@@ -522,3 +522,82 @@ export async function getConflictDiff(
     theirs: { filepath, oldContent: baseContent, newContent: theirsContent },
   }
 }
+
+export interface GraphCommit {
+  oid: string
+  parents: string[]
+  message: string
+  author: CommitAuthor & { timestamp: number }
+  refs: string[]
+}
+
+// Builds the commit graph across every local branch (not just the current
+// one), for GraphView's DAG rendering. isomorphic-git has no single call that
+// returns "all commits reachable from any local branch plus which refs point
+// at each", so this composes it from listBranches + currentBranch + one log
+// per branch, de-duplicating commits by oid as branches are walked (branches
+// sharing history will re-visit the same ancestor commits) and collecting,
+// per oid, the names of any refs/branches that point directly at it.
+export async function getGraphLog(
+  fs: GitFs,
+  dir: string,
+  opts: { maxCount?: number } = {}
+): Promise<GraphCommit[]> {
+  const maxCount = opts.maxCount ?? 200
+
+  let branches: string[]
+  try {
+    branches = await git.listBranches({ fs: iso(fs), dir })
+  } catch (err) {
+    if (isNotFound(err)) return [] // brand new repo, no branches yet
+    throw err
+  }
+
+  const current = await git.currentBranch({ fs: iso(fs), dir }).catch(() => undefined)
+
+  const byOid = new Map<string, GraphCommit>()
+  const refsByOid = new Map<string, string[]>()
+
+  for (const branch of branches) {
+    let tipOid: string
+    try {
+      tipOid = await git.resolveRef({ fs: iso(fs), dir, ref: branch })
+    } catch {
+      continue
+    }
+    const refs = refsByOid.get(tipOid) ?? []
+    refs.push(branch)
+    if (branch === current) refs.push('HEAD')
+    refsByOid.set(tipOid, refs)
+
+    let commits
+    try {
+      commits = await git.log({ fs: iso(fs), dir, ref: branch, depth: maxCount })
+    } catch (err) {
+      if (isNotFound(err)) continue
+      throw err
+    }
+
+    for (const c of commits) {
+      if (byOid.has(c.oid)) continue
+      byOid.set(c.oid, {
+        oid: c.oid,
+        parents: c.commit.parent,
+        message: c.commit.message,
+        author: {
+          name: c.commit.author.name,
+          email: c.commit.author.email,
+          timestamp: c.commit.author.timestamp * 1000,
+        },
+        refs: [],
+      })
+    }
+  }
+
+  for (const [oid, refs] of refsByOid) {
+    const commit = byOid.get(oid)
+    if (commit) commit.refs = refs
+  }
+
+  return Array.from(byOid.values())
+}

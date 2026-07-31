@@ -8,6 +8,7 @@ import {
   createCommit,
   getCommitDiff,
   getCurrentBranch,
+  getGraphLog,
   getLog,
   getStagedDiff,
   getStatus,
@@ -196,5 +197,40 @@ describe('diffs', () => {
 describe('getCurrentBranch', () => {
   it('returns the default branch name', async () => {
     await expect(getCurrentBranch(fs, dir)).resolves.toBe('main')
+  })
+})
+
+describe('getGraphLog', () => {
+  it('returns an empty list for a repo with no commits', async () => {
+    await expect(getGraphLog(fs, dir)).resolves.toEqual([])
+  })
+
+  it('includes commits from every local branch, de-duplicated, with refs attached', async () => {
+    write('a.txt', 'first')
+    await stageFile(fs, dir, 'a.txt')
+    const base = await createCommit(fs, dir, { message: 'base', author: AUTHOR })
+
+    await isoGit.branch({ fs: nodeFs, dir, ref: 'feature' })
+
+    write('a.txt', 'on main')
+    await stageFile(fs, dir, 'a.txt')
+    const mainTip = await createCommit(fs, dir, { message: 'on main', author: AUTHOR })
+
+    await isoGit.checkout({ fs: nodeFs, dir, ref: 'feature' })
+    write('b.txt', 'on feature')
+    await stageFile(fs, dir, 'b.txt')
+    const featureTip = await createCommit(fs, dir, { message: 'on feature', author: AUTHOR })
+
+    const graph = await getGraphLog(fs, dir)
+    const byOid = new Map(graph.map((c) => [c.oid, c]))
+
+    expect(graph).toHaveLength(3)
+    expect(byOid.get(base)?.parents).toEqual([])
+    expect(byOid.get(mainTip)?.refs).toEqual(['main'])
+    // checkout switched HEAD to 'feature' before getGraphLog ran, so HEAD
+    // decorates the feature tip, not the main tip.
+    expect(byOid.get(featureTip)?.refs).toContain('feature')
+    expect(byOid.get(featureTip)?.refs).toContain('HEAD')
+    expect(byOid.get(featureTip)?.parents).toEqual([base])
   })
 })

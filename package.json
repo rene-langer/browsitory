@@ -29,6 +29,8 @@
     "isomorphic-git": "^1.25.0",
     "idb-keyval": "^6.2.1",
     "react-diff-viewer-continued": "^3.4.0",
+    "diff": "^5.2.2",
+    "dagre": "^0.8.5",
     "lucide-react": "^0.294.0",
     "clsx": "^2.0.0",
     "tailwind-merge": "^2.2.0"
@@ -38,6 +40,8 @@
     "@types/react-dom": "^18.2.15",
     "@types/node": "^20.10.0",
     "@types/wicg-file-system-access": "^2023.10.5",
+    "@types/diff": "^5.2.3",
+    "@types/dagre": "^0.7.54",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vitejs/plugin-react": "^4.2.0",
