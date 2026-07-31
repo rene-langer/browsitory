@@ -103,7 +103,10 @@ export default function Dashboard() {
             <li>✓ Visual diff viewer</li>
             <li>✓ Stage/unstage changes</li>
             <li>✓ Create commits</li>
-            <li>○ Branch management (coming soon)</li>
+            <li>✓ Branch management &amp; stash</li>
+            <li>✓ Merge &amp; interactive rebase</li>
+            <li>✓ Blame viewer &amp; commit graph</li>
+            <li>○ Push/pull to a remote (coming soon)</li>
           </ul>
         </div>
       </div>

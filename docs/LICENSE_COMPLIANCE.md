@@ -24,6 +24,13 @@ Browsitory is licensed under the MIT License. All dependencies must comply with 
 
 ### Git Operations
 - **isomorphic-git** - MIT License + Apache 2.0 License (dual-licensed, MIT compatible)
+- **buffer** - MIT License. Already present as a transitive dependency (via isomorphic-git →
+  readable-stream) but not wired up as a browser global by default — promoted to a direct
+  dependency and imported in `src/polyfills.ts` (loaded first thing in `main.tsx`) to provide
+  `window.Buffer`, which isomorphic-git needs for real git object/pack-file parsing (e.g.
+  reading packed objects in an actual cloned repo, not just the loose objects a fresh
+  `git.init` produces). Found via real-browser testing against a real cloned repository —
+  none of the test fixtures ever produced a packed repo, so this was invisible to the suite.
 - **idb-keyval** - Apache 2.0 License (compatible; persists repository handles/metadata in IndexedDB)
 
 Phase 1's File System Access ↔ isomorphic-git bridge (`src/services/fsaGitFs.ts`) is

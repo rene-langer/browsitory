@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import * as git from 'isomorphic-git'
 import { createFakeRoot } from '@/test/fakeDirectoryHandle'
 import { createFsaGitFs } from './fsaGitFs'
+import { createCommit, getLog, getStatus, getUnstagedDiff, openRepository, stageFile } from './git'
 
 function fs() {
   const root = createFakeRoot()
@@ -79,5 +81,83 @@ describe('fsaGitFs', () => {
     await rename('/old.txt', '/new.txt')
     await expect(readFile('/old.txt')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readFile('/new.txt', 'utf8')).toBe('moved content')
+  })
+})
+
+// Every other test in this file (and in git.ts's own tests) exercises either
+// fsaGitFs's functions directly, or isomorphic-git against Node's real fs —
+// neither path goes through isomorphic-git's internal `bindFs()`, which
+// unconditionally does `fs[command].bind(fs)` for a fixed command list
+// (including `readlink`/`symlink`) with no existence check. That gap let a
+// real bug ship: omitting readlink/symlink here didn't just disable symlink
+// support, it crashed *every* isomorphic-git call against this adapter with
+// "Cannot read properties of undefined (reading 'bind')", for any repo, only
+// discovered via manual real-browser testing. These tests close that gap by
+// actually handing the full GitFs object to isomorphic-git, the same way
+// production code does.
+describe('fsaGitFs used as a real isomorphic-git fs client', () => {
+  function gitFs() {
+    const root = createFakeRoot()
+    return createFsaGitFs(root as unknown as FileSystemDirectoryHandle)
+  }
+
+  it('survives isomorphic-git init + commit + log without throwing', async () => {
+    const fs = gitFs()
+    await git.init({ fs, dir: '/', defaultBranch: 'main' })
+    await fs.promises.writeFile('/a.txt', 'hello')
+    await git.add({ fs, dir: '/', filepath: 'a.txt' })
+    await git.commit({
+      fs,
+      dir: '/',
+      message: 'initial',
+      author: { name: 'Test', email: 'test@example.com' },
+    })
+
+    const log = await git.log({ fs, dir: '/' })
+    expect(log).toHaveLength(1)
+    expect(log[0].commit.message.trim()).toBe('initial')
+  })
+
+  it('survives statusMatrix (exercises stat/lstat on every tracked path)', async () => {
+    const fs = gitFs()
+    await git.init({ fs, dir: '/', defaultBranch: 'main' })
+    await fs.promises.writeFile('/a.txt', 'hello')
+    await git.add({ fs, dir: '/', filepath: 'a.txt' })
+    await git.commit({
+      fs,
+      dir: '/',
+      message: 'initial',
+      author: { name: 'Test', email: 'test@example.com' },
+    })
+
+    await expect(git.statusMatrix({ fs, dir: '/' })).resolves.not.toThrow()
+  })
+
+  it('supports the full app flow through git.ts (open, status, stage, commit, log, diff)', async () => {
+    const fs = gitFs()
+    await git.init({ fs, dir: '/', defaultBranch: 'main' })
+
+    await openRepository(fs, '/')
+
+    await fs.promises.writeFile('/a.txt', 'v1')
+    let status = await getStatus(fs, '/')
+    expect(status.untracked).toContain('a.txt')
+
+    await stageFile(fs, '/', 'a.txt')
+    status = await getStatus(fs, '/')
+    expect(status.staged).toContain('a.txt')
+
+    const oid = await createCommit(fs, '/', {
+      message: 'initial',
+      author: { name: 'Test', email: 'test@example.com' },
+    })
+
+    const log = await getLog(fs, '/')
+    expect(log).toHaveLength(1)
+    expect(log[0].oid).toBe(oid)
+
+    await fs.promises.writeFile('/a.txt', 'v2, longer')
+    const diff = await getUnstagedDiff(fs, '/', 'a.txt')
+    expect(diff).toEqual([{ filepath: 'a.txt', oldContent: 'v1', newContent: 'v2, longer' }])
   })
 })
