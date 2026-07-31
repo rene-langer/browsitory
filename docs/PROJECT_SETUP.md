@@ -221,6 +221,32 @@ Vite's default 500 kB chunk-size warning threshold; splitting the bundle (e.g. l
 the graph/blame/rebase panels) is a reasonable follow-up but wasn't done here since it's a
 performance nice-to-have, not a correctness issue.
 
+#### First real-browser test pass (closed)
+The app had never actually been exercised against a real Chromium browser + a real,
+previously-cloned repository until this pass — every prior "verification" was automated
+tests plus a clean build. That surfaced five real bugs no test could have caught, since the
+fake directory handle used in tests has neither isomorphic-git's exact fs-binding
+expectations at stake nor any meaningful async latency to expose a performance bug:
+
+- Four correctness bugs in `fsaGitFs.ts` that made every operation against a real repo fail
+  outright: a missing `readlink`/`symlink` pair crashing isomorphic-git's internal `bindFs()`
+  on every call; a missing `ctimeMs` crashing `git.add()`; an unhandled `.` path segment
+  (isomorphic-git's own "current directory" convention) causing `ENOENT` on every
+  status/diff; and a missing global `Buffer` polyfill (Vite doesn't provide one) breaking
+  any repo with real pack files, which a fresh `git.init`-created test repo never has.
+- A severe performance bug in the same file: no directory-handle caching meant every read
+  re-walked the full path from root, turning an O(files) tree walk into O(files × depth)
+  FileSystemDirectoryHandle round-trips — ~19.5s to load one small file's diff on a real
+  ~50-commit repo, fixed to ~7ms with a per-adapter directory cache.
+- `DiffViewer.tsx` defaulted to character-level diffing (the library's own default),
+  producing noisy, hard-to-read highlighting on any line with more than a one-character
+  edit — switched to word-level diffing (`DiffMethod.WORDS_WITH_SPACE`), matching
+  GitHub/GitLab-style diff rendering.
+
+All fixed and verified live against a real repository (branch, status, stashes, commit
+history, commit diffs, blame, and the multi-branch graph view). Regression tests were added
+for the fsaGitFs bugs and the caching behavior; see `src/services/fsaGitFs.test.ts`.
+
 ### Phase 3: Server Backend
 - [ ] Backend API (Go/Node.js)
 - [ ] Database setup (PostgreSQL)
