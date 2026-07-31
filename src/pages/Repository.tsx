@@ -13,6 +13,8 @@ import StashPanel from '@components/StashPanel'
 import MergePanel from '@components/MergePanel'
 import RebasePlanner from '@components/RebasePlanner'
 import RebaseProgress from '@components/RebaseProgress'
+import BlameViewer from '@components/BlameViewer'
+import GraphView from '@components/GraphView'
 
 const AUTHOR_NAME_KEY = 'browsitory:author-name'
 const AUTHOR_EMAIL_KEY = 'browsitory:author-email'
@@ -25,6 +27,7 @@ export default function Repository() {
   const currentRepo = useRepositoryStore((s) => s.currentRepo)
   const repoError = useRepositoryStore((s) => s.error)
   const openRepositoryById = useRepositoryStore((s) => s.openRepositoryById)
+  const [view, setView] = useState<'history' | 'graph'>('history')
 
   const {
     commits,
@@ -34,6 +37,9 @@ export default function Repository() {
     stashes,
     selectedCommitOid,
     selectedDiff,
+    blameFilepath,
+    blame,
+    graphCommits,
     loading,
     error,
     refresh,
@@ -42,6 +48,8 @@ export default function Repository() {
     unstage,
     loadUnstagedDiff,
     loadStagedDiff,
+    loadBlame,
+    loadGraph,
     commit,
     switchBranch,
     createBranch,
@@ -90,6 +98,13 @@ export default function Repository() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo])
+
+  useEffect(() => {
+    if (view === 'graph' && currentRepo && currentRepo.id === id) {
+      loadGraph(currentRepo)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentRepo])
 
   const closeSidePanel = () => {
     setSidePanel('none')
@@ -149,9 +164,9 @@ export default function Repository() {
   const selectedCommit = commits.find((c) => c.oid === selectedCommitOid)
 
   return (
-    <div className="flex h-full">
-      <div className="w-96 border-r border-border flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-border">
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
+        <div>
           <h1 className="text-xl font-bold text-foreground truncate">{currentRepo.name}</h1>
           <BranchSwitcher
             branches={branches}
@@ -180,71 +195,118 @@ export default function Repository() {
             </div>
           )}
         </div>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setView('history')}
+            className={
+              view === 'history'
+                ? 'text-xs px-3 py-1.5 rounded bg-accent text-accent-foreground'
+                : 'text-xs px-3 py-1.5 rounded text-muted-foreground hover:bg-muted'
+            }
+          >
+            History
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('graph')}
+            className={
+              view === 'graph'
+                ? 'text-xs px-3 py-1.5 rounded bg-accent text-accent-foreground'
+                : 'text-xs px-3 py-1.5 rounded text-muted-foreground hover:bg-muted'
+            }
+          >
+            Graph
+          </button>
+        </div>
+      </div>
 
-        <StagingPanel
-          status={status}
-          onStage={(f) => stage(currentRepo, f)}
-          onUnstage={(f) => unstage(currentRepo, f)}
-          onSelectUnstaged={(f) => loadUnstagedDiff(currentRepo, f)}
-          onSelectStaged={(f) => loadStagedDiff(currentRepo, f)}
-        />
-
-        <StashPanel
-          stashes={stashes}
-          onCreate={(message) => createStash(currentRepo, message)}
-          onApply={(refIdx) => applyStash(currentRepo, refIdx)}
-          onPop={(refIdx) => popStash(currentRepo, refIdx)}
-          onDrop={(refIdx) => dropStash(currentRepo, refIdx)}
-        />
-
-        <CommitForm
-          disabled={status.staged.length === 0}
-          onCommit={(message, author) => commit(currentRepo, message, author)}
-        />
-
-        <div className="flex-1 overflow-auto border-t border-border">
-          <CommitList
-            commits={commits}
+      {view === 'graph' ? (
+        <div className="flex-1 overflow-auto">
+          {error && <p className="p-4 text-destructive text-sm">{error}</p>}
+          {loading && <p className="p-4 text-muted-foreground text-sm">Loading…</p>}
+          <GraphView
+            commits={graphCommits}
             selectedOid={selectedCommitOid}
             onSelect={(oid) => selectCommit(currentRepo, oid)}
           />
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <div className="w-96 border-r border-border flex flex-col overflow-hidden">
+            <StagingPanel
+              status={status}
+              onStage={(f) => stage(currentRepo, f)}
+              onUnstage={(f) => unstage(currentRepo, f)}
+              onSelectUnstaged={(f) => loadUnstagedDiff(currentRepo, f)}
+              onSelectStaged={(f) => loadStagedDiff(currentRepo, f)}
+              onBlame={(f) => loadBlame(currentRepo, f)}
+            />
 
-      <div className="flex-1 overflow-auto">
-        {rebaseState ? (
-          <RebaseProgress
-            repo={currentRepo}
-            state={rebaseState}
-            onContinue={handleContinueRebase}
-            onAbort={handleAbortRebase}
-            loading={rebaseLoading}
-            error={rebaseError}
-          />
-        ) : sidePanel === 'merge' ? (
-          <MergePanel repo={currentRepo} onClose={closeSidePanel} onMerged={handleMergedOrRebased} />
-        ) : sidePanel === 'rebase-plan' ? (
-          <RebasePlanner
-            ontoInput={ontoInput}
-            onOntoInputChange={setOntoInput}
-            onLoadPlan={() => currentRepo && loadPlanDraft(currentRepo, ontoInput.trim())}
-            plan={planDraft}
-            onMove={movePlanEntry}
-            onToggleDrop={toggleDrop}
-            onStart={handleStartRebase}
-            onCancel={closeSidePanel}
-            loading={rebaseLoading}
-            error={rebaseError}
-          />
-        ) : (
-          <>
-            {error && <p className="p-4 text-destructive text-sm">{error}</p>}
-            {loading && <p className="p-4 text-muted-foreground text-sm">Loading…</p>}
-            {selectedCommit && <CommitDetails commit={selectedCommit} />}
-            <DiffViewer diffs={selectedDiff} />
-          </>
-        )}
-      </div>
+            <StashPanel
+              stashes={stashes}
+              onCreate={(message) => createStash(currentRepo, message)}
+              onApply={(refIdx) => applyStash(currentRepo, refIdx)}
+              onPop={(refIdx) => popStash(currentRepo, refIdx)}
+              onDrop={(refIdx) => dropStash(currentRepo, refIdx)}
+            />
+
+            <CommitForm
+              disabled={status.staged.length === 0}
+              onCommit={(message, author) => commit(currentRepo, message, author)}
+            />
+
+            <div className="flex-1 overflow-auto border-t border-border">
+              <CommitList
+                commits={commits}
+                selectedOid={selectedCommitOid}
+                onSelect={(oid) => selectCommit(currentRepo, oid)}
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            {rebaseState ? (
+              <RebaseProgress
+                repo={currentRepo}
+                state={rebaseState}
+                onContinue={handleContinueRebase}
+                onAbort={handleAbortRebase}
+                loading={rebaseLoading}
+                error={rebaseError}
+              />
+            ) : sidePanel === 'merge' ? (
+              <MergePanel repo={currentRepo} onClose={closeSidePanel} onMerged={handleMergedOrRebased} />
+            ) : sidePanel === 'rebase-plan' ? (
+              <RebasePlanner
+                ontoInput={ontoInput}
+                onOntoInputChange={setOntoInput}
+                onLoadPlan={() => currentRepo && loadPlanDraft(currentRepo, ontoInput.trim())}
+                plan={planDraft}
+                onMove={movePlanEntry}
+                onToggleDrop={toggleDrop}
+                onStart={handleStartRebase}
+                onCancel={closeSidePanel}
+                loading={rebaseLoading}
+                error={rebaseError}
+              />
+            ) : (
+              <>
+                {error && <p className="p-4 text-destructive text-sm">{error}</p>}
+                {loading && <p className="p-4 text-muted-foreground text-sm">Loading…</p>}
+                {blameFilepath ? (
+                  <BlameViewer filepath={blameFilepath} lines={blame} />
+                ) : (
+                  <>
+                    {selectedCommit && <CommitDetails commit={selectedCommit} />}
+                    <DiffViewer diffs={selectedDiff} />
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
