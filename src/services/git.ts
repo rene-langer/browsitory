@@ -6,6 +6,8 @@
 import * as git from 'isomorphic-git'
 import { TREE, WORKDIR, STAGE } from 'isomorphic-git'
 import type { WalkerEntry } from 'isomorphic-git'
+import { GitIndexManager } from 'isomorphic-git/managers'
+import { FileSystem } from 'isomorphic-git/models'
 import type { GitFs } from './fsaGitFs'
 
 // isomorphic-git's fs-client type is intentionally duck-typed; both GitFs and
@@ -354,6 +356,17 @@ export async function switchBranch(fs: GitFs, dir: string, name: string): Promis
   }
 }
 
+export async function resolveRef(fs: GitFs, dir: string, ref: string): Promise<string> {
+  return git.resolveRef({ fs: iso(fs), dir, ref })
+}
+
+// Simple name-only listing used by merge/rebase, which only need branch
+// names (not the richer BranchInfo above) and are deliberately independent
+// of the branch-management workstream's data model.
+export async function listBranches(fs: GitFs, dir: string): Promise<string[]> {
+  return git.listBranches({ fs: iso(fs), dir })
+}
+
 // --- Stash -------------------------------------------------------------
 
 export interface StashEntry {
@@ -392,4 +405,120 @@ export async function popStash(fs: GitFs, dir: string, refIdx = 0): Promise<void
 
 export async function dropStash(fs: GitFs, dir: string, refIdx = 0): Promise<void> {
   await git.stash({ fs: iso(fs), dir, op: 'drop', refIdx })
+}
+
+// --- Merge ---------------------------------------------------------------
+
+export interface MergeResult {
+  status: 'fast-forward' | 'already-up-to-date' | 'merged' | 'conflict'
+  conflicts?: string[]
+}
+
+function errorCode(err: unknown): string | undefined {
+  return (err as { code?: string })?.code
+}
+
+export async function mergeBranch(
+  fs: GitFs,
+  dir: string,
+  theirs: string,
+  author: CommitAuthor
+): Promise<MergeResult> {
+  try {
+    const result = await git.merge({
+      fs: iso(fs),
+      dir,
+      theirs,
+      author,
+      abortOnConflict: false,
+    })
+
+    if (result.alreadyMerged) return { status: 'already-up-to-date' }
+
+    // Confirmed by reading isomorphic-git's _merge()/mergeTree() source
+    // directly: on a successful fast-forward OR a clean three-way merge,
+    // git.merge() only moves the branch ref / writes objects — it never
+    // syncs the working tree or index to match (mergeTree only writes files
+    // to disk in the conflict case). An explicit checkout of the
+    // now-updated current branch is required to bring the workdir back in
+    // sync; without it the UI would show a moved HEAD with stale file
+    // contents on screen.
+    const ours = await git.currentBranch({ fs: iso(fs), dir })
+    if (ours) {
+      await git.checkout({ fs: iso(fs), dir, ref: ours, force: true })
+    }
+
+    return result.fastForward ? { status: 'fast-forward' } : { status: 'merged' }
+  } catch (err) {
+    if (errorCode(err) === 'MergeConflictError') {
+      const filepaths = (err as { data?: { filepaths?: string[] } }).data?.filepaths ?? []
+      return { status: 'conflict', conflicts: filepaths }
+    }
+    throw err
+  }
+}
+
+export async function abortCurrentMerge(fs: GitFs, dir: string): Promise<void> {
+  await git.abortMerge({ fs: iso(fs), dir })
+}
+
+async function readBlobText(fs: GitFs, dir: string, oid: string | undefined): Promise<string> {
+  if (!oid) return ''
+  const { blob } = await git.readBlob({ fs: iso(fs), dir, oid })
+  return new TextDecoder().decode(blob)
+}
+
+// A conflicted path has index entries at stage 1 (common ancestor/base),
+// stage 2 (ours), and stage 3 (theirs) instead of the single stage 0 entry
+// a resolved path has. isomorphic-git's public API has no function to read
+// these directly — the STAGE() walker used elsewhere in this file
+// (readEntryContent()) only ever surfaces one representative entry per
+// path, not each conflict side individually.
+//
+// Read directly from isomorphic-git/models/index.js: `git.commit`,
+// `git.merge`, etc. all wrap the raw fs client in an internal `FileSystem`
+// class before touching the index, and the low-level `GitIndexManager`
+// (from isomorphic-git's separate `isomorphic-git/managers` entry point,
+// which *is* part of the package's public API surface even though the
+// top-level `isomorphic-git` export doesn't re-export it) expects that
+// wrapped `FileSystem`, not a raw fs client — confirmed empirically, a raw
+// fs client crashes inside `GitIndexManager.acquire` because it calls
+// `fs.lstat(...)` without a callback (Node's raw fs.lstat is
+// callback-based; FileSystem's wrapped .lstat is a promise).
+//
+// Once acquired, `index.entriesMap.get(filepath)` returns an entry whose
+// `.stages` array is sparse-indexed by git's stage number: `stages[1]` is
+// the base, `stages[2]` is ours, `stages[3]` is theirs. Each stage entry
+// carries a plain blob `.oid` that `readBlob` can resolve directly.
+export async function getConflictDiff(
+  fs: GitFs,
+  dir: string,
+  filepath: string
+): Promise<{ ours: FileDiff; theirs: FileDiff }> {
+  const gitdir = join(dir, '.git')
+  const wrappedFs = new FileSystem(iso(fs))
+
+  const entry = await GitIndexManager.acquire(
+    { fs: wrappedFs, gitdir, cache: {} },
+    (index) => index.entriesMap.get(filepath)
+  )
+
+  const stages = entry?.stages as
+    | Array<{ oid: string } | undefined | null>
+    | undefined
+  const hasConflict = stages !== undefined && (stages[2] !== undefined || stages[3] !== undefined)
+  if (!hasConflict) {
+    throw new Error(`No merge conflict found for ${filepath}`)
+  }
+
+  const [baseContent, oursContent, theirsContent] = await Promise.all([
+    readBlobText(fs, dir, stages[1]?.oid),
+    readBlobText(fs, dir, stages[2]?.oid),
+    readBlobText(fs, dir, stages[3]?.oid),
+  ])
+
+  return {
+    ours: { filepath, oldContent: baseContent, newContent: oursContent },
+    theirs: { filepath, oldContent: baseContent, newContent: theirsContent },
+  }
 }
