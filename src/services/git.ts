@@ -277,3 +277,119 @@ export async function createCommit(
 ): Promise<string> {
   return git.commit({ fs: iso(fs), dir, message: options.message, author: options.author })
 }
+
+// --- Branches --------------------------------------------------------------
+
+export interface BranchInfo {
+  name: string
+  oid: string
+  isCurrent: boolean
+}
+
+export async function listAllBranches(fs: GitFs, dir: string): Promise<BranchInfo[]> {
+  const [names, current] = await Promise.all([
+    git.listBranches({ fs: iso(fs), dir }),
+    getCurrentBranch(fs, dir),
+  ])
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      oid: await git.resolveRef({ fs: iso(fs), dir, ref: name }),
+      isCurrent: name === current,
+    }))
+  )
+}
+
+export async function createBranch(
+  fs: GitFs,
+  dir: string,
+  name: string,
+  startPoint?: string
+): Promise<void> {
+  await git.branch({ fs: iso(fs), dir, ref: name, object: startPoint, checkout: false })
+}
+
+// isomorphic-git's deleteBranch happily deletes the current branch (it just
+// detaches HEAD at the branch's current commit instead of refusing) — real
+// git refuses outright, so we replicate that guard here rather than leaving
+// the user with a detached HEAD they didn't ask for.
+export async function deleteBranchByName(fs: GitFs, dir: string, name: string): Promise<void> {
+  const current = await getCurrentBranch(fs, dir)
+  if (current === name) {
+    throw new Error(`Cannot delete branch "${name}" because it is currently checked out.`)
+  }
+  await git.deleteBranch({ fs: iso(fs), dir, ref: name })
+}
+
+export async function renameBranchTo(
+  fs: GitFs,
+  dir: string,
+  oldName: string,
+  newName: string
+): Promise<void> {
+  // renameBranch already updates HEAD itself when the renamed branch is the
+  // current one, so no extra `checkout` flag or manual HEAD handling needed.
+  await git.renameBranch({ fs: iso(fs), dir, ref: newName, oldref: oldName })
+}
+
+// isomorphic-git's checkout() already refuses (throws CheckoutConflictError)
+// when uncommitted working-tree/staged changes would be overwritten by the
+// target branch's tree, as long as `force` isn't passed — verified by reading
+// `analyze()` in isomorphic-git's checkout implementation, which walks
+// TREE/WORKDIR/STAGE and reports a 'conflict' entry for any path whose
+// working copy differs from both the stage and the incoming commit. So no
+// extra dirty-check is needed here; we just re-throw with a friendlier
+// message pointing the user at commit/stash/discard, mirroring real git's UX.
+export async function switchBranch(fs: GitFs, dir: string, name: string): Promise<void> {
+  try {
+    await git.checkout({ fs: iso(fs), dir, ref: name })
+  } catch (err) {
+    const code = (err as { code?: string })?.code
+    if (code === 'CheckoutConflictError') {
+      throw new Error(
+        `Cannot switch to "${name}": local changes would be overwritten. Commit, stash, or discard them first.`
+      )
+    }
+    throw err
+  }
+}
+
+// --- Stash -------------------------------------------------------------
+
+export interface StashEntry {
+  index: number
+  message: string
+}
+
+// git.stash({op:'list'}) returns string[] formatted as "stash@{N}: <message>"
+// (see isomorphic-git's GitRefStash.getStashReflogEntry with parsed=true) —
+// not an array of objects, despite the generic `Promise<string | void>`
+// return type declared for `stash()` overall. Parse that format ourselves.
+const STASH_LIST_ENTRY = /^stash@\{(\d+)\}: (.*)$/
+
+export async function listStashes(fs: GitFs, dir: string): Promise<StashEntry[]> {
+  const entries = (await git.stash({ fs: iso(fs), dir, op: 'list' })) as unknown as
+    | string[]
+    | undefined
+  if (!entries) return []
+  return entries.map((entry, i) => {
+    const match = STASH_LIST_ENTRY.exec(entry)
+    return match ? { index: Number(match[1]), message: match[2] } : { index: i, message: entry }
+  })
+}
+
+export async function createStash(fs: GitFs, dir: string, message?: string): Promise<void> {
+  await git.stash({ fs: iso(fs), dir, op: 'push', message: message ?? '' })
+}
+
+export async function applyStash(fs: GitFs, dir: string, refIdx = 0): Promise<void> {
+  await git.stash({ fs: iso(fs), dir, op: 'apply', refIdx })
+}
+
+export async function popStash(fs: GitFs, dir: string, refIdx = 0): Promise<void> {
+  await git.stash({ fs: iso(fs), dir, op: 'pop', refIdx })
+}
+
+export async function dropStash(fs: GitFs, dir: string, refIdx = 0): Promise<void> {
+  await git.stash({ fs: iso(fs), dir, op: 'drop', refIdx })
+}
