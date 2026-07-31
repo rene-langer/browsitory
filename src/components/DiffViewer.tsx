@@ -1,4 +1,4 @@
-import ReactDiffViewer from 'react-diff-viewer-continued'
+import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 import type { FileDiff } from '@services/git'
 
 interface DiffViewerProps {
@@ -17,7 +17,21 @@ export default function DiffViewer({ diffs }: DiffViewerProps) {
           <div className="px-3 py-2 bg-muted text-sm font-mono text-foreground">
             {diff.filepath}
           </div>
-          <ReactDiffViewer oldValue={diff.oldContent} newValue={diff.newContent} splitView={false} />
+          <ReactDiffViewer
+            oldValue={diff.oldContent}
+            newValue={diff.newContent}
+            splitView={false}
+            // The library defaults to character-level diffing (DiffMethod.CHARS),
+            // which highlights individual changed characters mid-word — on prose
+            // or code with multiple small edits per line this reads as noisy,
+            // fragmented highlighting (confirmed against a real diff: word
+            // boundaries visually disappear, e.g. "Requires the" rendering with
+            // no gap between the words). Word-level diffing, keeping whitespace
+            // attached to each word token, matches how GitHub/GitLab render
+            // diffs and is far more readable for anything beyond single-token
+            // changes.
+            compareMethod={DiffMethod.WORDS_WITH_SPACE}
+          />
         </div>
       ))}
     </div>

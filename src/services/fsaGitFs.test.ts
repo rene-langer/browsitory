@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as git from 'isomorphic-git'
-import { createFakeRoot } from '@/test/fakeDirectoryHandle'
+import { FakeDirectoryHandle, createFakeRoot } from '@/test/fakeDirectoryHandle'
 import { createFsaGitFs } from './fsaGitFs'
 import { createCommit, getLog, getStatus, getUnstagedDiff, openRepository, stageFile } from './git'
 
@@ -81,6 +81,47 @@ describe('fsaGitFs', () => {
     await rename('/old.txt', '/new.txt')
     await expect(readFile('/old.txt')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readFile('/new.txt', 'utf8')).toBe('moved content')
+  })
+
+  // Regression test for a real ~20s-to-load-one-small-diff bug: every call
+  // used to re-resolve every ancestor directory from root, so reading N
+  // files under the same directory did N (not 1) directory lookups for that
+  // shared ancestor. Caught via real-browser testing against an actual
+  // multi-hundred-file repo — the fake handle here has no real async
+  // latency, so this only verifies *call counts*, not wall-clock time.
+  it('caches resolved directory handles instead of re-walking from root on every call', async () => {
+    // Build the fixture directly against the fake handle (bypassing our
+    // adapter's own mkdir/writeFile) so the adapter's cache starts empty for
+    // the reads below — using our own writeFile here would pre-warm the
+    // cache via its defensive mkdir and defeat the point of the assertion.
+    const root = createFakeRoot()
+    const dir = await root.getDirectoryHandle('dir', { create: true })
+    const sub = await dir.getDirectoryHandle('sub', { create: true })
+    async function writeText(handle: FakeDirectoryHandle, name: string, text: string) {
+      const fileHandle = await handle.getFileHandle(name, { create: true })
+      const writable = await fileHandle.createWritable()
+      await writable.write(text)
+      await writable.close()
+    }
+    await writeText(dir, 'a.txt', 'a')
+    await writeText(dir, 'b.txt', 'b')
+    await writeText(sub, 'c.txt', 'c')
+
+    const { readFile } = createFsaGitFs(root as unknown as FileSystemDirectoryHandle).promises
+
+    const spy = vi.spyOn(FakeDirectoryHandle.prototype, 'getDirectoryHandle')
+    spy.mockClear()
+
+    await readFile('/dir/a.txt')
+    await readFile('/dir/b.txt')
+    await readFile('/dir/sub/c.txt')
+
+    // Without caching this would be 4 (dir, dir, dir, sub) across the three
+    // reads. With caching: 'dir' is resolved once on the first read and
+    // reused for the second and third; 'sub' is resolved once on the third.
+    expect(spy).toHaveBeenCalledTimes(2)
+
+    spy.mockRestore()
   })
 })
 
