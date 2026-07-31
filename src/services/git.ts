@@ -18,6 +18,37 @@ function iso(fs: GitFs): IsoFs {
   return fs as unknown as IsoFs
 }
 
+// isomorphic-git's `cache` option is how GitIndexManager memoizes the parsed
+// .git/index across calls — passing none (the default on every call site
+// below, before this existed) means EVERY statusMatrix/log/walk/etc. call
+// re-reads and re-parses the index from disk from scratch, and — far more
+// expensive — throws away the "racy git" stat-comparison fast path that lets
+// isomorphic-git skip re-hashing a file's content when its stat metadata
+// already matches the index. That fast path was already compromised by our
+// adapter (see fsaGitFs.ts — the File System Access API can't expose real
+// uid/gid/inode, so those fields are always 0), but isomorphic-git
+// self-heals the index with whatever stat values *did* get used once a
+// file's content-hash is confirmed unchanged — and that healing only helps
+// on a SUBSEQUENT call if the same in-memory cache (and thus parsed index)
+// is reused. Without this, every single call pays the full "hash every
+// tracked file's content" cost — measured live at ~18s for the first
+// statusMatrix on a real ~50-commit repo, only dropping to ~8s on a second,
+// separate page load (disk-persisted healing helping some, but each call
+// still re-parsing the index from scratch). One cache object per `fs`
+// instance (i.e. per opened repository, since fsaGitFs.createFsaGitFs is
+// called once per repo-open and that same object is reused for the whole
+// session) lets the healing compound within a session instead of restarting
+// every time.
+const cacheByFs = new WeakMap<GitFs, object>()
+function getCache(fs: GitFs): object {
+  let cache = cacheByFs.get(fs)
+  if (!cache) {
+    cache = {}
+    cacheByFs.set(fs, cache)
+  }
+  return cache
+}
+
 function join(dir: string, sub: string): string {
   return dir.endsWith('/') ? `${dir}${sub}` : `${dir}/${sub}`
 }
@@ -61,7 +92,7 @@ const WORKDIR_COL = 2
 const STAGE_COL = 3
 
 export async function getStatus(fs: GitFs, dir: string): Promise<StatusResult> {
-  const matrix = await git.statusMatrix({ fs: iso(fs), dir })
+  const matrix = await git.statusMatrix({ fs: iso(fs), dir, cache: getCache(fs) })
   const staged: string[] = []
   const unstaged: string[] = []
   const untracked: string[] = []
@@ -105,6 +136,7 @@ export async function getLog(
       dir,
       depth: opts.depth ?? 50,
       ref: opts.ref ?? 'HEAD',
+      cache: getCache(fs),
     })
     return commits.map((c) => ({
       oid: c.oid,
@@ -134,7 +166,7 @@ async function readEntryContent(
   // isomorphic-git's GitWalkerIndex) — fall back to reading the blob straight
   // from the object store by oid, which git.add already wrote there.
   const oid = await entry.oid()
-  const { blob } = await git.readBlob({ fs: iso(fs), dir, oid })
+  const { blob } = await git.readBlob({ fs: iso(fs), dir, oid, cache: getCache(fs) })
   return new TextDecoder().decode(blob)
 }
 
@@ -186,6 +218,7 @@ async function diffTrees(
   return git.walk({
     fs: iso(fs),
     dir,
+    cache: getCache(fs),
     trees: [treeA, treeB],
     map: async (filepath: string, [before, after]: (WalkerEntry | null)[]) => {
       if (filepath === '.') return undefined
@@ -197,13 +230,14 @@ async function diffTrees(
 }
 
 export async function getCommitDiff(fs: GitFs, dir: string, oid: string): Promise<FileDiff[]> {
-  const { commit } = await git.readCommit({ fs: iso(fs), dir, oid })
+  const { commit } = await git.readCommit({ fs: iso(fs), dir, oid, cache: getCache(fs) })
   const parentOid = commit.parent[0]
 
   if (!parentOid) {
     return git.walk({
       fs: iso(fs),
       dir,
+      cache: getCache(fs),
       trees: [TREE({ ref: oid })],
       map: async (filepath: string, [after]: (WalkerEntry | null)[]) => {
         if (filepath === '.') return undefined
@@ -232,6 +266,7 @@ export async function getStagedDiff(
     return git.walk({
       fs: iso(fs),
       dir,
+      cache: getCache(fs),
       trees: [STAGE()],
       map: async (fp: string, [entry]: (WalkerEntry | null)[]) => {
         if (fp === '.') return undefined
@@ -255,13 +290,13 @@ export async function getUnstagedDiff(
 
 export async function stageFile(fs: GitFs, dir: string, filepath: string): Promise<void> {
   try {
-    await git.add({ fs: iso(fs), dir, filepath })
+    await git.add({ fs: iso(fs), dir, filepath, cache: getCache(fs) })
   } catch (err) {
     // The file was deleted in the working tree — staging a deletion is `remove`,
     // not `add` (which expects the file to exist on disk).
     const code = (err as { code?: string })?.code
     if (code === 'NotFoundError' || code === 'ENOENT') {
-      await git.remove({ fs: iso(fs), dir, filepath })
+      await git.remove({ fs: iso(fs), dir, filepath, cache: getCache(fs) })
     } else {
       throw err
     }
@@ -269,7 +304,7 @@ export async function stageFile(fs: GitFs, dir: string, filepath: string): Promi
 }
 
 export async function unstageFile(fs: GitFs, dir: string, filepath: string): Promise<void> {
-  await git.resetIndex({ fs: iso(fs), dir, filepath })
+  await git.resetIndex({ fs: iso(fs), dir, filepath, cache: getCache(fs) })
 }
 
 export async function createCommit(
@@ -277,7 +312,13 @@ export async function createCommit(
   dir: string,
   options: { message: string; author: CommitAuthor }
 ): Promise<string> {
-  return git.commit({ fs: iso(fs), dir, message: options.message, author: options.author })
+  return git.commit({
+    fs: iso(fs),
+    dir,
+    message: options.message,
+    author: options.author,
+    cache: getCache(fs),
+  })
 }
 
 // --- Branches --------------------------------------------------------------
@@ -308,7 +349,13 @@ export async function createBranch(
   name: string,
   startPoint?: string
 ): Promise<void> {
-  await git.branch({ fs: iso(fs), dir, ref: name, object: startPoint, checkout: false })
+  await git.branch({
+    fs: iso(fs),
+    dir,
+    ref: name,
+    object: startPoint,
+    checkout: false,
+  })
 }
 
 // isomorphic-git's deleteBranch happily deletes the current branch (it just
@@ -344,7 +391,7 @@ export async function renameBranchTo(
 // message pointing the user at commit/stash/discard, mirroring real git's UX.
 export async function switchBranch(fs: GitFs, dir: string, name: string): Promise<void> {
   try {
-    await git.checkout({ fs: iso(fs), dir, ref: name })
+    await git.checkout({ fs: iso(fs), dir, ref: name, cache: getCache(fs) })
   } catch (err) {
     const code = (err as { code?: string })?.code
     if (code === 'CheckoutConflictError') {
@@ -431,6 +478,7 @@ export async function mergeBranch(
       theirs,
       author,
       abortOnConflict: false,
+      cache: getCache(fs),
     })
 
     if (result.alreadyMerged) return { status: 'already-up-to-date' }
@@ -445,7 +493,7 @@ export async function mergeBranch(
     // contents on screen.
     const ours = await git.currentBranch({ fs: iso(fs), dir })
     if (ours) {
-      await git.checkout({ fs: iso(fs), dir, ref: ours, force: true })
+      await git.checkout({ fs: iso(fs), dir, ref: ours, force: true, cache: getCache(fs) })
     }
 
     return result.fastForward ? { status: 'fast-forward' } : { status: 'merged' }
@@ -459,12 +507,12 @@ export async function mergeBranch(
 }
 
 export async function abortCurrentMerge(fs: GitFs, dir: string): Promise<void> {
-  await git.abortMerge({ fs: iso(fs), dir })
+  await git.abortMerge({ fs: iso(fs), dir, cache: getCache(fs) })
 }
 
 async function readBlobText(fs: GitFs, dir: string, oid: string | undefined): Promise<string> {
   if (!oid) return ''
-  const { blob } = await git.readBlob({ fs: iso(fs), dir, oid })
+  const { blob } = await git.readBlob({ fs: iso(fs), dir, oid, cache: getCache(fs) })
   return new TextDecoder().decode(blob)
 }
 
@@ -499,7 +547,7 @@ export async function getConflictDiff(
   const wrappedFs = new FileSystem(iso(fs))
 
   const entry = await GitIndexManager.acquire(
-    { fs: wrappedFs, gitdir, cache: {} },
+    { fs: wrappedFs, gitdir, cache: getCache(fs) },
     (index) => index.entriesMap.get(filepath)
   )
 
@@ -572,7 +620,13 @@ export async function getGraphLog(
 
     let commits
     try {
-      commits = await git.log({ fs: iso(fs), dir, ref: branch, depth: maxCount })
+      commits = await git.log({
+        fs: iso(fs),
+        dir,
+        ref: branch,
+        depth: maxCount,
+        cache: getCache(fs),
+      })
     } catch (err) {
       if (isNotFound(err)) continue
       throw err
