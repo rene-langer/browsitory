@@ -5,9 +5,10 @@ interface FileRowProps {
   actionLabel: string
   onAction: () => void
   onSelect: () => void
+  onBlame: () => void
 }
 
-function FileRow({ filepath, actionLabel, onAction, onSelect }: FileRowProps) {
+function FileRow({ filepath, actionLabel, onAction, onSelect, onBlame }: FileRowProps) {
   return (
     <div className="flex items-center justify-between px-3 py-1.5 hover:bg-muted rounded">
       <button
@@ -16,6 +17,13 @@ function FileRow({ filepath, actionLabel, onAction, onSelect }: FileRowProps) {
         className="text-sm text-foreground truncate text-left flex-1"
       >
         {filepath}
+      </button>
+      <button
+        type="button"
+        onClick={onBlame}
+        className="text-xs px-2 py-1 rounded hover:bg-accent hover:text-accent-foreground text-muted-foreground mr-1"
+      >
+        Blame
       </button>
       <button
         type="button"
@@ -34,6 +42,7 @@ interface StagingPanelProps {
   onUnstage: (filepath: string) => void
   onSelectUnstaged: (filepath: string) => void
   onSelectStaged: (filepath: string) => void
+  onBlame: (filepath: string) => void
 }
 
 export default function StagingPanel({
@@ -42,6 +51,7 @@ export default function StagingPanel({
   onUnstage,
   onSelectUnstaged,
   onSelectStaged,
+  onBlame,
 }: StagingPanelProps) {
   const unstagedFiles = [...status.unstaged, ...status.untracked]
 
@@ -61,6 +71,7 @@ export default function StagingPanel({
               actionLabel="Unstage"
               onAction={() => onUnstage(filepath)}
               onSelect={() => onSelectStaged(filepath)}
+              onBlame={() => onBlame(filepath)}
             />
           ))
         )}
@@ -79,6 +90,7 @@ export default function StagingPanel({
               actionLabel="Stage"
               onAction={() => onStage(filepath)}
               onSelect={() => onSelectUnstaged(filepath)}
+              onBlame={() => onBlame(filepath)}
             />
           ))
         )}
