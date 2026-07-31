@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useRepositoryStore } from '@store/repositoryStore'
 import { useGitStore } from '@store/gitStore'
+import { useRebaseStore } from '@store/rebaseStore'
 import CommitList from '@components/CommitList'
 import CommitDetails from '@components/CommitDetails'
 import StagingPanel from '@components/StagingPanel'
@@ -9,6 +10,14 @@ import CommitForm from '@components/CommitForm'
 import DiffViewer from '@components/DiffViewer'
 import BranchSwitcher from '@components/BranchSwitcher'
 import StashPanel from '@components/StashPanel'
+import MergePanel from '@components/MergePanel'
+import RebasePlanner from '@components/RebasePlanner'
+import RebaseProgress from '@components/RebaseProgress'
+
+const AUTHOR_NAME_KEY = 'browsitory:author-name'
+const AUTHOR_EMAIL_KEY = 'browsitory:author-email'
+
+type SidePanel = 'none' | 'merge' | 'rebase-plan'
 
 export default function Repository() {
   const { id } = useParams<{ id: string }>()
@@ -45,6 +54,25 @@ export default function Repository() {
     reset,
   } = useGitStore()
 
+  const {
+    state: rebaseState,
+    planDraft,
+    loading: rebaseLoading,
+    error: rebaseError,
+    checkForRebase,
+    loadPlanDraft,
+    movePlanEntry,
+    toggleDrop,
+    clearPlanDraft,
+    start: startRebase,
+    continue: continueRebase,
+    abort: abortRebase,
+    reset: resetRebase,
+  } = useRebaseStore()
+
+  const [sidePanel, setSidePanel] = useState<SidePanel>('none')
+  const [ontoInput, setOntoInput] = useState('')
+
   useEffect(() => {
     if (id && currentRepo?.id !== id) {
       openRepositoryById(id)
@@ -54,10 +82,54 @@ export default function Repository() {
   useEffect(() => {
     if (currentRepo && currentRepo.id === id) {
       refresh(currentRepo)
+      checkForRebase(currentRepo)
     }
-    return () => reset()
+    return () => {
+      reset()
+      resetRebase()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRepo])
+
+  const closeSidePanel = () => {
+    setSidePanel('none')
+    setOntoInput('')
+    clearPlanDraft()
+  }
+
+  const handleMergedOrRebased = () => {
+    closeSidePanel()
+    if (currentRepo) refresh(currentRepo)
+  }
+
+  const committer = {
+    name: localStorage.getItem(AUTHOR_NAME_KEY) ?? '',
+    email: localStorage.getItem(AUTHOR_EMAIL_KEY) ?? '',
+  }
+
+  const handleStartRebase = async () => {
+    if (!currentRepo) return
+    const result = await startRebase(currentRepo, committer)
+    if (result?.status === 'done') {
+      handleMergedOrRebased()
+    } else {
+      setSidePanel('none')
+    }
+  }
+
+  const handleContinueRebase = async () => {
+    if (!currentRepo) return
+    const result = await continueRebase(currentRepo)
+    if (result?.status === 'done') {
+      refresh(currentRepo)
+    }
+  }
+
+  const handleAbortRebase = async () => {
+    if (!currentRepo) return
+    await abortRebase(currentRepo)
+    refresh(currentRepo)
+  }
 
   if (repoError) {
     return (
@@ -89,6 +161,24 @@ export default function Repository() {
             onDelete={(name) => deleteBranch(currentRepo, name)}
             onRename={(oldName, newName) => renameBranch(currentRepo, oldName, newName)}
           />
+          {!rebaseState && (
+            <div className="flex gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => setSidePanel('merge')}
+                className="text-xs px-2 py-1 rounded bg-accent text-accent-foreground hover:opacity-90"
+              >
+                Merge…
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidePanel('rebase-plan')}
+                className="text-xs px-2 py-1 rounded bg-accent text-accent-foreground hover:opacity-90"
+              >
+                Rebase…
+              </button>
+            </div>
+          )}
         </div>
 
         <StagingPanel
@@ -122,10 +212,38 @@ export default function Repository() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {error && <p className="p-4 text-destructive text-sm">{error}</p>}
-        {loading && <p className="p-4 text-muted-foreground text-sm">Loading…</p>}
-        {selectedCommit && <CommitDetails commit={selectedCommit} />}
-        <DiffViewer diffs={selectedDiff} />
+        {rebaseState ? (
+          <RebaseProgress
+            repo={currentRepo}
+            state={rebaseState}
+            onContinue={handleContinueRebase}
+            onAbort={handleAbortRebase}
+            loading={rebaseLoading}
+            error={rebaseError}
+          />
+        ) : sidePanel === 'merge' ? (
+          <MergePanel repo={currentRepo} onClose={closeSidePanel} onMerged={handleMergedOrRebased} />
+        ) : sidePanel === 'rebase-plan' ? (
+          <RebasePlanner
+            ontoInput={ontoInput}
+            onOntoInputChange={setOntoInput}
+            onLoadPlan={() => currentRepo && loadPlanDraft(currentRepo, ontoInput.trim())}
+            plan={planDraft}
+            onMove={movePlanEntry}
+            onToggleDrop={toggleDrop}
+            onStart={handleStartRebase}
+            onCancel={closeSidePanel}
+            loading={rebaseLoading}
+            error={rebaseError}
+          />
+        ) : (
+          <>
+            {error && <p className="p-4 text-destructive text-sm">{error}</p>}
+            {loading && <p className="p-4 text-muted-foreground text-sm">Loading…</p>}
+            {selectedCommit && <CommitDetails commit={selectedCommit} />}
+            <DiffViewer diffs={selectedDiff} />
+          </>
+        )}
       </div>
     </div>
   )
