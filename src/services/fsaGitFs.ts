@@ -1,11 +1,25 @@
 // Bridges the browser's native File System Access API to the fs.promises-shaped
-// object isomorphic-git expects. Implements only the subset of Node's fs surface
+// object isomorphic-git expects. Implements the subset of Node's fs surface
 // isomorphic-git actually calls: readFile, writeFile, unlink, readdir, mkdir,
-// rmdir, stat, lstat (aliased to stat — no symlink support), rename.
+// rmdir, stat, lstat (aliased to stat — no symlink support), rename, plus
+// readlink/symlink stubs (see below — never actually invoked, but must exist).
 //
 // There is no MIT-licensed off-the-shelf bridge for this (the closest option,
 // ZenFS's WebAccess backend, is LGPL-3.0 and was ruled out on license grounds),
 // so this is hand-written against the spec.
+//
+// IMPORTANT: isomorphic-git's internal `bindFs()` unconditionally does
+// `fs[command].bind(fs)` for every command in its fixed list — including
+// `readlink` and `symlink` — with no existence check. Omitting either of
+// those methods here doesn't just disable symlink support, it throws
+// "Cannot read properties of undefined (reading 'bind')" at construction
+// time for every single isomorphic-git call, against every repo, always.
+// This was caught the hard way (real-browser testing against a real repo,
+// something this project's test suite couldn't exercise because git.test.ts
+// uses Node's real fs — which has these methods — not this adapter). Any
+// future trim of this file's surface must keep both, even though `stat`/
+// `lstat` never report `isSymbolicLink() === true` so they're never actually
+// called in practice.
 
 export interface GitFsStat {
   isFile: () => boolean
@@ -13,6 +27,16 @@ export interface GitFsStat {
   isSymbolicLink: () => boolean
   size: number
   mtimeMs: number
+  // isomorphic-git's normalizeStats() falls back from ctimeSeconds/ctimeMs to
+  // ctime (a Date, via .valueOf()) if neither is present — the File System
+  // Access API only exposes a single lastModified timestamp per file (no
+  // separate change-time), so ctimeMs is set equal to mtimeMs. Omitting this
+  // entirely crashes normalizeStats on every git.add() with "Cannot read
+  // properties of undefined (reading 'valueOf')" — caught via real-browser
+  // testing, not the test suite (see the file-level readlink/symlink note;
+  // same root cause pattern: an fs.Stats field isomorphic-git assumes exists
+  // that Node's real fs.Stats always has but this hand-rolled one didn't).
+  ctimeMs: number
   mode: number
   ino: number
   uid: number
@@ -34,6 +58,8 @@ export interface GitFs {
     stat: (filepath: string) => Promise<GitFsStat>
     lstat: (filepath: string) => Promise<GitFsStat>
     rename: (oldPath: string, newPath: string) => Promise<void>
+    readlink: (filepath: string) => Promise<string>
+    symlink: (target: string, filepath: string) => Promise<void>
   }
 }
 
@@ -43,8 +69,15 @@ function nodeError(code: string, message: string): NodeJS.ErrnoException {
   return err
 }
 
+// isomorphic-git's WORKDIR walker builds paths as `${dir}/${entry._fullpath}`,
+// and the root entry's _fullpath is the literal string '.' (its own POSIX-
+// relative-path convention for "current directory") — so with dir === '/',
+// real calls like `lstat('//.')` happen. `.` segments must be treated as a
+// no-op (stay at the current directory), not a literal path component to
+// look up — omitting this filter throws ENOENT on lstat('.') for every
+// statusMatrix()/walk() call. Caught via real-browser testing.
 function splitPath(filepath: string): string[] {
-  return filepath.split('/').filter(Boolean)
+  return filepath.split('/').filter((segment) => segment !== '' && segment !== '.')
 }
 
 async function getDirHandle(
@@ -119,6 +152,7 @@ async function toStat(handle: FileSystemFileHandle | FileSystemDirectoryHandle) 
     isSymbolicLink: () => false,
     size,
     mtimeMs,
+    ctimeMs: mtimeMs,
     mode: isFile ? 0o100644 : 0o40755,
     ino: 0,
     uid: 0,
@@ -222,6 +256,18 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
     await unlink(oldPath)
   }
 
+  // Never actually invoked in practice — stat()/lstat() never report
+  // isSymbolicLink() as true, so isomorphic-git has no reason to call these —
+  // but they must exist as functions or isomorphic-git's fs binding step
+  // crashes immediately for every operation. See the file-level comment.
+  async function readlink(filepath: string): Promise<string> {
+    throw nodeError('ENOSYS', `ENOSYS: symlinks are not supported, readlink '${filepath}'`)
+  }
+
+  async function symlink(_target: string, filepath: string): Promise<void> {
+    throw nodeError('ENOSYS', `ENOSYS: symlinks are not supported, symlink '${filepath}'`)
+  }
+
   return {
     promises: {
       readFile,
@@ -233,6 +279,8 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
       stat,
       lstat: stat,
       rename,
+      readlink,
+      symlink,
     },
   }
 }
