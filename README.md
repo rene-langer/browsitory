@@ -4,10 +4,12 @@ A Progressive Web App for Git repository management with a fast, visual Git clie
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status: Phase 1 (MVP)**. Implemented today: opening a local repository, commit history,
-> diff viewing, staging/unstaging, and committing. Everything else in the feature list below
-> is on the [roadmap](#roadmap). Repository access uses the browser's File System Access API,
-> so a Chromium-based browser (Chrome, Edge, Opera) is required for now — see
+> **Status: Phase 1 + 2**. Implemented today: opening a local repository, commit history,
+> diff viewing, staging/unstaging, committing, branch management, stash, merge with
+> conflict resolution, interactive rebase (pick/drop only), a blame viewer, and a
+> multi-branch commit graph. Push/pull to a remote is still on the [roadmap](#roadmap).
+> Repository access uses the browser's File System Access API, so a Chromium-based browser
+> (Chrome, Edge, Opera) is required for now — see
 > [Limitations](docs/PROJECT_SETUP.md#phase-1-limitations).
 
 ## Features
@@ -191,11 +193,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - [x] Staging/unstaging + commit creation
   - [x] Unit/component test tooling (Vitest) + CI
   - [ ] Deeper offline caching of repository data (app-shell offline support is in place)
-- [ ] Phase 2: Enhanced features
-  - [ ] Interactive rebase
-  - [ ] Conflict resolution
-  - [ ] Blame viewer
-  - [ ] Graph visualization
+- [x] Phase 2: Enhanced features
+  - [x] Branch management + stash
+  - [x] Merge & conflict resolution
+  - [x] Interactive rebase (pick/drop only)
+  - [x] Blame viewer
+  - [x] Graph visualization
 - [ ] Phase 3: Server backend
   - [ ] Backend API
   - [ ] User authentication

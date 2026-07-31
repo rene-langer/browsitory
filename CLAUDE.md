@@ -24,9 +24,41 @@ All four must pass.
 ## Project status
 
 Phase 1 (MVP) is implemented: opening a local repository, commit history, diff viewing,
-staging/unstaging, and committing. Push/pull, branch switching, merge, rebase, and stash are
-not implemented yet. See `docs/PROJECT_SETUP.md` for the phase roadmap and
-`docs/ARCHITECTURE.md` for the full tech-stack rationale.
+staging/unstaging, and committing. Phase 2 is also implemented: branch management (create/
+delete/rename/switch), stash (push/apply/pop/drop/list), merge with conflict resolution,
+interactive rebase (pick/drop only — no reword/squash), a blame viewer, and a multi-branch
+commit graph view. Push/pull to a remote is still not implemented. See `docs/PROJECT_SETUP.md`
+for the phase roadmap and `docs/ARCHITECTURE.md` for the full tech-stack rationale.
+
+### Phase 2 additions worth knowing before touching them
+
+- **Merge conflicts**: `mergeBranch`/`cherryPick` (the latter used by rebase) both use
+  `abortOnConflict: false`, which writes conflict markers to the working tree and unmerged
+  stage-1/2/3 (base/ours/theirs) index entries, then throws `MergeConflictError` — without
+  moving the branch ref. `getConflictDiff()` in `git.ts` reads those stage-2/3 entries
+  directly via isomorphic-git's `isomorphic-git/managers` (`GitIndexManager`) and
+  `isomorphic-git/models` (`FileSystem`) subpath exports — these are legitimate, declared
+  entries in the package's own `exports` map, not undocumented internals; verify against
+  `node_modules/isomorphic-git/package.json` if this ever looks broken after an upgrade.
+- **Interactive rebase** (`src/services/rebase.ts`) is hand-rolled from `cherryPick` +
+  `checkout`/`branch` — isomorphic-git has no native `rebase` command. State is persisted to
+  a `.git/browsitory-rebase.json` sidecar (via the same injected `fs`) so a paused rebase
+  survives a reload. The branch ref is never touched until the rebase fully completes —
+  every step runs in detached HEAD, which is what makes `abortRebase` a trivial checkout
+  back to the original branch.
+- **Blame** (`src/services/blame.ts`) is also hand-rolled — no native `blame` command either.
+  It walks `git.log({ filepath })` oldest-to-newest, re-diffing the running line-attribution
+  model against each commit with the `diff` package's `diffLines`. Both diff inputs must end
+  with a trailing `\n` or jsdiff misreports an unchanged last line as a remove+add whenever
+  old/new line counts differ — a real bug hit once, see the comment in `blame.ts`.
+- **Branch/stash** (`listAllBranches`, `createBranch`, `switchBranch`, `listStashes`, etc. in
+  `git.ts`) are thin wrappers — isomorphic-git supports all of this natively. One gotcha:
+  `git.stash({op:'list'})` returns `string[]` formatted as `"stash@{N}: <message>"` at
+  runtime despite its looser declared type; parse it, don't expect objects.
+- **`Repository.tsx`** has no per-feature routing (branch/merge/rebase/blame/graph are all
+  inline state in that one page, same precedent as Phase 1's diff viewing) — it composes
+  `gitStore`, `rebaseStore`, and `repositoryStore` together and switches between a History
+  view (staging/stash/commit sidebar + diff/blame/merge/rebase content) and a Graph view.
 
 ## Architecture
 

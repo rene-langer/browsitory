@@ -153,8 +153,8 @@ See [LICENSE_COMPLIANCE.md](LICENSE_COMPLIANCE.md) for detailed breakdown.
   in Chrome/Edge/Opera only — Firefox and Safari are not supported yet. A LightningFS-based
   "virtual clone" mode is a possible future fallback for those browsers.
 - No symlink support in the filesystem adapter (`src/services/fsaGitFs.ts`).
-- Branch switching/creation, merge, rebase, stash, and push/pull remain out of scope until
-  Phase 2.
+- Push/pull to a remote remains out of scope (planned for Phase 3 alongside the server
+  backend). Branch management, merge, rebase, and stash are implemented — see Phase 2 below.
 
 #### Phase 1 review follow-up (closed)
 A review pass found the PWA manifest referenced icon and screenshot assets that didn't
@@ -193,12 +193,33 @@ also remains manually-verified-only, as before, since it requires a native OS fi
 dialog that automation can't drive.
 
 ### Phase 2: Enhanced Features
-- [ ] Branch management
-- [ ] Interactive rebase
-- [ ] Merge & conflict resolution
-- [ ] Blame viewer
-- [ ] Stash management
-- [ ] Graph visualization
+- [x] Branch management (create/delete/rename/switch — all native isomorphic-git support)
+- [x] Interactive rebase (pick/drop only; no reword/squash — see scope cuts below)
+- [x] Merge & conflict resolution (native `merge()`, hand-rolled ours/theirs conflict diff)
+- [x] Blame viewer (hand-rolled — isomorphic-git has no native `blame`)
+- [x] Stash management (push/apply/pop/drop/list — all native isomorphic-git support)
+- [x] Graph visualization (multi-branch commit graph, Dagre layout + custom SVG rendering)
+
+#### Phase 2 scope cuts (deliberate)
+- **Rebase**: only `pick`/`drop` actions — no `reword` or `squash`. `onto` must be an
+  ancestor of the branch being rebased (no rebasing onto a diverged branch). Must be on a
+  named branch with a clean working tree to start. No in-app conflict editor — the app has
+  no file-editing capability at all yet, so conflict resolution means viewing which files
+  conflict plus a read-only ours/theirs diff, editing the real on-disk files with your own
+  OS editor (this works since it's the File System Access API on real files), then marking
+  resolved and continuing in-app.
+- **Blame**: no rename-following (matches plain `git blame`'s default, not `--follow`);
+  blame is against a ref's last-committed content, not live working-tree edits.
+- **Merge**: no 3-way merge editor beyond the ours/theirs diff view — same "edit the real
+  file yourself" model as rebase conflicts.
+
+#### Phase 2 review follow-up
+A coverage pass after merging all three workstreams found `BlameViewer.tsx` and
+`GraphView.tsx` had zero test coverage (present in the implementation but no test file was
+ever written for either) — both now have RTL component tests. The build also crossed
+Vite's default 500 kB chunk-size warning threshold; splitting the bundle (e.g. lazy-loading
+the graph/blame/rebase panels) is a reasonable follow-up but wasn't done here since it's a
+performance nice-to-have, not a correctness issue.
 
 ### Phase 3: Server Backend
 - [ ] Backend API (Go/Node.js)
