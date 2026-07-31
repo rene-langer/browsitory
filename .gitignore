@@ -37,3 +37,6 @@ workbox-*
 
 # Local, non-shared notes
 CLAUDE.local.md
+
+# Agent worktrees (nested checkouts for parallel background agents)
+.claude/

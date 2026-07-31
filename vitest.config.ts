@@ -21,6 +21,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Vitest's default excludes don't cover .claude/ — without this, a test run
+    // from the repo root also picks up any nested agent worktrees checked out
+    // under .claude/worktrees/, silently inflating/polluting the result.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/.claude/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
