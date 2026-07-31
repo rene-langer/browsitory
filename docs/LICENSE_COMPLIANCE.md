@@ -34,6 +34,17 @@ cross-browser "virtual clone" mode, but is not a current dependency.
 
 ### Diff Viewer
 - **react-diff-viewer-continued** - MIT License
+- **diff** - BSD-3-Clause License (compatible). Was already present as a transitive dependency
+  of `react-diff-viewer-continued`; promoted to a direct dependency for `src/services/blame.ts`,
+  which uses its `diffLines` export to attribute unchanged/changed lines to commits.
+- **@types/diff** - MIT License (DefinitelyTyped; `diff` ships no types of its own)
+
+### Graph Visualization
+- **dagre** - MIT License. DAG layout engine for `src/components/GraphView.tsx`; only used for
+  node/edge position computation, rendering is a hand-written SVG renderer (no React Flow or
+  other full canvas/interaction library was added, to keep the dependency footprint small).
+  Its own dependencies, `graphlib` (MIT) and `lodash` (MIT), are both permissively licensed.
+- **@types/dagre** - MIT License (DefinitelyTyped; `dagre` ships no types of its own)
 
 ### Build Tools
 - **@vitejs/plugin-react** - MIT License
