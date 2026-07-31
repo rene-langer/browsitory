@@ -7,6 +7,8 @@ import CommitDetails from '@components/CommitDetails'
 import StagingPanel from '@components/StagingPanel'
 import CommitForm from '@components/CommitForm'
 import DiffViewer from '@components/DiffViewer'
+import BranchSwitcher from '@components/BranchSwitcher'
+import StashPanel from '@components/StashPanel'
 
 export default function Repository() {
   const { id } = useParams<{ id: string }>()
@@ -19,6 +21,8 @@ export default function Repository() {
     commits,
     branch,
     status,
+    branches,
+    stashes,
     selectedCommitOid,
     selectedDiff,
     loading,
@@ -30,6 +34,14 @@ export default function Repository() {
     loadUnstagedDiff,
     loadStagedDiff,
     commit,
+    switchBranch,
+    createBranch,
+    deleteBranch,
+    renameBranch,
+    createStash,
+    applyStash,
+    popStash,
+    dropStash,
     reset,
   } = useGitStore()
 
@@ -69,7 +81,14 @@ export default function Repository() {
       <div className="w-96 border-r border-border flex flex-col overflow-hidden">
         <div className="p-4 border-b border-border">
           <h1 className="text-xl font-bold text-foreground truncate">{currentRepo.name}</h1>
-          {branch && <p className="text-sm text-muted-foreground">on {branch}</p>}
+          <BranchSwitcher
+            branches={branches}
+            currentBranch={branch}
+            onSwitch={(name) => switchBranch(currentRepo, name)}
+            onCreate={(name, startPoint) => createBranch(currentRepo, name, startPoint)}
+            onDelete={(name) => deleteBranch(currentRepo, name)}
+            onRename={(oldName, newName) => renameBranch(currentRepo, oldName, newName)}
+          />
         </div>
 
         <StagingPanel
@@ -78,6 +97,14 @@ export default function Repository() {
           onUnstage={(f) => unstage(currentRepo, f)}
           onSelectUnstaged={(f) => loadUnstagedDiff(currentRepo, f)}
           onSelectStaged={(f) => loadStagedDiff(currentRepo, f)}
+        />
+
+        <StashPanel
+          stashes={stashes}
+          onCreate={(message) => createStash(currentRepo, message)}
+          onApply={(refIdx) => applyStash(currentRepo, refIdx)}
+          onPop={(refIdx) => popStash(currentRepo, refIdx)}
+          onDrop={(refIdx) => dropStash(currentRepo, refIdx)}
         />
 
         <CommitForm
