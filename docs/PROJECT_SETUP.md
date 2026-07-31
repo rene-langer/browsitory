@@ -247,6 +247,25 @@ All fixed and verified live against a real repository (branch, status, stashes, 
 history, commit diffs, blame, and the multi-branch graph view). Regression tests were added
 for the fsaGitFs bugs and the caching behavior; see `src/services/fsaGitFs.test.ts`.
 
+#### Second performance pass: index-hashing cost (partially closed)
+After the directory-handle caching fix above, users still saw multi-second delays. The
+remaining cause: none of `git.ts`'s isomorphic-git calls passed a `cache` object, so every
+single call re-parsed `.git/index` from scratch and discarded isomorphic-git's "racy git"
+fast path (skip re-hashing a file's content if its stat metadata already matches the index)
+as soon as that call returned — compounded by `fsaGitFs.ts` always reporting
+`uid`/`gid`/`ino` as `0` (the File System Access API exposes none of these), which
+permanently mismatches a real git index's values from an actual `git clone`, forcing a full
+content re-hash of every tracked file on every status/diff call. Fixed by threading a
+per-repository `cache` object (keyed by the `fs` instance via `WeakMap`) through every
+`git.ts` call that supports one, letting isomorphic-git's own index self-healing compound
+within a session instead of restarting every time.
+
+**Not fully closed**: the *first* status check in a new session is still slow (~9s measured
+live, down from the ~18s before caching but not eliminated) — there's nothing yet to reuse on
+that first call. Subsequent operations in the same session dropped to ~1-1.3s (from ~9-18s).
+Further reducing the first-load cost would need something like priming the cache
+speculatively on repo-open before the user asks for anything, which hasn't been attempted.
+
 ### Phase 3: Server Backend
 - [ ] Backend API (Go/Node.js)
 - [ ] Database setup (PostgreSQL)
