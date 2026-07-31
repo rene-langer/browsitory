@@ -80,63 +80,6 @@ function splitPath(filepath: string): string[] {
   return filepath.split('/').filter((segment) => segment !== '' && segment !== '.')
 }
 
-async function getDirHandle(
-  root: FileSystemDirectoryHandle,
-  segments: string[],
-  create: boolean
-): Promise<FileSystemDirectoryHandle> {
-  let current = root
-  for (const segment of segments) {
-    try {
-      current = await current.getDirectoryHandle(segment, { create })
-    } catch (err) {
-      const name = (err as DOMException).name
-      if (name === 'NotFoundError') {
-        throw nodeError('ENOENT', `ENOENT: no such directory, '${segment}'`)
-      }
-      if (name === 'TypeMismatchError') {
-        throw nodeError('ENOTDIR', `ENOTDIR: not a directory, '${segment}'`)
-      }
-      throw err
-    }
-  }
-  return current
-}
-
-async function resolveParent(
-  root: FileSystemDirectoryHandle,
-  filepath: string
-): Promise<{ parent: FileSystemDirectoryHandle; name: string }> {
-  const segments = splitPath(filepath)
-  if (segments.length === 0) {
-    throw nodeError('EINVAL', 'EINVAL: cannot operate on the repository root as a file')
-  }
-  const name = segments[segments.length - 1]
-  const parent = await getDirHandle(root, segments.slice(0, -1), false)
-  return { parent, name }
-}
-
-async function resolveHandle(
-  root: FileSystemDirectoryHandle,
-  filepath: string
-): Promise<FileSystemFileHandle | FileSystemDirectoryHandle> {
-  const segments = splitPath(filepath)
-  if (segments.length === 0) return root
-  const { parent, name } = await resolveParent(root, filepath)
-  try {
-    return await parent.getFileHandle(name)
-  } catch (err) {
-    const errName = (err as DOMException).name
-    if (errName === 'TypeMismatchError') {
-      return parent.getDirectoryHandle(name)
-    }
-    if (errName === 'NotFoundError') {
-      throw nodeError('ENOENT', `ENOENT: no such file or directory, '${filepath}'`)
-    }
-    throw err
-  }
-}
-
 async function toStat(handle: FileSystemFileHandle | FileSystemDirectoryHandle) {
   const isFile = handle.kind === 'file'
   let size = 0
@@ -162,28 +105,100 @@ async function toStat(handle: FileSystemFileHandle | FileSystemDirectoryHandle) 
   return stat
 }
 
-/** Creates all missing directory segments. Idempotent — safe to call on existing paths. */
-async function mkdir(root: FileSystemDirectoryHandle, filepath: string): Promise<void> {
-  const segments = splitPath(filepath)
-  let current = root
-  for (const segment of segments) {
+export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
+  // Caches resolved directory handles by their POSIX path ('' = root) so a
+  // tree walk touching many files under the same parent directories doesn't
+  // re-resolve every ancestor segment from root on every single call. Before
+  // this, every readFile/stat/readdir/etc. walked the *entire* path from
+  // root each time, turning what should be an O(files) walk into
+  // O(files × depth) FileSystemDirectoryHandle round-trips — each of which
+  // is a real async browser-API call, not free. On a real multi-hundred-file
+  // repository this made loading a single small file's diff take ~20
+  // seconds. Found via real-browser testing: the in-memory fake handle used
+  // in tests has no meaningful async latency, so the *correctness* of the
+  // old code was never in question, only its real-world speed — the test
+  // suite had no way to catch this.
+  const dirCache = new Map<string, FileSystemDirectoryHandle>([['', root]])
+
+  async function getDirHandle(segments: string[], create: boolean): Promise<FileSystemDirectoryHandle> {
+    let path = ''
+    let current = root
+    for (const segment of segments) {
+      path = path ? `${path}/${segment}` : segment
+      const cached = dirCache.get(path)
+      if (cached) {
+        current = cached
+        continue
+      }
+      try {
+        current = await current.getDirectoryHandle(segment, { create })
+      } catch (err) {
+        const name = (err as DOMException).name
+        if (name === 'NotFoundError') {
+          throw nodeError('ENOENT', `ENOENT: no such directory, '${segment}'`)
+        }
+        if (name === 'TypeMismatchError') {
+          // Same underlying DOM error, different meaning depending on intent:
+          // looking up an existing path that isn't a directory is ENOTDIR;
+          // trying to create one where a file already exists is EEXIST.
+          throw create
+            ? nodeError('EEXIST', `EEXIST: file already exists, '${segment}'`)
+            : nodeError('ENOTDIR', `ENOTDIR: not a directory, '${segment}'`)
+        }
+        throw err
+      }
+      dirCache.set(path, current)
+    }
+    return current
+  }
+
+  async function resolveParent(
+    filepath: string
+  ): Promise<{ parent: FileSystemDirectoryHandle; name: string }> {
+    const segments = splitPath(filepath)
+    if (segments.length === 0) {
+      throw nodeError('EINVAL', 'EINVAL: cannot operate on the repository root as a file')
+    }
+    const name = segments[segments.length - 1]
+    const parent = await getDirHandle(segments.slice(0, -1), false)
+    return { parent, name }
+  }
+
+  async function resolveHandle(
+    filepath: string
+  ): Promise<FileSystemFileHandle | FileSystemDirectoryHandle> {
+    const segments = splitPath(filepath)
+    if (segments.length === 0) return root
+    const path = segments.join('/')
+    const cachedDir = dirCache.get(path)
+    if (cachedDir) return cachedDir
+    const { parent, name } = await resolveParent(filepath)
     try {
-      current = await current.getDirectoryHandle(segment, { create: true })
+      return await parent.getFileHandle(name)
     } catch (err) {
-      if ((err as DOMException).name === 'TypeMismatchError') {
-        throw nodeError('EEXIST', `EEXIST: file already exists, '${segment}'`)
+      const errName = (err as DOMException).name
+      if (errName === 'TypeMismatchError') {
+        const dirHandle = await parent.getDirectoryHandle(name)
+        dirCache.set(path, dirHandle)
+        return dirHandle
+      }
+      if (errName === 'NotFoundError') {
+        throw nodeError('ENOENT', `ENOENT: no such file or directory, '${filepath}'`)
       }
       throw err
     }
   }
-}
 
-export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
+  /** Creates all missing directory segments. Idempotent — safe to call on existing paths. */
+  async function mkdir(filepath: string): Promise<void> {
+    await getDirHandle(splitPath(filepath), true)
+  }
+
   async function readFile(
     filepath: string,
     options?: { encoding?: string } | string
   ): Promise<Uint8Array | string> {
-    const handle = await resolveHandle(root, filepath)
+    const handle = await resolveHandle(filepath)
     if (handle.kind !== 'file') {
       throw nodeError('EISDIR', `EISDIR: illegal operation on a directory, '${filepath}'`)
     }
@@ -198,8 +213,8 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
     // Defensive: ensure the parent directory exists even if the caller didn't
     // mkdir it first. Cheap and idempotent given mkdir's create:true semantics.
     const dirSegments = splitPath(filepath).slice(0, -1)
-    if (dirSegments.length > 0) await mkdir(root, '/' + dirSegments.join('/'))
-    const { parent, name } = await resolveParent(root, filepath)
+    if (dirSegments.length > 0) await mkdir(dirSegments.join('/'))
+    const { parent, name } = await resolveParent(filepath)
     const handle = await parent.getFileHandle(name, { create: true })
     const writable = await handle.createWritable()
     // FileSystemWriteChunkType is narrower than Uint8Array<ArrayBufferLike> (it
@@ -210,7 +225,7 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
   }
 
   async function unlink(filepath: string): Promise<void> {
-    const { parent, name } = await resolveParent(root, filepath)
+    const { parent, name } = await resolveParent(filepath)
     try {
       await parent.removeEntry(name)
     } catch (err) {
@@ -222,7 +237,7 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
   }
 
   async function rmdir(filepath: string): Promise<void> {
-    const { parent, name } = await resolveParent(root, filepath)
+    const { parent, name } = await resolveParent(filepath)
     try {
       await parent.removeEntry(name, { recursive: false })
     } catch (err) {
@@ -231,11 +246,12 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
       }
       throw err
     }
+    dirCache.delete(splitPath(filepath).join('/'))
   }
 
   async function readdir(filepath: string): Promise<string[]> {
     const segments = splitPath(filepath)
-    const dirHandle = await getDirHandle(root, segments, false)
+    const dirHandle = await getDirHandle(segments, false)
     const names: string[] = []
     for await (const entry of dirHandle.values()) {
       names.push(entry.name)
@@ -244,7 +260,7 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
   }
 
   async function stat(filepath: string): Promise<GitFsStat> {
-    const handle = await resolveHandle(root, filepath)
+    const handle = await resolveHandle(filepath)
     return toStat(handle)
   }
 
@@ -274,7 +290,7 @@ export function createFsaGitFs(root: FileSystemDirectoryHandle): GitFs {
       writeFile,
       unlink,
       readdir,
-      mkdir: (filepath: string) => mkdir(root, filepath),
+      mkdir,
       rmdir,
       stat,
       lstat: stat,
