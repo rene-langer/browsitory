@@ -5,6 +5,12 @@
 //! holding only the types both sides need, so neither workstream's branch
 //! has to fight the other over ownership of this file's function bodies.
 
+use git2::{FetchOptions, PushOptions, Repository};
+
+use crate::credentials;
+use crate::merge::{self, MergeOutcome};
+use crate::repo::{GitError, Result};
+
 /// A snapshot of transfer progress, cheap to copy so it can be sent through
 /// an `mpsc` channel on every libgit2 progress callback invocation (which
 /// can fire many times per second) without allocating.
@@ -26,12 +32,6 @@ pub enum TransferStage {
     Pushing,
     Done,
 }
-
-use git2::{FetchOptions, Repository};
-
-use crate::credentials;
-use crate::merge::{self, MergeOutcome};
-use crate::repo::Result;
 
 /// Fetches from `remote_name`, using the remote's own configured refspecs
 /// (e.g. `+refs/heads/*:refs/remotes/origin/*`) so this behaves like a plain
@@ -88,4 +88,77 @@ pub fn pull(
 
     let tracking_ref = format!("refs/remotes/{remote_name}/{branch}");
     merge::merge_branch(repo, &tracking_ref)
+}
+
+/// Pushes `refspecs` (already fully built by the caller — e.g.
+/// `refs/heads/{local}:refs/heads/{remote}`, or force-prefixed
+/// `+refs/heads/{local}:refs/heads/{remote}`; `push_tag` below builds a
+/// `refs/tags/{tag}:refs/tags/{tag}` one) to `remote_name`. Never pass an
+/// empty slice expecting "push everything" — that silently pushes nothing
+/// unless the remote has configured push refspecs of its own.
+///
+/// `Remote::push()` returning `Ok(())` does NOT mean every ref updated —
+/// non-fast-forward (and other) rejections surface only via the
+/// `push_update_reference` callback, which libgit2 calls once per ref with
+/// `Some(status_msg)` when the server rejected that ref. This collects any
+/// such rejections and turns them into an `Err` rather than reporting
+/// success.
+pub fn push(
+    repo: &Repository,
+    remote_name: &str,
+    refspecs: &[String],
+    mut on_progress: impl FnMut(ProgressUpdate),
+) -> Result<()> {
+    let mut remote = repo.find_remote(remote_name)?;
+
+    let mut rejections: Vec<String> = Vec::new();
+    let mut callbacks = credentials::make_callbacks(repo);
+    callbacks.push_update_reference(|refname, status| {
+        if let Some(msg) = status {
+            rejections.push(format!("{refname}: {msg}"));
+        }
+        Ok(())
+    });
+    callbacks.push_transfer_progress(|current, total, bytes| {
+        on_progress(ProgressUpdate {
+            received_objects: current,
+            total_objects: total,
+            indexed_objects: current,
+            received_bytes: bytes,
+            stage: TransferStage::Pushing,
+        });
+    });
+
+    let mut opts = PushOptions::new();
+    opts.remote_callbacks(callbacks);
+
+    remote.push(refspecs, Some(&mut opts))?;
+
+    // `opts` (and the `callbacks` it owns) still holds the closures that
+    // mutably borrow `rejections`/`on_progress` after `remote.push` returns
+    // — `&mut opts` only lends it for the call, it isn't consumed. Drop it
+    // explicitly to end those borrows before reading `rejections` or
+    // calling `on_progress` again below.
+    drop(opts);
+
+    if !rejections.is_empty() {
+        return Err(GitError::Rejected(rejections.join("; ")));
+    }
+
+    on_progress(ProgressUpdate {
+        stage: TransferStage::Done,
+        ..Default::default()
+    });
+    Ok(())
+}
+
+/// Pushes a single tag ref to `remote_name`.
+pub fn push_tag(
+    repo: &Repository,
+    remote_name: &str,
+    tag: &str,
+    on_progress: impl FnMut(ProgressUpdate),
+) -> Result<()> {
+    let refspec = format!("refs/tags/{tag}:refs/tags/{tag}");
+    push(repo, remote_name, &[refspec], on_progress)
 }

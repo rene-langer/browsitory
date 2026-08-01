@@ -71,8 +71,8 @@ pub struct RepoSession {
     pub rebase_active: bool,
 
     pub remotes: Vec<RemoteInfo>,
-    /// Progress of the in-flight fetch/pull (or push, from Workstream E),
-    /// updated on every `Event::TransferProgress`. `None` when idle.
+    /// Progress of the in-flight fetch/pull/push, updated on every
+    /// `Event::TransferProgress`. `None` when idle.
     pub transfer_progress: Option<ProgressUpdate>,
     pub transfer_in_progress: bool,
     /// UI-only scratch state for the remote-CRUD form in
@@ -87,6 +87,11 @@ pub struct RepoSession {
     /// Branch to pull, typed by the user (or defaulted from the current
     /// branch's upstream by `remote_panel.rs`).
     pub pull_branch: String,
+    /// UI-only scratch state for the push controls in `branch_panel.rs`,
+    /// same pattern as `new_branch_name`/`merge_target` above.
+    pub push_remote: String,
+    pub push_force: bool,
+    pub push_tag_name: String,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -140,6 +145,9 @@ impl RepoSession {
             remote_url_edit_target: None,
             remote_url_edit_input: String::new(),
             pull_branch: String::new(),
+            push_remote: String::new(),
+            push_force: false,
+            push_tag_name: String::new(),
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
@@ -253,6 +261,29 @@ impl RepoSession {
 
     pub fn is_merging(&self) -> bool {
         !self.merge_conflicts.is_empty()
+    }
+
+    // --- Push --------------------------------------------------------------
+
+    /// Pushes `local_branch` to `remote` (as a same-named remote branch,
+    /// force-pushing iff `push_force` is set) — the common case exercised by
+    /// the branch panel's Push button. `refspec` sent to the worker is the
+    /// plain `local:remote` branch-name pair; `Command::Push`'s doc comment
+    /// in `worker.rs` covers how that's expanded into a real ref.
+    pub fn push(&mut self, remote: String, local_branch: String) {
+        self.transfer_in_progress = true;
+        self.transfer_progress = None;
+        self.send(Command::Push {
+            remote,
+            refspec: local_branch,
+            force: self.push_force,
+        });
+    }
+
+    pub fn push_tag(&mut self, remote: String, tag: String) {
+        self.transfer_in_progress = true;
+        self.transfer_progress = None;
+        self.send(Command::PushTag { remote, tag });
     }
 
     // --- Interactive rebase ----------------------------------------------
@@ -505,7 +536,15 @@ impl RepoSession {
                         limit: LOG_PAGE_SIZE,
                     });
                 }
-                Event::Error(message) => self.error = Some(message),
+                Event::Error(message) => {
+                    self.error = Some(message);
+                    // An in-flight fetch/pull/push that errored (e.g.
+                    // rejected by the remote) still needs its busy state
+                    // cleared — nothing else does that for the generic
+                    // `Error` path.
+                    self.transfer_in_progress = false;
+                    self.transfer_progress = None;
+                }
 
                 Event::Remotes(remotes) => self.remotes = remotes,
                 Event::TransferProgress(update) => {
@@ -538,6 +577,14 @@ impl RepoSession {
                         skip: 0,
                         limit: LOG_PAGE_SIZE,
                     });
+                }
+                Event::PushFinished => {
+                    self.transfer_progress = None;
+                    self.transfer_in_progress = false;
+                    // Push can move remote-tracking refs (upstream markers
+                    // shown in the branch panel), so refresh branches the
+                    // same way `Event::BranchSwitched` does above.
+                    self.send(Command::LoadBranches);
                 }
             }
         }
