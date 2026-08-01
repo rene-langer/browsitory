@@ -18,6 +18,7 @@ pub fn init_repo() -> (TempDir, Repository) {
     (dir, repo)
 }
 
+#[allow(dead_code)]
 pub fn write_file(dir: &TempDir, relative_path: &str, contents: &str) {
     let full_path = dir.path().join(relative_path);
     if let Some(parent) = full_path.parent() {
