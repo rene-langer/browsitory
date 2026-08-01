@@ -86,7 +86,7 @@ also means switching between repos in a multi-repo session never contends on a s
   read directly via libgit2 — there is no separate "offline cache" to keep in sync, unlike the
   old browser build's IndexedDB commit/diff cache.
 
-## Remote operations (opportunity, not yet built)
+## Remote operations (Phase 3, implemented)
 
 The old architecture punted push/pull/fetch to an unbuilt "server backend" phase, because
 isomorphic-git running in a browser has no direct way to talk to a remote (it would need a
@@ -94,7 +94,16 @@ CORS-enabled proxy). `git2`/libgit2 has native transport support (HTTPS via vend
 SSH via vendored libssh2 — see `crates/git-core/Cargo.toml`'s `git2` features), so remote
 operations are directly reachable from a native app without any backend. This is why "remote
 operations" moved from Phase 3's old "server backend" framing to a plain, self-contained
-Phase 3 item in the current roadmap — see `docs/PROJECT_SETUP.md`.
+Phase 3 item in the roadmap — see `docs/PROJECT_SETUP.md`.
+
+Push, pull, fetch, multi-remote CRUD, and tag push are implemented on top of this native
+transport (`crates/git-core/src/remote.rs`, `credentials.rs`, `transfer.rs`), with progress
+reported via `RemoteCallbacks::transfer_progress`/`push_transfer_progress` streamed to the UI
+as repeated `Event::TransferProgress` messages — the first worker commands whose progress can't
+be reported as a single terminal `Event` (see the "Threading model" note in `CLAUDE.md`). `pull`
+reuses Phase 2's `merge::merge_branch` against the fetched remote-tracking ref rather than
+reimplementing merge logic, so a conflicting pull surfaces through the exact same
+`MergeOutcome`/conflict-resolution UI a conflicting local merge already does.
 
 ## Performance considerations
 
@@ -106,9 +115,11 @@ Phase 3 item in the current roadmap — see `docs/PROJECT_SETUP.md`.
 
 ## Security considerations
 
-1. **Git credentials**: when remote operations (Phase 3) are implemented, use platform
-   credential managers / SSH agent forwarding via `git2`'s credential callbacks — never store
-   plaintext passwords.
+1. **Git credentials**: remote operations (Phase 3) use platform credential managers / SSH
+   agent forwarding via `git2`'s credential callbacks (`crates/git-core/src/credentials.rs`) —
+   never plaintext passwords, and never an interactive terminal prompt (this is a GUI app with
+   no controlling terminal; the callback returns `Err` once it has no more credential types to
+   offer rather than blocking on stdin).
 2. **Input validation**: pathspecs passed to `git2` are user-supplied file paths from within an
    already-opened repository's working tree; no arbitrary shell invocation is used anywhere in
    `git-core` (all operations go through libgit2's C API via `git2`, not a spawned `git` CLI
