@@ -3,7 +3,7 @@ mod common;
 use common::{init_repo, write_file};
 use git_core::{commit_log, create_commit, stage_path};
 
-fn commit_n_files(repo: &git2::Repository, dir: &tempfile::TempDir, n: usize) {
+fn commit_n_files(repo: &mut git2::Repository, dir: &tempfile::TempDir, n: usize) {
     for i in 0..n {
         let name = format!("file{i}.txt");
         write_file(dir, &name, "content\n");
@@ -14,8 +14,8 @@ fn commit_n_files(repo: &git2::Repository, dir: &tempfile::TempDir, n: usize) {
 
 #[test]
 fn returns_commits_newest_first() {
-    let (dir, repo) = init_repo();
-    commit_n_files(&repo, &dir, 3);
+    let (dir, mut repo) = init_repo();
+    commit_n_files(&mut repo, &dir, 3);
 
     let commits = commit_log(&repo, None, 0, 10).unwrap();
 
@@ -27,8 +27,8 @@ fn returns_commits_newest_first() {
 
 #[test]
 fn limit_and_skip_page_through_history() {
-    let (dir, repo) = init_repo();
-    commit_n_files(&repo, &dir, 5);
+    let (dir, mut repo) = init_repo();
+    commit_n_files(&mut repo, &dir, 5);
 
     let first_page = commit_log(&repo, None, 0, 2).unwrap();
     let second_page = commit_log(&repo, None, 2, 2).unwrap();
@@ -45,8 +45,8 @@ fn limit_and_skip_page_through_history() {
 
 #[test]
 fn root_commit_has_no_parents() {
-    let (dir, repo) = init_repo();
-    commit_n_files(&repo, &dir, 1);
+    let (dir, mut repo) = init_repo();
+    commit_n_files(&mut repo, &dir, 1);
 
     let commits = commit_log(&repo, None, 0, 10).unwrap();
 
