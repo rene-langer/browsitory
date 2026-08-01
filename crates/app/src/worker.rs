@@ -40,7 +40,9 @@ pub enum Command {
     PopStash(usize),
     DropStash(usize),
     LoadBlame(String),
-    LoadGraph { max_count: usize },
+    LoadGraph {
+        max_count: usize,
+    },
 }
 
 pub enum Event {
