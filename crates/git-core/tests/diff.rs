@@ -61,3 +61,23 @@ fn word_diff_highlights_only_the_changed_word() {
     assert_eq!(deleted, vec!["quick"]);
     assert_eq!(inserted, vec!["slow"]);
 }
+
+/// Regression test for a real UI bug: `similar::Change`'s `Display`/
+/// `to_string()` auto-appends a newline to any token that doesn't already
+/// end in one, which `word_diff`'s word-level tokens never do. Every token
+/// getting a hidden trailing "\n" turned each word into its own multi-line
+/// egui label, breaking the diff viewer's line layout (each word rendered on
+/// its own row instead of flowing horizontally). The previous test above
+/// used `.trim()` on the results, which silently absorbed the bug — this one
+/// checks the untrimmed text directly.
+#[test]
+fn word_diff_tokens_never_contain_an_embedded_newline() {
+    let changes = word_diff("function clicked()", "onClicked:");
+
+    for (_, text) in &changes {
+        assert!(
+            !text.contains('\n'),
+            "word_diff token unexpectedly contains a newline: {text:?}"
+        );
+    }
+}
