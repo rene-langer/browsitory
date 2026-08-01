@@ -26,3 +26,66 @@ pub enum TransferStage {
     Pushing,
     Done,
 }
+
+use git2::{FetchOptions, Repository};
+
+use crate::credentials;
+use crate::merge::{self, MergeOutcome};
+use crate::repo::Result;
+
+/// Fetches from `remote_name`, using the remote's own configured refspecs
+/// (e.g. `+refs/heads/*:refs/remotes/origin/*`) so this behaves like a plain
+/// `git fetch <remote>` — passing an empty refspec slice tells libgit2 to
+/// fall back to those configured refspecs rather than requiring a caller to
+/// know/re-derive them.
+///
+/// This only updates remote-tracking refs (`refs/remotes/{remote}/*`) and
+/// `FETCH_HEAD` — it never touches a local branch. See `pull` below for the
+/// fetch-then-merge combination that does.
+pub fn fetch(
+    repo: &Repository,
+    remote_name: &str,
+    mut on_progress: impl FnMut(ProgressUpdate),
+) -> Result<()> {
+    let mut remote = repo.find_remote(remote_name)?;
+
+    let mut callbacks = credentials::make_callbacks(repo);
+    callbacks.transfer_progress(move |progress| {
+        let stage = if progress.indexed_objects() < progress.total_objects() {
+            TransferStage::Receiving
+        } else {
+            TransferStage::Indexing
+        };
+        on_progress(ProgressUpdate {
+            received_objects: progress.received_objects(),
+            total_objects: progress.total_objects(),
+            indexed_objects: progress.indexed_objects(),
+            received_bytes: progress.received_bytes(),
+            stage,
+        });
+        true
+    });
+
+    let mut fetch_options = FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+
+    remote.fetch(&[] as &[&str], Some(&mut fetch_options), None)?;
+    Ok(())
+}
+
+/// Fetches from `remote_name`, then merges the updated `refs/remotes/{remote_name}/{branch}`
+/// remote-tracking ref into the current branch, reusing `merge::merge_branch` so a
+/// conflicting pull produces the exact same `MergeOutcome`/conflict-index behavior a
+/// conflicting local merge does — the existing Phase 2 conflict-resolution UI just works
+/// for pull too, with no new conflict UI needed.
+pub fn pull(
+    repo: &Repository,
+    remote_name: &str,
+    branch: &str,
+    on_progress: impl FnMut(ProgressUpdate),
+) -> Result<MergeOutcome> {
+    fetch(repo, remote_name, on_progress)?;
+
+    let tracking_ref = format!("refs/remotes/{remote_name}/{branch}");
+    merge::merge_branch(repo, &tracking_ref)
+}
