@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
 use egui::Context;
-use git_core::{CommitInfo, FileDiff, FileStatus, Oid};
+use git_core::{BranchInfo, CommitInfo, FileDiff, FileStatus, Oid, StashEntry};
 
 use crate::worker::{self, Command, Event};
 
@@ -22,7 +22,17 @@ pub struct RepoSession {
     pub selected_diff: Option<SelectedDiff>,
     pub commit_message: String,
     pub last_commit: Option<Oid>,
+    pub branches: Vec<BranchInfo>,
+    pub current_branch: Option<String>,
+    pub stashes: Vec<StashEntry>,
     pub error: Option<String>,
+    /// UI-only scratch state for the branch/stash panels (`crates/app/src/ui/branch_panel.rs`,
+    /// `crates/app/src/ui/stash_panel.rs`) — mirrors how `commit_message` above is UI-bound
+    /// scratch state for the staging panel, not data mirrored from the worker thread.
+    pub new_branch_name: String,
+    pub rename_target: Option<String>,
+    pub rename_input: String,
+    pub new_stash_message: String,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -45,13 +55,22 @@ impl RepoSession {
             selected_diff: None,
             commit_message: String::new(),
             last_commit: None,
+            branches: Vec::new(),
+            current_branch: None,
+            stashes: Vec::new(),
             error: None,
+            new_branch_name: String::new(),
+            rename_target: None,
+            rename_input: String::new(),
+            new_stash_message: String::new(),
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
             skip: 0,
             limit: LOG_PAGE_SIZE,
         });
+        session.send(Command::LoadBranches);
+        session.send(Command::LoadStashes);
         session
     }
 
@@ -86,6 +105,38 @@ impl RepoSession {
         }
     }
 
+    pub fn create_branch(&self, name: String, start_point: Option<Oid>) {
+        self.send(Command::CreateBranch { name, start_point });
+    }
+
+    pub fn delete_branch(&self, name: String) {
+        self.send(Command::DeleteBranch(name));
+    }
+
+    pub fn rename_branch(&self, old_name: String, new_name: String) {
+        self.send(Command::RenameBranch { old_name, new_name });
+    }
+
+    pub fn switch_branch(&self, name: String) {
+        self.send(Command::SwitchBranch(name));
+    }
+
+    pub fn create_stash(&self, message: Option<String>) {
+        self.send(Command::CreateStash { message });
+    }
+
+    pub fn apply_stash(&self, index: usize) {
+        self.send(Command::ApplyStash(index));
+    }
+
+    pub fn pop_stash(&self, index: usize) {
+        self.send(Command::PopStash(index));
+    }
+
+    pub fn drop_stash(&self, index: usize) {
+        self.send(Command::DropStash(index));
+    }
+
     pub fn poll_events(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -114,6 +165,25 @@ impl RepoSession {
                         skip: 0,
                         limit: LOG_PAGE_SIZE,
                     });
+                }
+                Event::Branches(branches) => self.branches = branches,
+                Event::BranchSwitched(name) => {
+                    self.current_branch = Some(name);
+                    self.selected_diff = None;
+                    // HEAD moved: status, history, and the branch list's
+                    // `is_head` flags are all stale — reload the same way
+                    // `Event::Committed` reloads status/log above.
+                    self.send(Command::RefreshStatus);
+                    self.send(Command::LoadLog {
+                        skip: 0,
+                        limit: LOG_PAGE_SIZE,
+                    });
+                    self.send(Command::LoadBranches);
+                }
+                Event::Stashes(stashes) => self.stashes = stashes,
+                Event::StashCreated => {
+                    self.send(Command::RefreshStatus);
+                    self.send(Command::LoadStashes);
                 }
                 Event::Error(message) => self.error = Some(message),
             }

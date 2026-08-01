@@ -76,6 +76,11 @@ from `lib.rs`, tested against a real repo in `tests/`, not a mocked `git2::Repos
   children — commits made in the same second (as fast test setups do, and as real rebases/
   imports can) can come out in the wrong order. Use `Sort::TOPOLOGICAL | Sort::TIME` (matches
   `git log`'s own default ordering) — see `log.rs`.
+- `Reference::shorthand()` (and thus `Branch::get().shorthand()`/`repo.head()?.shorthand()`)
+  is another one of these: `Result<&str, Error>`, not `Option<&str>` — it only errs when the
+  name isn't valid UTF-8. Handle it the same way as the other gotchas above (`.ok()` to fold
+  into an `Option`, or an explicit `let Ok(name) = ... else { continue }` in a loop) — see
+  `branch.rs`.
 
 ### git2 vs. isomorphic-git: capability gain, not just a port
 
