@@ -29,7 +29,8 @@ browsitory/
 │
 ├── crates/
 │   ├── git-core/                 # git2-based service layer
-│   │   ├── src/                  # repo, status, log, diff, stage, commit (+ Phase 2 modules)
+│   │   ├── src/                  # repo, status, log, diff, stage, commit, branch, stash,
+│   │   │                          # merge, rebase, conflict, blame, graph
 │   │   └── tests/                # integration tests against real temp-dir repos
 │   ├── config/                   # repo registry + preferences (TOML)
 │   │   └── src/
@@ -105,16 +106,18 @@ system packages `eframe`/`winit` and `git2`'s vendored libgit2 build need).
   worker thread per repo — already exists in `state::AppState`, but the sidebar repo switcher
   is the only multi-repo UI built so far).
 
-### Phase 2: Enhanced Features (not started)
-- [ ] Branch management (create/delete/rename/switch) — native `git2` support
-- [ ] Stash (push/apply/pop/drop/list) — native `git2` support
-- [ ] Merge with conflict resolution — native `git2` merge + conflict index reader
-- [ ] Interactive rebase — native `Repository::rebase()`, which supports
-      pick/reword/edit/squash/fixup/drop (a capability gain over the old isomorphic-git-based
-      rebase, which was hand-rolled and limited to pick/drop only)
-- [ ] Blame viewer — native `Repository::blame_file()` (no hand-rolled line-attribution
+### Phase 2: Enhanced Features (implemented)
+- [x] Branch management (create/delete/rename/switch) — native `git2` support
+- [x] Stash (push/apply/pop/drop/list) — native `git2` support
+- [x] Merge with conflict resolution — native `git2` merge + conflict index reader
+- [x] Interactive rebase — pick/reword/edit/squash/fixup/drop, driven by Browsitory's own code
+      on top of `Repository::rebase()`'s mechanical pick-only primitive (see CLAUDE.md's git2
+      gotchas for why squash/fixup/drop aren't natively supported despite the type looking like
+      they should be) — still a capability gain over the old isomorphic-git-based rebase, which
+      was hand-rolled and limited to pick/drop only
+- [x] Blame viewer — native `Repository::blame_file()` (no hand-rolled line-attribution
       needed, unlike the old codebase)
-- [ ] Multi-branch commit graph view — hand-rolled lane/column layout (no off-the-shelf Rust
+- [x] Multi-branch commit graph view — hand-rolled lane/column layout (no off-the-shelf Rust
       equivalent of the old dagre-based layout), painted directly with `egui::Painter`
 
 ### Phase 3: Remote Operations (not started)
@@ -162,11 +165,11 @@ real `.git` directory.
 1. Run `scripts/setup-dev.sh` on a fresh machine
 2. `cargo build --workspace && cargo run -p app`
 3. Read [DEVELOPMENT.md](DEVELOPMENT.md) for conventions
-4. Pick a Phase 2 feature from [FEATURES.md](FEATURES.md) and follow the `git-core` module
-   pattern described in [ARCHITECTURE.md](ARCHITECTURE.md)
+4. Pick a Phase 3 feature (remote operations) from [FEATURES.md](FEATURES.md) and follow the
+   `git-core` module pattern described in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
-**Status**: 🟡 Phase 1 MVP implemented, Phase 2+ not started.
+**Status**: 🟡 Phase 1 and Phase 2 implemented, Phase 3+ not started.
 **License**: MIT (with one documented libgit2 linking exception — see
 [LICENSE_COMPLIANCE.md](LICENSE_COMPLIANCE.md)).
