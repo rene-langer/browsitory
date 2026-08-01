@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
 use egui::Context;
-use git_core::{CommitInfo, FileDiff, FileStatus, Oid};
+use git_core::{BlameLine, CommitInfo, FileDiff, FileStatus, GraphCommit, Oid};
 
 use crate::worker::{self, Command, Event};
 
@@ -23,6 +23,11 @@ pub struct RepoSession {
     pub commit_message: String,
     pub last_commit: Option<Oid>,
     pub error: Option<String>,
+    pub blame: Option<(String, Vec<BlameLine>)>,
+    pub graph: Option<Vec<GraphCommit>>,
+    /// Currently-selected commit id, shared by the history list and the
+    /// graph view so clicking a commit in either highlights it in both.
+    pub selected_commit: Option<Oid>,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -46,6 +51,9 @@ impl RepoSession {
             commit_message: String::new(),
             last_commit: None,
             error: None,
+            blame: None,
+            graph: None,
+            selected_commit: None,
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
@@ -77,6 +85,13 @@ impl RepoSession {
             staged,
             diff: None,
         });
+        // Selecting a file's diff switches the central panel back from the
+        // blame overlay to the diff view.
+        self.blame = None;
+    }
+
+    pub fn select_commit(&mut self, id: Oid) {
+        self.selected_commit = Some(id);
     }
 
     pub fn commit(&mut self) {
@@ -84,6 +99,14 @@ impl RepoSession {
         if !message.is_empty() {
             self.send(Command::Commit(message.to_string()));
         }
+    }
+
+    pub fn load_blame(&mut self, path: String) {
+        self.send(Command::LoadBlame(path));
+    }
+
+    pub fn load_graph(&mut self, max_count: usize) {
+        self.send(Command::LoadGraph { max_count });
     }
 
     pub fn poll_events(&mut self) {
@@ -115,6 +138,8 @@ impl RepoSession {
                         limit: LOG_PAGE_SIZE,
                     });
                 }
+                Event::Blame { path, lines } => self.blame = Some((path, lines)),
+                Event::Graph(commits) => self.graph = Some(commits),
                 Event::Error(message) => self.error = Some(message),
             }
         }
