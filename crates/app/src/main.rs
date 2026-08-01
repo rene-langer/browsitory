@@ -48,11 +48,29 @@ impl eframe::App for BrowsitoryApp {
                 }
             });
 
+        egui::Panel::top("branches")
+            .resizable(true)
+            .default_size(160.0)
+            .show(ui, |ui| {
+                if let Some(session) = self.state.active_session() {
+                    ui::branch_panel::show(ui, session);
+                }
+            });
+
         egui::Panel::left("staging")
             .default_size(280.0)
             .show(ui, |ui| {
                 if let Some(session) = self.state.active_session() {
                     ui::staging_panel::show(ui, session);
+                }
+            });
+
+        egui::Panel::left("stash")
+            .resizable(true)
+            .default_size(240.0)
+            .show(ui, |ui| {
+                if let Some(session) = self.state.active_session() {
+                    ui::stash_panel::show(ui, session);
                 }
             });
 
