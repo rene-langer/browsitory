@@ -37,6 +37,6 @@ pub use repo::{GitError, Result, open};
 pub use stage::{stage_path, unstage_path};
 pub use stash::{StashEntry, apply_stash, create_stash, drop_stash, list_stashes, pop_stash};
 pub use status::{FileState, FileStatus, status};
-pub use transfer::{ProgressUpdate, TransferStage};
+pub use transfer::{ProgressUpdate, TransferStage, fetch, pull};
 
 pub use git2::{Oid, Rebase, Repository};

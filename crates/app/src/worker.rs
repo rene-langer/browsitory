@@ -5,7 +5,7 @@ use std::thread;
 use egui::Context;
 use git_core::{
     BlameLine, BranchInfo, CommitInfo, FileDiff, FileStatus, GraphCommit, MergeOutcome, Oid,
-    RebaseAction, RebaseStatus, RebaseStep, Repository, StashEntry,
+    ProgressUpdate, RebaseAction, RebaseStatus, RebaseStep, RemoteInfo, Repository, StashEntry,
 };
 
 pub enum Command {
@@ -73,6 +73,26 @@ pub enum Command {
     /// `ResolveConflict`, or finished amending for an `Edit` pause).
     ContinueRebaseEdit,
     AbortRebase,
+
+    LoadRemotes,
+    AddRemote {
+        name: String,
+        url: String,
+    },
+    RemoveRemote(String),
+    RenameRemote {
+        old_name: String,
+        new_name: String,
+    },
+    SetRemoteUrl {
+        name: String,
+        url: String,
+    },
+    Fetch(String),
+    Pull {
+        remote: String,
+        branch: String,
+    },
 }
 
 /// How a conflicted path should be resolved. `Manual` is a no-op signal —
@@ -119,6 +139,15 @@ pub enum Event {
     RebaseProgress(RebaseStatus),
     RebaseFinished,
     Error(String),
+
+    Remotes(Vec<RemoteInfo>),
+    /// Fired repeatedly mid-`Fetch`/`Pull` (once per libgit2 `transfer_progress`
+    /// callback invocation), unlike every other `Event` variant, which is sent
+    /// exactly once per command. Shared with push progress (Workstream E) —
+    /// one progress event type for all transfer kinds.
+    TransferProgress(ProgressUpdate),
+    FetchFinished,
+    PullFinished(MergeOutcome),
 }
 
 /// Spawns the dedicated worker thread for one open repository.
@@ -152,7 +181,7 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
         let mut pending_rebase_step: Option<RebaseStep> = None;
 
         for cmd in cmd_rx {
-            let event = handle(&mut repo, &mut pending_rebase_step, cmd);
+            let event = handle(&mut repo, &mut pending_rebase_step, cmd, &evt_tx, &ctx);
             if evt_tx.send(event).is_err() {
                 break; // UI side hung up (repo closed/app exiting)
             }
@@ -167,6 +196,8 @@ fn handle(
     repo: &mut Repository,
     pending_rebase_step: &mut Option<RebaseStep>,
     cmd: Command,
+    evt_tx: &Sender<Event>,
+    ctx: &Context,
 ) -> Event {
     match cmd {
         Command::RefreshStatus => refresh_status(repo),
@@ -269,6 +300,28 @@ fn handle(
         Command::RebaseStep(action) => rebase_step(repo, pending_rebase_step, action),
         Command::ContinueRebaseEdit => continue_rebase(repo, pending_rebase_step),
         Command::AbortRebase => abort_rebase(repo, pending_rebase_step),
+
+        Command::LoadRemotes => load_remotes(repo),
+        Command::AddRemote { name, url } => match git_core::add_remote(repo, &name, &url) {
+            Ok(()) => load_remotes(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::RemoveRemote(name) => match git_core::remove_remote(repo, &name) {
+            Ok(()) => load_remotes(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::RenameRemote { old_name, new_name } => {
+            match git_core::rename_remote(repo, &old_name, &new_name) {
+                Ok(()) => load_remotes(repo),
+                Err(e) => Event::Error(e.to_string()),
+            }
+        }
+        Command::SetRemoteUrl { name, url } => match git_core::set_remote_url(repo, &name, &url) {
+            Ok(()) => load_remotes(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::Fetch(remote) => fetch(repo, &remote, evt_tx, ctx),
+        Command::Pull { remote, branch } => pull(repo, &remote, &branch, evt_tx, ctx),
     }
 }
 
@@ -469,6 +522,46 @@ fn abort_rebase(repo: &Repository, pending_rebase_step: &mut Option<RebaseStep>)
             *pending_rebase_step = None;
             Event::RebaseFinished
         }
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn load_remotes(repo: &Repository) -> Event {
+    match git_core::list_remotes(repo) {
+        Ok(remotes) => Event::Remotes(remotes),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+/// Unlike every other command handler in this file, `fetch`/`pull` send
+/// `Event::TransferProgress` repeatedly *during* the call (once per libgit2
+/// `transfer_progress` callback invocation) via `evt_tx`, in addition to the
+/// single terminal `Event` returned here that the `spawn` loop sends the same
+/// way it sends every other command's result.
+fn fetch(repo: &Repository, remote: &str, evt_tx: &Sender<Event>, ctx: &Context) -> Event {
+    let result = git_core::fetch(repo, remote, |update| {
+        let _ = evt_tx.send(Event::TransferProgress(update));
+        ctx.request_repaint();
+    });
+    match result {
+        Ok(()) => Event::FetchFinished,
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn pull(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    evt_tx: &Sender<Event>,
+    ctx: &Context,
+) -> Event {
+    let result = git_core::pull(repo, remote, branch, |update| {
+        let _ = evt_tx.send(Event::TransferProgress(update));
+        ctx.request_repaint();
+    });
+    match result {
+        Ok(outcome) => Event::PullFinished(outcome),
         Err(e) => Event::Error(e.to_string()),
     }
 }
