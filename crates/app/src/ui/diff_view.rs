@@ -21,7 +21,11 @@ pub fn show(ui: &mut Ui, session: &RepoSession) {
     });
 }
 
-fn render_lines(ui: &mut Ui, diff: &FileDiff) {
+/// Renders one side of a diff (context/addition/deletion lines, with
+/// word-level highlighting for changed-line pairs). `pub(crate)` so
+/// `conflict_view.rs` can reuse it for the side-by-side ours/theirs
+/// conflict view instead of duplicating the diff-coloring logic.
+pub(crate) fn render_lines(ui: &mut Ui, diff: &FileDiff) {
     let lines = &diff.lines;
     let mut i = 0;
     while i < lines.len() {

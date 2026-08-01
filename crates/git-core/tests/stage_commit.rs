@@ -5,11 +5,11 @@ use git_core::{FileState, create_commit, stage_path, status, unstage_path};
 
 #[test]
 fn commit_creates_a_commit_with_the_given_message_and_clears_status() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "a.txt", "hello\n");
     stage_path(&repo, "a.txt").unwrap();
 
-    let oid = create_commit(&repo, "add a.txt").unwrap();
+    let oid = create_commit(&mut repo, "add a.txt").unwrap();
 
     let commit = repo.find_commit(oid).unwrap();
     assert_eq!(commit.summary(), Ok(Some("add a.txt")));
@@ -18,10 +18,10 @@ fn commit_creates_a_commit_with_the_given_message_and_clears_status() {
 
 #[test]
 fn unstage_restores_head_state_for_a_modified_tracked_file() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "a.txt", "hello\n");
     stage_path(&repo, "a.txt").unwrap();
-    create_commit(&repo, "add a.txt").unwrap();
+    create_commit(&mut repo, "add a.txt").unwrap();
 
     write_file(&dir, "a.txt", "hello again\n");
     stage_path(&repo, "a.txt").unwrap();
