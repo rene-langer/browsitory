@@ -3,15 +3,70 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use egui::Context;
-use git_core::{CommitInfo, FileDiff, FileStatus, Oid, Repository};
+use git_core::{
+    CommitInfo, FileDiff, FileStatus, MergeOutcome, Oid, RebaseAction, RebaseStatus, RebaseStep,
+    Repository,
+};
 
 pub enum Command {
     RefreshStatus,
-    LoadLog { skip: usize, limit: usize },
-    LoadDiff { path: String, staged: bool },
+    LoadLog {
+        skip: usize,
+        limit: usize,
+    },
+    LoadDiff {
+        path: String,
+        staged: bool,
+    },
     Stage(String),
     Unstage(String),
     Commit(String),
+
+    /// Minimal local-branch lister for the merge/rebase branch pickers; see
+    /// `git_core::list_local_branch_names`'s doc comment for why this is
+    /// deliberately minimal and expected to be de-duplicated later against
+    /// the parallel branch/stash workstream's fuller version.
+    LoadBranches,
+
+    MergeBranch(String),
+    AbortMerge,
+    LoadConflict(String),
+    ResolveConflict {
+        path: String,
+        resolution: ResolvedWith,
+    },
+
+    /// Read-only preview of the commits an interactive rebase of `upstream`
+    /// would replay, for the planner UI to assign per-row actions to before
+    /// anything is actually started. Not in the original command sketch —
+    /// added because `rebase_planner.rs` needs a commit list to populate its
+    /// dropdowns *before* `StartRebase` (which really begins mutating
+    /// on-disk rebase state) can be sent.
+    LoadRebasePlan(String),
+    StartRebase {
+        upstream: String,
+        onto: Option<String>,
+    },
+    /// Drives whatever step is "current" in the on-disk rebase state (see
+    /// the module doc comment for why this reopens the rebase from disk
+    /// each time rather than holding a live `git_core::Rebase` in worker
+    /// state).
+    RebaseStep(RebaseAction),
+    /// Resumes the step that most recently returned `Conflict` or
+    /// `PausedForEdit` (after the caller resolved conflicts via `Stage`/
+    /// `ResolveConflict`, or finished amending for an `Edit` pause).
+    ContinueRebaseEdit,
+    AbortRebase,
+}
+
+/// How a conflicted path should be resolved. `Manual` is a no-op signal —
+/// the UI has already written the user's hand-edited content to the working
+/// tree file before sending this command, so the worker just needs to stage
+/// it (same as the other two variants' final step).
+pub enum ResolvedWith {
+    Ours,
+    Theirs,
+    Manual,
 }
 
 pub enum Event {
@@ -27,6 +82,22 @@ pub enum Event {
     },
     Committed(Oid),
     Error(String),
+
+    Branches(Vec<String>),
+
+    MergeResult(MergeOutcome),
+    ConflictDiff {
+        path: String,
+        ours: FileDiff,
+        theirs: FileDiff,
+    },
+
+    RebasePlan(Vec<CommitInfo>),
+    RebaseStarted {
+        steps: Vec<CommitInfo>,
+    },
+    RebaseProgress(RebaseStatus),
+    RebaseFinished,
 }
 
 /// Spawns the dedicated worker thread for one open repository.
@@ -36,21 +107,31 @@ pub enum Event {
 /// owned data (`Command`/`Event`) ever crosses the boundary. One thread per
 /// open repo also means switching between repos never contends on a shared
 /// handle.
+///
+/// Beyond `repo` itself, the loop now also carries `pending_rebase_step`:
+/// the `RebaseStep` (action + commit) that most recently paused on a
+/// conflict or an `Edit`, needed by `ContinueRebaseEdit` (which carries no
+/// payload of its own) to know how to finish committing once the user has
+/// resolved things. This is plain owned data with no lifetime tie to `repo`,
+/// unlike an in-progress `git_core::Rebase<'repo>` itself — see the doc
+/// comment on `rebase_command` for why the actual `Rebase` handle is never
+/// stored across commands at all.
 pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) {
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
     let (evt_tx, evt_rx) = mpsc::channel::<Event>();
 
     thread::spawn(move || {
-        let repo = match git_core::open(&path) {
+        let mut repo = match git_core::open(&path) {
             Ok(repo) => repo,
             Err(e) => {
                 let _ = evt_tx.send(Event::Error(e.to_string()));
                 return;
             }
         };
+        let mut pending_rebase_step: Option<RebaseStep> = None;
 
         for cmd in cmd_rx {
-            let event = handle(&repo, cmd);
+            let event = handle(&mut repo, &mut pending_rebase_step, cmd);
             if evt_tx.send(event).is_err() {
                 break; // UI side hung up (repo closed/app exiting)
             }
@@ -61,7 +142,11 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
     (cmd_tx, evt_rx)
 }
 
-fn handle(repo: &Repository, cmd: Command) -> Event {
+fn handle(
+    repo: &mut Repository,
+    pending_rebase_step: &mut Option<RebaseStep>,
+    cmd: Command,
+) -> Event {
     match cmd {
         Command::RefreshStatus => refresh_status(repo),
         Command::LoadLog { skip, limit } => match git_core::commit_log(repo, None, skip, limit) {
@@ -91,12 +176,219 @@ fn handle(repo: &Repository, cmd: Command) -> Event {
             Ok(oid) => Event::Committed(oid),
             Err(e) => Event::Error(e.to_string()),
         },
+
+        Command::LoadBranches => match git_core::list_local_branch_names(repo) {
+            Ok(names) => Event::Branches(names),
+            Err(e) => Event::Error(e.to_string()),
+        },
+
+        Command::MergeBranch(branch) => match git_core::merge_branch(repo, &branch) {
+            Ok(outcome) => Event::MergeResult(outcome),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::AbortMerge => match git_core::abort_merge(repo) {
+            Ok(()) => refresh_status(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadConflict(path) => load_conflict(repo, path),
+        Command::ResolveConflict { path, resolution } => resolve_conflict(repo, path, resolution),
+
+        Command::LoadRebasePlan(upstream) => match git_core::plan_rebase(repo, &upstream, None) {
+            Ok(steps) => Event::RebasePlan(steps),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::StartRebase { upstream, onto } => {
+            start_rebase(repo, pending_rebase_step, upstream, onto)
+        }
+        Command::RebaseStep(action) => rebase_step(repo, pending_rebase_step, action),
+        Command::ContinueRebaseEdit => continue_rebase(repo, pending_rebase_step),
+        Command::AbortRebase => abort_rebase(repo, pending_rebase_step),
     }
 }
 
 fn refresh_status(repo: &Repository) -> Event {
     match git_core::status(repo) {
         Ok(entries) => Event::Status(entries),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn load_conflict(repo: &Repository, path: String) -> Event {
+    let sides = match git_core::read_conflict(repo, &path) {
+        Ok(sides) => sides,
+        Err(e) => return Event::Error(e.to_string()),
+    };
+    let ours = git_core::diff_blob_sides(
+        repo,
+        &path,
+        sides.ancestor.as_deref(),
+        sides.ours.as_deref(),
+    );
+    let theirs = git_core::diff_blob_sides(
+        repo,
+        &path,
+        sides.ancestor.as_deref(),
+        sides.theirs.as_deref(),
+    );
+    match (ours, theirs) {
+        (Ok(ours), Ok(theirs)) => Event::ConflictDiff { path, ours, theirs },
+        (Err(e), _) => Event::Error(e.to_string()),
+        (_, Err(e)) => Event::Error(e.to_string()),
+    }
+}
+
+fn resolve_conflict(repo: &Repository, path: String, resolution: ResolvedWith) -> Event {
+    if !matches!(resolution, ResolvedWith::Manual) {
+        let sides = match git_core::read_conflict(repo, &path) {
+            Ok(sides) => sides,
+            Err(e) => return Event::Error(e.to_string()),
+        };
+        let content = match resolution {
+            ResolvedWith::Ours => sides.ours,
+            ResolvedWith::Theirs => sides.theirs,
+            ResolvedWith::Manual => unreachable!("filtered out above"),
+        };
+        let Some(workdir) = repo.workdir() else {
+            return Event::Error("repository has no working tree".to_string());
+        };
+        let full_path = workdir.join(&path);
+        match content {
+            Some(bytes) => {
+                if let Some(parent) = full_path.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    return Event::Error(e.to_string());
+                }
+                if let Err(e) = std::fs::write(&full_path, bytes) {
+                    return Event::Error(e.to_string());
+                }
+            }
+            // The chosen side doesn't have this file at all (e.g. taking
+            // "theirs" on a "deleted by them" conflict) — the resolution is
+            // to not have the file either.
+            None => {
+                if let Err(e) = std::fs::remove_file(&full_path)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    return Event::Error(e.to_string());
+                }
+            }
+        }
+    }
+
+    match git_core::stage_path(repo, &path) {
+        Ok(()) => refresh_status(repo),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+/// The `Rebase<'repo>` git2 hands back from `start_rebase`/`open_rebase` is
+/// never stored in worker state across commands (unlike what an earlier
+/// sketch of this module assumed). It borrows `'repo` from `&Repository`,
+/// and `handle`'s `repo: &mut Repository` parameter is freshly reborrowed
+/// each call — a borrow tied to one command can't be stashed in a variable
+/// that has to outlive many subsequent commands (including ones needing
+/// `&mut Repository` for unrelated operations), so the borrow checker
+/// rejects keeping a live `Rebase` around between `handle` calls.
+///
+/// The fix: `git_rebase_next`/`git_rebase_commit` persist their progress to
+/// `.git/rebase-merge/` on disk (the same mechanism `git rebase --continue`
+/// relies on from a fresh CLI invocation), so each rebase-related command
+/// just reopens the in-progress rebase fresh via `repo.open_rebase(None)`,
+/// drives exactly one step, and lets the handle drop at the end of the
+/// function — no cross-command lifetime to manage, no unsafe lifetime
+/// extension needed. The only state that *does* need to persist across
+/// commands is `pending_rebase_step` (plain owned data, not a git2 borrow):
+/// `ContinueRebaseEdit` carries no payload, so the worker has to remember
+/// which action (and, for Reword, which message) the paused step was
+/// supposed to finish with.
+fn start_rebase(
+    repo: &Repository,
+    pending_rebase_step: &mut Option<RebaseStep>,
+    upstream: String,
+    onto: Option<String>,
+) -> Event {
+    let steps = match git_core::plan_rebase(repo, &upstream, None) {
+        Ok(steps) => steps,
+        Err(e) => return Event::Error(e.to_string()),
+    };
+    match git_core::start_rebase(repo, &upstream, None, onto.as_deref()) {
+        // The returned `Rebase` is intentionally dropped immediately — see
+        // this module's doc comment above `start_rebase` (the free
+        // function, shadowed here) for why.
+        Ok(_rebase) => {
+            *pending_rebase_step = None;
+            Event::RebaseStarted { steps }
+        }
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn rebase_step(
+    repo: &Repository,
+    pending_rebase_step: &mut Option<RebaseStep>,
+    action: RebaseAction,
+) -> Event {
+    let mut rebase = match repo.open_rebase(None) {
+        Ok(rebase) => rebase,
+        Err(e) => return Event::Error(e.to_string()),
+    };
+    let next_index = rebase.operation_current().map(|i| i + 1).unwrap_or(0);
+    let commit = rebase
+        .nth(next_index)
+        .map(|op| op.id())
+        .unwrap_or(Oid::ZERO_SHA1);
+    let step = RebaseStep { commit, action };
+
+    match git_core::drive_rebase_step(repo, &mut rebase, &step) {
+        Ok(status) => finish_rebase_command(pending_rebase_step, step, status),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn continue_rebase(repo: &Repository, pending_rebase_step: &mut Option<RebaseStep>) -> Event {
+    let Some(step) = pending_rebase_step.clone() else {
+        return Event::Error("no paused rebase step to continue".to_string());
+    };
+    let mut rebase = match repo.open_rebase(None) {
+        Ok(rebase) => rebase,
+        Err(e) => return Event::Error(e.to_string()),
+    };
+    match git_core::continue_rebase_step(repo, &mut rebase, &step) {
+        Ok(status) => finish_rebase_command(pending_rebase_step, step, status),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn finish_rebase_command(
+    pending_rebase_step: &mut Option<RebaseStep>,
+    step: RebaseStep,
+    status: RebaseStatus,
+) -> Event {
+    match &status {
+        RebaseStatus::Conflict { .. } | RebaseStatus::PausedForEdit { .. } => {
+            *pending_rebase_step = Some(step);
+        }
+        RebaseStatus::StepComplete { .. } | RebaseStatus::Done => {
+            *pending_rebase_step = None;
+        }
+    }
+    match status {
+        RebaseStatus::Done => Event::RebaseFinished,
+        other => Event::RebaseProgress(other),
+    }
+}
+
+fn abort_rebase(repo: &Repository, pending_rebase_step: &mut Option<RebaseStep>) -> Event {
+    let rebase = match repo.open_rebase(None) {
+        Ok(rebase) => rebase,
+        Err(e) => return Event::Error(e.to_string()),
+    };
+    match git_core::abort_rebase(repo, rebase) {
+        Ok(()) => {
+            *pending_rebase_step = None;
+            Event::RebaseFinished
+        }
         Err(e) => Event::Error(e.to_string()),
     }
 }
