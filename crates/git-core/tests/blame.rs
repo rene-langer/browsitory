@@ -5,10 +5,10 @@ use git_core::{blame_file, create_commit, stage_path};
 
 #[test]
 fn single_commit_attributes_every_line_to_it() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "a.txt", "one\ntwo\nthree\n");
     stage_path(&repo, "a.txt").unwrap();
-    let oid = create_commit(&repo, "add a.txt").unwrap();
+    let oid = create_commit(&mut repo, "add a.txt").unwrap();
 
     let lines = blame_file(&repo, "a.txt").unwrap();
 
@@ -27,16 +27,16 @@ fn single_commit_attributes_every_line_to_it() {
 
 #[test]
 fn untouched_lines_keep_their_original_attributing_commit() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "a.txt", "one\ntwo\nthree\n");
     stage_path(&repo, "a.txt").unwrap();
-    let first_oid = create_commit(&repo, "add a.txt").unwrap();
+    let first_oid = create_commit(&mut repo, "add a.txt").unwrap();
 
     // Only touch the middle line; "one" and "three" should keep attribution
     // to the first commit, "two changed" should attribute to the second.
     write_file(&dir, "a.txt", "one\ntwo changed\nthree\n");
     stage_path(&repo, "a.txt").unwrap();
-    let second_oid = create_commit(&repo, "change line two").unwrap();
+    let second_oid = create_commit(&mut repo, "change line two").unwrap();
 
     let lines = blame_file(&repo, "a.txt").unwrap();
 
@@ -51,16 +51,16 @@ fn untouched_lines_keep_their_original_attributing_commit() {
 
 #[test]
 fn tracks_lines_across_a_file_rename_with_rename_tracking_enabled() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "old_name.txt", "alpha\nbeta\ngamma\n");
     stage_path(&repo, "old_name.txt").unwrap();
-    let first_oid = create_commit(&repo, "add old_name.txt").unwrap();
+    let first_oid = create_commit(&mut repo, "add old_name.txt").unwrap();
 
     common::remove_file(&dir, "old_name.txt");
     write_file(&dir, "new_name.txt", "alpha\nbeta\ngamma\n");
     stage_path(&repo, "old_name.txt").unwrap();
     stage_path(&repo, "new_name.txt").unwrap();
-    create_commit(&repo, "rename to new_name.txt").unwrap();
+    create_commit(&mut repo, "rename to new_name.txt").unwrap();
 
     let lines = blame_file(&repo, "new_name.txt").unwrap();
 

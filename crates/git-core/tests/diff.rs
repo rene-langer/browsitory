@@ -22,10 +22,10 @@ fn staged_diff_shows_new_file_as_all_additions() {
 
 #[test]
 fn unstaged_diff_shows_working_tree_edit_against_the_index() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(&dir, "a.txt", "one\ntwo\n");
     stage_path(&repo, "a.txt").unwrap();
-    create_commit(&repo, "add a.txt").unwrap();
+    create_commit(&mut repo, "add a.txt").unwrap();
 
     write_file(&dir, "a.txt", "one\ntwo changed\n");
 
