@@ -79,6 +79,18 @@ fn diff_to_file_diff(path: &str, diff: &Diff) -> Result<FileDiff> {
 pub fn word_diff(old: &str, new: &str) -> Vec<(ChangeTag, String)> {
     TextDiff::from_words(old, new)
         .iter_all_changes()
-        .map(|change| (change.tag(), change.to_string()))
+        // `Change`'s `Display`/`to_string()` auto-appends a newline whenever
+        // the token doesn't already end in one (by design, for line-based
+        // diffs — see `missing_newline()`'s doc comment in the `similar`
+        // crate). `from_words` tokens never end in "\n", so `to_string()`
+        // would silently embed one in every single token, turning each word
+        // into its own multi-line UI label. `as_str()` returns the raw token
+        // instead.
+        .map(|change| {
+            (
+                change.tag(),
+                change.as_str().unwrap_or_default().to_string(),
+            )
+        })
         .collect()
 }
