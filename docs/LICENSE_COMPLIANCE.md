@@ -1,183 +1,84 @@
 # License Compliance Report
 
-Browsitory is licensed under the MIT License. All dependencies must comply with MIT or compatible licenses.
+Browsitory itself is licensed under the MIT License. Dependencies are expected to be MIT or a
+compatible permissive license (Apache-2.0, ISC, BSD, MIT-0), with **one deliberate, documented
+exception**: `git2`.
 
-## Frontend Dependencies
+## The libgit2 exception
 
-### Core
-- **React** - MIT License
-- **React DOM** - MIT License
-- **TypeScript** - Apache 2.0 License (compatible)
-- **Vite** - MIT License
+`git2` (the Rust binding crate) is itself dual-licensed MIT/Apache-2.0, but it links against
+**libgit2**, which is licensed **GPL-2.0-with-linking-exception**. The linking exception
+explicitly permits linking libgit2 from software under a different license (including
+proprietary or MIT-licensed code) without that code inheriting the GPL — this is the same
+linking-exception model used by, e.g., the GCC runtime libraries, and is why `git2` is safely
+used by MIT-licensed projects like `cargo` itself.
 
-### Routing & State
-- **React Router** - MIT License
-- **Zustand** - MIT License
+This was a conscious choice, not an oversight: the pure-Rust alternative (`gitoxide`/`gix`, MIT/
+Apache-2.0, no C dependency) would have been a closer license fit, but at the time this project
+picked `git2`, `gitoxide`'s write-side operations (merge, rebase) were judged less mature than
+`git2`'s native support for the same. See `docs/PROJECT_SETUP.md`'s "Key Decisions & Rationale"
+for the full tradeoff discussion.
 
-### UI & Styling
-- **Tailwind CSS** - MIT License
-- **Autoprefixer** - MIT License
-- **PostCSS** - MIT License
-- **Lucide React** - ISC License (compatible)
-- **clsx** - MIT License
-- **tailwind-merge** - MIT License
+Practical effect: `git2` is configured with `default-features = false, features =
+["vendored-libgit2", "vendored-openssl", "https", "ssh"]` (see `crates/git-core/Cargo.toml`),
+so libgit2 (and OpenSSL, for HTTPS transport) are built from vendored source via `cmake` rather
+than requiring system `libgit2-dev`/`libssl-dev` — this is a build-mechanism choice, not a
+license-avoidance one; the GPL-2.0-with-linking-exception status is the same either way.
 
-### Git Operations
-- **isomorphic-git** - MIT License + Apache 2.0 License (dual-licensed, MIT compatible)
-- **buffer** - MIT License. Already present as a transitive dependency (via isomorphic-git →
-  readable-stream) but not wired up as a browser global by default — promoted to a direct
-  dependency and imported in `src/polyfills.ts` (loaded first thing in `main.tsx`) to provide
-  `window.Buffer`, which isomorphic-git needs for real git object/pack-file parsing (e.g.
-  reading packed objects in an actual cloned repo, not just the loose objects a fresh
-  `git.init` produces). Found via real-browser testing against a real cloned repository —
-  none of the test fixtures ever produced a packed repo, so this was invisible to the suite.
-- **idb-keyval** - Apache 2.0 License (compatible; persists repository handles/metadata in IndexedDB)
+## Dependencies by crate
 
-Phase 1's File System Access ↔ isomorphic-git bridge (`src/services/fsaGitFs.ts`) is
-hand-written rather than a dependency: the closest off-the-shelf option, ZenFS's
-`@zenfs/dom` `WebAccess` backend, is **LGPL-3.0** and was rejected on license grounds.
-`@isomorphic-git/lightning-fs` (MIT) remains a documented fallback for a possible future
-cross-browser "virtual clone" mode, but is not a current dependency.
+### `crates/git-core`
+- **git2** — MIT/Apache-2.0 (binding); links libgit2, GPL-2.0-with-linking-exception (see
+  above)
+- **similar** — MIT/Apache-2.0 (line + word-level diffing, `unicode` feature enabled)
+- **thiserror** — MIT/Apache-2.0 (typed error enum)
+- **tempfile** (dev-dependency only, not shipped) — MIT/Apache-2.0
 
-### Diff Viewer
-- **react-diff-viewer-continued** - MIT License
-- **diff** - BSD-3-Clause License (compatible). Was already present as a transitive dependency
-  of `react-diff-viewer-continued`; promoted to a direct dependency for `src/services/blame.ts`,
-  which uses its `diffLines` export to attribute unchanged/changed lines to commits.
-- **@types/diff** - MIT License (DefinitelyTyped; `diff` ships no types of its own)
+### `crates/config`
+- **serde** (+ `derive`) — MIT/Apache-2.0
+- **toml** — MIT/Apache-2.0
+- **directories** — MIT/Apache-2.0 (resolves the OS config directory)
+- **thiserror** — MIT/Apache-2.0
+- **tempfile** (dev-dependency only) — MIT/Apache-2.0
 
-### Graph Visualization
-- **dagre** - MIT License. DAG layout engine for `src/components/GraphView.tsx`; only used for
-  node/edge position computation, rendering is a hand-written SVG renderer (no React Flow or
-  other full canvas/interaction library was added, to keep the dependency footprint small).
-  Its own dependencies, `graphlib` (MIT) and `lodash` (MIT), are both permissively licensed.
-- **@types/dagre** - MIT License (DefinitelyTyped; `dagre` ships no types of its own)
-
-### Build Tools
-- **@vitejs/plugin-react** - MIT License
-- **@vitejs/plugin-react-swc** - MIT License
-- **Vite PWA Plugin** - MIT License
-- **Workbox** - Apache 2.0 License (compatible)
-
-### Development Tools
-- **ESLint** - MIT License
-- **TypeScript ESLint** - MIT License + BSD License (compatible)
-- **Prettier** - MIT License
-- **@types/react** - MIT License
-- **@types/react-dom** - MIT License
-- **@types/node** - MIT License
-- **@types/wicg-file-system-access** - MIT License (DefinitelyTyped)
-
-### Testing
-- **Vitest** - MIT License
-- **@vitest/coverage-v8** - MIT License
-- **jsdom** - MIT License
-- **@testing-library/react** - MIT License
-- **@testing-library/jest-dom** - MIT License
-- **@testing-library/user-event** - MIT License
-
-## Backend Dependencies (Optional, for server mode)
-
-### Node.js Stack
-- **Express.js** - MIT License
-- **Node.js** - MIT License
-
-### Go Stack
-- **Gin** - MIT License
-- **go-git** - Apache 2.0 License (compatible)
-
-### Database
-- **SQLite3** - Public Domain
-- **PostgreSQL** - PostgreSQL License (compatible with MIT)
-- **Prisma** - Apache 2.0 License (compatible)
-
-## License Summary
-
-✅ **All core dependencies are MIT licensed or have compatible licenses**
-
-### Licenses Used in Project
-- **MIT License** - Most permissive, used by majority of dependencies
-- **Apache 2.0 License** - Compatible with MIT
-- **ISC License** - Compatible with MIT
-- **Public Domain** - SQLite3
-
-### Compatibility Notes
-1. Apache 2.0 is compatible with MIT (more permissive MIT)
-2. ISC is compatible with MIT (similar permissiveness)
-3. Public domain (SQLite3) is fully compatible
-4. PostgreSQL License is compatible with MIT
+### `crates/app`
+- **eframe**, **egui** — MIT/Apache-2.0 (desktop UI; pulls in `winit`, `wgpu`, and platform
+  windowing crates, all permissively licensed)
+- **rfd** — MIT/Apache-2.0 (native folder-picker dialog; on Linux this uses the XDG desktop
+  portal by default, not GTK, so no GTK dependency is pulled in)
+- **similar** — MIT/Apache-2.0
+- **git-core**, **config** — internal workspace crates (MIT, this project)
 
 ## Compliance Verification Process
 
-To verify license compliance:
-
 ```bash
-# Check for license issues
-npm list
+# View a specific crate's license
+cargo info <crate-name>
 
-# For detailed license information
-npx license-checker
-
-# View specific package license
-npm view <package-name> license
+# List the full resolved dependency tree with licenses (requires cargo-license, not bundled)
+cargo install cargo-license
+cargo license
 ```
 
-## Adding New Dependencies
-
-When adding new dependencies:
-
-1. **Verify the license**
-   ```bash
-   npm view <package-name> license
-   ```
-
-2. **Check compatibility** - Only MIT, Apache 2.0, ISC, MIT-0, or similar permissive licenses
-
-3. **Update this document** with the new dependency and its license
-
-4. **Run license checker**
-   ```bash
-   npx license-checker
-   ```
+When adding a new dependency:
+1. Check its license with `cargo info <crate-name>`.
+2. Confirm it's MIT, Apache-2.0, ISC, BSD, or MIT-0 — or, if it's a genuine exception like
+   `git2`, document the exception here with the same rationale depth as above (why it was
+   chosen despite the license, and what the practical linking implications are).
+3. Update this document.
 
 ## Excluded Licenses
 
-❌ Do NOT add dependencies with these licenses:
-- GPL (any version) - Requires derivative works to be open source
-- AGPL - Network version of GPL
-- SSPL - Server Side Public License
-- Commercial/Proprietary - Requires purchase
-- Elastic License - Restrictive commercial license
-
-## Attribution
-
-All licenses of dependencies are properly attributed through:
-- `package.json` - Lists all dependencies and versions
-- `node_modules/<package>/LICENSE` - Each package includes its license
-- This document - Provides compliance overview
-
-## Questions About Licenses?
-
-If you're unsure about a license:
-1. Check [Open Source Initiative](https://opensource.org/licenses)
-2. Review [SPDX License List](https://spdx.org/licenses/)
-3. Open an issue to discuss before adding dependency
-
-## Version Updates
-
-When updating dependency versions, verify the license hasn't changed:
-
-```bash
-# Before updating
-npm outdated
-
-# Check license of new version
-npm view <package>@latest license
-
-# Update if license is compatible
-npm update <package>
-```
+Do not add dependencies with these licenses (the `git2`/libgit2 case above is the one
+pre-approved, documented exception — new exceptions need the same explicit write-up, not a
+silent addition):
+- GPL (any version, without a linking exception)
+- AGPL
+- SSPL
+- LGPL (already ruled out ZenFS in the old browser-era codebase on these grounds)
+- Commercial/Proprietary
+- Elastic License
 
 ---
 
-Last Updated: 2024
+Last updated: 2026 (Rust rewrite, branch `feat/rust_from_scratch`).

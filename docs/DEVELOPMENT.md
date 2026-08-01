@@ -1,268 +1,131 @@
 # Development Guide
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-- Node.js >= 18.0.0
-- npm >= 9.0.0
+- Rust (stable, pinned in `rust-toolchain.toml`) — installed automatically by
+  `scripts/setup-dev.sh` if missing
+- A C toolchain + `cmake` (for `git2`'s vendored libgit2 build)
+- Linux only: `libxkbcommon`, `libwayland`, `libx11`/`libxcb` dev headers (for `eframe`/`winit`)
+- Linux only: `Xvfb` (`xvfb-run`) — lets GUI verification run under an isolated virtual
+  display instead of the real desktop; GNOME Wayland's screenshot D-Bus API refuses
+  unsandboxed callers, so this is the automatable path for screenshotting UI changes
 - Git
 
-### Setup
+## Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd browsitory
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start development server**
-   ```bash
-   npm run dev
-   ```
-
-4. **Open in browser**
-   - Visit http://localhost:5173
-   - App will hot-reload on file changes
+```bash
+git clone <repository-url>
+cd browsitory
+./scripts/setup-dev.sh   # installs Rust + system deps, then builds the workspace
+cargo run -p app
+```
 
 ## Project Structure
 
 ```
 browsitory/
-├── src/
-│   ├── components/     # Reusable React components
-│   ├── pages/         # Page-level components
-│   ├── hooks/         # Custom React hooks
-│   ├── store/         # Zustand state stores
-│   ├── lib/           # Utilities and helper functions
-│   ├── services/      # External service integrations (Git, API)
-│   ├── styles/        # Global styles
-│   ├── App.tsx        # Root component
-│   └── main.tsx       # Application entry point
-├── public/            # Static assets
-├── docs/              # Documentation
-├── package.json
-└── vite.config.ts     # Build configuration
+├── crates/
+│   ├── git-core/      # git2-based service layer — status, log, diff, stage, commit, ...
+│   ├── config/        # repo registry + preferences (TOML)
+│   └── app/           # egui/eframe desktop UI
+│       └── src/
+│           ├── worker.rs   # per-repo worker thread
+│           ├── state.rs    # AppState, RepoSession
+│           ├── ui/         # one module per panel
+│           └── main.rs
+├── docs/
+└── Cargo.toml
 ```
 
 ## Development Workflow
 
 ### Code Style
 
-We use ESLint and Prettier for code quality. Run these commands:
-
 ```bash
-# Check for linting issues
-npm run lint
-
-# Format code
-npm run format
-
-# Type checking
-npm run type-check
+cargo fmt --all -- --check                              # formatting
+cargo clippy --workspace --all-targets -- -D warnings    # lints
+cargo fmt --all                                          # auto-format
 ```
 
 ### Git Workflow
 
 1. Create a feature branch: `git checkout -b feature/feature-name`
 2. Make your changes
-3. Run linting and tests: `npm run lint && npm run type-check`
-4. Format code: `npm run format`
-5. Commit with descriptive message: `git commit -m "feat: add feature"`
-6. Push to your fork and open a pull request
+3. Run `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
+4. Commit with a descriptive message following Conventional Commits (`feat:`, `fix:`, `docs:`,
+   `refactor:`, `test:`, `chore:`)
+5. Push and open a pull request
 
-### Commit Message Convention
+## Key Patterns
 
-Follow Conventional Commits:
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation
-- `style:` for code style changes
-- `refactor:` for code refactoring
-- `test:` for test additions/changes
-- `chore:` for maintenance tasks
+### Adding a git-core operation
 
-Example: `feat: add diff viewer component`
+Add a function to the relevant module (or a new module) in `crates/git-core/src/`, taking
+`&git2::Repository` (or a path) as an explicit argument — never a singleton/global. Re-export
+it from `lib.rs`. Add integration tests in `crates/git-core/tests/` against a real temp-dir
+repo (see `tests/common/mod.rs`'s `init_repo()` helper), not a mocked `Repository`.
 
-## Key Libraries & Patterns
+```rust
+// crates/git-core/src/example.rs
+use git2::Repository;
+use crate::repo::Result;
 
-### Git Operations
-
-We use `isomorphic-git` for all Git operations. It's a pure JavaScript implementation that works in browsers.
-
-Example usage:
-```typescript
-import * as fs from 'isomorphic-git'
-
-// Read commit history
-const commits = await fs.log({ fs, dir: '/path/to/repo' })
-
-// Get repository status
-const status = await fs.statusMatrix({ fs, dir: '/path/to/repo' })
-```
-
-### State Management
-
-We use Zustand for state management. Create stores in `src/store/`:
-
-```typescript
-import { create } from 'zustand'
-
-interface RepositoryStore {
-  repositories: Repository[]
-  currentRepo: Repository | null
-  addRepository: (repo: Repository) => void
-  selectRepository: (id: string) => void
-}
-
-export const useRepositoryStore = create<RepositoryStore>((set) => ({
-  repositories: [],
-  currentRepo: null,
-  addRepository: (repo) => set((state) => ({
-    repositories: [...state.repositories, repo],
-  })),
-  selectRepository: (id) => set((state) => ({
-    currentRepo: state.repositories.find(r => r.id === id) || null,
-  })),
-}))
-```
-
-### React Hooks
-
-Custom hooks go in `src/hooks/`. Common patterns:
-
-```typescript
-// Hook for git operations
-export function useGitOperation(dir: string) {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
-
-  const execute = useCallback(async (operation: () => Promise<any>) => {
-    try {
-      setLoading(true)
-      setError(null)
-      return await operation()
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  return { execute, loading, error }
+pub fn example_operation(repo: &Repository, arg: &str) -> Result<()> {
+    // ...
+    Ok(())
 }
 ```
 
-### Styling
+### Wiring a git-core operation into the UI
 
-We use Tailwind CSS for styling. Some guidelines:
+1. Add a `Command`/`Event` variant pair in `crates/app/src/worker.rs`.
+2. Handle the command in `worker::handle`, calling the `git-core` function.
+3. Apply the resulting event to `RepoSession` state in `RepoSession::poll_events`
+   (`crates/app/src/state.rs`).
+4. Trigger it from a UI panel in `crates/app/src/ui/` via `RepoSession::send`/a dedicated method
+   on `RepoSession` (see `stage`/`unstage`/`commit` for the pattern) — UI code never calls
+   `git-core` directly.
 
-- Use existing Tailwind classes, avoid custom CSS when possible
-- Follow the design system defined in `tailwind.config.js`
-- Use semantic color classes: `bg-primary`, `text-muted-foreground`, etc.
-- For responsive design, use Tailwind's responsive prefixes: `md:`, `lg:`, etc.
+### egui/eframe version notes
 
-Example:
-```tsx
-<button className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition">
-  Click me
-</button>
-```
+This project pins `eframe`/`egui` 0.35. The `App` trait's method is `fn ui(&mut self, ui: &mut
+egui::Ui, frame: &mut eframe::Frame)`, and `SidePanel`/`TopBottomPanel` from older egui
+tutorials don't exist — use `egui::Panel::left/right/top/bottom(id)` instead, and note that
+every panel's `.show()` (including `CentralPanel`) takes `&mut Ui`, not `&Context`. See
+`CLAUDE.md`'s "egui/eframe version-specific API notes" for more, and check the pinned version
+in `crates/app/Cargo.toml` before trusting online example code.
 
-## PWA Features
-
-The app is a Progressive Web App enabled by Vite PWA plugin. To test PWA features:
-
-### Service Worker
-- Check DevTools → Application → Service Workers
-- See caching behavior in Network tab
-- Check offline functionality
-
-### Installation
-- Desktop: Look for "Install app" in address bar
-- Mobile: Menu → "Install app"
-- Test adding to home screen
-
-### Icons
-PWA icons should be placed in `public/`:
-- `icon-192.png` - 192x192 PWA icon
-- `icon-512.png` - 512x512 PWA icon
-- `icon-192-maskable.png` - 192x192 maskable icon
-- `icon-512-maskable.png` - 512x512 maskable icon
-
-## Testing (Future)
+## Testing
 
 ```bash
-# Run tests
-npm run test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Generate coverage report
-npm run test:coverage
+cargo test --workspace                       # all tests
+cargo test -p git-core                       # one crate
+cargo test -p git-core --test log            # one test file
+cargo test -p git-core -- some_test_name      # one test by name
 ```
+
+`git-core` and `config` tests use real temp directories (`tempfile`), never mocks of `git2` or
+the filesystem.
 
 ## Building for Production
 
 ```bash
-# Build the app
-npm run build
-
-# Preview production build locally
-npm run preview
-
-# Build output is in `dist/` directory
+cargo build --workspace --release
 ```
 
-## Deployment
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for deployment instructions.
+The release binary is at `target/release/app` (or `app.exe` on Windows).
 
 ## Troubleshooting
 
-### Port already in use
-```bash
-# Kill process on port 5173
-lsof -ti:5173 | xargs kill -9
+### Build fails on a fresh Linux machine
+Missing system packages for `eframe`/`winit` or `git2`'s vendored libgit2 build — run
+`scripts/setup-dev.sh`, or see its contents for the exact `apt`/`dnf`/`pacman` package names.
 
-# Or use different port
-npm run dev -- --port 3000
-```
+### `cargo build` is very slow the first time
+Expected — `git2` builds vendored libgit2 from source via `cmake`, and `eframe`'s dependency
+tree (`wgpu`, `winit`, `egui`) is large. Subsequent builds are incremental and much faster.
 
-### Git operations not working
-- Ensure repository path is correct
-- Check browser console for errors
-- Verify repository has proper `.git` directory
-
-### PWA not installing
-- Must be served over HTTPS (except localhost)
-- Manifest.json must be valid
-- Check DevTools for PWA requirements
-
-### Module not found errors
-- Check import paths use `@/` aliases
-- Ensure files exist in expected locations
-- Run `npm install` after adding new dependencies
-
-## Performance Tips
-
-1. **Code Splitting**: Use React.lazy() for route-based splitting
-2. **Memoization**: Use React.memo() for expensive components
-3. **Virtual Lists**: Use virtualization for large lists (1000+ items)
-4. **IndexedDB**: Cache commit history for offline access
-5. **Service Worker**: Precache critical assets
-
-## Resources
-
-- [React Documentation](https://react.dev)
-- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
-- [Tailwind CSS](https://tailwindcss.com/docs)
-- [isomorphic-git](https://isomorphic-git.org/)
-- [Zustand](https://github.com/pmndrs/zustand)
-- [Vite Documentation](https://vitejs.dev/)
+### Git operations behave unexpectedly
+Check that the target directory is actually a git repository (`git2::Repository::discover`
+walks up from the given path looking for `.git`, same as the `git` CLI) and that file paths
+passed to `git-core` functions are relative to the repo root, not absolute.

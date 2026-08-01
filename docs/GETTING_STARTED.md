@@ -4,42 +4,37 @@ Welcome to Browsitory! This guide will help you set up and understand the projec
 
 ## What is Browsitory?
 
-Browsitory is a Progressive Web App (PWA) for Git repository management. It provides a modern, intuitive interface for:
-- Viewing commit history
-- Managing branches
+Browsitory is a native, cross-platform desktop Git client (Windows/macOS/Linux) built in Rust,
+with a fast, custom-drawn UI inspired by Sublime Merge. It provides:
+- Commit history viewing
+- Diff viewing (with word-level highlighting)
 - Staging and committing changes
-- Viewing diffs
-- Push/pull operations
+- Branch management, stash, merge, rebase, blame, and a commit graph (planned — see
+  [PROJECT_SETUP.md](PROJECT_SETUP.md) for what's implemented today vs. on the roadmap)
 
-The unique aspect is that it's a **Progressive Web App** - it can run:
-- As an installable app on your desktop or mobile device
-- As a web app in your browser
-- **Offline** with cached repository data
+Unlike the project's original browser-based prototype, this is a plain native binary: it opens
+repositories directly from the local filesystem via libgit2, with no browser sandbox, no
+service worker, and no server.
 
 ## Quick Start (5 minutes)
 
-### 1. Install Dependencies
+### 1. One-time host setup
 ```bash
 cd browsitory
-npm install
+./scripts/setup-dev.sh
 ```
+Installs Rust (via rustup, if not already present) and the system packages `eframe`/`winit`
+and `git2`'s vendored libgit2 build need, then verifies the workspace builds.
 
-### 2. Start Development Server
+### 2. Run the app
 ```bash
-npm run dev
+cargo run -p app
 ```
 
-### 3. Open in Browser
-Visit `http://localhost:5173` and explore the app.
-
-### 4. Install as App (Optional)
-- **Desktop**: Click "Install app" in the address bar (Chrome/Edge)
-- **Mobile**: Tap menu → "Install app" (Android Chrome)
-- **iOS**: Tap Share → "Add to Home Screen"
+### 3. Open a repository
+Click "Open Repository..." in the app and pick any local git repository.
 
 ## Project Structure
-
-Quick reference for important files:
 
 ```
 browsitory/
@@ -47,193 +42,101 @@ browsitory/
 │   ├── FEATURES.md         # Complete feature list
 │   ├── ARCHITECTURE.md     # Tech stack & design
 │   ├── DEVELOPMENT.md      # Development guide
-│   └── LICENSE_COMPLIANCE  # License verification
-├── src/
-│   ├── components/         # Reusable React components
-│   ├── pages/             # Page-level components (Dashboard, Repository)
-│   ├── hooks/             # Custom React hooks
-│   ├── store/             # Zustand state management
-│   ├── lib/               # Utility functions
-│   ├── services/          # Git service & API integration
-│   └── App.tsx            # Root component
-├── public/                # Static files (icons, etc.)
-├── README.md              # Project overview
-├── package.json           # Dependencies
-└── vite.config.ts         # Build configuration
+│   └── LICENSE_COMPLIANCE.md
+├── crates/
+│   ├── git-core/           # git2-based service layer
+│   ├── config/             # repo registry + preferences
+│   └── app/                # egui/eframe desktop UI
+├── scripts/setup-dev.sh    # dev host setup
+├── README.md
+└── Cargo.toml
 ```
 
 ## Tech Stack at a Glance
 
-### Frontend
-- **React** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Fast build tool
-- **Tailwind CSS** - Styling
-- **isomorphic-git** - Git operations (JavaScript)
-
-### Backend (Optional)
-- **Go/Node.js** - Can add for server deployment
-- **PostgreSQL/SQLite** - Database (for server mode)
+- **egui / eframe** — immediate-mode Rust GUI
+- **git2** — libgit2 bindings for all git operations
+- **similar** — line + word-level diffing
+- **rfd** — native folder-picker dialog
+- **serde + toml + directories** — config/preferences persistence
 
 ## Key Concepts
 
-### 1. Progressive Web App (PWA)
-- Works offline thanks to Service Worker
-- Can be installed as an app
-- Installable on desktop and mobile
-- Works without requiring separate app download
+### 1. Native desktop app, not a web app
+No browser, no install-to-home-screen flow, no offline caching to reason about — the app has
+direct, unrestricted filesystem access the moment it opens a repository.
 
-### 2. Git Operations
-- Uses **isomorphic-git** - a pure JavaScript git implementation
-- Works in browser without needing Git CLI
-- Can handle file I/O via browser File API
+### 2. git-core is dependency-injected
+Every git operation is a plain function taking a `&git2::Repository` explicitly. This is what
+makes the whole service layer testable without a GUI — see `crates/git-core/tests/`.
 
-### 3. Local-First Architecture
-- Initial MVP stores data in browser (IndexedDB, localStorage)
-- No backend required to get started
-- Can add optional backend for server deployment later
+### 3. One worker thread per open repository
+Git operations run on a background thread (one per open repo) so the UI never blocks; see
+`docs/ARCHITECTURE.md`'s "Threading model" section.
 
 ## Common Tasks
 
 ### View Commit History
-1. Open a Git repository
-2. Repository status shows in main view
-3. Commit list displays automatically
-4. Click a commit to see details
+1. Open a repository
+2. The commit history panel at the bottom lists commits newest-first
 
 ### Stage Changes
-1. In the Changes panel, select files to stage
-2. Click "Stage" to add to staging area
-3. Unstaged changes show in separate section
+1. In the "Changes" panel, click "+" next to an unstaged file to stage it
+2. Click "-" next to a staged file to unstage it
 
 ### Create a Commit
-1. Stage files you want to commit
-2. Write commit message
+1. Stage the files you want to commit
+2. Write a commit message
 3. Click "Commit"
-
-### Switch Branches
-1. View branch list in sidebar
-2. Click branch name to switch
-3. Working directory updates instantly
 
 ## Development Workflow
 
-### Making Changes
-
-1. **Create a branch**
-   ```bash
-   git checkout -b feature/my-feature
-   ```
-
-2. **Make your changes** - files auto-reload
-
-3. **Check code quality**
-   ```bash
-   npm run lint        # Check code style
-   npm run format      # Format code
-   npm run type-check  # Type checking
-   ```
-
-4. **Build and test**
-   ```bash
-   npm run build       # Production build
-   npm run preview     # Preview build
-   ```
-
-5. **Commit and push**
-   ```bash
-   git add .
-   git commit -m "feat: add new feature"
-   git push origin feature/my-feature
-   ```
-
-### Project Standards
-
-- **Code Style**: ESLint + Prettier (run `npm run format`)
-- **Type Safety**: Strict TypeScript (fix type errors)
-- **Commit Messages**: Conventional Commits format (feat:, fix:, docs:, etc.)
-- **Components**: React functional components with hooks
-- **Styling**: Tailwind CSS utility classes
-
-## API Reference (for Backend Integration)
-
-When implementing server backend, these endpoints are needed:
-
+```bash
+git checkout -b feature/my-feature
+# make changes
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+git add .
+git commit -m "feat: add new feature"
+git push origin feature/my-feature
 ```
-GET    /api/repositories              - List repositories
-POST   /api/repositories              - Add new repository  
-GET    /api/repositories/:id/commits  - Get commit history
-GET    /api/repositories/:id/status   - Get repo status
-POST   /api/repositories/:id/commit   - Create commit
-POST   /api/repositories/:id/push     - Push to remote
-POST   /api/repositories/:id/pull     - Pull from remote
-GET    /api/repositories/:id/diff     - Get diff
-```
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed API design.
 
 ## Next Steps
 
 ### For Users
-1. Open a local Git repository
-2. Explore the commit history
-3. Try staging changes
-4. Install as an app
+1. Open a local git repository
+2. Explore the commit history and diff viewer
+3. Try staging changes and committing
 
 ### For Contributors
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md)
 2. Read [CONTRIBUTING.md](../CONTRIBUTING.md)
-3. Pick an issue to work on
-4. Submit a pull request
-
-### For Deploying
-1. See [ARCHITECTURE.md](ARCHITECTURE.md) for deployment options
-2. Deployment guide coming soon
+3. Pick a Phase 2 item from [PROJECT_SETUP.md](PROJECT_SETUP.md) or an open issue
 
 ## Troubleshooting
 
-### Port Already in Use?
-```bash
-lsof -ti:5173 | xargs kill -9
-npm run dev -- --port 3000
-```
+### Build fails with missing system libraries
+Run `scripts/setup-dev.sh`, or see [DEVELOPMENT.md](DEVELOPMENT.md#troubleshooting) for the
+exact package names per OS.
 
-### Module Not Found?
-```bash
-rm -rf node_modules package-lock.json
-npm install
-```
-
-### TypeScript Errors?
-```bash
-npm run type-check  # See all errors
-npm run format      # Auto-fix some issues
-```
-
-### Git Operations Failing?
-- Check browser console (F12) for error details
-- Ensure repository path is correct
-- Verify `.git` directory exists
+### First build is very slow
+Expected — `git2` compiles vendored libgit2 from source, and `eframe`'s dependency tree
+(`wgpu`/`winit`/`egui`) is large. Later builds are incremental.
 
 ## Resources
 
-- **[Documentation Index](../README.md)** - All documentation
-- **[Features](FEATURES.md)** - Complete feature specifications
-- **[Architecture](ARCHITECTURE.md)** - System design decisions
-- **[Development Guide](DEVELOPMENT.md)** - Detailed dev setup
-- **[Contributing](../CONTRIBUTING.md)** - How to contribute
-
-## Questions?
-
-- Check documentation first
-- Look at issues and discussions on GitHub
-- Open a new issue if stuck
-- Ask in pull requests if uncertain
+- **[Documentation Index](../README.md)**
+- **[Features](FEATURES.md)**
+- **[Architecture](ARCHITECTURE.md)**
+- **[Development Guide](DEVELOPMENT.md)**
+- **[Contributing](../CONTRIBUTING.md)**
 
 ## License
 
-Browsitory is licensed under MIT License - see [LICENSE](../LICENSE) for details.
+Browsitory is licensed under the MIT License — see [LICENSE](../LICENSE) for details, and
+[LICENSE_COMPLIANCE.md](LICENSE_COMPLIANCE.md) for the one documented dependency exception.
 
 ---
 
-**Ready to get started?** Run `npm install && npm run dev` and open http://localhost:5173! 🚀
+**Ready to get started?** Run `./scripts/setup-dev.sh && cargo run -p app`!
