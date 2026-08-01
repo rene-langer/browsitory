@@ -29,7 +29,11 @@ license-avoidance one; the GPL-2.0-with-linking-exception status is the same eit
 
 ### `crates/git-core`
 - **git2** — MIT/Apache-2.0 (binding); links libgit2, GPL-2.0-with-linking-exception (see
-  above)
+  above). Phase 3 (remote operations: push/pull/fetch, credentials, multi-remote) uses only
+  APIs already covered by the `https`/`ssh` features enabled since Phase 1 — SSH-agent auth
+  (`Cred::ssh_key_from_agent`) and platform credential-manager auth (`Cred::credential_helper`,
+  which reads `credential.helper` from gitconfig) are both built into `git2` itself. No new
+  dependency was added for Phase 3.
 - **similar** — MIT/Apache-2.0 (line + word-level diffing, `unicode` feature enabled)
 - **thiserror** — MIT/Apache-2.0 (typed error enum)
 - **tempfile** (dev-dependency only, not shipped) — MIT/Apache-2.0
