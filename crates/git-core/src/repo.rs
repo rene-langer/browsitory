@@ -6,6 +6,12 @@ use git2::Repository;
 pub enum GitError {
     #[error(transparent)]
     Git(#[from] git2::Error),
+    /// One or more refs were rejected by the remote on push — surfaced via
+    /// `RemoteCallbacks::push_update_reference`, since `Remote::push()`
+    /// itself returns `Ok(())` even when the server rejected every ref (see
+    /// `transfer::push`'s doc comment).
+    #[error("push rejected: {0}")]
+    Rejected(String),
 }
 
 pub type Result<T> = std::result::Result<T, GitError>;
