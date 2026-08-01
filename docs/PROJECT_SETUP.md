@@ -30,7 +30,8 @@ browsitory/
 ├── crates/
 │   ├── git-core/                 # git2-based service layer
 │   │   ├── src/                  # repo, status, log, diff, stage, commit, branch, stash,
-│   │   │                          # merge, rebase, conflict, blame, graph
+│   │   │                          # merge, rebase, conflict, blame, graph, remote,
+│   │   │                          # credentials, transfer (push/pull/fetch)
 │   │   └── tests/                # integration tests against real temp-dir repos
 │   ├── config/                   # repo registry + preferences (TOML)
 │   │   └── src/
@@ -120,10 +121,11 @@ system packages `eframe`/`winit` and `git2`'s vendored libgit2 build need).
 - [x] Multi-branch commit graph view — hand-rolled lane/column layout (no off-the-shelf Rust
       equivalent of the old dagre-based layout), painted directly with `egui::Painter`
 
-### Phase 3: Remote Operations (not started)
-- [ ] Push/pull/fetch with progress reporting
-- [ ] Credential handling (SSH agent, platform credential managers) via `git2` callbacks
-- [ ] Multi-remote support
+### Phase 3: Remote Operations (implemented)
+- [x] Push/pull/fetch with progress reporting
+- [x] Credential handling (SSH agent, platform credential managers) via `git2` callbacks
+- [x] Multi-remote support (add/remove/rename/set-url, remote-CRUD UI panel)
+- [x] Tag push
 
 This replaces the old roadmap's Phase 3 "server backend" — that phase existed only because
 isomorphic-git in a browser can't reach a remote directly. A native app with libgit2 doesn't
@@ -165,11 +167,12 @@ real `.git` directory.
 1. Run `scripts/setup-dev.sh` on a fresh machine
 2. `cargo build --workspace && cargo run -p app`
 3. Read [DEVELOPMENT.md](DEVELOPMENT.md) for conventions
-4. Pick a Phase 3 feature (remote operations) from [FEATURES.md](FEATURES.md) and follow the
-   `git-core` module pattern described in [ARCHITECTURE.md](ARCHITECTURE.md)
+4. Pick a Phase 4 feature (worktrees, submodules, reflog, PR integration) from
+   [FEATURES.md](FEATURES.md) and follow the `git-core` module pattern described in
+   [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
-**Status**: 🟡 Phase 1 and Phase 2 implemented, Phase 3+ not started.
+**Status**: 🟡 Phase 1, Phase 2, and Phase 3 implemented, Phase 4 not started.
 **License**: MIT (with one documented libgit2 linking exception — see
 [LICENSE_COMPLIANCE.md](LICENSE_COMPLIANCE.md)).

@@ -32,11 +32,14 @@ outright rather than ported incrementally — see git history before this branch
 recover something from it.
 
 Phase 1 is implemented: open a local repository, view status, commit history, and file diffs,
-stage/unstage, and commit. Phase 2 (this pass) is also implemented: branch management, stash,
-merge with conflict resolution, interactive rebase (pick/reword/edit/squash/fixup/drop), a blame
-viewer, and a multi-branch commit graph view. Remote operations (push/pull/fetch) are **not**
-implemented yet — see Phase 3 in `docs/PROJECT_SETUP.md` for the full phase roadmap and
-`docs/ARCHITECTURE.md` for the tech-stack rationale.
+stage/unstage, and commit. Phase 2 is also implemented: branch management, stash, merge with
+conflict resolution, interactive rebase (pick/reword/edit/squash/fixup/drop), a blame viewer,
+and a multi-branch commit graph view. Phase 3 (this pass) is also implemented: push/pull/fetch
+with progress reporting, multi-remote support, tag push, and non-interactive credential
+handling (SSH agent, platform credential managers) via `git2`'s credential callbacks. Phase 4
+(worktrees, submodules, reflog, PR integration) is **not** implemented yet — see
+`docs/PROJECT_SETUP.md` for the full phase roadmap and `docs/ARCHITECTURE.md` for the
+tech-stack rationale.
 
 ## Architecture
 
@@ -82,6 +85,24 @@ from `lib.rs`, tested against a real repo in `tests/`, not a mocked `git2::Repos
   name isn't valid UTF-8. Handle it the same way as the other gotchas above (`.ok()` to fold
   into an `Option`, or an explicit `let Ok(name) = ... else { continue }` in a loop) — see
   `branch.rs`.
+- `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>` per
+  slot, not `Option<&str>` — it's fallible *and* optional, so skipping bad entries needs
+  `.iter().flatten().flatten()` (first `Result`, then `Option`), not a single `.flatten()` —
+  see `remote.rs`.
+- `Remote::push()` returning `Ok(())` does **not** mean every ref updated: non-fast-forward (and
+  other) rejections surface only through the `push_update_reference` callback (`Some(status_msg)`
+  per rejected ref), not through `push()`'s own `Result`. Register that callback and check it
+  explicitly — see `transfer.rs`.
+- A `RemoteCallbacks`/`PushOptions`/`FetchOptions` value passed as `Some(&mut opts)` to
+  `Remote::push()`/`fetch()` is only *lent* for the call, not consumed by it — any closures it
+  owns (and the state they mutably borrow, e.g. a `Vec` collecting rejection messages) stay
+  borrowed until `opts` itself is dropped. Reading that state right after the call without an
+  explicit `drop(opts)` first is a borrow-checker error, not a logic bug — see `transfer::push`'s
+  comment on this.
+- Non-interactive credential callbacks (`credentials.rs`) must return `Err` once they've
+  exhausted every auth method they support, never fall through to a blocking prompt — this is a
+  GUI app with no controlling terminal, and libgit2 retries the `credentials` callback with a
+  different `allowed_types` bitflag per attempt rather than looping forever on its own.
 
 ### git2 vs. isomorphic-git: capability gain, not just a port
 
