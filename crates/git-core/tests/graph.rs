@@ -3,7 +3,7 @@ mod common;
 use common::{init_repo, write_file};
 use git_core::{create_commit, graph_log, stage_path};
 
-fn commit_file(repo: &git2::Repository, dir: &tempfile::TempDir, name: &str, message: &str) {
+fn commit_file(repo: &mut git2::Repository, dir: &tempfile::TempDir, name: &str, message: &str) {
     write_file(dir, name, "content\n");
     stage_path(repo, name).unwrap();
     create_commit(repo, message).unwrap();
@@ -20,10 +20,10 @@ fn empty_repo_returns_no_commits_and_does_not_panic() {
 
 #[test]
 fn linear_history_is_a_single_lane_newest_first() {
-    let (dir, repo) = init_repo();
-    commit_file(&repo, &dir, "a.txt", "commit 0");
-    commit_file(&repo, &dir, "b.txt", "commit 1");
-    commit_file(&repo, &dir, "c.txt", "commit 2");
+    let (dir, mut repo) = init_repo();
+    commit_file(&mut repo, &dir, "a.txt", "commit 0");
+    commit_file(&mut repo, &dir, "b.txt", "commit 1");
+    commit_file(&mut repo, &dir, "c.txt", "commit 2");
 
     let commits = graph_log(&repo, 100).unwrap();
 
@@ -41,26 +41,31 @@ fn linear_history_is_a_single_lane_newest_first() {
 
 #[test]
 fn diverging_branches_are_both_reachable_with_correct_refs_per_tip() {
-    let (dir, repo) = init_repo();
-    commit_file(&repo, &dir, "a.txt", "base");
-    let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    let (dir, mut repo) = init_repo();
+    commit_file(&mut repo, &dir, "a.txt", "base");
+    let base_commit_id = repo.head().unwrap().peel_to_commit().unwrap().id();
     // Captured while HEAD is still on the original default branch — once we
     // switch to and commit on "feature" below, HEAD's shorthand would be
     // "feature" instead.
     let default_branch_name = default_branch_name(&repo);
 
-    // Branch "feature" off of base, one commit ahead.
-    repo.branch("feature", &base_commit, false).unwrap();
+    // Branch "feature" off of base, one commit ahead. Scoped so the
+    // borrowed `Commit` (which has a `Drop` impl, extending its NLL borrow
+    // to the end of its scope) doesn't overlap the `&mut repo` below.
+    {
+        let base_commit = repo.find_commit(base_commit_id).unwrap();
+        repo.branch("feature", &base_commit, false).unwrap();
+    }
     repo.set_head("refs/heads/feature").unwrap();
     repo.checkout_head(None).unwrap();
-    commit_file(&repo, &dir, "feature.txt", "feature work");
+    commit_file(&mut repo, &dir, "feature.txt", "feature work");
 
     // Back on the default branch, one different commit ahead.
     repo.set_head(&format!("refs/heads/{default_branch_name}"))
         .unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
-    commit_file(&repo, &dir, "main.txt", "main work");
+    commit_file(&mut repo, &dir, "main.txt", "main work");
 
     let commits = graph_log(&repo, 100).unwrap();
 
@@ -82,15 +87,18 @@ fn diverging_branches_are_both_reachable_with_correct_refs_per_tip() {
 
 #[test]
 fn merge_commit_has_two_parents_and_lanes_converge() {
-    let (dir, repo) = init_repo();
-    commit_file(&repo, &dir, "a.txt", "base");
-    let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    let (dir, mut repo) = init_repo();
+    commit_file(&mut repo, &dir, "a.txt", "base");
+    let base_commit_id = repo.head().unwrap().peel_to_commit().unwrap().id();
     let default_branch_name = default_branch_name(&repo);
 
-    repo.branch("feature", &base_commit, false).unwrap();
+    {
+        let base_commit = repo.find_commit(base_commit_id).unwrap();
+        repo.branch("feature", &base_commit, false).unwrap();
+    }
     repo.set_head("refs/heads/feature").unwrap();
     repo.checkout_head(None).unwrap();
-    commit_file(&repo, &dir, "feature.txt", "feature work");
+    commit_file(&mut repo, &dir, "feature.txt", "feature work");
     let feature_commit = repo.head().unwrap().peel_to_commit().unwrap();
 
     repo.set_head(&format!("refs/heads/{default_branch_name}"))

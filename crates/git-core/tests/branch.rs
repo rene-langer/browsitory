@@ -10,7 +10,7 @@ use git_core::{
 /// shorthand name). The initial branch name depends on the machine's
 /// `init.defaultBranch` config (`master` vs `main`), so tests read it back
 /// rather than hardcoding either.
-fn commit_initial(dir: &tempfile::TempDir, repo: &git2::Repository) -> (git2::Oid, String) {
+fn commit_initial(dir: &tempfile::TempDir, repo: &mut git2::Repository) -> (git2::Oid, String) {
     write_file(dir, "a.txt", "hello\n");
     stage_path(repo, "a.txt").unwrap();
     let oid = create_commit(repo, "initial commit").unwrap();
@@ -20,8 +20,8 @@ fn commit_initial(dir: &tempfile::TempDir, repo: &git2::Repository) -> (git2::Oi
 
 #[test]
 fn create_and_list_branches() {
-    let (dir, repo) = init_repo();
-    let (_oid, initial_branch) = commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    let (_oid, initial_branch) = commit_initial(&dir, &mut repo);
 
     create_branch(&repo, "feature", None).unwrap();
 
@@ -36,12 +36,12 @@ fn create_and_list_branches() {
 
 #[test]
 fn create_branch_at_explicit_start_point() {
-    let (dir, repo) = init_repo();
-    let (first, _initial_branch) = commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    let (first, _initial_branch) = commit_initial(&dir, &mut repo);
 
     write_file(&dir, "b.txt", "world\n");
     stage_path(&repo, "b.txt").unwrap();
-    create_commit(&repo, "second commit").unwrap();
+    create_commit(&mut repo, "second commit").unwrap();
 
     create_branch(&repo, "from-first", Some(first)).unwrap();
 
@@ -53,8 +53,8 @@ fn create_branch_at_explicit_start_point() {
 
 #[test]
 fn switch_branch_moves_head_and_checks_out_tree() {
-    let (dir, repo) = init_repo();
-    let (_oid, initial_branch) = commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    let (_oid, initial_branch) = commit_initial(&dir, &mut repo);
     create_branch(&repo, "feature", None).unwrap();
 
     switch_branch(&repo, "feature").unwrap();
@@ -70,8 +70,8 @@ fn switch_branch_moves_head_and_checks_out_tree() {
 
 #[test]
 fn switch_branch_with_dirty_working_tree_is_refused() {
-    let (dir, repo) = init_repo();
-    let (first, initial_branch) = commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    let (first, initial_branch) = commit_initial(&dir, &mut repo);
     // Branch "feature" off the *first* commit, before a.txt's content
     // changes below — otherwise "feature" and the initial branch would
     // point at the same commit, switching would need to rewrite nothing,
@@ -83,7 +83,7 @@ fn switch_branch_with_dirty_working_tree_is_refused() {
     // HEAD's tree.
     write_file(&dir, "a.txt", "second commit content\n");
     stage_path(&repo, "a.txt").unwrap();
-    create_commit(&repo, "second commit").unwrap();
+    create_commit(&mut repo, "second commit").unwrap();
 
     // Dirty the working tree with an uncommitted change that would be
     // clobbered by checking "feature"'s differing a.txt content out.
@@ -100,8 +100,8 @@ fn switch_branch_with_dirty_working_tree_is_refused() {
 
 #[test]
 fn delete_branch_removes_it_from_the_list() {
-    let (dir, repo) = init_repo();
-    commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    commit_initial(&dir, &mut repo);
     create_branch(&repo, "feature", None).unwrap();
 
     delete_branch(&repo, "feature").unwrap();
@@ -112,8 +112,8 @@ fn delete_branch_removes_it_from_the_list() {
 
 #[test]
 fn delete_current_branch_is_refused() {
-    let (dir, repo) = init_repo();
-    commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    commit_initial(&dir, &mut repo);
     create_branch(&repo, "feature", None).unwrap();
     switch_branch(&repo, "feature").unwrap();
 
@@ -126,8 +126,8 @@ fn delete_current_branch_is_refused() {
 
 #[test]
 fn rename_branch_keeps_the_same_commit() {
-    let (dir, repo) = init_repo();
-    let (oid, _initial_branch) = commit_initial(&dir, &repo);
+    let (dir, mut repo) = init_repo();
+    let (oid, _initial_branch) = commit_initial(&dir, &mut repo);
     create_branch(&repo, "feature", None).unwrap();
 
     rename_branch(&repo, "feature", "feature-renamed").unwrap();

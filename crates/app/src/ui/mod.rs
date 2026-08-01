@@ -1,7 +1,10 @@
 pub mod blame_view;
 pub mod branch_panel;
+pub mod conflict_view;
 pub mod diff_view;
 pub mod graph_view;
 pub mod history_view;
+pub mod rebase_planner;
+pub mod rebase_progress;
 pub mod staging_panel;
 pub mod stash_panel;

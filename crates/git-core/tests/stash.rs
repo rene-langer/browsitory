@@ -6,7 +6,7 @@ use git_core::{
     status,
 };
 
-fn commit_initial(dir: &tempfile::TempDir, repo: &git2::Repository) {
+fn commit_initial(dir: &tempfile::TempDir, repo: &mut git2::Repository) {
     write_file(dir, "a.txt", "hello\n");
     stage_path(repo, "a.txt").unwrap();
     create_commit(repo, "initial commit").unwrap();
@@ -15,7 +15,7 @@ fn commit_initial(dir: &tempfile::TempDir, repo: &git2::Repository) {
 #[test]
 fn create_and_list_stash() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "a.txt", "changed\n");
 
     create_stash(&mut repo, Some("wip changes")).unwrap();
@@ -32,7 +32,7 @@ fn create_and_list_stash() {
 #[test]
 fn untracked_file_is_included_in_stash_by_default() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "untracked.txt", "new file\n");
 
     create_stash(&mut repo, None).unwrap();
@@ -50,7 +50,7 @@ fn untracked_file_is_included_in_stash_by_default() {
 #[test]
 fn apply_stash_restores_changes_without_removing_the_stash() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "a.txt", "changed\n");
     create_stash(&mut repo, None).unwrap();
 
@@ -63,7 +63,7 @@ fn apply_stash_restores_changes_without_removing_the_stash() {
 #[test]
 fn pop_stash_applies_and_removes_the_entry() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "a.txt", "changed\n");
     create_stash(&mut repo, None).unwrap();
 
@@ -76,7 +76,7 @@ fn pop_stash_applies_and_removes_the_entry() {
 #[test]
 fn drop_stash_removes_entry_without_applying_it() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "a.txt", "changed\n");
     create_stash(&mut repo, None).unwrap();
 
@@ -91,7 +91,7 @@ fn drop_stash_removes_entry_without_applying_it() {
 #[test]
 fn apply_with_conflicting_working_tree_changes_surfaces_an_error() {
     let (dir, mut repo) = init_repo();
-    commit_initial(&dir, &repo);
+    commit_initial(&dir, &mut repo);
     write_file(&dir, "a.txt", "stashed change\n");
     create_stash(&mut repo, None).unwrap();
 
