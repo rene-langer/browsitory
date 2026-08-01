@@ -6,10 +6,12 @@ git operations — no browser, no server, direct filesystem access to your repos
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status: Phase 1 (early)**. Implemented today: opening a local repository, commit history,
-> file diffs, staging/unstaging, and committing. Branch management, stash, merge, interactive
-> rebase, blame, and the multi-branch commit graph are on the [roadmap](#roadmap) but not yet
-> implemented. See [Project Setup](docs/PROJECT_SETUP.md) for the full phase plan.
+> **Status: Phase 1 & 2 complete**. Implemented today: opening a local repository, commit
+> history, file diffs, staging/unstaging, committing, branch management, stash, merge with
+> conflict resolution, interactive rebase (pick/reword/edit/squash/fixup/drop), a blame viewer,
+> and a multi-branch commit graph. Remote operations (push/pull/fetch) are on the
+> [roadmap](#roadmap) but not yet implemented. See [Project Setup](docs/PROJECT_SETUP.md) for
+> the full phase plan.
 
 ## Features
 
@@ -17,7 +19,7 @@ git operations — no browser, no server, direct filesystem access to your repos
 - 🔍 **Visual diff viewer** — word-level highlighting on changed lines
 - 📝 **Staging area** — stage/unstage files, write commit messages, commit
 - 📜 **Commit history** — paginated, lazy-loaded commit log
-- 🌿 **Branch management, stash, merge, rebase, blame, commit graph** — planned, not yet built
+- 🌿 **Branch management, stash, merge, rebase, blame, commit graph** — implemented
 - ⚡ **Fast** — direct libgit2 bindings, no JavaScript git reimplementation
 
 ## Quick Start
@@ -83,7 +85,7 @@ MIT; see [License Compliance](docs/LICENSE_COMPLIANCE.md) for why that's still f
 
 - [x] Cargo workspace scaffold (git-core / config / app crates)
 - [x] Phase 1: open repo, status, commit history, diff viewer, staging, commit
-- [ ] Phase 2: branch management, stash, merge with conflict resolution, interactive rebase
+- [x] Phase 2: branch management, stash, merge with conflict resolution, interactive rebase
       (with reword/squash — a capability gain over the old browser build), blame, commit graph
 - [ ] Phase 3: remote operations (push/pull/fetch, credentials) — newly feasible early thanks
       to libgit2's native transport support
@@ -95,4 +97,4 @@ For issues, feature requests, or questions, please open an issue on GitHub.
 
 ---
 
-**Status**: Early development — breaking changes expected. Not ready for production use yet.
+**Status**: Phase 1 & 2 complete — breaking changes expected. Not ready for production use yet.
