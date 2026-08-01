@@ -5,7 +5,7 @@ use std::thread;
 use egui::Context;
 use git_core::{
     BlameLine, BranchInfo, CommitInfo, FileDiff, FileStatus, GraphCommit, MergeOutcome, Oid,
-    RebaseAction, RebaseStatus, RebaseStep, Repository, StashEntry,
+    ProgressUpdate, RebaseAction, RebaseStatus, RebaseStep, Repository, StashEntry,
 };
 
 pub enum Command {
@@ -73,6 +73,19 @@ pub enum Command {
     /// `ResolveConflict`, or finished amending for an `Edit` pause).
     ContinueRebaseEdit,
     AbortRebase,
+
+    /// Pushes `refspec` (a plain `local:remote` branch-name pair, e.g.
+    /// `"main:main"` — not a full `refs/heads/...` ref yet; the worker
+    /// expands it, prefixing with `+` when `force` is set) to `remote`.
+    Push {
+        remote: String,
+        refspec: String,
+        force: bool,
+    },
+    PushTag {
+        remote: String,
+        tag: String,
+    },
 }
 
 /// How a conflicted path should be resolved. `Manual` is a no-op signal —
@@ -119,6 +132,14 @@ pub enum Event {
     RebaseProgress(RebaseStatus),
     RebaseFinished,
     Error(String),
+
+    /// Reported repeatedly during a push (and, once Workstream D's fetch/pull
+    /// lands, during those too) — one event per libgit2 progress-callback
+    /// invocation, which can fire many times per second. Shared by design:
+    /// both push and fetch/pull report through this one variant rather than
+    /// each owning a separate progress event type.
+    TransferProgress(ProgressUpdate),
+    PushFinished,
 }
 
 /// Spawns the dedicated worker thread for one open repository.
@@ -152,7 +173,7 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
         let mut pending_rebase_step: Option<RebaseStep> = None;
 
         for cmd in cmd_rx {
-            let event = handle(&mut repo, &mut pending_rebase_step, cmd);
+            let event = handle(&mut repo, &mut pending_rebase_step, &evt_tx, &ctx, cmd);
             if evt_tx.send(event).is_err() {
                 break; // UI side hung up (repo closed/app exiting)
             }
@@ -163,9 +184,15 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
     (cmd_tx, evt_rx)
 }
 
+/// `evt_tx`/`ctx` are only needed by `Command::Push`/`PushTag`, which (unlike
+/// every other command) must report progress *repeatedly* mid-command rather
+/// than via the single `Event` this function returns at the end — see
+/// `push_command`'s doc comment.
 fn handle(
     repo: &mut Repository,
     pending_rebase_step: &mut Option<RebaseStep>,
+    evt_tx: &Sender<Event>,
+    ctx: &Context,
     cmd: Command,
 ) -> Event {
     match cmd {
@@ -269,6 +296,52 @@ fn handle(
         Command::RebaseStep(action) => rebase_step(repo, pending_rebase_step, action),
         Command::ContinueRebaseEdit => continue_rebase(repo, pending_rebase_step),
         Command::AbortRebase => abort_rebase(repo, pending_rebase_step),
+
+        Command::Push {
+            remote,
+            refspec,
+            force,
+        } => {
+            let (local, remote_branch) = match refspec.split_once(':') {
+                Some((local, remote_branch)) => (local, remote_branch),
+                None => (refspec.as_str(), refspec.as_str()),
+            };
+            let built = format!(
+                "{prefix}refs/heads/{local}:refs/heads/{remote_branch}",
+                prefix = if force { "+" } else { "" },
+            );
+            let result = git_core::push(repo, &remote, &[built], |update| {
+                report_progress(evt_tx, ctx, update)
+            });
+            finish_push(result)
+        }
+        Command::PushTag { remote, tag } => {
+            let result = git_core::push_tag(repo, &remote, &tag, |update| {
+                report_progress(evt_tx, ctx, update)
+            });
+            finish_push(result)
+        }
+    }
+}
+
+/// Forwards one push progress-callback invocation as its own
+/// `Event::TransferProgress`, sent immediately over `evt_tx` (with a
+/// `ctx.request_repaint()` so the UI updates promptly, same as the loop in
+/// `spawn` does for the final event of every other command) rather than
+/// batching them into the single `Event` `handle` returns — push is the
+/// first command whose progress can't be reported as one final message,
+/// since a large push can take long enough that the user needs live
+/// feedback through the negotiate/pack-transfer/ref-update phases.
+fn report_progress(evt_tx: &Sender<Event>, ctx: &Context, update: ProgressUpdate) {
+    if evt_tx.send(Event::TransferProgress(update)).is_ok() {
+        ctx.request_repaint();
+    }
+}
+
+fn finish_push(result: git_core::Result<()>) -> Event {
+    match result {
+        Ok(()) => Event::PushFinished,
+        Err(e) => Event::Error(e.to_string()),
     }
 }
 

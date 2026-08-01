@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use egui::Context;
 use git_core::{
     BlameLine, BranchInfo, CommitInfo, FileDiff, FileState, FileStatus, GraphCommit, MergeOutcome,
-    Oid, RebaseAction, RebaseStatus, RebaseStep, StashEntry,
+    Oid, ProgressUpdate, RebaseAction, RebaseStatus, RebaseStep, RemoteInfo, StashEntry,
 };
 
 use crate::worker::{self, Command, Event, ResolvedWith};
@@ -69,6 +69,23 @@ pub struct RepoSession {
     pub rebase_upstream: String,
     pub rebase_onto: String,
     pub rebase_active: bool,
+
+    /// Configured remotes, for the push remote picker in
+    /// `crates/app/src/ui/branch_panel.rs`. Stub field: no `Command` loads
+    /// this yet (that's Workstream D's remote-CRUD foundation, landing in
+    /// parallel) — it just stays empty until that lands, at which point its
+    /// `Event::Remotes`-equivalent handler slots in above without touching
+    /// this declaration.
+    pub remotes: Vec<RemoteInfo>,
+    /// Live progress of an in-flight push (or, once Workstream D's fetch/pull
+    /// lands, those too), for `crates/app/src/ui/transfer_progress.rs`.
+    pub transfer_progress: Option<ProgressUpdate>,
+    pub transfer_in_progress: bool,
+    /// UI-only scratch state for the push controls in `branch_panel.rs`,
+    /// same pattern as `new_branch_name`/`merge_target` above.
+    pub push_remote: String,
+    pub push_force: bool,
+    pub push_tag_name: String,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -112,6 +129,12 @@ impl RepoSession {
             rebase_upstream: String::new(),
             rebase_onto: String::new(),
             rebase_active: false,
+            remotes: Vec::new(),
+            transfer_progress: None,
+            transfer_in_progress: false,
+            push_remote: String::new(),
+            push_force: false,
+            push_tag_name: String::new(),
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
@@ -224,6 +247,29 @@ impl RepoSession {
 
     pub fn is_merging(&self) -> bool {
         !self.merge_conflicts.is_empty()
+    }
+
+    // --- Push --------------------------------------------------------------
+
+    /// Pushes `local_branch` to `remote` (as a same-named remote branch,
+    /// force-pushing iff `push_force` is set) — the common case exercised by
+    /// the branch panel's Push button. `refspec` sent to the worker is the
+    /// plain `local:remote` branch-name pair; `Command::Push`'s doc comment
+    /// in `worker.rs` covers how that's expanded into a real ref.
+    pub fn push(&mut self, remote: String, local_branch: String) {
+        self.transfer_in_progress = true;
+        self.transfer_progress = None;
+        self.send(Command::Push {
+            remote,
+            refspec: local_branch,
+            force: self.push_force,
+        });
+    }
+
+    pub fn push_tag(&mut self, remote: String, tag: String) {
+        self.transfer_in_progress = true;
+        self.transfer_progress = None;
+        self.send(Command::PushTag { remote, tag });
     }
 
     // --- Interactive rebase ----------------------------------------------
@@ -446,7 +492,27 @@ impl RepoSession {
                         limit: LOG_PAGE_SIZE,
                     });
                 }
-                Event::Error(message) => self.error = Some(message),
+                Event::Error(message) => {
+                    self.error = Some(message);
+                    // An in-flight push that errored (e.g. rejected by the
+                    // remote) still needs its busy state cleared — nothing
+                    // else does that for the generic `Error` path.
+                    self.transfer_in_progress = false;
+                    self.transfer_progress = None;
+                }
+
+                Event::TransferProgress(update) => {
+                    self.transfer_progress = Some(update);
+                    self.transfer_in_progress = true;
+                }
+                Event::PushFinished => {
+                    self.transfer_progress = None;
+                    self.transfer_in_progress = false;
+                    // Push can move remote-tracking refs (upstream markers
+                    // shown in the branch panel), so refresh branches the
+                    // same way `Event::BranchSwitched` does above.
+                    self.send(Command::LoadBranches);
+                }
             }
         }
     }
