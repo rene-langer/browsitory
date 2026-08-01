@@ -6,5 +6,6 @@ pub mod graph_view;
 pub mod history_view;
 pub mod rebase_planner;
 pub mod rebase_progress;
+pub mod remote_panel;
 pub mod staging_panel;
 pub mod stash_panel;

@@ -89,6 +89,15 @@ impl eframe::App for BrowsitoryApp {
                 }
             });
 
+        egui::Panel::left("remotes")
+            .resizable(true)
+            .default_size(280.0)
+            .show(ui, |ui| {
+                if let Some(session) = self.state.active_session() {
+                    ui::remote_panel::show(ui, session);
+                }
+            });
+
         egui::Panel::bottom("history")
             .resizable(true)
             .default_size(220.0)
