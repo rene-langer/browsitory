@@ -24,6 +24,9 @@ pub fn show(ui: &mut Ui, session: &mut RepoSession) {
             if ui.small_button("-").on_hover_text("Unstage").clicked() {
                 session.unstage(path.clone());
             }
+            if ui.small_button("B").on_hover_text("Blame").clicked() {
+                session.load_blame(path.clone());
+            }
             if ui
                 .selectable_label(is_selected(session, path, true), path)
                 .clicked()
@@ -39,6 +42,9 @@ pub fn show(ui: &mut Ui, session: &mut RepoSession) {
         ui.horizontal(|ui| {
             if ui.small_button("+").on_hover_text("Stage").clicked() {
                 session.stage(path.clone());
+            }
+            if ui.small_button("B").on_hover_text("Blame").clicked() {
+                session.load_blame(path.clone());
             }
             if ui
                 .selectable_label(is_selected(session, path, false), path)

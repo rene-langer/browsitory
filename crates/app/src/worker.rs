@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use egui::Context;
-use git_core::{CommitInfo, FileDiff, FileStatus, Oid, Repository};
+use git_core::{BlameLine, CommitInfo, FileDiff, FileStatus, GraphCommit, Oid, Repository};
 
 pub enum Command {
     RefreshStatus,
@@ -12,6 +12,8 @@ pub enum Command {
     Stage(String),
     Unstage(String),
     Commit(String),
+    LoadBlame(String),
+    LoadGraph { max_count: usize },
 }
 
 pub enum Event {
@@ -26,6 +28,11 @@ pub enum Event {
         diff: FileDiff,
     },
     Committed(Oid),
+    Blame {
+        path: String,
+        lines: Vec<BlameLine>,
+    },
+    Graph(Vec<GraphCommit>),
     Error(String),
 }
 
@@ -89,6 +96,14 @@ fn handle(repo: &Repository, cmd: Command) -> Event {
         },
         Command::Commit(message) => match git_core::create_commit(repo, &message) {
             Ok(oid) => Event::Committed(oid),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadBlame(path) => match git_core::blame_file(repo, &path) {
+            Ok(lines) => Event::Blame { path, lines },
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadGraph { max_count } => match git_core::graph_log(repo, max_count) {
+            Ok(commits) => Event::Graph(commits),
             Err(e) => Event::Error(e.to_string()),
         },
     }
