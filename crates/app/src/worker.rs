@@ -3,15 +3,39 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use egui::Context;
-use git_core::{CommitInfo, FileDiff, FileStatus, Oid, Repository};
+use git_core::{BranchInfo, CommitInfo, FileDiff, FileStatus, Oid, Repository, StashEntry};
 
 pub enum Command {
     RefreshStatus,
-    LoadLog { skip: usize, limit: usize },
-    LoadDiff { path: String, staged: bool },
+    LoadLog {
+        skip: usize,
+        limit: usize,
+    },
+    LoadDiff {
+        path: String,
+        staged: bool,
+    },
     Stage(String),
     Unstage(String),
     Commit(String),
+    LoadBranches,
+    CreateBranch {
+        name: String,
+        start_point: Option<Oid>,
+    },
+    DeleteBranch(String),
+    RenameBranch {
+        old_name: String,
+        new_name: String,
+    },
+    SwitchBranch(String),
+    LoadStashes,
+    CreateStash {
+        message: Option<String>,
+    },
+    ApplyStash(usize),
+    PopStash(usize),
+    DropStash(usize),
 }
 
 pub enum Event {
@@ -26,6 +50,10 @@ pub enum Event {
         diff: FileDiff,
     },
     Committed(Oid),
+    Branches(Vec<BranchInfo>),
+    BranchSwitched(String),
+    Stashes(Vec<StashEntry>),
+    StashCreated,
     Error(String),
 }
 
@@ -41,7 +69,7 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
     let (evt_tx, evt_rx) = mpsc::channel::<Event>();
 
     thread::spawn(move || {
-        let repo = match git_core::open(&path) {
+        let mut repo = match git_core::open(&path) {
             Ok(repo) => repo,
             Err(e) => {
                 let _ = evt_tx.send(Event::Error(e.to_string()));
@@ -50,7 +78,7 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
         };
 
         for cmd in cmd_rx {
-            let event = handle(&repo, cmd);
+            let event = handle(&mut repo, cmd);
             if evt_tx.send(event).is_err() {
                 break; // UI side hung up (repo closed/app exiting)
             }
@@ -61,7 +89,7 @@ pub fn spawn(path: PathBuf, ctx: Context) -> (Sender<Command>, Receiver<Event>) 
     (cmd_tx, evt_rx)
 }
 
-fn handle(repo: &Repository, cmd: Command) -> Event {
+fn handle(repo: &mut Repository, cmd: Command) -> Event {
     match cmd {
         Command::RefreshStatus => refresh_status(repo),
         Command::LoadLog { skip, limit } => match git_core::commit_log(repo, None, skip, limit) {
@@ -91,12 +119,69 @@ fn handle(repo: &Repository, cmd: Command) -> Event {
             Ok(oid) => Event::Committed(oid),
             Err(e) => Event::Error(e.to_string()),
         },
+        Command::LoadBranches => load_branches(repo),
+        Command::CreateBranch { name, start_point } => {
+            match git_core::create_branch(repo, &name, start_point) {
+                Ok(()) => load_branches(repo),
+                Err(e) => Event::Error(e.to_string()),
+            }
+        }
+        Command::DeleteBranch(name) => match git_core::delete_branch(repo, &name) {
+            Ok(()) => load_branches(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::RenameBranch { old_name, new_name } => {
+            match git_core::rename_branch(repo, &old_name, &new_name) {
+                Ok(()) => load_branches(repo),
+                Err(e) => Event::Error(e.to_string()),
+            }
+        }
+        Command::SwitchBranch(name) => match git_core::switch_branch(repo, &name) {
+            // HEAD moved, so both the working tree (status) and history (log)
+            // are stale — refresh both, same as `Command::Commit` does via
+            // `Event::Committed` in `RepoSession::poll_events`.
+            Ok(()) => Event::BranchSwitched(name),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadStashes => load_stashes(repo),
+        Command::CreateStash { message } => {
+            match git_core::create_stash(repo, message.as_deref()) {
+                Ok(_oid) => Event::StashCreated,
+                Err(e) => Event::Error(e.to_string()),
+            }
+        }
+        Command::ApplyStash(index) => match git_core::apply_stash(repo, index) {
+            Ok(()) => refresh_status(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::PopStash(index) => match git_core::pop_stash(repo, index) {
+            Ok(()) => refresh_status(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::DropStash(index) => match git_core::drop_stash(repo, index) {
+            Ok(()) => load_stashes(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
     }
 }
 
 fn refresh_status(repo: &Repository) -> Event {
     match git_core::status(repo) {
         Ok(entries) => Event::Status(entries),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn load_branches(repo: &Repository) -> Event {
+    match git_core::list_branches(repo) {
+        Ok(branches) => Event::Branches(branches),
+        Err(e) => Event::Error(e.to_string()),
+    }
+}
+
+fn load_stashes(repo: &mut Repository) -> Event {
+    match git_core::list_stashes(repo) {
+        Ok(stashes) => Event::Stashes(stashes),
         Err(e) => Event::Error(e.to_string()),
     }
 }
