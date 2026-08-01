@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build --workspace              # build all crates
 cargo run -p app                     # launch the desktop app
-cargo test --workspace                # run all tests (git-core + config; app has none yet)
+cargo test --workspace                # run all tests (git-core + config + app)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all                      # format
 cargo fmt --all -- --check           # format check (used in CI)
@@ -31,11 +31,12 @@ browser-only PWA (React + TypeScript + isomorphic-git). The old JS/TS codebase w
 outright rather than ported incrementally — see git history before this branch if you need to
 recover something from it.
 
-Phase 1 (this pass) is implemented: open a local repository, view status, commit history,
-and file diffs, stage/unstage, and commit. Branch management, stash, merge, interactive
-rebase, blame, and the multi-branch commit graph (the old Phase 2 feature set) are **not**
-implemented yet — deliberately deferred, not an oversight. See `docs/PROJECT_SETUP.md` for
-the full phase roadmap and `docs/ARCHITECTURE.md` for the tech-stack rationale.
+Phase 1 is implemented: open a local repository, view status, commit history, and file diffs,
+stage/unstage, and commit. Phase 2 (this pass) is also implemented: branch management, stash,
+merge with conflict resolution, interactive rebase (pick/reword/edit/squash/fixup/drop), a blame
+viewer, and a multi-branch commit graph view. Remote operations (push/pull/fetch) are **not**
+implemented yet — see Phase 3 in `docs/PROJECT_SETUP.md` for the full phase roadmap and
+`docs/ARCHITECTURE.md` for the tech-stack rationale.
 
 ## Architecture
 
@@ -86,10 +87,22 @@ from `lib.rs`, tested against a real repo in `tests/`, not a mocked `git2::Repos
 
 libgit2 has **native** support for several things the old isomorphic-git codebase had to
 hand-roll (and where the hand-rolling had real bugs — see the old CLAUDE.md via git history if
-curious): blame (`Repository::blame_file`), and — once Phase 2 lands — full interactive rebase
-via `Repository::rebase()` (pick/reword/edit/squash/fixup/drop, not just pick/drop like the old
-isomorphic-git-based rebase), native merge conflict indices, and native stash/cherry-pick. Don't
-re-introduce hand-rolled versions of these; use the native `git2` API.
+curious): blame (`Repository::blame_file`), native merge conflict indices
+(`Index::conflicts()`), and native stash/cherry-pick. Don't re-introduce hand-rolled versions of
+these; use the native `git2` API.
+
+`Repository::rebase()` is a partial exception, worth knowing before touching `rebase.rs`:
+libgit2's own rebase driver (traced into `libgit2-sys`'s vendored C source) only ever generates
+`Pick` operations — the `git_rebase_operation_t` enum has `Reword`/`Edit`/`Squash`/`Fixup`/`Exec`
+variants for API completeness, but nothing in git2 produces them, and there's no way to hand it a
+custom todo list. `Rebase::next()` always means "mechanically cherry-pick the next commit
+onto whatever `commit()` last produced" — reword/edit/squash/fixup/drop are all driven by
+Browsitory's own code on top of that one primitive (see `rebase.rs`'s module doc comment for the
+per-action mechanics, including the squash/fixup commit-and-replace technique and why
+`Repository::reset` can't be used mid-rebase — it unconditionally calls libgit2's
+`git_repository_state_cleanup()`, silently wiping in-progress rebase state). Still a genuine
+capability gain over the old isomorphic-git-based rebase (which was limited to pick/drop only,
+with no reword/edit/squash/fixup at all) — just not a case of "git2 does it for you."
 
 ### Threading model
 
