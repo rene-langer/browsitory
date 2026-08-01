@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use egui::Context;
 use git_core::{
     BlameLine, BranchInfo, CommitInfo, FileDiff, FileState, FileStatus, GraphCommit, MergeOutcome,
-    Oid, RebaseAction, RebaseStatus, RebaseStep, StashEntry,
+    Oid, ProgressUpdate, RebaseAction, RebaseStatus, RebaseStep, RemoteInfo, StashEntry,
 };
 
 use crate::worker::{self, Command, Event, ResolvedWith};
@@ -69,6 +69,24 @@ pub struct RepoSession {
     pub rebase_upstream: String,
     pub rebase_onto: String,
     pub rebase_active: bool,
+
+    pub remotes: Vec<RemoteInfo>,
+    /// Progress of the in-flight fetch/pull (or push, from Workstream E),
+    /// updated on every `Event::TransferProgress`. `None` when idle.
+    pub transfer_progress: Option<ProgressUpdate>,
+    pub transfer_in_progress: bool,
+    /// UI-only scratch state for the remote-CRUD form in
+    /// `crates/app/src/ui/remote_panel.rs` — same role as `new_branch_name`
+    /// above for the branch panel.
+    pub new_remote_name: String,
+    pub new_remote_url: String,
+    pub remote_rename_target: Option<String>,
+    pub remote_rename_input: String,
+    pub remote_url_edit_target: Option<String>,
+    pub remote_url_edit_input: String,
+    /// Branch to pull, typed by the user (or defaulted from the current
+    /// branch's upstream by `remote_panel.rs`).
+    pub pull_branch: String,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -112,6 +130,16 @@ impl RepoSession {
             rebase_upstream: String::new(),
             rebase_onto: String::new(),
             rebase_active: false,
+            remotes: Vec::new(),
+            transfer_progress: None,
+            transfer_in_progress: false,
+            new_remote_name: String::new(),
+            new_remote_url: String::new(),
+            remote_rename_target: None,
+            remote_rename_input: String::new(),
+            remote_url_edit_target: None,
+            remote_url_edit_input: String::new(),
+            pull_branch: String::new(),
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
@@ -120,6 +148,7 @@ impl RepoSession {
         });
         session.send(Command::LoadBranches);
         session.send(Command::LoadStashes);
+        session.send(Command::LoadRemotes);
         session
     }
 
@@ -288,6 +317,36 @@ impl RepoSession {
         self.send(Command::RebaseStep(step.action.clone()));
     }
 
+    // --- Remotes / fetch / pull ------------------------------------------
+
+    pub fn add_remote(&self, name: String, url: String) {
+        self.send(Command::AddRemote { name, url });
+    }
+
+    pub fn remove_remote(&self, name: String) {
+        self.send(Command::RemoveRemote(name));
+    }
+
+    pub fn rename_remote(&self, old_name: String, new_name: String) {
+        self.send(Command::RenameRemote { old_name, new_name });
+    }
+
+    pub fn set_remote_url(&self, name: String, url: String) {
+        self.send(Command::SetRemoteUrl { name, url });
+    }
+
+    pub fn fetch(&mut self, remote: String) {
+        self.transfer_progress = None;
+        self.transfer_in_progress = true;
+        self.send(Command::Fetch(remote));
+    }
+
+    pub fn pull(&mut self, remote: String, branch: String) {
+        self.transfer_progress = None;
+        self.transfer_in_progress = true;
+        self.send(Command::Pull { remote, branch });
+    }
+
     pub fn poll_events(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -447,6 +506,39 @@ impl RepoSession {
                     });
                 }
                 Event::Error(message) => self.error = Some(message),
+
+                Event::Remotes(remotes) => self.remotes = remotes,
+                Event::TransferProgress(update) => {
+                    self.transfer_progress = Some(update);
+                    self.transfer_in_progress = true;
+                }
+                Event::FetchFinished => {
+                    self.transfer_progress = None;
+                    self.transfer_in_progress = false;
+                    // Fetch only updates remote-tracking refs, but the
+                    // branch panel shows upstream info derived from them.
+                    self.send(Command::LoadBranches);
+                }
+                Event::PullFinished(outcome) => {
+                    self.transfer_progress = None;
+                    self.transfer_in_progress = false;
+                    // Mirrors `Event::MergeResult` above exactly: pull's
+                    // merge step reuses `merge::merge_branch`, so it can
+                    // produce the same conflict/success shapes.
+                    self.last_merge_outcome = Some(outcome.clone());
+                    match outcome {
+                        MergeOutcome::Conflict(paths) => self.merge_conflicts = paths,
+                        MergeOutcome::UpToDate => {}
+                        MergeOutcome::FastForward | MergeOutcome::Merged => {
+                            self.merge_conflicts.clear();
+                        }
+                    }
+                    self.send(Command::RefreshStatus);
+                    self.send(Command::LoadLog {
+                        skip: 0,
+                        limit: LOG_PAGE_SIZE,
+                    });
+                }
             }
         }
     }
