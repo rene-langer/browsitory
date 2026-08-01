@@ -3,7 +3,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use egui::Context;
-use git_core::{BranchInfo, CommitInfo, FileDiff, FileStatus, Oid, Repository, StashEntry};
+use git_core::{
+    BlameLine, BranchInfo, CommitInfo, FileDiff, FileStatus, GraphCommit, Oid, Repository,
+    StashEntry,
+};
 
 pub enum Command {
     RefreshStatus,
@@ -36,6 +39,8 @@ pub enum Command {
     ApplyStash(usize),
     PopStash(usize),
     DropStash(usize),
+    LoadBlame(String),
+    LoadGraph { max_count: usize },
 }
 
 pub enum Event {
@@ -54,6 +59,11 @@ pub enum Event {
     BranchSwitched(String),
     Stashes(Vec<StashEntry>),
     StashCreated,
+    Blame {
+        path: String,
+        lines: Vec<BlameLine>,
+    },
+    Graph(Vec<GraphCommit>),
     Error(String),
 }
 
@@ -160,6 +170,14 @@ fn handle(repo: &mut Repository, cmd: Command) -> Event {
         },
         Command::DropStash(index) => match git_core::drop_stash(repo, index) {
             Ok(()) => load_stashes(repo),
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadBlame(path) => match git_core::blame_file(repo, &path) {
+            Ok(lines) => Event::Blame { path, lines },
+            Err(e) => Event::Error(e.to_string()),
+        },
+        Command::LoadGraph { max_count } => match git_core::graph_log(repo, max_count) {
+            Ok(commits) => Event::Graph(commits),
             Err(e) => Event::Error(e.to_string()),
         },
     }

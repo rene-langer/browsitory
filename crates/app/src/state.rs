@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
 use egui::Context;
-use git_core::{BranchInfo, CommitInfo, FileDiff, FileStatus, Oid, StashEntry};
+use git_core::{
+    BlameLine, BranchInfo, CommitInfo, FileDiff, FileStatus, GraphCommit, Oid, StashEntry,
+};
 
 use crate::worker::{self, Command, Event};
 
@@ -33,6 +35,11 @@ pub struct RepoSession {
     pub rename_target: Option<String>,
     pub rename_input: String,
     pub new_stash_message: String,
+    pub blame: Option<(String, Vec<BlameLine>)>,
+    pub graph: Option<Vec<GraphCommit>>,
+    /// Currently-selected commit id, shared by the history list and the
+    /// graph view so clicking a commit in either highlights it in both.
+    pub selected_commit: Option<Oid>,
 }
 
 const LOG_PAGE_SIZE: usize = 200;
@@ -63,6 +70,9 @@ impl RepoSession {
             rename_target: None,
             rename_input: String::new(),
             new_stash_message: String::new(),
+            blame: None,
+            graph: None,
+            selected_commit: None,
         };
         session.send(Command::RefreshStatus);
         session.send(Command::LoadLog {
@@ -96,6 +106,13 @@ impl RepoSession {
             staged,
             diff: None,
         });
+        // Selecting a file's diff switches the central panel back from the
+        // blame overlay to the diff view.
+        self.blame = None;
+    }
+
+    pub fn select_commit(&mut self, id: Oid) {
+        self.selected_commit = Some(id);
     }
 
     pub fn commit(&mut self) {
@@ -135,6 +152,14 @@ impl RepoSession {
 
     pub fn drop_stash(&self, index: usize) {
         self.send(Command::DropStash(index));
+    }
+
+    pub fn load_blame(&mut self, path: String) {
+        self.send(Command::LoadBlame(path));
+    }
+
+    pub fn load_graph(&mut self, max_count: usize) {
+        self.send(Command::LoadGraph { max_count });
     }
 
     pub fn poll_events(&mut self) {
@@ -185,6 +210,8 @@ impl RepoSession {
                     self.send(Command::RefreshStatus);
                     self.send(Command::LoadStashes);
                 }
+                Event::Blame { path, lines } => self.blame = Some((path, lines)),
+                Event::Graph(commits) => self.graph = Some(commits),
                 Event::Error(message) => self.error = Some(message),
             }
         }
