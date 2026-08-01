@@ -1,212 +1,93 @@
 # Browsitory
 
-A Progressive Web App for Git repository management with a fast, visual Git client experience. Manage your Git repositories locally as an installable app or deploy on a server to manage repositories from anywhere.
+A fast, native desktop Git client, inspired by the speed and keyboard-driven workflow of tools
+like Sublime Merge. Written in Rust, with a custom-drawn UI (`egui`) and libgit2 (`git2`) for
+git operations — no browser, no server, direct filesystem access to your repositories.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status: Phase 1 + 2**. Implemented today: opening a local repository, commit history,
-> diff viewing, staging/unstaging, committing, branch management, stash, merge with
-> conflict resolution, interactive rebase (pick/drop only), a blame viewer, and a
-> multi-branch commit graph. Push/pull to a remote is still on the [roadmap](#roadmap).
-> Repository access uses the browser's File System Access API, so a Chromium-based browser
-> (Chrome, Edge, Opera) is required for now — see
-> [Limitations](docs/PROJECT_SETUP.md#phase-1-limitations).
+> **Status: Phase 1 (early)**. Implemented today: opening a local repository, commit history,
+> file diffs, staging/unstaging, and committing. Branch management, stash, merge, interactive
+> rebase, blame, and the multi-branch commit graph are on the [roadmap](#roadmap) but not yet
+> implemented. See [Project Setup](docs/PROJECT_SETUP.md) for the full phase plan.
 
 ## Features
 
-- 📱 **Progressive Web App** - Install as a native app or use in browser
-- 🌐 **Offline Support** - Full functionality without internet connection
-- 🔍 **Visual Diff Viewer** - Side-by-side or unified diff comparison
-- 📊 **Commit Graph** - Visualize repository history as a DAG
-- 🌿 **Branch Management** - Create, switch, merge, and rebase branches
-- 📝 **Staging Area** - Stage/unstage changes with hunk-level control
-- 🚀 **Push/Pull** - Synchronize with remote repositories
-- 💾 **Stash Management** - Save work in progress
-- 🔎 **Search & Filter** - Find commits by message, author, or hash
-- ⚡ **Fast & Responsive** - Lightning-fast performance on desktop and tablet
-- 🎨 **Dark/Light Theme** - Beautiful UI with theme support
-- ⌨️ **Keyboard Shortcuts** - Customizable keybindings for power users
+- 🖥️ **Native desktop app** — Windows, macOS, and Linux; no browser required
+- 🔍 **Visual diff viewer** — word-level highlighting on changed lines
+- 📝 **Staging area** — stage/unstage files, write commit messages, commit
+- 📜 **Commit history** — paginated, lazy-loaded commit log
+- 🌿 **Branch management, stash, merge, rebase, blame, commit graph** — planned, not yet built
+- ⚡ **Fast** — direct libgit2 bindings, no JavaScript git reimplementation
 
 ## Quick Start
 
-### Local PWA (Recommended for Getting Started)
-
 ```bash
-# Install dependencies
-npm install
+# One-time setup (installs Rust + system build deps): see scripts/setup-dev.sh
+./scripts/setup-dev.sh
 
-# Development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+# Build and run
+cargo build --workspace
+cargo run -p app
 ```
 
-Then open http://localhost:5173 in your browser and add the app to your home screen.
-
-### Server Deployment (Coming Soon)
-
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for server deployment options.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow.
 
 ## Tech Stack
 
-### Frontend
-- **React 18** - UI framework (MIT)
-- **TypeScript** - Type safety
-- **Vite** - Build tool (MIT)
-- **Tailwind CSS** - Styling (MIT)
-- **isomorphic-git** - Git operations (MIT)
-- **idb-keyval** - Persists repository handles across reloads (Apache 2.0)
-- **react-diff-viewer-continued** - Diff rendering (MIT)
-- **Zustand** - State management (MIT)
-- **Workbox** - Service worker (MIT)
-
-### Testing
-- **Vitest** + **@testing-library/react** - Unit and component tests (MIT)
-
-### Backend (Optional)
-- **Go + Gin** OR **Node.js + Express** (MIT)
-- **PostgreSQL / SQLite3** (MIT)
-- **go-git / nodegit** (MIT / Apache 2.0)
+| Layer | Technology | License |
+|-------|-----------|---------|
+| GUI | [egui](https://github.com/emilk/egui) / [eframe](https://github.com/emilk/egui) | MIT/Apache-2.0 |
+| Git operations | [git2](https://github.com/rust-lang/git2-rs) (libgit2 bindings) | MIT/Apache-2.0 binding; libgit2 itself is GPL-2.0-with-linking-exception — see [License Compliance](docs/LICENSE_COMPLIANCE.md) |
+| Diffing | [similar](https://github.com/mitsuhiko/similar) | MIT/Apache-2.0 |
+| Folder picker | [rfd](https://github.com/PolyMeilex/rfd) | MIT/Apache-2.0 |
+| Config/preferences | serde + toml + directories | MIT/Apache-2.0 |
+| Tests | built-in `cargo test`, real temp-dir git repos | — |
 
 ## Project Structure
 
 ```
 browsitory/
+├── crates/
+│   ├── git-core/   # git2-based service layer (status, log, diff, stage, commit, ...)
+│   ├── config/     # repo registry + preferences (TOML, OS config dir)
+│   └── app/        # egui/eframe desktop UI
 ├── docs/
-│   ├── FEATURES.md          # Detailed feature list
-│   ├── ARCHITECTURE.md      # System architecture & tech decisions
-│   └── DEPLOYMENT.md        # Deployment guide (WIP)
-├── src/
-│   ├── components/          # React components
-│   ├── pages/              # Page components
-│   ├── hooks/              # Custom React hooks
-│   ├── store/              # Zustand stores
-│   ├── lib/                # Utilities and helpers
-│   ├── services/           # Git operations service
-│   ├── styles/             # Global styles
-│   └── App.tsx
-├── public/
-│   ├── manifest.json       # PWA manifest
-│   └── icons/              # PWA icons
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── README.md
+│   ├── FEATURES.md
+│   ├── ARCHITECTURE.md
+│   └── PROJECT_SETUP.md
+├── scripts/
+│   └── setup-dev.sh
+└── Cargo.toml      # workspace manifest
 ```
-
-## Getting Started with Development
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd browsitory
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start development server**
-   ```bash
-   npm run dev
-   ```
-
-4. **Open in browser**
-   - Visit http://localhost:5173
-   - Use Chrome DevTools to simulate PWA installation
-   - Or use "Install app" option in address bar (Chrome/Edge)
-
-## Installation as App
-
-### Desktop
-1. Visit the app in Chrome, Edge, or other Chromium-based browser
-2. Look for "Install app" button in address bar (or menu)
-3. Click to install
-4. App appears in your applications menu
-
-### Mobile (Android)
-1. Visit the app in Chrome
-2. Tap menu → "Install app"
-3. Confirm installation
-4. App added to home screen
-
-### iOS/Safari
-1. Visit the app in Safari
-2. Tap Share → "Add to Home Screen"
-3. Name the shortcut
-4. App added to home screen (limited PWA support)
 
 ## Documentation
 
-- **[Features](docs/FEATURES.md)** - Complete feature specifications
-- **[Architecture](docs/ARCHITECTURE.md)** - System design and technology choices
-- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and conventions (WIP)
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - Deployment and hosting options (WIP)
-
-## Usage Examples
-
-### Opening a Repository
-1. Click "Open Repository" or drag & drop a folder
-2. Browser will prompt for folder access permissions
-3. Repository appears in your repository list
-
-### Viewing Commit History
-1. Select a repository from the list
-2. Commit history displays in main view
-3. Click a commit to see details and diff
-4. Use search to filter commits
-
-### Creating a Commit
-1. Open a repository
-2. Select files to stage in the "Changes" panel
-3. Write commit message
-4. Click "Commit"
-
-### Pushing Changes
-Not yet implemented — planned for a later phase alongside fetch/pull. See the
-[roadmap](#roadmap).
+- **[Features](docs/FEATURES.md)** — complete feature specifications
+- **[Architecture](docs/ARCHITECTURE.md)** — system design and technology choices
+- **[Project Setup](docs/PROJECT_SETUP.md)** — workspace layout and phase roadmap
+- **[Development Guide](docs/DEVELOPMENT.md)** — development setup and conventions
+- **[License Compliance](docs/LICENSE_COMPLIANCE.md)** — dependency license audit
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines (WIP) before submitting PRs.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with [isomorphic-git](https://isomorphic-git.org/) for pure JavaScript git operations
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+One dependency (`git2`, via vendored libgit2) is GPL-2.0-with-linking-exception rather than
+MIT; see [License Compliance](docs/LICENSE_COMPLIANCE.md) for why that's still fine.
 
 ## Roadmap
 
-- [x] Initial architecture and feature planning
-- [x] Phase 1: MVP with local PWA support
-  - [x] Repository management (File System Access API)
-  - [x] Commit history viewer
-  - [x] Diff viewer
-  - [x] Staging/unstaging + commit creation
-  - [x] Unit/component test tooling (Vitest) + CI
-  - [ ] Deeper offline caching of repository data (app-shell offline support is in place)
-- [x] Phase 2: Enhanced features
-  - [x] Branch management + stash
-  - [x] Merge & conflict resolution
-  - [x] Interactive rebase (pick/drop only)
-  - [x] Blame viewer
-  - [x] Graph visualization
-- [ ] Phase 3: Server backend
-  - [ ] Backend API
-  - [ ] User authentication
-  - [ ] Multi-user support
-- [ ] Phase 4: Advanced features
-  - [ ] PR integration
-  - [ ] Code review tools
-  - [ ] Collaboration features
+- [x] Cargo workspace scaffold (git-core / config / app crates)
+- [x] Phase 1: open repo, status, commit history, diff viewer, staging, commit
+- [ ] Phase 2: branch management, stash, merge with conflict resolution, interactive rebase
+      (with reword/squash — a capability gain over the old browser build), blame, commit graph
+- [ ] Phase 3: remote operations (push/pull/fetch, credentials) — newly feasible early thanks
+      to libgit2's native transport support
+- [ ] Phase 4: worktrees, submodules, reflog, PR integration
 
 ## Support
 
@@ -214,4 +95,4 @@ For issues, feature requests, or questions, please open an issue on GitHub.
 
 ---
 
-**Status**: Early development - breaking changes expected. Not ready for production use yet.
+**Status**: Early development — breaking changes expected. Not ready for production use yet.
