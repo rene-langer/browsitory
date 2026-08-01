@@ -53,22 +53,14 @@
 
 ## UI/UX Features
 
-### App-Like Experience
-- **Offline Support** - Cache repository data for offline browsing
-- **Installable** - Add to home screen / app menu
+### Desktop App Experience
 - **Native Notifications** - Background operation notifications
 - **Keyboard Shortcuts** - Customizable keybindings for common operations
 - **Dark/Light Theme** - System theme detection with toggle
 
-### Responsive Design
-- **Desktop Layout** - Full-featured desktop interface
-- **Tablet Support** - Touch-optimized tablet layout
-- **Mobile View** - Simplified mobile interface for viewing only
-
 ### Performance
 - **Lazy Loading** - Load history on demand
 - **Virtual Scrolling** - Efficient rendering of large lists
-- **Service Worker** - Offline capability and caching
 
 ## Multi-Repository Features
 - **Quick Switch** - Command palette for switching repos
@@ -76,6 +68,5 @@
 - **Batch Operations** - Operations on multiple repos (fetch all, pull all)
 
 ## Configuration & Persistence
-- **Local Storage** - Persist user preferences and repo list
-- **IndexedDB** - Cache commit history and diffs
+- **Config File** - Persist user preferences and repo list (TOML, OS config directory)
 - **Import/Export** - Export repo configs and settings

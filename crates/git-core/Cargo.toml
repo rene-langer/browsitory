@@ -1,0 +1,13 @@
+[package]
+name = "git-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "https", "ssh"] }
+similar = { version = "3.1.1", features = ["unicode"] }
+thiserror = "2.0.19"
+
+[dev-dependencies]
+tempfile = "3.27.0"

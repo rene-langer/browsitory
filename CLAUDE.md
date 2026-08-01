@@ -5,145 +5,136 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev            # Vite dev server (http://localhost:5173)
-npm run build           # tsc + vite build (production)
-npm run lint             # eslint . --ext .ts,.tsx
-npm run type-check      # tsc --noEmit
-npm test                # vitest run (single run, used in CI)
-npm run test:watch      # vitest (watch mode)
-npm run test:coverage   # vitest run --coverage
-npm run format           # prettier --write
+cargo build --workspace              # build all crates
+cargo run -p app                     # launch the desktop app
+cargo test --workspace                # run all tests (git-core + config; app has none yet)
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all                      # format
+cargo fmt --all -- --check           # format check (used in CI)
 ```
 
-Run a single test file or test: `npx vitest run src/services/git.test.ts` or
-`npx vitest run -t "reports a modified tracked file"`.
+Run a single test file or test: `cargo test -p git-core --test log` or
+`cargo test -p git-core -- reports_untracked_file_as_unstaged_new`.
 
-CI (`.github/workflows/ci.yml`) runs, in order: `npm ci`, `lint`, `type-check`, `build`, `test`.
-All four must pass.
+First-time setup on a fresh machine: `scripts/setup-dev.sh` installs the Rust toolchain (via
+rustup) and the system packages `eframe`/`winit` and `git2`'s vendored libgit2 build need
+(cmake, a C toolchain, `libxkbcommon`/`libwayland`/`libx11` dev headers on Linux).
+
+CI (`.github/workflows/ci.yml`) runs, per OS in a Linux/macOS/Windows matrix, in order:
+`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build --release`.
+All must pass on all three platforms.
 
 ## Project status
 
-Phase 1 (MVP) is implemented: opening a local repository, commit history, diff viewing,
-staging/unstaging, and committing. Phase 2 is also implemented: branch management (create/
-delete/rename/switch), stash (push/apply/pop/drop/list), merge with conflict resolution,
-interactive rebase (pick/drop only — no reword/squash), a blame viewer, and a multi-branch
-commit graph view. Push/pull to a remote is still not implemented. See `docs/PROJECT_SETUP.md`
-for the phase roadmap and `docs/ARCHITECTURE.md` for the full tech-stack rationale.
+This is a from-scratch Rust rewrite (branch `feat/rust_from_scratch`) of what was previously a
+browser-only PWA (React + TypeScript + isomorphic-git). The old JS/TS codebase was deleted
+outright rather than ported incrementally — see git history before this branch if you need to
+recover something from it.
 
-### Phase 2 additions worth knowing before touching them
-
-- **Merge conflicts**: `mergeBranch`/`cherryPick` (the latter used by rebase) both use
-  `abortOnConflict: false`, which writes conflict markers to the working tree and unmerged
-  stage-1/2/3 (base/ours/theirs) index entries, then throws `MergeConflictError` — without
-  moving the branch ref. `getConflictDiff()` in `git.ts` reads those stage-2/3 entries
-  directly via isomorphic-git's `isomorphic-git/managers` (`GitIndexManager`) and
-  `isomorphic-git/models` (`FileSystem`) subpath exports — these are legitimate, declared
-  entries in the package's own `exports` map, not undocumented internals; verify against
-  `node_modules/isomorphic-git/package.json` if this ever looks broken after an upgrade.
-- **Interactive rebase** (`src/services/rebase.ts`) is hand-rolled from `cherryPick` +
-  `checkout`/`branch` — isomorphic-git has no native `rebase` command. State is persisted to
-  a `.git/browsitory-rebase.json` sidecar (via the same injected `fs`) so a paused rebase
-  survives a reload. The branch ref is never touched until the rebase fully completes —
-  every step runs in detached HEAD, which is what makes `abortRebase` a trivial checkout
-  back to the original branch.
-- **Blame** (`src/services/blame.ts`) is also hand-rolled — no native `blame` command either.
-  It walks `git.log({ filepath })` oldest-to-newest, re-diffing the running line-attribution
-  model against each commit with the `diff` package's `diffLines`. Both diff inputs must end
-  with a trailing `\n` or jsdiff misreports an unchanged last line as a remove+add whenever
-  old/new line counts differ — a real bug hit once, see the comment in `blame.ts`.
-- **Branch/stash** (`listAllBranches`, `createBranch`, `switchBranch`, `listStashes`, etc. in
-  `git.ts`) are thin wrappers — isomorphic-git supports all of this natively. One gotcha:
-  `git.stash({op:'list'})` returns `string[]` formatted as `"stash@{N}: <message>"` at
-  runtime despite its looser declared type; parse it, don't expect objects.
-- **`Repository.tsx`** has no per-feature routing (branch/merge/rebase/blame/graph are all
-  inline state in that one page, same precedent as Phase 1's diff viewing) — it composes
-  `gitStore`, `rebaseStore`, and `repositoryStore` together and switches between a History
-  view (staging/stash/commit sidebar + diff/blame/merge/rebase content) and a Graph view.
+Phase 1 (this pass) is implemented: open a local repository, view status, commit history,
+and file diffs, stage/unstage, and commit. Branch management, stash, merge, interactive
+rebase, blame, and the multi-branch commit graph (the old Phase 2 feature set) are **not**
+implemented yet — deliberately deferred, not an oversight. See `docs/PROJECT_SETUP.md` for
+the full phase roadmap and `docs/ARCHITECTURE.md` for the tech-stack rationale.
 
 ## Architecture
 
-This is a client-only PWA (React + TypeScript + Vite) — there is no backend in Phase 1. Git
-repositories are opened directly from the user's disk via the browser's **File System Access
-API** (`showDirectoryPicker`), which is why the app currently only works in Chromium-based
-browsers (Chrome/Edge/Opera).
+Three-crate Cargo workspace:
 
-### The fs adapter is the load-bearing piece
+- **`crates/git-core`** — all git operations, wrapping `git2` (libgit2 bindings). UI-agnostic
+  and unit-tested headlessly.
+- **`crates/config`** — repo registry (list of opened repo paths) + user preferences,
+  persisted as a single TOML file via `serde`/`toml` in the OS config directory (resolved by
+  the `directories` crate). Replaces the old browser build's IndexedDB-backed registry — a
+  native app just writes a real file.
+- **`crates/app`** — the `egui`/`eframe` desktop UI. The only crate that depends on
+  `eframe`/`egui`/`rfd`.
 
-`src/services/fsaGitFs.ts` bridges the File System Access API to the `fs.promises`-shaped
-object isomorphic-git expects (`readFile`, `writeFile`, `unlink`, `readdir`, `mkdir`, `rmdir`,
-`stat`, `lstat`, `rename`). This is hand-written, not a dependency — there is no MIT-licensed
-off-the-shelf bridge; the closest option (ZenFS's `@zenfs/dom` `WebAccess` backend) is
-LGPL-3.0 and was rejected on license grounds (see "License policy" below). Key gotchas already
-worked through here, worth knowing before touching this file:
+This is a **native desktop app**, not a browser PWA: no File System Access API, no service
+worker, no IndexedDB, no permission-revocation dance. Repository access is direct filesystem
+access via `git2`, working from any OS.
 
-- `mkdir` is fully recursive and idempotent by design, independent of whatever
-  parent-directory-creation behavior isomorphic-git's own `FileSystem` wrapper does or doesn't
-  do internally — don't rely on isomorphic-git to create parent dirs for you.
-- Errors must carry Node-style `.code` values (`ENOENT`, `ENOTDIR`, `EISDIR`, ...) because
-  isomorphic-git branches on `err.code`, not on `DOMException.name`.
-- No symlink support (`lstat` is aliased to `stat`).
+### git-core is dependency-injected on purpose
 
-### git.ts is dependency-injected on purpose
+Every function in `git-core` takes a `&git2::Repository` (or a path, for `open`) as an
+explicit argument rather than reading a module singleton — same rationale as the old `git.ts`:
+it keeps the crate unit-testable with real temp-directory repos
+(`tempfile::TempDir` + `git2::Repository::init`, see `crates/git-core/tests/common/mod.rs`),
+exercising the *exact same* code paths the UI uses. When adding a new git operation, keep this
+shape: a plain function in its own module (`status.rs`, `log.rs`, `diff.rs`, ...), re-exported
+from `lib.rs`, tested against a real repo in `tests/`, not a mocked `git2::Repository`.
 
-`src/services/git.ts` wraps isomorphic-git calls (`statusMatrix`, `log`, `walk`, `add`,
-`commit`, ...) as functions taking `(fs, dir, ...)` explicitly rather than reading a module
-singleton. This is what makes `src/services/git.test.ts` possible without a browser: tests
-pass Node's real `fs` module against real temp-directory repos
-(`fs.mkdtempSync` + `isomorphic-git`'s own `init`), exercising the *exact same* code paths the
-browser uses with `fsaGitFs`. When adding a new git operation, keep this shape.
+### git2 API gotchas already hit once
 
-Two isomorphic-git behaviors that are easy to get wrong here (both already hit and fixed once
-— see git history / commit messages if you need the "why"):
-- `git.walk`'s `map()` callback: returning `null` for a tree entry tells isomorphic-git to
-  **prune that subtree** (skip walking its children). Returning `undefined` just excludes that
-  entry from the results without pruning. Always use `undefined`, never `null`, unless you
-  intend to prune.
-- The `STAGE()` walker's entries have a **no-op `content()`** ("Cannot get content for an
-  index entry" — this is intentional upstream). To read staged file content, fetch the oid via
-  `entry.oid()` and call `git.readBlob({ fs, dir, oid })` instead. `readEntryContent()` in
-  `git.ts` already does this fallback — reuse it rather than calling `entry.content()`
-  directly on new code paths.
+- Several `git2` accessors that look infallible aren't: `Commit::summary()` and
+  `Signature::name()`/`email()` return `Result<Option<&str>, Error>` /
+  `Result<&str, Error>`, not bare `Option`/`&str` — chain `.ok().flatten().unwrap_or_default()`
+  or `.unwrap_or_default()` accordingly (see `log.rs`). `StatusEntry::path()` returns
+  `Result<&str, Error>`, not `Option<&str>` — use `let Ok(path) = entry.path() else { continue };`
+  in a status loop, not `let Some(...)`.
+- `Revwalk::set_sorting` with plain `Sort::TIME` is not enough to guarantee parents sort after
+  children — commits made in the same second (as fast test setups do, and as real rebases/
+  imports can) can come out in the wrong order. Use `Sort::TOPOLOGICAL | Sort::TIME` (matches
+  `git log`'s own default ordering) — see `log.rs`.
 
-### State flow
+### git2 vs. isomorphic-git: capability gain, not just a port
 
-`src/store/repositoryStore.ts` (Zustand) owns the list of opened repositories
-(persisted via `src/services/repositoryRegistry.ts`, an `idb-keyval` wrapper that stores
-`FileSystemDirectoryHandle`s directly in IndexedDB) and the currently-open repo's `{ fs, dir }`
-pair. `src/store/gitStore.ts` owns commit/status/diff state and takes an `OpenRepository`
-(`{ fs, dir }`) as an explicit argument on every action rather than reading
-`repositoryStore` internally — this keeps it mockable in isolation (see `gitStore.test.ts`).
+libgit2 has **native** support for several things the old isomorphic-git codebase had to
+hand-roll (and where the hand-rolling had real bugs — see the old CLAUDE.md via git history if
+curious): blame (`Repository::blame_file`), and — once Phase 2 lands — full interactive rebase
+via `Repository::rebase()` (pick/reword/edit/squash/fixup/drop, not just pick/drop like the old
+isomorphic-git-based rebase), native merge conflict indices, and native stash/cherry-pick. Don't
+re-introduce hand-rolled versions of these; use the native `git2` API.
 
-Pages (`src/pages/Repository.tsx`) compose both stores; there is no separate routed page for
-commit diffs — commit and staged/unstaged file diffs are both rendered inline via
-`selectedDiff` in `gitStore`, not through nested routes. If you're tempted to add a
-`/repo/:id/commit/:hash` route, know that this was tried and deliberately backed out because
-staged/unstaged file diffs have no natural URL of their own in this design.
+### Threading model
 
-### Browser permission handling
+`git2::Repository` is not `Send`. Each open repository (`state::RepoSession`) spawns one
+dedicated worker thread (`worker::spawn` in `crates/app/src/worker.rs`) that opens its own
+`Repository` handle and owns it exclusively for the thread's lifetime — the handle itself never
+crosses a thread boundary, only plain owned `Command`/`Event` enum values do, over
+`std::sync::mpsc` channels. The UI thread (`eframe::App::ui`) drains the event channel
+non-blocking (`try_recv`) each frame; the worker calls `egui::Context::request_repaint()`
+(a cloned `Context` is `Send + Sync`) after finishing a command so the UI updates promptly
+instead of waiting for the next input-driven repaint. One worker thread per open repo also
+means switching between repos never contends on a shared handle — this is what will make
+multi-repo "quick switch" (a `FEATURES.md` requirement) essentially free later.
 
-`FileSystemDirectoryHandle`s can be restored from IndexedDB across reloads, but the browser
-can silently revoke write permission on them. Any code path that resumes a stored handle must
-call `verifyPermission()` (in `fsaGitFs.ts`) before use — see `openHandle()` in
-`repositoryStore.ts` for the pattern.
+When adding a new UI-triggered git operation: add a `Command`/`Event` variant pair in
+`worker.rs`, handle it in `worker::handle`, and add the corresponding state mutation in
+`RepoSession::poll_events` (`crates/app/src/state.rs`) — don't call `git-core` functions
+directly from UI code in `crates/app/src/ui/`.
+
+### egui/eframe version-specific API notes (0.35)
+
+This version's `App` trait's required method is `fn ui(&mut self, ui: &mut egui::Ui, frame:
+&mut eframe::Frame)`, not the older `update(&mut self, ctx: &egui::Context, frame: ...)`.
+`SidePanel`/`TopBottomPanel` from older egui versions don't exist in 0.35 — they were unified
+into a single `egui::Panel` type with `Panel::left/right/top/bottom(id)` constructors, and
+every panel's `.show()` (including `CentralPanel`) now takes `&mut Ui`, not `&Context`. Panels
+are still shown by nesting `.show(ui, |ui| ...)` calls against the same outer `ui` in sequence
+(side/top/bottom panels first, `CentralPanel` last) — see `crates/app/src/main.rs`. If you're
+looking at online egui examples that use `ctx.set_visuals`/`SidePanel::show(ctx, ...)`, they're
+likely for an older version; check `crates/app/Cargo.toml`'s pinned egui/eframe version and the
+vendored source under `~/.cargo/registry/src/.../egui-<version>` before trusting example code.
 
 ## License policy
 
-MIT-only. Every dependency must be MIT or a compatible permissive license (Apache-2.0, ISC,
-BSD, MIT-0). GPL/AGPL/LGPL/SSPL and similar copyleft licenses are disallowed — this has
-already ruled out at least one otherwise-convenient library (ZenFS, LGPL-3.0). Verify with
-`npm view <package> license` before adding a dependency, and record it in
-`docs/LICENSE_COMPLIANCE.md`.
+Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0) with **one explicit, deliberate
+exception**: `git2` links against libgit2 (via vendored build), which is
+GPL-2.0-with-linking-exception — not MIT, but the linking exception explicitly permits linking
+from differently-licensed code, so this was a conscious choice (see `docs/LICENSE_COMPLIANCE.md`
+for the full rationale) rather than an oversight. Verify new dependencies with
+`cargo info <crate>` and record them in `docs/LICENSE_COMPLIANCE.md`.
 
 ## Testing conventions
 
-- Vitest config is in `vitest.config.ts` (separate from `vite.config.ts` so the PWA plugin
-  never loads during tests).
-- Browser-only APIs (`FileSystemDirectoryHandle`, `showDirectoryPicker`) are faked, not
-  mocked-at-the-module-level, where practical: `src/test/fakeDirectoryHandle.ts` is a minimal
-  in-memory implementation used to unit-test `fsaGitFs.ts` directly.
-- Service-layer tests (`git.test.ts`) use real temp-directory git repos via Node's `fs`, not
-  mocks — prefer this pattern for new git.ts functions over mocking isomorphic-git.
-- Store tests mock the service layer (`vi.mock('@services/git', ...)`) since stores are
-  thin orchestration over services.
-- Path aliases (`@components`, `@pages`, `@hooks`, `@store`, `@lib`, `@services`) are defined
-  in both `tsconfig.json` and `vitest.config.ts` — keep them in sync if you add a new one.
+- `git-core` tests live in `crates/git-core/tests/*.rs` (integration tests, one file per
+  module) plus a shared `tests/common/mod.rs` helper (`init_repo()` inits a temp-dir repo with
+  a test identity configured; `write_file`/`remove_file` mutate its working tree). They use
+  real repos via `git2::Repository::init`, never a mocked `Repository` — direct continuation
+  of the old `git.test.ts` philosophy.
+- `config` tests are unit tests inside `store.rs` (`#[cfg(test)] mod tests`), also against a
+  real temp-dir TOML file, not a mocked filesystem.
+- `app` has no tests yet; when adding some, prefer testing `state.rs`'s event-handling logic
+  (`RepoSession::poll_events`, `AppState::open_repo`) directly as plain Rust, rather than trying
+  to drive `eframe`'s windowing/GPU context in a test.
