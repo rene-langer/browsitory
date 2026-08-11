@@ -1,2 +1,13 @@
 *.local*
 .env
+
+# Rust build output
+/target
+**/target
+
+# Frontend
+frontend/node_modules
+frontend/dist
+
+# Claude Code worktrees (nested checkouts for parallel/background agents)
+.claude/worktrees/
