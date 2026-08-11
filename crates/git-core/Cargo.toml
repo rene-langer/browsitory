@@ -1,0 +1,12 @@
+[package]
+name = "git-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+git2 = "0.21"
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
