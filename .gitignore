@@ -1,20 +1,2 @@
-# Rust build output
-/target
-**/target
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Local, non-shared notes
-CLAUDE.local.md
-
-# Agent worktrees (nested checkouts for parallel background agents)
-.claude/
+*.local*
+.env
