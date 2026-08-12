@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BranchInfo, CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -24,6 +24,11 @@ describe("useAppState", () => {
       openRepo: async () => {},
       getStatus: async () => [entry],
       getLog: async () => [commit],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -53,6 +58,11 @@ describe("useAppState", () => {
         return [];
       },
       getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -85,6 +95,11 @@ describe("useAppState", () => {
         return getStatusCalls === 1 ? [entryA] : [];
       },
       getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -115,6 +130,11 @@ describe("useAppState", () => {
       },
       getStatus: async () => unimplemented(),
       getLog: async () => unimplemented(),
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -128,5 +148,136 @@ describe("useAppState", () => {
     await act(() => result.current.openRepo("/bad"));
 
     expect(result.current.state.error).toBe("Error: no such directory");
+  });
+
+  it("openRepo also populates branches", async () => {
+    const branch: BranchInfo = { name: "main", isCurrent: true };
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [branch],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+
+    await act(() => result.current.openRepo("/repo"));
+
+    expect(result.current.state.branches).toEqual([branch]);
+  });
+
+  it("switchBranch calls client.switchBranch then refreshes branches", async () => {
+    let switchArg: string | null = null;
+    let branchesCallCount = 0;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => {
+        branchesCallCount += 1;
+        return branchesCallCount === 1
+          ? [{ name: "main", isCurrent: true }]
+          : [{ name: "feature", isCurrent: true }, { name: "main", isCurrent: false }];
+      },
+      createBranch: async () => unimplemented(),
+      switchBranch: async (name: string) => {
+        switchArg = name;
+      },
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+
+    await act(() => result.current.switchBranch("feature"));
+
+    expect(switchArg).toBe("feature");
+    expect(result.current.state.branches).toEqual([
+      { name: "feature", isCurrent: true },
+      { name: "main", isCurrent: false },
+    ]);
+  });
+
+  it("createBranch calls client.createBranch and clears the create-branch draft", async () => {
+    let createArgs: [string, string] | null = null;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async (name: string, startPoint: string) => {
+        createArgs = [name, startPoint];
+      },
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    act(() => result.current.openCreateBranchDraft("abc123"));
+    expect(result.current.state.createBranchDraft).toEqual({ startPoint: "abc123" });
+
+    await act(() => result.current.createBranch("feature", "abc123"));
+
+    expect(createArgs).toEqual(["feature", "abc123"]);
+    expect(result.current.state.createBranchDraft).toBeNull();
+  });
+
+  it("closeCreateBranchDraft clears the draft without calling the client", async () => {
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    act(() => result.current.openCreateBranchDraft("HEAD"));
+
+    act(() => result.current.closeCreateBranchDraft());
+
+    expect(result.current.state.createBranchDraft).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BranchInfo, CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
 
 const LOG_LIMIT = 300;
 
@@ -10,6 +10,8 @@ export interface AppState {
   selectedRow: SelectedRow;
   status: StatusEntry[];
   log: CommitInfo[];
+  branches: BranchInfo[];
+  createBranchDraft: { startPoint: string } | null;
   error: string | null;
 }
 
@@ -20,6 +22,12 @@ export interface UseAppStateResult {
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
   commit(message: string): Promise<void>;
+  createBranch(name: string, startPoint: string): Promise<void>;
+  switchBranch(name: string): Promise<void>;
+  deleteBranch(name: string, force: boolean): Promise<void>;
+  renameBranch(oldName: string, newName: string): Promise<void>;
+  openCreateBranchDraft(startPoint: string): void;
+  closeCreateBranchDraft(): void;
   refresh(): Promise<void>;
 }
 
@@ -29,16 +37,19 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     selectedRow: "uncommitted",
     status: [],
     log: [],
+    branches: [],
+    createBranchDraft: null,
     error: null,
   });
 
   const refresh = useCallback(async () => {
     try {
-      const [status, log] = await Promise.all([
+      const [status, log, branches] = await Promise.all([
         client.getStatus(),
         client.getLog(LOG_LIMIT),
+        client.listBranches(),
       ]);
-      setState((prev) => ({ ...prev, status, log, error: null }));
+      setState((prev) => ({ ...prev, status, log, branches, error: null }));
     } catch (err) {
       setState((prev) => ({ ...prev, error: String(err) }));
     }
@@ -82,5 +93,47 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
 
-  return { state, openRepo, selectRow, stageFile, unstageFile, commit, refresh };
+  const createBranch = useCallback(
+    (name: string, startPoint: string) =>
+      runMutation(async () => {
+        await client.createBranch(name, startPoint);
+        setState((prev) => ({ ...prev, createBranchDraft: null }));
+      }),
+    [client, runMutation],
+  );
+  const switchBranch = useCallback(
+    (name: string) => runMutation(() => client.switchBranch(name)),
+    [client, runMutation],
+  );
+  const deleteBranch = useCallback(
+    (name: string, force: boolean) => runMutation(() => client.deleteBranch(name, force)),
+    [client, runMutation],
+  );
+  const renameBranch = useCallback(
+    (oldName: string, newName: string) => runMutation(() => client.renameBranch(oldName, newName)),
+    [client, runMutation],
+  );
+
+  const openCreateBranchDraft = useCallback((startPoint: string) => {
+    setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
+  }, []);
+  const closeCreateBranchDraft = useCallback(() => {
+    setState((prev) => ({ ...prev, createBranchDraft: null }));
+  }, []);
+
+  return {
+    state,
+    openRepo,
+    selectRow,
+    stageFile,
+    unstageFile,
+    commit,
+    createBranch,
+    switchBranch,
+    deleteBranch,
+    renameBranch,
+    openCreateBranchDraft,
+    closeCreateBranchDraft,
+    refresh,
+  };
 }
