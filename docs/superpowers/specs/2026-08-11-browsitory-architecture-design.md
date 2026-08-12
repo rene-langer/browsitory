@@ -5,7 +5,7 @@ Status: Approved
 
 ## Context
 
-Browsitory is a git client. Two prior implementations exist in git
+Browsitory is modern graphical git client. Two prior implementations exist in git
 history: a browser PWA (React + TypeScript + isomorphic-git, `main` branch) and a native Rust
 desktop app (`git2` + `egui`, branch `feat/rust_from_scratch`, phases 1-3 complete). Both were
 deleted from the working tree to start a clean architecture pass, seeded by
