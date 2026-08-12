@@ -208,7 +208,11 @@ fix: explicit error state, rendered, never silently falling through to an empty-
   union), same rationale as Phase 0's `StatusKind` test.
 - `frontend`: Vitest + Testing Library per component, `RepoClient` mocked — never
   `@tauri-apps/api`/`@tauri-apps/plugin-dialog` directly.
-- **E2E (Playwright) starts this phase**, per the Phase 0 architecture spec's roadmap note. One
+- **E2E starts this phase**, per the Phase 0 architecture spec's roadmap note — via
+  `tauri-driver` + WebdriverIO, not Playwright (corrected from the original roadmap note:
+  Playwright drives browser engines it manages itself and can't attach to a native
+  Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the actually-supported
+  path — `docs/ARCHITECTURE.md`'s testing-strategy section carries the same correction). One
   flow: open a repo → see its status → stage a file → commit → see the new commit in history.
   Drives the real `cargo tauri dev` build; this is the one flow that spans backend+frontend in a
   way unit tests can't catch (the actual IPC round-trip, the actual git operations).

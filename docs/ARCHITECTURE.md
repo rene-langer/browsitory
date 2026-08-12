@@ -88,9 +88,11 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   the `StatusKind` strings it serializes to the `StatusKind` union in
   `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
-- E2E (added from Phase 1 onward, not in Phase 0): Playwright against the `cargo tauri dev`
-  build, one flow per major feature area, added where a flow spans backend+frontend in a way
-  unit tests can't catch.
+- E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO against the
+  `cargo tauri dev` build, one flow per major feature area, added where a flow spans
+  backend+frontend in a way unit tests can't catch. (Not Playwright: Playwright drives browser
+  engines it manages itself and can't attach to a native Tauri/webkit2gtk window; `tauri-driver`
+  is Tauri's own WebDriver bridge, the actually-supported E2E path.)
 
 ## Roadmap
 
