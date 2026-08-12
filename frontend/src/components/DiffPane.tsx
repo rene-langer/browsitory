@@ -11,6 +11,7 @@ export function DiffPane({
   onStageFile,
   onUnstageFile,
   onCommit,
+  onSaveStash,
 }: {
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -18,6 +19,7 @@ export function DiffPane({
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
+  onSaveStash: () => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -27,6 +29,7 @@ export function DiffPane({
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
         onCommit={onCommit}
+        onSaveStash={onSaveStash}
       />
     );
   }
@@ -41,12 +44,14 @@ function UncommittedDiffPane({
   onStageFile,
   onUnstageFile,
   onCommit,
+  onSaveStash,
 }: {
   client: RepoClient;
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
+  onSaveStash: () => void;
 }) {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
   const [hunks, setHunks] = useState<DiffHunk[]>([]);
@@ -104,6 +109,7 @@ function UncommittedDiffPane({
         ))}
       </ul>
       {error !== null ? <p role="alert">{error}</p> : <DiffView hunks={displayedHunks} />}
+      <button onClick={onSaveStash}>Stash</button>
       <CommitBox onCommit={onCommit} disabled={stagedCount === 0} />
     </div>
   );

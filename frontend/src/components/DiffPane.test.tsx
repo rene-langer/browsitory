@@ -51,6 +51,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -70,6 +71,7 @@ describe("DiffPane", () => {
           onStageFile={onStageFile}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -99,6 +101,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -129,6 +132,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -163,6 +167,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -184,6 +189,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -204,6 +210,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -222,6 +229,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -233,6 +241,45 @@ describe("DiffPane", () => {
       });
 
       expect(screen.getByText("Commit")).not.toBeDisabled();
+    });
+
+    it("renders a Stash button", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Stash")).toBeInTheDocument();
+    });
+
+    it("clicking Stash calls onSaveStash", () => {
+      const client = fakeClient({});
+      const onSaveStash = vi.fn();
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={onSaveStash}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Stash"));
+
+      expect(onSaveStash).toHaveBeenCalled();
     });
   });
 
@@ -260,6 +307,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -282,6 +330,7 @@ describe("DiffPane", () => {
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
         />,
       );
 
@@ -289,6 +338,26 @@ describe("DiffPane", () => {
 
       expect(screen.queryByText("Commit")).toBeNull();
       expect(screen.queryByText("Stage")).toBeNull();
+    });
+
+    it("no Stash button renders for a commit's diff", async () => {
+      const client = fakeClient({ getCommitFiles, getCommitDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+        />,
+      );
+
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+
+      expect(screen.queryByText("Stash")).toBeNull();
     });
   });
 });
