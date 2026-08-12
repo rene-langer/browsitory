@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { BranchSwitcher } from "./components/BranchSwitcher";
 import { DiffPane } from "./components/DiffPane";
 import { HistoryList } from "./components/HistoryList";
 import { RepoPicker } from "./components/RepoPicker";
@@ -37,12 +38,23 @@ export default function App() {
     <main>
       <h1>Browsitory</h1>
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
+      <BranchSwitcher
+        branches={appState.state.branches}
+        createBranchDraft={appState.state.createBranchDraft}
+        onSwitchBranch={appState.switchBranch}
+        onCreateBranch={appState.createBranch}
+        onDeleteBranch={appState.deleteBranch}
+        onRenameBranch={appState.renameBranch}
+        onOpenCreateBranchDraft={appState.openCreateBranchDraft}
+        onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
+      />
       <div className="app-layout">
         <HistoryList
           status={appState.state.status}
           log={appState.state.log}
           selectedRow={appState.state.selectedRow}
           onSelectRow={appState.selectRow}
+          onBranchFromCommit={appState.openCreateBranchDraft}
         />
         <DiffPane
           client={tauriRepoClient}
