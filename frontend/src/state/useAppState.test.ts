@@ -219,6 +219,36 @@ describe("useAppState", () => {
     ]);
   });
 
+  it("switchBranch resets selectedRow to uncommitted", async () => {
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => {},
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    act(() => result.current.selectRow({ commitId: "abc123" }));
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc123" });
+
+    await act(() => result.current.switchBranch("feature"));
+
+    expect(result.current.state.selectedRow).toBe("uncommitted");
+  });
+
   it("createBranch calls client.createBranch and clears the create-branch draft", async () => {
     let createArgs: [string, string] | null = null;
     const client: RepoClient = {
@@ -251,6 +281,36 @@ describe("useAppState", () => {
 
     expect(createArgs).toEqual(["feature", "abc123"]);
     expect(result.current.state.createBranchDraft).toBeNull();
+  });
+
+  it("createBranch resets selectedRow to uncommitted", async () => {
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => {},
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    act(() => result.current.selectRow({ commitId: "abc123" }));
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc123" });
+
+    await act(() => result.current.createBranch("feature", "abc123"));
+
+    expect(result.current.state.selectedRow).toBe("uncommitted");
   });
 
   it("closeCreateBranchDraft clears the draft without calling the client", async () => {

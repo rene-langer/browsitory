@@ -97,12 +97,16 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (name: string, startPoint: string) =>
       runMutation(async () => {
         await client.createBranch(name, startPoint);
-        setState((prev) => ({ ...prev, createBranchDraft: null }));
+        setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
       }),
     [client, runMutation],
   );
   const switchBranch = useCallback(
-    (name: string) => runMutation(() => client.switchBranch(name)),
+    (name: string) =>
+      runMutation(async () => {
+        await client.switchBranch(name);
+        setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
+      }),
     [client, runMutation],
   );
   const deleteBranch = useCallback(
