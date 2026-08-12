@@ -3,10 +3,23 @@ import { describe, expect, it } from "vitest";
 import type { RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { StatusView } from "./StatusView";
 
+function unimplemented(): never {
+  throw new Error("not implemented in this fake");
+}
+
 function fakeClient(entries: StatusEntry[]): RepoClient {
   return {
+    pickRepoFolder: async () => unimplemented(),
+    listRecentRepos: async () => unimplemented(),
     openRepo: async () => {},
     getStatus: async () => entries,
+    getLog: async () => unimplemented(),
+    getWorkingDiff: async () => unimplemented(),
+    getCommitDiff: async () => unimplemented(),
+    getCommitFiles: async () => unimplemented(),
+    stageFile: async () => unimplemented(),
+    unstageFile: async () => unimplemented(),
+    commit: async () => unimplemented(),
   };
 }
 
@@ -33,10 +46,19 @@ describe("StatusView", () => {
 
   it("renders the error instead of the empty state when getStatus rejects", async () => {
     const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => {
         throw new Error("no repo open");
       },
+      getLog: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
     };
 
     render(<StatusView client={client} />);
