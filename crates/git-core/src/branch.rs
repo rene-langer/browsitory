@@ -67,3 +67,20 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
     branch.rename(new_name, false)?;
     Ok(())
 }
+
+pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
+    let mut branch = repo.find_branch(name, BranchType::Local)?;
+    if !force {
+        let branch_oid = branch.get().peel_to_commit()?.id();
+        let head_oid = repo.head()?.peel_to_commit()?.id();
+        // libgit2's graph_descendant_of treats a commit as not-a-descendant-of-itself, so an
+        // exact tip match (the branch is fully caught up with HEAD, no divergent commits)
+        // needs its own check to count as merged.
+        let merged = branch_oid == head_oid || repo.graph_descendant_of(head_oid, branch_oid)?;
+        if !merged {
+            return Err(BranchError::NotMerged(name.to_string()));
+        }
+    }
+    branch.delete()?;
+    Ok(())
+}
