@@ -1,5 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,18 @@ function setupFixtureRepo(repoPath: string) {
   fs.rmSync(repoPath, { recursive: true, force: true });
   fs.mkdirSync(repoPath, { recursive: true });
   execFileSync("git", ["init"], { cwd: repoPath, stdio: "inherit" });
+  // Local (not global) identity — GitHub-hosted runners ship no global git identity, and
+  // `git_core::commit::commit`'s `repo.signature()` call errors without one (the same failure
+  // mode `crates/git-core/tests/stage_commit.rs`'s
+  // `commit_without_a_configured_identity_returns_an_error` test exists to cover). Setting it
+  // locally here, rather than relying on the host's `~/.gitconfig`, also makes this fixture
+  // hermetic for local runs. Matches the "Test User"/"test@example.com" convention from
+  // `crates/git-core/tests/common/mod.rs`'s `init_repo()` helper.
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: repoPath, stdio: "inherit" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: repoPath,
+    stdio: "inherit",
+  });
   fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
 }
 
@@ -48,6 +61,32 @@ let exiting = false;
 function closeTauriDriver() {
   exiting = true;
   tauriDriver?.kill();
+}
+
+// Poll until something is listening on 127.0.0.1:4444, rather than assuming `tauri-driver` is
+// ready right after `spawn()` returns. WebdriverIO's own session-creation retries mask this
+// most of the time, but a cold CI runner is slower than a local box, and a plausible flake
+// class is cheap to remove outright: retry a raw TCP connect for a few seconds before letting
+// `beforeSession` return (and WebdriverIO proceed to actually create the session).
+function waitForPort(port: number, host: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect({ port, host }, () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        socket.destroy();
+        if (Date.now() >= deadline) {
+          reject(new Error(`Timed out waiting for ${host}:${port} to accept connections`));
+          return;
+        }
+        setTimeout(attempt, 100);
+      });
+    };
+    attempt();
+  });
 }
 
 function onShutdown(fn: () => void) {
@@ -105,7 +144,7 @@ export const config: WebdriverIO.Config = {
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
-  beforeSession: () => {
+  beforeSession: async () => {
     const driverPath = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
     tauriDriver = spawn(driverPath, [], { stdio: [null, process.stdout, process.stderr] });
     tauriDriver.on("error", (error) => {
@@ -118,6 +157,7 @@ export const config: WebdriverIO.Config = {
         process.exit(1);
       }
     });
+    await waitForPort(4444, "127.0.0.1", 10_000);
   },
 
   afterSession: () => {
