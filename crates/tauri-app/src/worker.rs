@@ -162,9 +162,8 @@ impl Worker {
                         new_name,
                         reply,
                     } => {
-                        let result =
-                            git_core::branch::rename_branch(&repo, &old_name, &new_name)
-                                .map_err(|e| e.to_string());
+                        let result = git_core::branch::rename_branch(&repo, &old_name, &new_name)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                 }
@@ -541,12 +540,10 @@ mod tests {
 
         handle.delete_branch("feature".into(), true).unwrap();
 
-        assert!(
-            !handle
-                .list_branches()
-                .unwrap()
-                .iter()
-                .any(|b| b.name == "feature")
-        );
+        assert!(!handle
+            .list_branches()
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "feature"));
     }
 }
