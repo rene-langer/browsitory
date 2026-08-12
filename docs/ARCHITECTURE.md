@@ -88,11 +88,17 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   the `StatusKind` strings it serializes to the `StatusKind` union in
   `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
-- E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO against the
-  `cargo tauri dev` build, one flow per major feature area, added where a flow spans
-  backend+frontend in a way unit tests can't catch. (Not Playwright: Playwright drives browser
-  engines it manages itself and can't attach to a native Tauri/webkit2gtk window; `tauri-driver`
-  is Tauri's own WebDriver bridge, the actually-supported E2E path.)
+- E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO (`e2e/`) driving
+  the built `tauri-app` binary as a black box — `cargo build --workspace --features
+  tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
+  `frontend/dist` instead of the Vite dev server; plain `cargo build` stays in dev-server mode
+  regardless of debug/release, so it can't be driven standalone). One flow per major feature
+  area, added where a flow spans backend+frontend in a way unit tests can't catch; `App.tsx`
+  reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
+  `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
+  Playwright drives browser engines it manages itself and can't attach to a native
+  Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
+  actually-supported E2E path.)
 
 ## Roadmap
 

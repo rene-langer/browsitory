@@ -7,6 +7,17 @@ license = "MIT"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Enables Tauri's embedded-asset production mode (serves `frontendDist` from the compiled
+# binary instead of the `devUrl` dev server). Without this, `tauri`'s build.rs sets its `dev`
+# cfg unconditionally true (`let dev = !custom_protocol;`), so even a `cargo build --workspace`
+# debug binary would always try to load the Vite dev server at devUrl and ignore
+# `frontend/dist` entirely — fatal for E2E, which must run the built binary standalone with no
+# dev server running. `cargo tauri build`/`cargo tauri dev` pass this via the tauri-cli
+# orchestration layer; a bare `cargo build` needs it passed explicitly, e.g.
+# `cargo build --workspace --features tauri-app/custom-protocol`.
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
