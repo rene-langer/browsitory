@@ -4,12 +4,13 @@ mod commands;
 mod worker;
 
 use commands::{
-    commit, get_commit_diff, get_commit_files, get_log, get_status, get_working_diff, open_repo,
-    stage_file, unstage_file, AppState,
+    commit, get_commit_diff, get_commit_files, get_log, get_status, get_working_diff,
+    list_recent_repos, open_repo, pick_repo_folder, stage_file, unstage_file, AppState,
 };
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             open_repo,
@@ -21,6 +22,8 @@ fn main() {
             stage_file,
             unstage_file,
             commit,
+            pick_repo_folder,
+            list_recent_repos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

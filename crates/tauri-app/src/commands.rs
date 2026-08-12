@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use git_core::diff::DiffHunk;
 use git_core::log::CommitInfo;
 use serde::Serialize;
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::worker::Worker;
 
@@ -81,11 +82,35 @@ pub struct AppState {
 
 #[tauri::command]
 pub fn open_repo(path: String, state: State<AppState>) -> Result<(), String> {
-    let worker = Worker::spawn(PathBuf::from(path))?;
+    let worker = Worker::spawn(PathBuf::from(&path))?;
     // A poisoned lock is recoverable here: the worker thread never touches this mutex, so
     // the `Option<Worker>` behind it can't have been left half-updated.
     *state.worker.lock().unwrap_or_else(|e| e.into_inner()) = Some(worker);
+    // Best-effort: a repo that opened successfully should count as "recent" even if we can't
+    // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
+    // over it.
+    let _ = config::add_recent_repo(Path::new(&path));
     Ok(())
+}
+
+#[tauri::command]
+pub fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
+    app.dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|path| path.to_string())
+}
+
+#[tauri::command]
+pub fn list_recent_repos() -> Result<Vec<String>, String> {
+    config::list_recent_repos()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(|e| e.to_string())
 }
 
 // Clone the worker's channel handle and drop the guard before blocking on the reply —

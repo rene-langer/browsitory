@@ -15,6 +15,7 @@ tree).
 | tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `config` |
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
+| tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
 | serde | MIT OR Apache-2.0 | `tauri-app`; also `config` |
 | serde_json | MIT OR Apache-2.0 | `tauri-app` |
 | directories | MIT OR Apache-2.0 | `config` |
