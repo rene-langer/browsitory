@@ -99,6 +99,68 @@ fn commit_on_a_fresh_repo_creates_a_parentless_first_commit() {
     assert_eq!(commit.parent_count(), 0);
 }
 
+/// `git2::opts::{set,get,reset}_search_path` mutate process-global libgit2 state and are
+/// documented as needing external synchronization. This mutex serializes access to that
+/// global state across tests in this binary (`cargo test` runs tests multi-threaded by
+/// default), and `ConfigSearchPathOverride` below saves/restores the prior value via RAII
+/// so the mutation never leaks past the one test that needs it — even if that test panics.
+static CONFIG_SEARCH_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Points libgit2's Global/System/XDG config search paths at an empty directory for the
+/// life of this guard, restoring the previous paths on drop. Holds `CONFIG_SEARCH_PATH_LOCK`
+/// for the duration so no other test's `repo.signature()`/config lookups can observe the
+/// overridden paths.
+struct ConfigSearchPathOverride<'a> {
+    _lock: std::sync::MutexGuard<'a, ()>,
+    previous: Vec<(git2::ConfigLevel, std::ffi::CString)>,
+}
+
+impl ConfigSearchPathOverride<'_> {
+    const LEVELS: [git2::ConfigLevel; 3] = [
+        git2::ConfigLevel::Global,
+        git2::ConfigLevel::System,
+        git2::ConfigLevel::XDG,
+    ];
+
+    fn install(empty_dir: &std::path::Path) -> Self {
+        let lock = CONFIG_SEARCH_PATH_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // SAFETY: `_lock` (held for the lifetime of `self`) serializes this against every
+        // other `get_search_path`/`set_search_path` call in this test binary.
+        let previous: Vec<_> = Self::LEVELS
+            .iter()
+            .map(|&level| {
+                let path = unsafe { git2::opts::get_search_path(level).unwrap() };
+                (level, path)
+            })
+            .collect();
+
+        for &level in &Self::LEVELS {
+            unsafe {
+                git2::opts::set_search_path(level, empty_dir).unwrap();
+            }
+        }
+
+        ConfigSearchPathOverride {
+            _lock: lock,
+            previous,
+        }
+    }
+}
+
+impl Drop for ConfigSearchPathOverride<'_> {
+    fn drop(&mut self) {
+        // SAFETY: still holding `_lock`.
+        for (level, path) in &self.previous {
+            unsafe {
+                git2::opts::set_search_path(*level, path).unwrap();
+            }
+        }
+    }
+}
+
 #[test]
 fn commit_without_a_configured_identity_returns_an_error() {
     // Isolate libgit2's global/system/XDG config search paths to an empty directory so
@@ -106,11 +168,7 @@ fn commit_without_a_configured_identity_returns_an_error() {
     // `user.name`/`user.email` configured in `~/.gitconfig` — otherwise `repo.signature()`
     // would silently fall back to the host's identity and this assertion would flake.
     let empty_config_dir = tempfile::TempDir::new().unwrap();
-    unsafe {
-        git2::opts::set_search_path(git2::ConfigLevel::Global, empty_config_dir.path()).unwrap();
-        git2::opts::set_search_path(git2::ConfigLevel::System, empty_config_dir.path()).unwrap();
-        git2::opts::set_search_path(git2::ConfigLevel::XDG, empty_config_dir.path()).unwrap();
-    }
+    let _config_override = ConfigSearchPathOverride::install(empty_config_dir.path());
 
     let dir = tempfile::TempDir::new().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
