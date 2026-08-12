@@ -30,6 +30,11 @@ export interface DiffHunk {
   lines: DiffLine[];
 }
 
+export interface BranchInfo {
+  name: string;
+  isCurrent: boolean;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -42,4 +47,9 @@ export interface RepoClient {
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
   commit(message: string): Promise<void>;
+  listBranches(): Promise<BranchInfo[]>;
+  createBranch(name: string, startPoint: string): Promise<void>;
+  switchBranch(name: string): Promise<void>;
+  deleteBranch(name: string, force: boolean): Promise<void>;
+  renameBranch(oldName: string, newName: string): Promise<void>;
 }
