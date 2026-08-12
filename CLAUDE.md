@@ -5,145 +5,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev            # Vite dev server (http://localhost:5173)
-npm run build           # tsc + vite build (production)
-npm run lint             # eslint . --ext .ts,.tsx
-npm run type-check      # tsc --noEmit
-npm test                # vitest run (single run, used in CI)
-npm run test:watch      # vitest (watch mode)
-npm run test:coverage   # vitest run --coverage
-npm run format           # prettier --write
+cargo build --workspace                          # build all Rust crates
+cargo test --workspace                            # run all Rust tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check                        # format check (CI)
+cargo tauri dev                                    # run the desktop app (from crates/tauri-app)
 ```
 
-Run a single test file or test: `npx vitest run src/services/git.test.ts` or
-`npx vitest run -t "reports a modified tracked file"`.
+```bash
+cd frontend
+pnpm install
+pnpm dev                                           # Vite dev server (used by `cargo tauri dev`)
+pnpm build
+pnpm lint
+pnpm test -- --run
+```
 
-CI (`.github/workflows/ci.yml`) runs, in order: `npm ci`, `lint`, `type-check`, `build`, `test`.
-All four must pass.
+Run a single Rust test: `cargo test -p git-core --test status` or
+`cargo test -p git-core -- reports_an_untracked_file_as_unstaged_new`.
 
 ## Project status
 
-Phase 1 (MVP) is implemented: opening a local repository, commit history, diff viewing,
-staging/unstaging, and committing. Phase 2 is also implemented: branch management (create/
-delete/rename/switch), stash (push/apply/pop/drop/list), merge with conflict resolution,
-interactive rebase (pick/drop only — no reword/squash), a blame viewer, and a multi-branch
-commit graph view. Push/pull to a remote is still not implemented. See `docs/PROJECT_SETUP.md`
-for the phase roadmap and `docs/ARCHITECTURE.md` for the full tech-stack rationale.
+Second from-scratch rewrite (branch `feat/rust_from_scratch`). See
+`docs/superpowers/specs/2026-08-11-browsitory-architecture-design.md` for the full rationale —
+in short: a prior native Rust+egui pass (also on this branch, see git history) worked but
+produced a UI that can't be reused as a VSCode webview, which is a stated future requirement.
+This pass keeps the Rust git layer but replaces egui with Tauri + a React/TypeScript frontend
+behind a `RepoClient` IPC interface, so a VSCode extension can implement the same interface
+later without touching UI code.
 
-### Phase 2 additions worth knowing before touching them
-
-- **Merge conflicts**: `mergeBranch`/`cherryPick` (the latter used by rebase) both use
-  `abortOnConflict: false`, which writes conflict markers to the working tree and unmerged
-  stage-1/2/3 (base/ours/theirs) index entries, then throws `MergeConflictError` — without
-  moving the branch ref. `getConflictDiff()` in `git.ts` reads those stage-2/3 entries
-  directly via isomorphic-git's `isomorphic-git/managers` (`GitIndexManager`) and
-  `isomorphic-git/models` (`FileSystem`) subpath exports — these are legitimate, declared
-  entries in the package's own `exports` map, not undocumented internals; verify against
-  `node_modules/isomorphic-git/package.json` if this ever looks broken after an upgrade.
-- **Interactive rebase** (`src/services/rebase.ts`) is hand-rolled from `cherryPick` +
-  `checkout`/`branch` — isomorphic-git has no native `rebase` command. State is persisted to
-  a `.git/browsitory-rebase.json` sidecar (via the same injected `fs`) so a paused rebase
-  survives a reload. The branch ref is never touched until the rebase fully completes —
-  every step runs in detached HEAD, which is what makes `abortRebase` a trivial checkout
-  back to the original branch.
-- **Blame** (`src/services/blame.ts`) is also hand-rolled — no native `blame` command either.
-  It walks `git.log({ filepath })` oldest-to-newest, re-diffing the running line-attribution
-  model against each commit with the `diff` package's `diffLines`. Both diff inputs must end
-  with a trailing `\n` or jsdiff misreports an unchanged last line as a remove+add whenever
-  old/new line counts differ — a real bug hit once, see the comment in `blame.ts`.
-- **Branch/stash** (`listAllBranches`, `createBranch`, `switchBranch`, `listStashes`, etc. in
-  `git.ts`) are thin wrappers — isomorphic-git supports all of this natively. One gotcha:
-  `git.stash({op:'list'})` returns `string[]` formatted as `"stash@{N}: <message>"` at
-  runtime despite its looser declared type; parse it, don't expect objects.
-- **`Repository.tsx`** has no per-feature routing (branch/merge/rebase/blame/graph are all
-  inline state in that one page, same precedent as Phase 1's diff viewing) — it composes
-  `gitStore`, `rebaseStore`, and `repositoryStore` together and switches between a History
-  view (staging/stash/commit sidebar + diff/blame/merge/rebase content) and a Graph view.
+Phase 0 (this pass) is setup only: workspace scaffold, CI, `git-core::repo`/`status` with
+tests, and a Tauri shell proving the IPC boundary end-to-end with a minimal status view.
+Phases 1-4 (see `docs/ARCHITECTURE.md`) are not started.
 
 ## Architecture
 
-This is a client-only PWA (React + TypeScript + Vite) — there is no backend in Phase 1. Git
-repositories are opened directly from the user's disk via the browser's **File System Access
-API** (`showDirectoryPicker`), which is why the app currently only works in Chromium-based
-browsers (Chrome/Edge/Opera).
+See `docs/ARCHITECTURE.md` for the full crate/package layout, the `RepoClient` IPC boundary,
+and the threading model. Summary: `crates/git-core` (git2, UI-agnostic, DI'd per function,
+tested against real temp-dir repos) + `crates/config` (TOML registry/prefs, stub so far) +
+`crates/tauri-app` (Tauri commands, one worker thread per open repo) + `frontend/` (React/TS,
+talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
 
-### The fs adapter is the load-bearing piece
+### git2 API gotchas
 
-`src/services/fsaGitFs.ts` bridges the File System Access API to the `fs.promises`-shaped
-object isomorphic-git expects (`readFile`, `writeFile`, `unlink`, `readdir`, `mkdir`, `rmdir`,
-`stat`, `lstat`, `rename`). This is hand-written, not a dependency — there is no MIT-licensed
-off-the-shelf bridge; the closest option (ZenFS's `@zenfs/dom` `WebAccess` backend) is
-LGPL-3.0 and was rejected on license grounds (see "License policy" below). Key gotchas already
-worked through here, worth knowing before touching this file:
+- `StatusEntry::path()` (and `Signature::name()`/`email()`, `Reference::shorthand()`,
+  `Commit::summary()`) return `Result<&str, Error>` or `Result<Option<&str>, Error>`, not a
+  bare `Option`/`&str` — verified against the vendored `git2` 0.21 source. Handle with
+  `let Ok(x) = ... else { continue };` in a loop, or `.ok().flatten().unwrap_or_default()`
+  otherwise. See `crates/git-core/src/status.rs`.
+- `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>`
+  per slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`, once remote
+  support is added.
 
-- `mkdir` is fully recursive and idempotent by design, independent of whatever
-  parent-directory-creation behavior isomorphic-git's own `FileSystem` wrapper does or doesn't
-  do internally — don't rely on isomorphic-git to create parent dirs for you.
-- Errors must carry Node-style `.code` values (`ENOENT`, `ENOTDIR`, `EISDIR`, ...) because
-  isomorphic-git branches on `err.code`, not on `DOMException.name`.
-- No symlink support (`lstat` is aliased to `stat`).
+### Threading model
 
-### git.ts is dependency-injected on purpose
+`git2::Repository` **is** `Send` but is **not** `Sync`. It can be moved into one thread and
+owned there (that's why `Worker::spawn`'s `thread::spawn(move || …)` compiles), but a
+`&Repository` can never be shared across threads. Tauri managed state requires `Send + Sync`,
+so a `Repository` can't be `State` directly, and putting it behind `State<Mutex<Repository>>`
+would serialize every command on one lock held across blocking git work. The response to
+`!Sync` is therefore message-passing to a single owning thread:
+`crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the repository on a dedicated thread
+and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
+send `Command`s over an `mpsc` channel and get replies over a per-call reply channel. UI code
+never touches `git-core` directly — only through `RepoClient` → a Tauri command → the worker
+thread.
 
-`src/services/git.ts` wraps isomorphic-git calls (`statusMatrix`, `log`, `walk`, `add`,
-`commit`, ...) as functions taking `(fs, dir, ...)` explicitly rather than reading a module
-singleton. This is what makes `src/services/git.test.ts` possible without a browser: tests
-pass Node's real `fs` module against real temp-directory repos
-(`fs.mkdtempSync` + `isomorphic-git`'s own `init`), exercising the *exact same* code paths the
-browser uses with `fsaGitFs`. When adding a new git operation, keep this shape.
+### `RepoClient`: why it exists
 
-Two isomorphic-git behaviors that are easy to get wrong here (both already hit and fixed once
-— see git history / commit messages if you need the "why"):
-- `git.walk`'s `map()` callback: returning `null` for a tree entry tells isomorphic-git to
-  **prune that subtree** (skip walking its children). Returning `undefined` just excludes that
-  entry from the results without pruning. Always use `undefined`, never `null`, unless you
-  intend to prune.
-- The `STAGE()` walker's entries have a **no-op `content()`** ("Cannot get content for an
-  index entry" — this is intentional upstream). To read staged file content, fetch the oid via
-  `entry.oid()` and call `git.readBlob({ fs, dir, oid })` instead. `readEntryContent()` in
-  `git.ts` already does this fallback — reuse it rather than calling `entry.content()`
-  directly on new code paths.
-
-### State flow
-
-`src/store/repositoryStore.ts` (Zustand) owns the list of opened repositories
-(persisted via `src/services/repositoryRegistry.ts`, an `idb-keyval` wrapper that stores
-`FileSystemDirectoryHandle`s directly in IndexedDB) and the currently-open repo's `{ fs, dir }`
-pair. `src/store/gitStore.ts` owns commit/status/diff state and takes an `OpenRepository`
-(`{ fs, dir }`) as an explicit argument on every action rather than reading
-`repositoryStore` internally — this keeps it mockable in isolation (see `gitStore.test.ts`).
-
-Pages (`src/pages/Repository.tsx`) compose both stores; there is no separate routed page for
-commit diffs — commit and staged/unstaged file diffs are both rendered inline via
-`selectedDiff` in `gitStore`, not through nested routes. If you're tempted to add a
-`/repo/:id/commit/:hash` route, know that this was tried and deliberately backed out because
-staged/unstaged file diffs have no natural URL of their own in this design.
-
-### Browser permission handling
-
-`FileSystemDirectoryHandle`s can be restored from IndexedDB across reloads, but the browser
-can silently revoke write permission on them. Any code path that resumes a stored handle must
-call `verifyPermission()` (in `fsaGitFs.ts`) before use — see `openHandle()` in
-`repositoryStore.ts` for the pattern.
+`frontend/src/ipc/RepoClient.ts` is the only interface `frontend/src/components` and
+`frontend/src/state` are allowed to depend on for backend calls.
+`frontend/src/ipc/tauriRepoClient.ts` is the only file that imports `@tauri-apps/api`; a
+`no-restricted-imports` override in `frontend/eslint.config.js` fails `pnpm lint` if any file
+under `src/components/` or `src/state/` imports `@tauri-apps/*` directly. When a
+VSCode extension frontend is built later, it gets a second implementation
+(`frontend/src/ipc/vscodeRepoClient.ts`, over `postMessage`) behind the same interface — no
+changes to any component.
 
 ## License policy
 
-MIT-only. Every dependency must be MIT or a compatible permissive license (Apache-2.0, ISC,
-BSD, MIT-0). GPL/AGPL/LGPL/SSPL and similar copyleft licenses are disallowed — this has
-already ruled out at least one otherwise-convenient library (ZenFS, LGPL-3.0). Verify with
-`npm view <package> license` before adding a dependency, and record it in
-`docs/LICENSE_COMPLIANCE.md`.
+Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0) with **one explicit, deliberate
+exception**: `git2` links against libgit2 (via vendored build), which is
+GPL-2.0-with-linking-exception — not MIT, but the linking exception explicitly permits linking
+from differently-licensed code. Verify new dependencies (`cargo info <crate>` / `npm info
+<package>`) before adding them and record them in `docs/LICENSE_COMPLIANCE.md`.
 
 ## Testing conventions
 
-- Vitest config is in `vitest.config.ts` (separate from `vite.config.ts` so the PWA plugin
-  never loads during tests).
-- Browser-only APIs (`FileSystemDirectoryHandle`, `showDirectoryPicker`) are faked, not
-  mocked-at-the-module-level, where practical: `src/test/fakeDirectoryHandle.ts` is a minimal
-  in-memory implementation used to unit-test `fsaGitFs.ts` directly.
-- Service-layer tests (`git.test.ts`) use real temp-directory git repos via Node's `fs`, not
-  mocks — prefer this pattern for new git.ts functions over mocking isomorphic-git.
-- Store tests mock the service layer (`vi.mock('@services/git', ...)`) since stores are
-  thin orchestration over services.
-- Path aliases (`@components`, `@pages`, `@hooks`, `@store`, `@lib`, `@services`) are defined
-  in both `tsconfig.json` and `vitest.config.ts` — keep them in sync if you add a new one.
+- `git-core` tests live in `crates/git-core/tests/*.rs` (one file per module) plus a shared
+  `tests/common/mod.rs` helper. They use real repos via `git2::Repository::init`/`TempDir`,
+  never a mocked `Repository`.
+- `tauri-app` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
+  `worker.rs`), also against real temp-dir repos. Thin pass-through Tauri commands
+  (`commands.rs`) don't need their own tests — the `git-core`/`Worker` logic they call already
+  is tested. The exception is the DTO wire format: `commands.rs`'s test module asserts the
+  `StatusKind` strings it emits match the `StatusKind` union in
+  `frontend/src/ipc/RepoClient.ts`, since nothing else catches that drift.
+- `frontend` tests mock `RepoClient` (a real interface seam), never `@tauri-apps/api`.
+
+## Task workflow
+
+This repo uses the `superpowers` plugin's `test-driven-development`, `writing-plans`,
+`subagent-driven-development`, and `executing-plans` skills for all implementation work, plus
+the project-local `.claude/skills/browsitory-conventions` skill for the Browsitory-specific
+conventions those global skills don't cover (real temp-dir repos in tests, the `RepoClient`
+transport-isolation rule, task-file naming). That skill is a pointer into this file and
+`docs/ARCHITECTURE.md`, which stay authoritative if the two ever disagree. New implementation
+tasks (Phase 1 onward) follow `docs/TASK_TEMPLATE.md`.

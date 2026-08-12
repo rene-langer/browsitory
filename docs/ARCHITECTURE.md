@@ -1,219 +1,103 @@
-# Browsitory - Architecture & Tech Stack
+# Architecture
 
-## Overview
-
-Browsitory is a Progressive Web App (PWA) for Git repository management, providing a fast, visual Git client experience in the browser. It supports both local deployment (installable app) and server-based deployment for remote repository access.
-
-## Architecture Layers
-
-### 1. Frontend Layer (Browser)
-
-**Framework**: React 18+ with TypeScript
-- **Why React**: Large ecosystem, excellent PWA support, strong component model
-- **License**: MIT
-- **State Management**: Zustand (lightweight, MIT) or Redux Toolkit (MIT)
-- **UI Components**: shadcn/ui (MIT) or Mantine (MIT)
-- **Routing**: React Router v6 (MIT)
-- **Git Operations**: isomorphic-git (MIT) - pure JavaScript git implementation
-- **Diff Viewer**: react-diff-viewer-continued (MIT) or custom implementation
-- **Graph Visualization**: Dagre (MIT) for DAG rendering, React Flow (MIT) for interactive layouts
-- **Styling**: Tailwind CSS (MIT) or CSS modules
-- **Icons**: Lucide React (MIT)
-
-**Build Tool**: Vite (MIT)
-- Fast development server
-- Optimized production builds
-- Native ESM support
-
-**PWA Support**:
-- Workbox (MIT) for service worker management
-- Manifest.json for installability
-- Service Worker for offline support
-
-### 2. Backend Layer (Optional/Server Deployment)
-
-**Language Options**:
-
-**Option A: Node.js + Express (Recommended)**
-- **Runtime**: Node.js (MIT)
-- **Framework**: Express.js (MIT)
-- **License**: MIT
-- **Why**: Same language as frontend reduces context switching, large git library ecosystem
-- **Git Operations**: nodegit (MIT) or isomorphic-git
-- **Database**: SQLite3 (MIT) for local, PostgreSQL (MIT) for server
-- **ORM**: Prisma (Apache 2.0, compatible) or Typeorm (MIT)
-
-**Option B: Python + Flask**
-- **Framework**: Flask (BSD, compatible)
-- **Git Operations**: GitPython (BSD, compatible)
-- **Database**: SQLite3 (MIT) for local
-- **Why**: Simple, excellent git integration
-
-**Option C: Go**
-- **Framework**: Gin (MIT)
-- **Git Operations**: go-git (Apache 2.0, compatible)
-- **Why**: High performance, small binary, excellent for server deployments
-
-**Recommendation**: Go-based backend for production deployments, simple Node.js Express for development and local setups.
-
-### 3. Data Layer
-
-**Local Storage**:
-- **Preferences**: localStorage (browser standard)
-- **Repository Metadata**: IndexedDB (browser standard) for larger datasets
-- **Commit Cache**: IndexedDB for offline access to commit history
-- **Database**: SQLite3 (MIT) when running locally
-
-**Server Storage** (optional):
-- **Database**: PostgreSQL (MIT) with connection pooling
-- **Cache**: Redis (MIT) for session management and commit cache
-- **File Storage**: Direct filesystem access to git repositories
-
-### 4. Git Integration
-
-**Frontend Git Operations**:
-- **Library**: isomorphic-git (MIT)
-- **Capabilities**: Read-only operations in browser (status, log, diff, blame)
-- **Limitations**: File system access via File API when needed
-
-**Backend Git Operations** (server mode):
-- **Library**: go-git (Apache 2.0) or nodegit (MIT)
-- **Capabilities**: Full git operations (push, pull, rebase, merge)
-- **Persistence**: Direct access to repository directories
-
-## System Architecture
+## Crate/package layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Browser / Desktop                     │
-├─────────────────────────────────────────────────────────┤
-│  React App + TypeScript                                 │
-│  ├─ UI Components (shadcn/ui)                          │
-│  ├─ State Management (Zustand)                         │
-│  ├─ Git Operations (isomorphic-git)                    │
-│  ├─ Diff Viewer                                        │
-│  └─ Service Worker (Workbox)                           │
-├─────────────────────────────────────────────────────────┤
-│  IndexedDB / localStorage                              │
-│  (Offline cache, preferences)                          │
-└─────────────────────────────────────────────────────────┘
-           ↓ (Optional API calls)
-┌─────────────────────────────────────────────────────────┐
-│              Backend Server (Optional)                   │
-├─────────────────────────────────────────────────────────┤
-│  Go + Gin Framework  OR  Node.js + Express             │
-│  ├─ REST/GraphQL API                                   │
-│  ├─ Git Operations (go-git / nodegit)                  │
-│  ├─ Authentication                                      │
-│  └─ Repository Management                              │
-├─────────────────────────────────────────────────────────┤
-│  PostgreSQL / SQLite3                                  │
-│  (User data, repository metadata, settings)            │
-└─────────────────────────────────────────────────────────┘
-           ↓
-┌─────────────────────────────────────────────────────────┐
-│            Git Repositories (File System)                │
-└─────────────────────────────────────────────────────────┘
+browsitory/
+├── crates/
+│   ├── git-core/    # git2-based service layer, UI-agnostic, unit-tested headlessly
+│   ├── config/      # repo registry + preferences (TOML), stub until Phase 1
+│   └── tauri-app/    # Tauri commands + per-repo worker threads
+└── frontend/          # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
 ```
 
-## Deployment Modes
+## Why Tauri + a web frontend, not egui again
 
-### Mode 1: Local PWA (Recommended for Initial MVP)
-- React app bundled with Vite
-- isomorphic-git for all git operations
-- Data stored in IndexedDB and localStorage
-- Installable via "Add to Home Screen"
-- Works offline
-- Direct file system access via File/Directory APIs
-- Zero backend required
+A prior pass (see git history on this branch before 2026-08-11) used `egui` for a
+single-language, no-webview native UI. It worked, but `egui`'s immediate-mode canvas can't be
+embedded in a VSCode webview later — a stated product requirement ("frontend shall be either
+the standalone app or a vscode integration"). Tauri packages a plain web frontend as a
+standalone app today, and that same frontend becomes the VSCode webview later by adding one
+more `RepoClient` implementation — no UI rewrite.
 
-### Mode 2: Server-Based (Production)
-- Same React frontend deployed to web server
-- Backend API server (Go/Node.js)
-- Repositories stored on server
-- User authentication
-- Multi-user support
-- Can manage repositories from anywhere
+## Why git2 (libgit2 bindings), not gitoxide
 
-### Mode 3: Hybrid
-- Local PWA for local repositories
-- Optional backend for remote repository access
-- Sync preferences across devices
+`git2` is mature and complete: native blame, native interactive rebase primitives, native
+merge conflict handling, native stash/cherry-pick, native remote transports. The pure-Rust
+alternative (`gitoxide`/`gix`) is a closer license fit (no GPL exception needed at all), but
+its write-side operations (merge, rebase) are less mature as of this writing. `git2` is the
+pragmatic choice; the libgit2 license deviation is documented, not silently accepted — see
+`CLAUDE.md`'s License policy section.
 
-## API Design (for Server Mode)
+## The `RepoClient` IPC boundary
 
-**REST Endpoints**:
-```
-GET    /api/repositories              - List repositories
-POST   /api/repositories              - Add new repository
-GET    /api/repositories/:id/commits  - Get commit history
-GET    /api/repositories/:id/status   - Get repo status
-POST   /api/repositories/:id/commit   - Create commit
-POST   /api/repositories/:id/push     - Push to remote
-POST   /api/repositories/:id/pull     - Pull from remote
-GET    /api/repositories/:id/diff     - Get diff
+`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on:
+
+```ts
+export interface RepoClient {
+  openRepo(path: string): Promise<void>;
+  getStatus(): Promise<StatusEntry[]>;
+  // grows with each feature phase
+}
 ```
 
-Or GraphQL alternative for more flexible querying.
+`frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
+is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
+`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri. A future VSCode
+extension implements the same interface over `postMessage` in a sibling file
+(`vscodeRepoClient.ts`); no component changes.
 
-## Performance Considerations
+The rule is enforced mechanically, not just by review: `frontend/eslint.config.js` has a
+`no-restricted-imports` override banning `@tauri-apps/*` imports from
+`frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
+(and CI).
 
-1. **Code Splitting**: Route-based and library-based splitting
-2. **Lazy Loading**: Load commit history on demand
-3. **Virtual Scrolling**: For large commit lists
-4. **IndexedDB Caching**: Cache frequently accessed data
-5. **Service Worker**: Precache critical assets
-6. **Image Optimization**: SVG for icons, WebP for images
-7. **Bundle Size**: Target < 500KB gzipped for core app
+## Threading model
 
-## Security Considerations
+`git2::Repository` **is** `Send` (libgit2 handles can be moved between threads, and `git2`
+carries an `unsafe impl Send` to say so) but it is **not** `Sync`: a `&Repository` must never
+be used from two threads at once. So the handle can be *given* to exactly one thread, but not
+*shared*. That rules out the obvious Tauri shape — managed state requires `Send + Sync`, so a
+bare `Repository` can't be `State` at all, and `State<Mutex<Repository>>` (which does satisfy
+`Sync`) would funnel every concurrent command invocation through a single lock held for the
+duration of blocking git work.
 
-1. **SSH Key Storage**: Store SSH keys securely in browser (IndexedDB with encryption) or require passphrase entry per operation
-2. **Git Credentials**: Never store plaintext passwords, use credential managers or token-based auth
-3. **CORS**: Properly configure CORS if backend is separate
-4. **CSP**: Content Security Policy headers
-5. **Input Validation**: Sanitize git input to prevent injection attacks
-6. **File Access**: Validate file paths to prevent directory traversal
+The `!Sync` constraint is what message-passing answers. Each opened repository gets one
+dedicated OS thread (`crates/tauri-app/src/worker.rs`'s `Worker::spawn`) that opens its own
+`Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved in
+once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands.rs`) send a
+`Command` enum value over a `std::sync::mpsc` channel to that thread and receive the result
+over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
+Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
+on a reply, so one slow repository operation can't serialize unrelated commands. One worker
+thread per open repo also means multiple repos never contend on a shared handle.
 
-## Data Persistence Strategy
+## Error handling
 
-### Local Mode
-- IndexedDB: Commit history, diffs, blame info
-- localStorage: User preferences, selected repository
-- filesystem: Direct repository access via File API
+`git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
+`StatusError`, ...). `Worker`/Tauri commands map these to `Result<T, String>` crossing the IPC
+boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods return
+`Promise<T>` that reject with that message — no error is swallowed at the boundary.
 
-### Server Mode
-- PostgreSQL: Persistent data (users, repositories, settings)
-- Redis: Session cache, rate limiting
-- Filesystem: Git repository directories
-- CDN: Static assets (optional)
+## Testing strategy
 
-## Development Roadmap Phases
+- `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
+- `tauri-app`: inline unit tests for logic that isn't thin delegation (see `worker.rs`'s tests,
+  which spawn a real worker thread against a real temp-dir repo). Pass-through Tauri commands
+  don't get separate tests, except for the DTO wire format: `commands.rs` has a test pinning
+  the `StatusKind` strings it serializes to the `StatusKind` union in
+  `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
+- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
+- E2E (added from Phase 1 onward, not in Phase 0): Playwright against the `cargo tauri dev`
+  build, one flow per major feature area, added where a flow spans backend+frontend in a way
+  unit tests can't catch.
 
-### Phase 1: MVP (Local PWA)
-- Basic repository management
-- Commit history viewing
-- Diff viewer
-- Staging/unstaging
-- Commit creation
-- Branch switching
-- Service worker & offline support
+## Roadmap
 
-### Phase 2: Enhanced Features
-- Interactive rebase
-- Merge conflict resolution
-- Blame view
-- Stash management
-- Graph visualization
-
-### Phase 3: Server Backend
-- Backend API implementation
-- User authentication
-- Multi-user support
-- Remote repository access
-
-### Phase 4: Advanced Features
-- PR integration (GitHub/GitLab)
-- Code review tools
-- Advanced search
-- Collaboration features
+- **Phase 0** (this pass): workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal
+  status view proving the IPC boundary.
+- **Phase 1**: full repo view — commit history, diff viewer, stage/unstage, commit.
+- **Phase 2**: branch management, stash, merge with conflict resolution, interactive rebase,
+  blame viewer, multi-branch commit graph.
+- **Phase 3**: push/pull/fetch with progress, multi-remote, tag push, credential handling.
+- **Phase 4**: worktrees, submodules, reflog viewer, PR integration.
