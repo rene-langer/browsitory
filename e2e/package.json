@@ -2,6 +2,7 @@
   "name": "e2e",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "typecheck": "tsc --noEmit"
