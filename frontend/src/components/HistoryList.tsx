@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { CommitInfo, StatusEntry } from "../ipc/RepoClient";
+import type { CommitInfo, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
@@ -12,15 +12,21 @@ function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
 export function HistoryList({
   status,
   log,
+  stashes,
   selectedRow,
   onSelectRow,
   onBranchFromCommit,
+  onApplyStash,
+  onDropStash,
 }: {
   status: StatusEntry[];
   log: CommitInfo[];
+  stashes: StashEntry[];
   selectedRow: SelectedRow;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
+  onApplyStash: (index: number) => void;
+  onDropStash: (index: number) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -30,6 +36,7 @@ export function HistoryList({
 
   const rows: SelectedRow[] = [
     "uncommitted",
+    ...stashes.map((stash) => ({ commitId: stash.commitId })),
     ...log.map((commit) => ({ commitId: commit.id })),
   ];
   const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
@@ -57,6 +64,33 @@ export function HistoryList({
       >
         Uncommitted Changes{status.length > 0 && ` (${status.length})`}
       </li>
+      {stashes.map((stash) => (
+        <li
+          key={stash.commitId}
+          aria-selected={
+            typeof selectedRow === "object" && selectedRow.commitId === stash.commitId
+          }
+          onClick={() => onSelectRow({ commitId: stash.commitId })}
+        >
+          {stash.message}
+          <button
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              onApplyStash(stash.index);
+            }}
+          >
+            Apply
+          </button>
+          <button
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              onDropStash(stash.index);
+            }}
+          >
+            Drop
+          </button>
+        </li>
+      ))}
       {log.map((commit) => (
         <li
           key={commit.id}
