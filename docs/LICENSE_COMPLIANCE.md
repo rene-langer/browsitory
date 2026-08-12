@@ -11,14 +11,14 @@ tree).
 | Crate | License | Notes |
 |---|---|---|
 | git2 | MIT OR Apache-2.0 (binding); vendored libgit2 is GPL-2.0-with-linking-exception | Deliberate exception — see below. Direct dep of `git-core`; dev-dependency of `tauri-app`. |
-| thiserror | MIT OR Apache-2.0 | `git-core` |
-| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core` and `tauri-app` |
+| thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
+| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `config` |
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
-| serde | MIT OR Apache-2.0 | `tauri-app` |
+| serde | MIT OR Apache-2.0 | `tauri-app`; also `config` |
 | serde_json | MIT OR Apache-2.0 | `tauri-app` |
-
-`crates/config` has no dependencies yet (stub crate).
+| directories | MIT OR Apache-2.0 | `config` |
+| toml | MIT OR Apache-2.0 | `config` |
 
 ## JavaScript (`npm info <package> license`)
 
