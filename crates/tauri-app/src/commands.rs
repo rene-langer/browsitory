@@ -57,6 +57,24 @@ impl From<git_core::branch::BranchInfo> for BranchInfoDto {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashEntryDto {
+    pub index: usize,
+    pub message: String,
+    pub commit_id: String,
+}
+
+impl From<git_core::stash::StashEntry> for StashEntryDto {
+    fn from(s: git_core::stash::StashEntry) -> Self {
+        StashEntryDto {
+            index: s.index,
+            message: s.message,
+            commit_id: s.commit_id,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -241,6 +259,27 @@ pub async fn rename_branch(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state)?.rename_branch(old_name, new_name)
+}
+
+#[tauri::command]
+pub async fn list_stashes(state: State<'_, AppState>) -> Result<Vec<StashEntryDto>, String> {
+    let stashes = worker_handle(&state)?.list_stashes()?;
+    Ok(stashes.into_iter().map(StashEntryDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn save_stash(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.save_stash()
+}
+
+#[tauri::command]
+pub async fn apply_stash(index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.apply_stash(index)
+}
+
+#[tauri::command]
+pub async fn drop_stash(index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.drop_stash(index)
 }
 
 #[cfg(test)]
