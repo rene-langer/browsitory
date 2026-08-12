@@ -59,17 +59,25 @@ talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
 
 ### Threading model
 
-`git2::Repository` is not `Send`. `crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the
-repository on a dedicated thread and owns it for that thread's lifetime; Tauri commands
-(`crates/tauri-app/src/commands.rs`) send `Command`s over an `mpsc` channel and get replies
-over a per-call reply channel. UI code never touches `git-core` directly — only through
-`RepoClient` → a Tauri command → the worker thread.
+`git2::Repository` **is** `Send` but is **not** `Sync`. It can be moved into one thread and
+owned there (that's why `Worker::spawn`'s `thread::spawn(move || …)` compiles), but a
+`&Repository` can never be shared across threads. Tauri managed state requires `Send + Sync`,
+so a `Repository` can't be `State` directly, and putting it behind `State<Mutex<Repository>>`
+would serialize every command on one lock held across blocking git work. The response to
+`!Sync` is therefore message-passing to a single owning thread:
+`crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the repository on a dedicated thread
+and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
+send `Command`s over an `mpsc` channel and get replies over a per-call reply channel. UI code
+never touches `git-core` directly — only through `RepoClient` → a Tauri command → the worker
+thread.
 
 ### `RepoClient`: why it exists
 
 `frontend/src/ipc/RepoClient.ts` is the only interface `frontend/src/components` and
 `frontend/src/state` are allowed to depend on for backend calls.
-`frontend/src/ipc/tauriRepoClient.ts` is the only file that imports `@tauri-apps/api`. When a
+`frontend/src/ipc/tauriRepoClient.ts` is the only file that imports `@tauri-apps/api`; a
+`no-restricted-imports` override in `frontend/eslint.config.js` fails `pnpm lint` if any file
+under `src/components/` or `src/state/` imports `@tauri-apps/*` directly. When a
 VSCode extension frontend is built later, it gets a second implementation
 (`frontend/src/ipc/vscodeRepoClient.ts`, over `postMessage`) behind the same interface — no
 changes to any component.
@@ -90,17 +98,17 @@ from differently-licensed code. Verify new dependencies (`cargo info <crate>` / 
 - `tauri-app` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
   `worker.rs`), also against real temp-dir repos. Thin pass-through Tauri commands
   (`commands.rs`) don't need their own tests — the `git-core`/`Worker` logic they call already
-  is tested.
+  is tested. The exception is the DTO wire format: `commands.rs`'s test module asserts the
+  `StatusKind` strings it emits match the `StatusKind` union in
+  `frontend/src/ipc/RepoClient.ts`, since nothing else catches that drift.
 - `frontend` tests mock `RepoClient` (a real interface seam), never `@tauri-apps/api`.
 
 ## Task workflow
 
 This repo uses the `superpowers` plugin's `test-driven-development`, `writing-plans`,
-`subagent-driven-development`, and `executing-plans` skills for all implementation work. A
-project-local skill for Browsitory-specific conventions not covered by those global skills
-(real temp-dir repos in tests, the `RepoClient` transport-isolation rule, phase/task
-numbering) is planned but not yet created as of Phase 0 — until it exists, follow the
-conventions documented above and in `docs/ARCHITECTURE.md` directly. The task-file template
-used to produce Tasks 1-4 of this pass lives in the "Task template" section of
-`docs/superpowers/specs/2026-08-11-browsitory-architecture-design.md`; it has not yet been
-split into its own `docs/TASK_TEMPLATE.md`.
+`subagent-driven-development`, and `executing-plans` skills for all implementation work, plus
+the project-local `.claude/skills/browsitory-conventions` skill for the Browsitory-specific
+conventions those global skills don't cover (real temp-dir repos in tests, the `RepoClient`
+transport-isolation rule, task-file naming). That skill is a pointer into this file and
+`docs/ARCHITECTURE.md`, which stay authoritative if the two ever disagree. New implementation
+tasks (Phase 1 onward) follow `docs/TASK_TEMPLATE.md`.
