@@ -21,8 +21,9 @@ win; fix this skill to match.
 
 2. **`RepoClient` is the only transport seam.** `frontend/src/components` and
    `frontend/src/state` never import `@tauri-apps/api` or any transport directly — only files
-   under `frontend/src/ipc/` do. See CLAUDE.md's "`RepoClient`: why it exists" and
-   `docs/ARCHITECTURE.md`'s "The `RepoClient` IPC boundary".
+   under `frontend/src/ipc/` do. Enforced mechanically by the `no-restricted-imports`
+   override in `frontend/eslint.config.js` (`pnpm lint`). See CLAUDE.md's "`RepoClient`: why
+   it exists" and `docs/ARCHITECTURE.md`'s "The `RepoClient` IPC boundary".
 
 3. **Task files follow the template.** New implementation tasks (Phase 1 onward) follow
    `docs/TASK_TEMPLATE.md`'s shape and are named
