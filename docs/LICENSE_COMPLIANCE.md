@@ -3,8 +3,8 @@
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
 ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
-in `crates/*/Cargo.toml` and `frontend/package.json` as of Tasks 1-3 (not the full transitive
-tree).
+in `crates/*/Cargo.toml`, `frontend/package.json`, and `e2e/package.json` as of Phase 1's
+completion (not the full transitive tree).
 
 ## Rust (`cargo info <crate>`)
 
@@ -45,6 +45,25 @@ tree).
 | @types/node | MIT | dev only |
 | @types/react | MIT | dev only |
 | @types/react-dom | MIT | dev only |
+
+## JavaScript, `e2e/` (`npm info <package> license`)
+
+`e2e/` is a separate pnpm package from `frontend/`; its dependencies aren't shipped in the app
+and are dev-only test tooling, but are recorded here for completeness.
+
+| Package | License | Notes |
+|---|---|---|
+| webdriverio | MIT | |
+| @wdio/cli | MIT | |
+| @wdio/globals | MIT | |
+| @wdio/local-runner | MIT | |
+| @wdio/mocha-framework | MIT | |
+| @wdio/spec-reporter | MIT | |
+| @wdio/types | MIT | |
+| tsx | MIT | |
+| typescript | Apache-2.0 | same package as `frontend/`'s row above |
+| @types/node | MIT | same package as `frontend/`'s row above |
+| @types/mocha | MIT | |
 
 ## The one exception: libgit2 via `git2`
 

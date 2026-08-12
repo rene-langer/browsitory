@@ -24,6 +24,16 @@ pnpm test -- --run
 Run a single Rust test: `cargo test -p git-core --test status` or
 `cargo test -p git-core -- reports_an_untracked_file_as_unstaged_new`.
 
+```bash
+# E2E (tauri-driver + WebdriverIO), from the repo root:
+cargo install tauri-driver --locked               # once, if not already installed
+cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
+cargo build --workspace --features tauri-app/custom-protocol
+cd e2e
+pnpm install
+pnpm test                                          # spawns/reaps tauri-driver itself; needs a display (xvfb-run on headless CI)
+```
+
 ## Project status
 
 Second from-scratch rewrite (branch `feat/rust_from_scratch`). See
@@ -34,17 +44,32 @@ This pass keeps the Rust git layer but replaces egui with Tauri + a React/TypeSc
 behind a `RepoClient` IPC interface, so a VSCode extension can implement the same interface
 later without touching UI code.
 
-Phase 0 (this pass) is setup only: workspace scaffold, CI, `git-core::repo`/`status` with
-tests, and a Tauri shell proving the IPC boundary end-to-end with a minimal status view.
-Phases 1-4 (see `docs/ARCHITECTURE.md`) are not started.
+Phase 0 was setup only: workspace scaffold, CI, `git-core::repo`/`status` with tests, and a
+Tauri shell proving the IPC boundary end-to-end with a minimal status view.
+
+Phase 1 (this pass) is complete: full repo view. Added `git-core::log` (commit history),
+`git-core::diff` (line-level diffs for both the working tree and a given commit, plus a
+`commit_files` helper), `git-core::stage` (whole-file stage/unstage), and `git-core::commit`
+(commit creation) to the git layer; turned `crates/config` from a stub into a real recent-repos
+registry backed by TOML; added 9 Tauri commands and a `tauri-plugin-dialog`-backed folder
+picker; and built the unified frontend layout (`RepoPicker`, `HistoryList`, `DiffPane`,
+`CommitBox`, composed in `App.tsx`) with basic keyboard navigation, retiring the old
+`StatusView`. Also added Browsitory's first GUI E2E layer (`e2e/`, see "Testing conventions"
+below) and a CI job for it. Phase 2 (branch management, stash, merge, rebase, blame, multi-branch
+graph) is next and not started — see `docs/ARCHITECTURE.md`'s Roadmap.
 
 ## Architecture
 
 See `docs/ARCHITECTURE.md` for the full crate/package layout, the `RepoClient` IPC boundary,
 and the threading model. Summary: `crates/git-core` (git2, UI-agnostic, DI'd per function,
-tested against real temp-dir repos) + `crates/config` (TOML registry/prefs, stub so far) +
+tested against real temp-dir repos) + `crates/config` (TOML-backed recent-repos registry) +
 `crates/tauri-app` (Tauri commands, one worker thread per open repo) + `frontend/` (React/TS,
 talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
+
+Building `tauri-app` standalone (no dev server) requires the `custom-protocol` Cargo feature —
+see the "Commands" section's E2E block and `crates/tauri-app/Cargo.toml`'s comment on it. Plain
+`cargo build --workspace` always leaves the binary looking for the Vite dev server, regardless
+of debug/release.
 
 ### git2 API gotchas
 
@@ -102,6 +127,12 @@ from differently-licensed code. Verify new dependencies (`cargo info <crate>` / 
   `StatusKind` strings it emits match the `StatusKind` union in
   `frontend/src/ipc/RepoClient.ts`, since nothing else catches that drift.
 - `frontend` tests mock `RepoClient` (a real interface seam), never `@tauri-apps/api`.
+- `e2e/` holds `tauri-driver` + WebdriverIO specs (`e2e/specs/*.spec.ts`) that drive the real
+  built `tauri-app` binary as a black box, one flow per major feature area (currently: open
+  repo → stage a file → commit → see it in history). Run separately from `cargo test`/`pnpm
+  test` — it needs a debug build with the `custom-protocol` feature and a frontend build with
+  `VITE_E2E_REPO_PATH` baked in first; see the "Commands" section above for the exact sequence
+  (mirrors `.github/workflows/ci.yml`'s `e2e` job, the source of truth if this drifts).
 
 ## Task workflow
 
