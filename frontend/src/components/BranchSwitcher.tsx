@@ -28,6 +28,17 @@ export function BranchSwitcher({
 
   const current = branches.find((b) => b.isCurrent);
 
+  // Closing the popover should drop any in-progress force-delete confirmation or rename edit —
+  // otherwise a stale `pendingForceFor`/`renaming` name can reattach to an unrelated branch that
+  // reuses that name later (see BranchSwitcher.test.tsx). Called from both places the popover
+  // closes: the toggle button and the branch-switch button in the list.
+  const closePopoverState = () => {
+    setOpen(false);
+    setPendingForceFor(null);
+    setRenaming(null);
+    setRenameValue("");
+  };
+
   const submitCreate = () => {
     if (newBranchName.trim() === "" || createBranchDraft === null) {
       return;
@@ -47,6 +58,9 @@ export function BranchSwitcher({
 
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>, oldName: string) => {
     if (event.key === "Enter") {
+      if (renameValue.trim() === "") {
+        return;
+      }
       onRenameBranch(oldName, renameValue);
       setRenaming(null);
     }
@@ -54,7 +68,16 @@ export function BranchSwitcher({
 
   return (
     <div>
-      <button aria-label="Branch switcher" onClick={() => setOpen((o) => !o)}>
+      <button
+        aria-label="Branch switcher"
+        onClick={() => {
+          if (open) {
+            closePopoverState();
+          } else {
+            setOpen(true);
+          }
+        }}
+      >
         {current?.name ?? "no branch"}
       </button>
       {open && (
@@ -72,7 +95,7 @@ export function BranchSwitcher({
                   <button
                     onClick={() => {
                       onSwitchBranch(b.name);
-                      setOpen(false);
+                      closePopoverState();
                     }}
                   >
                     {b.name}

@@ -103,4 +103,55 @@ describe("BranchSwitcher", () => {
 
     expect(onRenameBranch).toHaveBeenCalledWith("feature", "feature-renamed");
   });
+
+  it("Enter on an empty/whitespace-only rename value does not call onRenameBranch", () => {
+    const onRenameBranch = vi.fn();
+    renderSwitcher({ onRenameBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    const renameButtons = screen.getAllByText("Rename");
+    fireEvent.click(renameButtons[1]); // "feature" row
+    const input = screen.getByDisplayValue("feature");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onRenameBranch).not.toHaveBeenCalled();
+  });
+
+  it("closing the popover clears a pending force-delete so reopening shows Delete again", async () => {
+    const onDeleteBranch = vi.fn().mockResolvedValue(undefined);
+    renderSwitcher({ onDeleteBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    const deleteButtons = screen.getAllByText("Delete");
+    fireEvent.click(deleteButtons[1]); // "feature" row
+    await Promise.resolve();
+    await screen.findByText("Force Delete");
+
+    // Close the popover (toggle button) without acting on the pending force-delete.
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    // Reopen — as if the branch list changed underneath (e.g. delete succeeded, then a new
+    // branch named "feature" was created) and reused the same name.
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    const deleteButtonsAfterReopen = screen.getAllByText("Delete");
+    expect(deleteButtonsAfterReopen.length).toBe(2);
+    expect(screen.queryByText("Force Delete")).toBeNull();
+  });
+
+  it("closing the popover clears an in-progress rename so reopening shows the button, not the input", () => {
+    renderSwitcher();
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    const renameButtons = screen.getAllByText("Rename");
+    fireEvent.click(renameButtons[1]); // "feature" row
+    expect(screen.getByDisplayValue("feature")).toBeInTheDocument();
+
+    // Close via the branch-switch button in the list, the other path that sets open=false.
+    fireEvent.click(screen.getByRole("button", { name: /^main/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.queryByDisplayValue("feature")).toBeNull();
+    expect(screen.getAllByText("Rename").length).toBe(2);
+  });
 });
