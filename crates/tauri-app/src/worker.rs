@@ -4,13 +4,22 @@ use std::thread;
 
 use git_core::status::StatusEntry;
 
-enum Command {
+pub(crate) enum Command {
     GetStatus {
         reply: Sender<Result<Vec<StatusEntry>, String>>,
     },
 }
 
 pub struct Worker {
+    tx: Sender<Command>,
+}
+
+/// Cheap, cloneable handle to a `Worker`'s command channel.
+///
+/// Callers clone this out of shared state and drop the lock *before* blocking on a
+/// reply, so a slow (or wedged) repository operation can't serialize unrelated commands.
+#[derive(Clone)]
+pub struct WorkerHandle {
     tx: Sender<Command>,
 }
 
@@ -34,6 +43,15 @@ impl Worker {
         Ok(Worker { tx })
     }
 
+    /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.
+    pub fn handle(&self) -> WorkerHandle {
+        WorkerHandle {
+            tx: self.tx.clone(),
+        }
+    }
+}
+
+impl WorkerHandle {
     pub fn get_status(&self) -> Result<Vec<StatusEntry>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -75,7 +93,7 @@ mod tests {
         write_file(dir.path(), "untracked.txt", "hello");
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-        let entries = worker.get_status().unwrap();
+        let entries = worker.handle().get_status().unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "untracked.txt");
