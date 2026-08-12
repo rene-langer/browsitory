@@ -3,7 +3,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options } from "@wdio/types";
+// Side-effect-only imports: register webdriverio's and @wdio/types's `declare global {
+// namespace WebdriverIO { ... } }` augmentations, which `WebdriverIO.Config` below (and the
+// element/browser globals `$`/`browser` used implicitly by the spec files) are typed against.
+// Listing "webdriverio"/"@wdio/types" in tsconfig's `types` array doesn't do this, since that
+// array only resolves entries under typeRoots (effectively `node_modules/@types/*`), and both
+// packages ship their own types rather than `@types/*` packages.
+import "webdriverio";
+import "@wdio/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,7 +23,7 @@ const tauriAppBinary = path.resolve(__dirname, "../target/debug/tauri-app");
 // `wdio run` time — by the time this suite runs, the value is already frozen inside the
 // built `tauri-app` binary. So the frontend must be built with
 // `VITE_E2E_REPO_PATH=<this exact path>` *before* `cargo build --workspace` embeds
-// `frontend/dist`. See e2e/README-less inline docs below and the CI `e2e` job.
+// `frontend/dist` (see the CI `e2e` job, and this file's `onPrepare` below).
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
 // The app auto-opens E2E_REPO_PATH as soon as it launches (App.tsx's mount effect), and the
@@ -58,7 +65,7 @@ function onShutdown(fn: () => void) {
 }
 onShutdown(() => closeTauriDriver());
 
-export const config: Options.Testrunner = {
+export const config: WebdriverIO.Config = {
   runner: "local",
   hostname: "127.0.0.1",
   port: 4444,
@@ -66,11 +73,13 @@ export const config: Options.Testrunner = {
   maxInstances: 1,
   capabilities: [
     {
-      maxInstances: 1,
       // @ts-expect-error — tauri:options isn't in WebdriverIO's built-in capability types.
-      // NOTE: the brief's draft also included `browserName: "wry"` here; the live guide's
-      // current example capability object omits `browserName` entirely, so it's dropped here
-      // too (see task report for detail).
+      // NOTE: the brief's draft also included a per-capability `maxInstances: 1` and
+      // `browserName: "wry"` here; the live guide's current example capability object has
+      // neither (just `maxInstances`+`tauri:options` at this same nesting, without
+      // `browserName`), and per-capability `maxInstances` doesn't type-check against
+      // WebdriverIO v9's `RequestedStandaloneCapabilities`, so both are dropped — the
+      // top-level `maxInstances: 1` above already caps this to one instance (see task report).
       "tauri:options": {
         application: tauriAppBinary,
       },
