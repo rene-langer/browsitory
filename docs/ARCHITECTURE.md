@@ -6,7 +6,7 @@
 browsitory/
 ├── crates/
 │   ├── git-core/    # git2-based service layer, UI-agnostic, unit-tested headlessly
-│   ├── config/      # repo registry + preferences (TOML), stub until Phase 1
+│   ├── config/      # repo registry + preferences: recent-repos list, backed by TOML
 │   └── tauri-app/    # Tauri commands + per-repo worker threads
 └── frontend/          # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
 ```
@@ -31,15 +31,10 @@ pragmatic choice; the libgit2 license deviation is documented, not silently acce
 
 ## The `RepoClient` IPC boundary
 
-`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on:
-
-```ts
-export interface RepoClient {
-  openRepo(path: string): Promise<void>;
-  getStatus(): Promise<StatusEntry[]>;
-  // grows with each feature phase
-}
-```
+`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on. It grows
+with each feature phase (11 methods as of Phase 1: repo picking/opening, status, log, diffs,
+stage/unstage, commit) — see that file directly for the current shape rather than a copy here,
+which would just go stale again next phase.
 
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
@@ -98,13 +93,19 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
-  actually-supported E2E path.)
+  actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
+  `packageManager: "pnpm@9.15.9"` — a CI-vs-local pnpm major-version mismatch broke `e2e/`'s
+  frozen-lockfile install during Phase 1; a contributor running a different pnpm major without
+  Corepack honoring this pin can hit the same failure.
 
 ## Roadmap
 
-- **Phase 0** (this pass): workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal
-  status view proving the IPC boundary.
-- **Phase 1**: full repo view — commit history, diff viewer, stage/unstage, commit.
+- **Phase 0**: workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal status view
+  proving the IPC boundary.
+- **Phase 1** (this pass, complete): full repo view — `git-core::log`/`diff`/`stage`/`commit`;
+  `config` turned into a real recent-repos registry; `RepoPicker`/`HistoryList`/`DiffPane`/
+  `CommitBox` frontend, replacing `StatusView`; first GUI E2E layer (`e2e/`, `tauri-driver` +
+  WebdriverIO) plus a CI job for it. See `CLAUDE.md`'s "Project status" for the short version.
 - **Phase 2**: branch management, stash, merge with conflict resolution, interactive rebase,
   blame viewer, multi-branch commit graph.
 - **Phase 3**: push/pull/fetch with progress, multi-remote, tag push, credential handling.
