@@ -4,4 +4,5 @@ pub mod diff;
 pub mod log;
 pub mod repo;
 pub mod stage;
+pub mod stash;
 pub mod status;
