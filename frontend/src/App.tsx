@@ -23,6 +23,11 @@ export default function App() {
     return (
       <main>
         <h1>Browsitory</h1>
+        {/* `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos`
+            calls; an `onOpenRepo` rejection (bad path, a stale recent-repo entry, permissions)
+            lands in `useAppState`'s `state.error`, which is otherwise only rendered in the
+            post-open branch below — leaving a failed open looking like nothing happened. */}
+        {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
         <RepoPicker client={tauriRepoClient} onOpenRepo={appState.openRepo} />
       </main>
     );
