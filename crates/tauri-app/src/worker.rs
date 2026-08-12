@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
+use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::log::CommitInfo;
 use git_core::status::StatusEntry;
@@ -39,6 +40,28 @@ pub(crate) enum Command {
     Commit {
         message: String,
         reply: Sender<Result<String, String>>,
+    },
+    ListBranches {
+        reply: Sender<Result<Vec<BranchInfo>, String>>,
+    },
+    CreateBranch {
+        name: String,
+        start_point: String,
+        reply: Sender<Result<(), String>>,
+    },
+    SwitchBranch {
+        name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    DeleteBranch {
+        name: String,
+        force: bool,
+        reply: Sender<Result<(), String>>,
+    },
+    RenameBranch {
+        old_name: String,
+        new_name: String,
+        reply: Sender<Result<(), String>>,
     },
 }
 
@@ -108,6 +131,40 @@ impl Worker {
                     Command::Commit { message, reply } => {
                         let result =
                             git_core::commit::commit(&repo, &message).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListBranches { reply } => {
+                        let result =
+                            git_core::branch::list_branches(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::CreateBranch {
+                        name,
+                        start_point,
+                        reply,
+                    } => {
+                        let result = git_core::branch::create_branch(&repo, &name, &start_point)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::SwitchBranch { name, reply } => {
+                        let result = git_core::branch::switch_branch(&repo, &name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::DeleteBranch { name, force, reply } => {
+                        let result = git_core::branch::delete_branch(&repo, &name, force)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RenameBranch {
+                        old_name,
+                        new_name,
+                        reply,
+                    } => {
+                        let result =
+                            git_core::branch::rename_branch(&repo, &old_name, &new_name)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                 }
@@ -232,6 +289,71 @@ impl WorkerHandle {
             .recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
+
+    pub fn list_branches(&self) -> Result<Vec<BranchInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListBranches { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn create_branch(&self, name: String, start_point: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::CreateBranch {
+                name,
+                start_point,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn switch_branch(&self, name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SwitchBranch {
+                name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn delete_branch(&self, name: String, force: bool) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::DeleteBranch {
+                name,
+                force,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn rename_branch(&self, old_name: String, new_name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RenameBranch {
+                old_name,
+                new_name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +452,101 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_branches_reflects_the_initial_branch_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let branches = worker.handle().list_branches().unwrap();
+
+        assert_eq!(branches.len(), 1);
+        assert!(branches[0].is_current);
+    }
+
+    #[test]
+    fn create_then_switch_branch_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .create_branch("feature".into(), "HEAD".into())
+            .unwrap();
+
+        let branches = handle.list_branches().unwrap();
+        let feature = branches.iter().find(|b| b.name == "feature").unwrap();
+        assert!(feature.is_current);
+
+        let initial_branch_name = branches
+            .iter()
+            .find(|b| b.name != "feature")
+            .unwrap()
+            .name
+            .clone();
+        handle.switch_branch(initial_branch_name.clone()).unwrap();
+
+        let branches_after = handle.list_branches().unwrap();
+        assert!(
+            branches_after
+                .iter()
+                .find(|b| b.name == initial_branch_name)
+                .unwrap()
+                .is_current
+        );
+    }
+
+    #[test]
+    fn rename_branch_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let initial_branch_name = handle.list_branches().unwrap()[0].name.clone();
+
+        handle
+            .rename_branch(initial_branch_name, "renamed".into())
+            .unwrap();
+
+        let branches = handle.list_branches().unwrap();
+        assert_eq!(branches[0].name, "renamed");
+    }
+
+    #[test]
+    fn delete_branch_with_force_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .create_branch("feature".into(), "HEAD".into())
+            .unwrap();
+        let initial_branch_name = handle
+            .list_branches()
+            .unwrap()
+            .into_iter()
+            .find(|b| b.name != "feature")
+            .unwrap()
+            .name;
+        handle.switch_branch(initial_branch_name).unwrap();
+
+        handle.delete_branch("feature".into(), true).unwrap();
+
+        assert!(
+            !handle
+                .list_branches()
+                .unwrap()
+                .iter()
+                .any(|b| b.name == "feature")
+        );
     }
 }
