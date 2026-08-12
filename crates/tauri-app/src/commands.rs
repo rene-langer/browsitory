@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use git_core::diff::DiffHunk;
+use git_core::log::CommitInfo;
 use serde::Serialize;
 use tauri::State;
 
@@ -11,6 +13,65 @@ pub struct StatusEntryDto {
     pub path: String,
     pub staged: bool,
     pub kind: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfoDto {
+    pub id: String,
+    pub short_id: String,
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+}
+
+impl From<CommitInfo> for CommitInfoDto {
+    fn from(c: CommitInfo) -> Self {
+        CommitInfoDto {
+            id: c.id,
+            short_id: c.short_id,
+            summary: c.summary,
+            author_name: c.author_name,
+            author_email: c.author_email,
+            timestamp: c.timestamp,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct DiffLineDto {
+    pub origin: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunkDto {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    pub lines: Vec<DiffLineDto>,
+}
+
+impl From<DiffHunk> for DiffHunkDto {
+    fn from(h: DiffHunk) -> Self {
+        DiffHunkDto {
+            old_start: h.old_start,
+            old_lines: h.old_lines,
+            new_start: h.new_start,
+            new_lines: h.new_lines,
+            lines: h
+                .lines
+                .into_iter()
+                .map(|l| DiffLineDto {
+                    origin: format!("{:?}", l.origin),
+                    content: l.content,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -27,19 +88,20 @@ pub fn open_repo(path: String, state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// Clone the worker's channel handle and drop the guard before blocking on the reply —
+// holding the mutex across the round-trip would serialize every command behind this one
+// and let a wedged worker hold the lock forever.
+fn worker_handle(state: &State<AppState>) -> Result<crate::worker::WorkerHandle, String> {
+    let guard = state.worker.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .as_ref()
+        .map(Worker::handle)
+        .ok_or_else(|| "no repo open".to_string())
+}
+
 #[tauri::command]
 pub fn get_status(state: State<AppState>) -> Result<Vec<StatusEntryDto>, String> {
-    // Clone the worker's channel handle and drop the guard before blocking on the reply —
-    // holding the mutex across the round-trip would serialize every command behind this one
-    // and let a wedged worker hold the lock forever.
-    let worker = {
-        let guard = state.worker.lock().unwrap_or_else(|e| e.into_inner());
-        guard
-            .as_ref()
-            .map(Worker::handle)
-            .ok_or_else(|| "no repo open".to_string())?
-    };
-    let entries = worker.get_status()?;
+    let entries = worker_handle(&state)?.get_status()?;
     Ok(entries
         .into_iter()
         .map(|e| StatusEntryDto {
@@ -50,8 +112,55 @@ pub fn get_status(state: State<AppState>) -> Result<Vec<StatusEntryDto>, String>
         .collect())
 }
 
+#[tauri::command]
+pub fn get_log(limit: usize, state: State<AppState>) -> Result<Vec<CommitInfoDto>, String> {
+    let commits = worker_handle(&state)?.get_log(limit)?;
+    Ok(commits.into_iter().map(CommitInfoDto::from).collect())
+}
+
+#[tauri::command]
+pub fn get_working_diff(
+    path: String,
+    staged: bool,
+    state: State<AppState>,
+) -> Result<Vec<DiffHunkDto>, String> {
+    let hunks = worker_handle(&state)?.get_working_diff(path, staged)?;
+    Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
+}
+
+#[tauri::command]
+pub fn get_commit_diff(
+    commit_id: String,
+    path: String,
+    state: State<AppState>,
+) -> Result<Vec<DiffHunkDto>, String> {
+    let hunks = worker_handle(&state)?.get_commit_diff(commit_id, path)?;
+    Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
+}
+
+#[tauri::command]
+pub fn get_commit_files(commit_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
+    worker_handle(&state)?.get_commit_files(commit_id)
+}
+
+#[tauri::command]
+pub fn stage_file(path: String, state: State<AppState>) -> Result<(), String> {
+    worker_handle(&state)?.stage_file(path)
+}
+
+#[tauri::command]
+pub fn unstage_file(path: String, state: State<AppState>) -> Result<(), String> {
+    worker_handle(&state)?.unstage_file(path)
+}
+
+#[tauri::command]
+pub fn commit(message: String, state: State<AppState>) -> Result<String, String> {
+    worker_handle(&state)?.commit(message)
+}
+
 #[cfg(test)]
 mod tests {
+    use git_core::diff::DiffLineOrigin;
     use git_core::status::StatusKind;
 
     /// The `kind` field of `StatusEntryDto` is produced by `format!("{:?}", kind)`, so the
@@ -80,6 +189,33 @@ mod tests {
             StatusKind::TypeChange,
         ] {
             assert_eq!(format!("{:?}", kind), expected_wire_value(kind));
+        }
+    }
+
+    /// `DiffLineDto::origin` is produced by `format!("{:?}", origin)`, so the `Debug`
+    /// output *is* the wire format. Counterpart contract: the `DiffLineOrigin` union in
+    /// `frontend/src/ipc/RepoClient.ts` (`"Add" | "Remove" | "Context"`) — these must stay
+    /// in sync. Exhaustive on purpose: adding a `DiffLineOrigin` variant breaks compilation
+    /// here, which is the reminder to extend the TypeScript union too.
+    fn expected_diff_origin_wire_value(origin: DiffLineOrigin) -> &'static str {
+        match origin {
+            DiffLineOrigin::Add => "Add",
+            DiffLineOrigin::Remove => "Remove",
+            DiffLineOrigin::Context => "Context",
+        }
+    }
+
+    #[test]
+    fn diff_line_origin_wire_values_match_the_typescript_union() {
+        for origin in [
+            DiffLineOrigin::Add,
+            DiffLineOrigin::Remove,
+            DiffLineOrigin::Context,
+        ] {
+            assert_eq!(
+                format!("{:?}", origin),
+                expected_diff_origin_wire_value(origin)
+            );
         }
     }
 }
