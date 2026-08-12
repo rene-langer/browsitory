@@ -52,9 +52,12 @@ export default function App() {
         <HistoryList
           status={appState.state.status}
           log={appState.state.log}
+          stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
           onSelectRow={appState.selectRow}
           onBranchFromCommit={appState.openCreateBranchDraft}
+          onApplyStash={appState.applyStash}
+          onDropStash={appState.dropStash}
         />
         <DiffPane
           client={tauriRepoClient}
@@ -63,6 +66,7 @@ export default function App() {
           onStageFile={appState.stageFile}
           onUnstageFile={appState.unstageFile}
           onCommit={appState.commit}
+          onSaveStash={appState.saveStash}
         />
       </div>
     </main>
