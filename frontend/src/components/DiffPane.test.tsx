@@ -1,0 +1,201 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import { DiffPane } from "./DiffPane";
+
+function unused(): never {
+  throw new Error("not used in this test");
+}
+
+function fakeClient(overrides: Partial<RepoClient>): RepoClient {
+  return {
+    pickRepoFolder: unused,
+    listRecentRepos: unused,
+    openRepo: unused,
+    getStatus: unused,
+    getLog: unused,
+    getWorkingDiff: unused,
+    getCommitDiff: unused,
+    getCommitFiles: unused,
+    stageFile: unused,
+    unstageFile: unused,
+    commit: unused,
+    ...overrides,
+  };
+}
+
+describe("DiffPane", () => {
+  describe("uncommitted", () => {
+    const status: StatusEntry[] = [
+      { path: "a.txt", staged: false, kind: "Modified" },
+      { path: "b.txt", staged: true, kind: "New" },
+    ];
+
+    it("renders a Stage button for unstaged entries and Unstage for staged ones", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Stage")).toBeInTheDocument();
+      expect(screen.getByText("Unstage")).toBeInTheDocument();
+    });
+
+    it("clicking Stage calls onStageFile with that path", () => {
+      const client = fakeClient({});
+      const onStageFile = vi.fn();
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={onStageFile}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Stage"));
+
+      expect(onStageFile).toHaveBeenCalledWith("a.txt");
+    });
+
+    it("clicking a file fetches and renders its working diff", async () => {
+      const hunks: DiffHunk[] = [
+        {
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          lines: [{ origin: "Add", content: "changed line" }],
+        },
+      ];
+      const getWorkingDiff = vi.fn(async () => hunks);
+      const client = fakeClient({ getWorkingDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("a.txt (Modified)"));
+
+      expect(await screen.findByText(/changed line/)).toBeInTheDocument();
+      expect(getWorkingDiff).toHaveBeenCalledWith("a.txt", false);
+    });
+
+    it("CommitBox is disabled when nothing is staged", () => {
+      const client = fakeClient({});
+      const unstagedOnly: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={unstagedOnly}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Commit")).toBeDisabled();
+    });
+
+    it("CommitBox is enabled when something is staged", () => {
+      const client = fakeClient({});
+      const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={stagedOnly}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      // CommitBox itself still requires a non-empty message before it will enable
+      // (covered by CommitBox.test.tsx); typing one here isolates DiffPane's own
+      // concern, which is correctly threading disabled={stagedCount === 0}.
+      fireEvent.change(screen.getByPlaceholderText("Commit message"), {
+        target: { value: "a message" },
+      });
+
+      expect(screen.getByText("Commit")).not.toBeDisabled();
+    });
+  });
+
+  describe("commit", () => {
+    const getCommitFiles = vi.fn(async () => ["src/main.rs"]);
+    const hunks: DiffHunk[] = [
+      {
+        oldStart: 1,
+        oldLines: 1,
+        newStart: 1,
+        newLines: 1,
+        lines: [{ origin: "Add", content: "fn main() {}" }],
+      },
+    ];
+    const getCommitDiff = vi.fn(async () => hunks);
+
+    it("renders the commit's changed files and their diff on click", async () => {
+      const client = fakeClient({ getCommitFiles, getCommitDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText("src/main.rs"));
+
+      expect(await screen.findByText(/fn main/)).toBeInTheDocument();
+      expect(getCommitDiff).toHaveBeenCalledWith("abc123", "src/main.rs");
+    });
+
+    it("no CommitBox or stage/unstage buttons render", async () => {
+      const client = fakeClient({ getCommitFiles, getCommitDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+        />,
+      );
+
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+
+      expect(screen.queryByText("Commit")).toBeNull();
+      expect(screen.queryByText("Stage")).toBeNull();
+    });
+  });
+});
