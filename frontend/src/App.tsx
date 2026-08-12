@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { DiffPane } from "./components/DiffPane";
 import { HistoryList } from "./components/HistoryList";
 import { RepoPicker } from "./components/RepoPicker";
@@ -6,6 +7,17 @@ import { useAppState } from "./state/useAppState";
 
 export default function App() {
   const appState = useAppState(tauriRepoClient);
+
+  // E2E-only auto-open: `RepoPicker`'s native folder dialog can't be driven through WebDriver,
+  // so the E2E build points at a fixture repo via this Vite env var instead. Statically absent
+  // from a normal production build unless VITE_E2E_REPO_PATH is set at build time.
+  useEffect(() => {
+    const autoOpenPath = import.meta.env.VITE_E2E_REPO_PATH;
+    if (typeof autoOpenPath === "string" && autoOpenPath.length > 0) {
+      appState.openRepo(autoOpenPath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (appState.state.repoPath === null) {
     return (

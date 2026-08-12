@@ -9,5 +9,8 @@
 frontend/node_modules
 frontend/dist
 
+# E2E
+e2e/node_modules
+
 # Claude Code worktrees (nested checkouts for parallel/background agents)
 .claude/worktrees/
