@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { BranchInfo, CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BranchInfo, CommitInfo, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -29,6 +29,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -63,6 +67,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -100,6 +108,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -135,6 +147,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -163,6 +179,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -199,6 +219,10 @@ describe("useAppState", () => {
       },
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -231,6 +255,10 @@ describe("useAppState", () => {
       switchBranch: async () => {},
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -264,6 +292,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -295,6 +327,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -325,6 +361,10 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
@@ -339,5 +379,151 @@ describe("useAppState", () => {
     act(() => result.current.closeCreateBranchDraft());
 
     expect(result.current.state.createBranchDraft).toBeNull();
+  });
+
+  it("openRepo also populates stashes", async () => {
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [stash],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+
+    await act(() => result.current.openRepo("/repo"));
+
+    expect(result.current.state.stashes).toEqual([stash]);
+  });
+
+  it("saveStash calls client.saveStash then refreshes stashes", async () => {
+    let saveStashCalls = 0;
+    let listStashesCalls = 0;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => {
+        listStashesCalls += 1;
+        return listStashesCalls === 1
+          ? []
+          : [{ index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" }];
+      },
+      saveStash: async () => {
+        saveStashCalls += 1;
+      },
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+
+    await act(() => result.current.saveStash());
+
+    expect(saveStashCalls).toBe(1);
+    expect(result.current.state.stashes).toEqual([
+      { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" },
+    ]);
+  });
+
+  it("applyStash calls client.applyStash with the given index", async () => {
+    let applyStashArg: number | null = null;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async (index: number) => {
+        applyStashArg = index;
+      },
+      dropStash: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+
+    await act(() => result.current.applyStash(0));
+
+    expect(applyStashArg).toBe(0);
+  });
+
+  it("dropStash calls client.dropStash with the given index", async () => {
+    let dropStashArg: number | null = null;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async (index: number) => {
+        dropStashArg = index;
+      },
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+
+    await act(() => result.current.dropStash(0));
+
+    expect(dropStashArg).toBe(0);
   });
 });

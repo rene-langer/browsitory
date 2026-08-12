@@ -1,5 +1,11 @@
 import { useCallback, useState } from "react";
-import type { BranchInfo, CommitInfo, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type {
+  BranchInfo,
+  CommitInfo,
+  RepoClient,
+  StashEntry,
+  StatusEntry,
+} from "../ipc/RepoClient";
 
 const LOG_LIMIT = 300;
 
@@ -12,6 +18,7 @@ export interface AppState {
   log: CommitInfo[];
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
+  stashes: StashEntry[];
   error: string | null;
 }
 
@@ -28,6 +35,9 @@ export interface UseAppStateResult {
   renameBranch(oldName: string, newName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
+  saveStash(): Promise<void>;
+  applyStash(index: number): Promise<void>;
+  dropStash(index: number): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -39,17 +49,19 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     log: [],
     branches: [],
     createBranchDraft: null,
+    stashes: [],
     error: null,
   });
 
   const refresh = useCallback(async () => {
     try {
-      const [status, log, branches] = await Promise.all([
+      const [status, log, branches, stashes] = await Promise.all([
         client.getStatus(),
         client.getLog(LOG_LIMIT),
         client.listBranches(),
+        client.listStashes(),
       ]);
-      setState((prev) => ({ ...prev, status, log, branches, error: null }));
+      setState((prev) => ({ ...prev, status, log, branches, stashes, error: null }));
     } catch (err) {
       setState((prev) => ({ ...prev, error: String(err) }));
     }
@@ -125,6 +137,19 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     setState((prev) => ({ ...prev, createBranchDraft: null }));
   }, []);
 
+  const saveStash = useCallback(
+    () => runMutation(() => client.saveStash()),
+    [client, runMutation],
+  );
+  const applyStash = useCallback(
+    (index: number) => runMutation(() => client.applyStash(index)),
+    [client, runMutation],
+  );
+  const dropStash = useCallback(
+    (index: number) => runMutation(() => client.dropStash(index)),
+    [client, runMutation],
+  );
+
   return {
     state,
     openRepo,
@@ -138,6 +163,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     renameBranch,
     openCreateBranchDraft,
     closeCreateBranchDraft,
+    saveStash,
+    applyStash,
+    dropStash,
     refresh,
   };
 }
