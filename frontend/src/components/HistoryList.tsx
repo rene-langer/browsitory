@@ -67,12 +67,13 @@ export function HistoryList({
       {stashes.map((stash) => (
         <li
           key={stash.commitId}
+          className="stash-row"
           aria-selected={
             typeof selectedRow === "object" && selectedRow.commitId === stash.commitId
           }
           onClick={() => onSelectRow({ commitId: stash.commitId })}
         >
-          {stash.message}
+          <span>{stash.message}</span>
           <button
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();

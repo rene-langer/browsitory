@@ -72,6 +72,22 @@ h1 {
   text-overflow: ellipsis;
 }
 
+.app-layout > ul > li.stash-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: normal;
+  overflow: visible;
+}
+
+.app-layout > ul > li.stash-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .app-layout > ul > li[aria-selected="true"] {
   background: var(--selected-bg);
 }
