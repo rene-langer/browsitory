@@ -81,7 +81,7 @@ pub struct AppState {
 }
 
 #[tauri::command]
-pub fn open_repo(path: String, state: State<AppState>) -> Result<(), String> {
+pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
     let worker = Worker::spawn(PathBuf::from(&path))?;
     // A poisoned lock is recoverable here: the worker thread never touches this mutex, so
     // the `Option<Worker>` behind it can't have been left half-updated.
@@ -94,7 +94,7 @@ pub fn open_repo(path: String, state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
+pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
     app.dialog()
         .file()
         .blocking_pick_folder()
@@ -125,7 +125,7 @@ fn worker_handle(state: &State<AppState>) -> Result<crate::worker::WorkerHandle,
 }
 
 #[tauri::command]
-pub fn get_status(state: State<AppState>) -> Result<Vec<StatusEntryDto>, String> {
+pub async fn get_status(state: State<'_, AppState>) -> Result<Vec<StatusEntryDto>, String> {
     let entries = worker_handle(&state)?.get_status()?;
     Ok(entries
         .into_iter()
@@ -138,48 +138,54 @@ pub fn get_status(state: State<AppState>) -> Result<Vec<StatusEntryDto>, String>
 }
 
 #[tauri::command]
-pub fn get_log(limit: usize, state: State<AppState>) -> Result<Vec<CommitInfoDto>, String> {
+pub async fn get_log(
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<CommitInfoDto>, String> {
     let commits = worker_handle(&state)?.get_log(limit)?;
     Ok(commits.into_iter().map(CommitInfoDto::from).collect())
 }
 
 #[tauri::command]
-pub fn get_working_diff(
+pub async fn get_working_diff(
     path: String,
     staged: bool,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     let hunks = worker_handle(&state)?.get_working_diff(path, staged)?;
     Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
 }
 
 #[tauri::command]
-pub fn get_commit_diff(
+pub async fn get_commit_diff(
     commit_id: String,
     path: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     let hunks = worker_handle(&state)?.get_commit_diff(commit_id, path)?;
     Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
 }
 
 #[tauri::command]
-pub fn get_commit_files(commit_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
+pub async fn get_commit_files(
+    commit_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     worker_handle(&state)?.get_commit_files(commit_id)
 }
 
 #[tauri::command]
-pub fn stage_file(path: String, state: State<AppState>) -> Result<(), String> {
+pub async fn stage_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
     worker_handle(&state)?.stage_file(path)
 }
 
 #[tauri::command]
-pub fn unstage_file(path: String, state: State<AppState>) -> Result<(), String> {
+pub async fn unstage_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
     worker_handle(&state)?.unstage_file(path)
 }
 
 #[tauri::command]
-pub fn commit(message: String, state: State<AppState>) -> Result<String, String> {
+pub async fn commit(message: String, state: State<'_, AppState>) -> Result<String, String> {
     worker_handle(&state)?.commit(message)
 }
 
