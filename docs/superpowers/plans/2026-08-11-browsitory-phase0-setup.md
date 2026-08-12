@@ -1050,11 +1050,17 @@ talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
 
 ### Threading model
 
-`git2::Repository` is not `Send`. `crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the
-repository on a dedicated thread and owns it for that thread's lifetime; Tauri commands
-(`crates/tauri-app/src/commands.rs`) send `Command`s over an `mpsc` channel and get replies
-over a per-call reply channel. UI code never touches `git-core` directly — only through
-`RepoClient` → a Tauri command → the worker thread.
+`git2::Repository` **is** `Send` but is **not** `Sync`. It can be moved into one thread and
+owned there (that's why `Worker::spawn`'s `thread::spawn(move || …)` compiles), but a
+`&Repository` can never be shared across threads. Tauri managed state requires `Send + Sync`,
+so a `Repository` can't be `State` directly, and putting it behind `State<Mutex<Repository>>`
+would serialize every command on one lock held across blocking git work. The response to
+`!Sync` is therefore message-passing to a single owning thread:
+`crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the repository on a dedicated thread
+and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
+send `Command`s over an `mpsc` channel and get replies over a per-call reply channel. UI code
+never touches `git-core` directly — only through `RepoClient` → a Tauri command → the worker
+thread.
 
 ### `RepoClient`: why it exists
 
@@ -1148,14 +1154,23 @@ extension implements the same interface over `postMessage` in a sibling file
 
 ## Threading model
 
-`git2::Repository` is not `Send`, so it can't be shared across threads or stored in Tauri's
-async command handlers directly. Each opened repository gets one dedicated OS thread
-(`crates/tauri-app/src/worker.rs`'s `Worker::spawn`) that opens its own `Repository` handle and
-owns it exclusively. Tauri commands (`crates/tauri-app/src/commands.rs`) send a `Command` enum
-value over a `std::sync::mpsc` channel to that thread and receive the result over a per-call
-reply channel — the `Repository` handle itself never crosses a thread boundary, only owned,
-`Send` command/reply values do. One worker thread per open repo also means multiple repos never
-contend on a shared handle.
+`git2::Repository` **is** `Send` (libgit2 handles can be moved between threads, and `git2`
+carries an `unsafe impl Send` to say so) but it is **not** `Sync`: a `&Repository` must never
+be used from two threads at once. So the handle can be *given* to exactly one thread, but not
+*shared*. That rules out the obvious Tauri shape — managed state requires `Send + Sync`, so a
+bare `Repository` can't be `State` at all, and `State<Mutex<Repository>>` (which does satisfy
+`Sync`) would funnel every concurrent command invocation through a single lock held for the
+duration of blocking git work.
+
+The `!Sync` constraint is what message-passing answers. Each opened repository gets one
+dedicated OS thread (`crates/tauri-app/src/worker.rs`'s `Worker::spawn`) that opens its own
+`Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved in
+once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands.rs`) send a
+`Command` enum value over a `std::sync::mpsc` channel to that thread and receive the result
+over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
+Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
+on a reply, so one slow repository operation can't serialize unrelated commands. One worker
+thread per open repo also means multiple repos never contend on a shared handle.
 
 ## Error handling
 
