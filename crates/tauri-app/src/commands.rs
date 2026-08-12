@@ -41,6 +41,22 @@ impl From<CommitInfo> for CommitInfoDto {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchInfoDto {
+    pub name: String,
+    pub is_current: bool,
+}
+
+impl From<git_core::branch::BranchInfo> for BranchInfoDto {
+    fn from(b: git_core::branch::BranchInfo) -> Self {
+        BranchInfoDto {
+            name: b.name,
+            is_current: b.is_current,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -187,6 +203,44 @@ pub async fn unstage_file(path: String, state: State<'_, AppState>) -> Result<()
 #[tauri::command]
 pub async fn commit(message: String, state: State<'_, AppState>) -> Result<String, String> {
     worker_handle(&state)?.commit(message)
+}
+
+#[tauri::command]
+pub async fn list_branches(state: State<'_, AppState>) -> Result<Vec<BranchInfoDto>, String> {
+    let branches = worker_handle(&state)?.list_branches()?;
+    Ok(branches.into_iter().map(BranchInfoDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn create_branch(
+    name: String,
+    start_point: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.create_branch(name, start_point)
+}
+
+#[tauri::command]
+pub async fn switch_branch(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.switch_branch(name)
+}
+
+#[tauri::command]
+pub async fn delete_branch(
+    name: String,
+    force: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.delete_branch(name, force)
+}
+
+#[tauri::command]
+pub async fn rename_branch(
+    old_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.rename_branch(old_name, new_name)
 }
 
 #[cfg(test)]
