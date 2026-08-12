@@ -5,6 +5,7 @@ use std::thread;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::log::CommitInfo;
+use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
 pub(crate) enum Command {
@@ -63,6 +64,20 @@ pub(crate) enum Command {
         new_name: String,
         reply: Sender<Result<(), String>>,
     },
+    ListStashes {
+        reply: Sender<Result<Vec<StashEntry>, String>>,
+    },
+    SaveStash {
+        reply: Sender<Result<(), String>>,
+    },
+    ApplyStash {
+        index: usize,
+        reply: Sender<Result<(), String>>,
+    },
+    DropStash {
+        index: usize,
+        reply: Sender<Result<(), String>>,
+    },
 }
 
 pub struct Worker {
@@ -84,7 +99,7 @@ impl Worker {
         let (tx, rx) = mpsc::channel::<Command>();
 
         thread::spawn(move || {
-            let repo = repo;
+            let mut repo = repo;
             for command in rx {
                 match command {
                     Command::GetStatus { reply } => {
@@ -163,6 +178,26 @@ impl Worker {
                         reply,
                     } => {
                         let result = git_core::branch::rename_branch(&repo, &old_name, &new_name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListStashes { reply } => {
+                        let result =
+                            git_core::stash::list_stashes(&mut repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::SaveStash { reply } => {
+                        let result =
+                            git_core::stash::save_stash(&mut repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ApplyStash { index, reply } => {
+                        let result = git_core::stash::apply_stash(&mut repo, index)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::DropStash { index, reply } => {
+                        let result = git_core::stash::drop_stash(&mut repo, index)
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
@@ -346,6 +381,52 @@ impl WorkerHandle {
             .send(Command::RenameBranch {
                 old_name,
                 new_name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn list_stashes(&self) -> Result<Vec<StashEntry>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListStashes { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn save_stash(&self) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SaveStash { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn apply_stash(&self, index: usize) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ApplyStash {
+                index,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn drop_stash(&self, index: usize) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::DropStash {
+                index,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -545,5 +626,39 @@ mod tests {
             .unwrap()
             .iter()
             .any(|b| b.name == "feature"));
+    }
+
+    #[test]
+    fn save_then_list_stash_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "file.txt", "v2");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.save_stash().unwrap();
+
+        let stashes = handle.list_stashes().unwrap();
+        assert_eq!(stashes.len(), 1);
+    }
+
+    #[test]
+    fn apply_then_drop_stash_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "file.txt", "v2");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.save_stash().unwrap();
+
+        handle.apply_stash(0).unwrap();
+        let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
+        assert_eq!(contents, "v2");
+
+        handle.drop_stash(0).unwrap();
+        assert!(handle.list_stashes().unwrap().is_empty());
     }
 }
