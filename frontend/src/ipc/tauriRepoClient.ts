@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  BranchInfo,
   CommitInfo,
   DiffHunk,
   RepoClient,
@@ -21,4 +22,12 @@ export const tauriRepoClient: RepoClient = {
   stageFile: (path: string) => invoke("stage_file", { path }),
   unstageFile: (path: string) => invoke("unstage_file", { path }),
   commit: (message: string) => invoke("commit", { message }),
+  listBranches: () => invoke<BranchInfo[]>("list_branches"),
+  createBranch: (name: string, startPoint: string) =>
+    invoke("create_branch", { name, startPoint }),
+  switchBranch: (name: string) => invoke("switch_branch", { name }),
+  deleteBranch: (name: string, force: boolean) =>
+    invoke("delete_branch", { name, force }),
+  renameBranch: (oldName: string, newName: string) =>
+    invoke("rename_branch", { oldName, newName }),
 };
