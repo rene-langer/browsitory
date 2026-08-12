@@ -30,7 +30,13 @@ const log: CommitInfo[] = [
 describe("HistoryList", () => {
   it("renders the Uncommitted Changes row with a change-count badge", () => {
     render(
-      <HistoryList status={status} log={log} selectedRow="uncommitted" onSelectRow={vi.fn()} />,
+      <HistoryList
+        status={status}
+        log={log}
+        selectedRow="uncommitted"
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+      />,
     );
 
     expect(screen.getByText("Uncommitted Changes (2)")).toBeInTheDocument();
@@ -38,7 +44,13 @@ describe("HistoryList", () => {
 
   it("renders each commit's short id and summary", () => {
     render(
-      <HistoryList status={status} log={log} selectedRow="uncommitted" onSelectRow={vi.fn()} />,
+      <HistoryList
+        status={status}
+        log={log}
+        selectedRow="uncommitted"
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+      />,
     );
 
     expect(screen.getByText(/aaa1111/)).toBeInTheDocument();
@@ -55,6 +67,7 @@ describe("HistoryList", () => {
         log={log}
         selectedRow="uncommitted"
         onSelectRow={onSelectRow}
+        onBranchFromCommit={vi.fn()}
       />,
     );
 
@@ -71,6 +84,7 @@ describe("HistoryList", () => {
         log={log}
         selectedRow="uncommitted"
         onSelectRow={onSelectRow}
+        onBranchFromCommit={vi.fn()}
       />,
     );
 
@@ -88,6 +102,7 @@ describe("HistoryList", () => {
         log={log}
         selectedRow="uncommitted"
         onSelectRow={onSelectRow}
+        onBranchFromCommit={vi.fn()}
       />,
     );
 
@@ -105,6 +120,7 @@ describe("HistoryList", () => {
         log={log}
         selectedRow={{ commitId: "bbb222..." }}
         onSelectRow={onSelectRow}
+        onBranchFromCommit={vi.fn()}
       />,
     );
 
@@ -112,5 +128,56 @@ describe("HistoryList", () => {
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." });
+  });
+
+  it("right-clicking a commit row shows a 'Branch from here' menu entry", () => {
+    render(
+      <HistoryList
+        status={status}
+        log={log}
+        selectedRow="uncommitted"
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+
+    expect(screen.getByText("Branch from here")).toBeInTheDocument();
+  });
+
+  it("clicking 'Branch from here' calls onBranchFromCommit with that commit's id and closes the menu", () => {
+    const onBranchFromCommit = vi.fn();
+    render(
+      <HistoryList
+        status={status}
+        log={log}
+        selectedRow="uncommitted"
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={onBranchFromCommit}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+    fireEvent.click(screen.getByText("Branch from here"));
+
+    expect(onBranchFromCommit).toHaveBeenCalledWith("aaa111...");
+    expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
+  });
+
+  it("right-clicking the Uncommitted Changes row does not show the menu", () => {
+    render(
+      <HistoryList
+        status={status}
+        log={log}
+        selectedRow="uncommitted"
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/Uncommitted Changes/).closest("li")!);
+
+    expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
   });
 });

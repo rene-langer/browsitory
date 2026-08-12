@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { CommitInfo, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 
@@ -14,12 +14,20 @@ export function HistoryList({
   log,
   selectedRow,
   onSelectRow,
+  onBranchFromCommit,
 }: {
   status: StatusEntry[];
   log: CommitInfo[];
   selectedRow: SelectedRow;
   onSelectRow: (row: SelectedRow) => void;
+  onBranchFromCommit: (commitId: string) => void;
 }) {
+  const [contextMenu, setContextMenu] = useState<{
+    commitId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const rows: SelectedRow[] = [
     "uncommitted",
     ...log.map((commit) => ({ commitId: commit.id })),
@@ -34,6 +42,11 @@ export function HistoryList({
       event.preventDefault();
       onSelectRow(rows[Math.max(selectedIndex - 1, 0)]);
     }
+  };
+
+  const handleContextMenu = (event: MouseEvent, commitId: string) => {
+    event.preventDefault();
+    setContextMenu({ commitId, x: event.clientX, y: event.clientY });
   };
 
   return (
@@ -51,10 +64,28 @@ export function HistoryList({
             typeof selectedRow === "object" && selectedRow.commitId === commit.id
           }
           onClick={() => onSelectRow({ commitId: commit.id })}
+          onContextMenu={(event) => handleContextMenu(event, commit.id)}
         >
           {commit.shortId} {commit.summary}
         </li>
       ))}
+      {contextMenu !== null && (
+        <ul
+          style={{ position: "fixed", top: contextMenu.y, left: contextMenu.x }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <li>
+            <button
+              onClick={() => {
+                onBranchFromCommit(contextMenu.commitId);
+                setContextMenu(null);
+              }}
+            >
+              Branch from here
+            </button>
+          </li>
+        </ul>
+      )}
     </ul>
   );
 }
