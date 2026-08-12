@@ -38,3 +38,18 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
     })?;
     Ok(entries)
 }
+
+pub fn apply_stash(repo: &mut Repository, index: usize) -> Result<(), StashError> {
+    // `None` options means libgit2's default (safe) checkout strategy applies, refusing to
+    // overwrite a conflicting file exactly like `branch::switch_branch`'s
+    // `checkout_tree(..., None)` does. Same philosophy, same error-propagation shape.
+    repo.stash_apply(index, None)?;
+    Ok(())
+}
+
+pub fn drop_stash(repo: &mut Repository, index: usize) -> Result<(), StashError> {
+    // Indices shift after a drop (git2's own behavior) — callers always re-fetch the full list
+    // afterward, so a stale index is never held across calls.
+    repo.stash_drop(index)?;
+    Ok(())
+}
