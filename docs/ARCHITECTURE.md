@@ -67,6 +67,19 @@ Commands clone the channel `Sender` out of the state mutex and drop the guard be
 on a reply, so one slow repository operation can't serialize unrelated commands. One worker
 thread per open repo also means multiple repos never contend on a shared handle.
 
+**Every Tauri command that blocks must be an `async fn`.** A plain `#[tauri::command] fn` is
+dispatched by `tauri-macros`' `ExecutionContext::Blocking` path, which runs the function body
+*inline on the main/UI thread*; an `async fn` command takes the `ExecutionContext::Async` path
+(`InvokeResolver::respond_async_serialized` → `async_runtime::spawn`) and runs off the main
+thread. So anything that parks the calling thread — `reply_rx.recv()` on a worker round-trip,
+`tauri_plugin_dialog`'s `blocking_pick_folder()` — freezes the whole window if the command is
+sync. In `blocking_pick_folder()`'s case it doesn't merely freeze, it *deadlocks*: the dialog
+is posted back to the main thread via `run_on_main_thread` and then waited on, so when the main
+thread is the caller the dialog can never be dispatched and the app hangs forever. Every
+command in `commands.rs` that touches the worker or the dialog plugin is therefore an
+`async fn`. Note that an `async fn` command taking a borrowed argument (e.g.
+`state: State<'_, AppState>`) must return a `Result`, which is why they all do.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
