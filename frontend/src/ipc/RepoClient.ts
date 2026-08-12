@@ -35,6 +35,12 @@ export interface BranchInfo {
   isCurrent: boolean;
 }
 
+export interface StashEntry {
+  index: number;
+  message: string;
+  commitId: string;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -52,4 +58,8 @@ export interface RepoClient {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  listStashes(): Promise<StashEntry[]>;
+  saveStash(): Promise<void>;
+  applyStash(index: number): Promise<void>;
+  dropStash(index: number): Promise<void>;
 }

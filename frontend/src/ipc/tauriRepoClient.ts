@@ -4,6 +4,7 @@ import type {
   CommitInfo,
   DiffHunk,
   RepoClient,
+  StashEntry,
   StatusEntry,
 } from "./RepoClient";
 
@@ -30,4 +31,8 @@ export const tauriRepoClient: RepoClient = {
     invoke("delete_branch", { name, force }),
   renameBranch: (oldName: string, newName: string) =>
     invoke("rename_branch", { oldName, newName }),
+  listStashes: () => invoke<StashEntry[]>("list_stashes"),
+  saveStash: () => invoke("save_stash"),
+  applyStash: (index: number) => invoke("apply_stash", { index }),
+  dropStash: (index: number) => invoke("drop_stash", { index }),
 };
