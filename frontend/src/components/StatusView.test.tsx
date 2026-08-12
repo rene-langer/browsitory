@@ -30,4 +30,18 @@ describe("StatusView", () => {
 
     expect(await screen.findByText("No changes")).toBeInTheDocument();
   });
+
+  it("renders the error instead of the empty state when getStatus rejects", async () => {
+    const client: RepoClient = {
+      openRepo: async () => {},
+      getStatus: async () => {
+        throw new Error("no repo open");
+      },
+    };
+
+    render(<StatusView client={client} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("no repo open");
+    expect(screen.queryByText("No changes")).not.toBeInTheDocument();
+  });
 });
