@@ -11,3 +11,6 @@ frontend/dist
 
 # Claude Code worktrees (nested checkouts for parallel/background agents)
 .claude/worktrees/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
