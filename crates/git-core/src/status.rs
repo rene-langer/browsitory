@@ -23,7 +23,19 @@ pub struct StatusEntry {
 }
 
 pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
-    let statuses = repo.statuses(None)?;
+    // Explicit options, because libgit2's defaults both do too much and too little: they
+    // scan ignored files (whose flags then resolve to `None`/`None` and get dropped below)
+    // and they leave rename detection off, which would make `StatusKind::Renamed`
+    // unreachable — renames would surface as a Deleted + New pair instead.
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true);
+
+    let statuses = repo.statuses(Some(&mut options))?;
     let mut entries = Vec::new();
 
     for entry in statuses.iter() {
