@@ -112,3 +112,89 @@ fn rename_branch_updates_head_when_renaming_the_current_branch() {
     assert_eq!(branches[0].name, "renamed");
     assert!(branches[0].is_current);
 }
+
+#[test]
+fn delete_branch_without_force_fails_on_an_unmerged_branch() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "feature commit");
+    let initial_branch = git_core::branch::list_branches(&repo)
+        .unwrap()
+        .into_iter()
+        .find(|b| b.name != "feature")
+        .unwrap()
+        .name;
+    git_core::branch::switch_branch(&repo, &initial_branch).unwrap();
+
+    let result = git_core::branch::delete_branch(&repo, "feature", false);
+
+    assert!(matches!(result, Err(git_core::branch::BranchError::NotMerged(_))));
+    assert!(
+        git_core::branch::list_branches(&repo)
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "feature")
+    );
+}
+
+#[test]
+fn delete_branch_with_force_deletes_an_unmerged_branch() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "feature commit");
+    let initial_branch = git_core::branch::list_branches(&repo)
+        .unwrap()
+        .into_iter()
+        .find(|b| b.name != "feature")
+        .unwrap()
+        .name;
+    git_core::branch::switch_branch(&repo, &initial_branch).unwrap();
+
+    git_core::branch::delete_branch(&repo, "feature", true).unwrap();
+
+    assert!(
+        !git_core::branch::list_branches(&repo)
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "feature")
+    );
+}
+
+#[test]
+fn delete_branch_without_force_succeeds_when_fully_merged() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let initial_branch = git_core::branch::list_branches(&repo).unwrap()[0].name.clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    // "feature" has no commits of its own — its tip exactly matches the initial branch's tip,
+    // the edge case libgit2's graph_descendant_of doesn't treat as "descendant" on its own.
+    git_core::branch::switch_branch(&repo, &initial_branch).unwrap();
+
+    git_core::branch::delete_branch(&repo, "feature", false).unwrap();
+
+    assert!(
+        !git_core::branch::list_branches(&repo)
+            .unwrap()
+            .iter()
+            .any(|b| b.name == "feature")
+    );
+}
+
+#[test]
+fn delete_branch_fails_when_deleting_the_current_branch_even_with_force() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let initial_branch = git_core::branch::list_branches(&repo).unwrap()[0].name.clone();
+
+    let result = git_core::branch::delete_branch(&repo, &initial_branch, true);
+
+    assert!(result.is_err());
+}
