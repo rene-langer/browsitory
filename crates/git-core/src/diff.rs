@@ -33,19 +33,30 @@ pub struct DiffHunk {
 
 /// Diff for one path in the working tree. `staged: true` diffs HEAD's tree against the index
 /// (what `git diff --cached -- path` shows); `staged: false` diffs the index against the
-/// working directory (what `git diff -- path` shows).
+/// working directory (what `git diff -- path` shows, *plus* untracked files — see below).
 pub fn working_diff(
     repo: &Repository,
     path: &str,
     staged: bool,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let mut opts = git2::DiffOptions::new();
-    opts.pathspec(path);
+    // `pathspec` is a glob pattern by default, so a real filename containing `*`, `?` or `[`
+    // would match unintended files. Callers always pass a literal path from `status()`/
+    // `commit_files()`, so match it literally.
+    opts.pathspec(path).disable_pathspec_match(true);
 
     let diff = if staged {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
     } else {
+        // `status()` deliberately reports untracked files (`include_untracked(true)`), so an
+        // untracked path shows up in the UI as an unstaged `New` row and gets diffed here.
+        // Plain `git diff` emits nothing for such a path; without these options the pane would
+        // render an empty "No differences" state for a brand-new file — the single most common
+        // first thing a user clicks. Show the whole file as added instead.
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .show_untracked_content(true);
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
 
@@ -62,7 +73,8 @@ pub fn commit_diff(
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
     let mut opts = git2::DiffOptions::new();
-    opts.pathspec(path);
+    // Literal path, not a glob — see `working_diff`.
+    opts.pathspec(path).disable_pathspec_match(true);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
     hunks_from_diff(&diff)
 }

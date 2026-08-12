@@ -57,6 +57,30 @@ fn working_diff_staged_shows_the_staged_content() {
     assert!(unstaged_hunks.is_empty());
 }
 
+/// An untracked file is reported by `status()` (which sets `include_untracked(true)`) as an
+/// unstaged `New` row, so clicking it must show its content — not an empty "No differences"
+/// pane, which is what plain `git diff` semantics would produce.
+#[test]
+fn working_diff_unstaged_shows_the_content_of_an_untracked_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "line one\n");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "untracked.txt", "brand\nnew\nfile\n");
+
+    let hunks = git_core::diff::working_diff(&repo, "untracked.txt", false).unwrap();
+
+    assert!(!hunks.is_empty());
+    let concatenated: String = hunks
+        .iter()
+        .flat_map(|hunk| hunk.lines.iter())
+        .map(|line| {
+            assert_eq!(line.origin, DiffLineOrigin::Add);
+            line.content.clone()
+        })
+        .collect();
+    assert_eq!(concatenated, "brand\nnew\nfile\n");
+}
+
 #[test]
 fn commit_diff_shows_the_change_introduced_by_that_commit() {
     let (dir, repo) = init_repo();
