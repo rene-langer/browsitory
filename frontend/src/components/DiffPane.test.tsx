@@ -418,6 +418,33 @@ describe("DiffPane", () => {
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
 
+    it("shows a friendly message, not the raw error, when blame fetch rejects", async () => {
+      const getBlame = vi.fn(async () => {
+        throw new Error("git operation failed: the path 'a.txt' does not exist in the given tree");
+      });
+      const client = fakeClient({ getBlame });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+
+      expect(
+        await screen.findByText("No blame available for this file at this revision."),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
+    });
+
     it("Back to Diff switches back to the diff view", async () => {
       const blameLines: BlameLine[] = [
         {
@@ -625,6 +652,36 @@ describe("DiffPane", () => {
       fireEvent.click(row.closest("tr")!);
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
+    });
+
+    it("shows a friendly message, not the raw error, when blame fetch rejects", async () => {
+      const getBlame = vi.fn(async () => {
+        throw new Error(
+          "git operation failed: the path 'src/main.rs' does not exist in the given tree",
+        );
+      });
+      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      await screen.findByText("src/main.rs");
+      fireEvent.click(screen.getByText("Blame"));
+
+      expect(
+        await screen.findByText("No blame available for this file at this revision."),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
     });
   });
 });

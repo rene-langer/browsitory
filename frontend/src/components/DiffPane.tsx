@@ -74,7 +74,9 @@ function UncommittedDiffPane({
   // the file currently on screen refreshes `status` without changing `selected` by reference,
   // and the displayed diff is stale afterwards (an "unstaged" diff for a file that is now
   // staged, or a working-tree diff for a file that was just committed away). Re-fetching on
-  // every `status` change is what keeps the pane honest.
+  // every `status` change is what keeps the pane honest. The blame effect below needs the same
+  // `status` dependency for the same reason: staging/committing the file while blame view is
+  // open must not leave stale pre-commit attribution on screen.
   //
   // `ignore` closes the companion race: rapid clicking between files leaves several fetches in
   // flight, and a slow earlier one resolving after a fast later one would clobber the correct
@@ -104,6 +106,9 @@ function UncommittedDiffPane({
 
   // Same `ignore` guard, gated on `viewMode === "blame"` instead. Blame always targets `"HEAD"`
   // — blaming a dirty working-tree edit isn't meaningful (see the design spec's non-goals).
+  // `status` is a dependency for the same reason it's on the diff effect above: staging or
+  // committing the file on screen while blame view is still open must trigger a refetch, or
+  // the pane keeps showing pre-commit attribution indefinitely.
   useEffect(() => {
     if (selected === null || viewMode !== "blame") {
       return;
@@ -117,15 +122,18 @@ function UncommittedDiffPane({
           setError(null);
         }
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (!ignore) {
-          setError(String(err));
+          // libgit2's rejection message (e.g. "the path 'x' does not exist in the given tree")
+          // is jarring for what's usually just an unexceptional case — blaming a new/untracked
+          // file that isn't in HEAD's tree yet.
+          setError("No blame available for this file at this revision.");
         }
       });
     return () => {
       ignore = true;
     };
-  }, [client, selected, viewMode]);
+  }, [client, selected, viewMode, status]);
 
   const stagedCount = status.filter((entry) => entry.staged).length;
   const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
@@ -257,9 +265,12 @@ function CommitDiffPane({
           setError(null);
         }
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (!ignore) {
-          setError(String(err));
+          // See UncommittedDiffPane's blame effect: swap libgit2's raw rejection message for a
+          // friendlier one — this is a common, unexceptional case (e.g. a file that was added
+          // or removed relative to this commit's parent).
+          setError("No blame available for this file at this revision.");
         }
       });
     return () => {
