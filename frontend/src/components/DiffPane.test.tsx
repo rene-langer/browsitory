@@ -59,6 +59,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -80,6 +81,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -111,6 +113,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -143,6 +146,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -179,6 +183,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -202,6 +207,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -224,6 +230,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -244,6 +251,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -270,6 +278,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -290,6 +299,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={onSaveStash}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -311,6 +321,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -330,6 +341,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -349,6 +361,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -379,6 +392,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -413,6 +427,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -439,6 +454,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -478,6 +494,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -486,6 +503,33 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("Back to Diff"));
 
       expect(screen.queryByText("Back to Diff")).not.toBeInTheDocument();
+    });
+
+    it("clicking a conflicted file opens the conflict resolution pane instead of a diff", async () => {
+      const conflictedStatus: StatusEntry[] = [
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const client = fakeClient({
+        getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
+      });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={conflictedStatus}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
+
+      await waitFor(() => screen.getByText("Save resolution"));
     });
   });
 
@@ -515,6 +559,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -539,6 +584,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -561,6 +607,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -582,6 +629,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -613,6 +661,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -648,6 +697,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
+          onResolveConflict={vi.fn()}
         />,
       );
 
@@ -677,6 +727,7 @@ describe("DiffPane", () => {
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
         />,
       );
 
