@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BlameLine,
   BranchInfo,
+  ConflictSegment,
   DiffHunk,
   GraphCommit,
+  MergeOutcome,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -39,4 +41,12 @@ export const tauriRepoClient: RepoClient = {
   dropStash: (index: number) => invoke("drop_stash", { index }),
   getBlame: (commitId: string, path: string) =>
     invoke<BlameLine[]>("get_blame", { commitId, path }),
+  mergeBranch: (branchName: string) =>
+    invoke<MergeOutcome>("start_merge", { branchName }),
+  getConflictHunks: (path: string) =>
+    invoke<ConflictSegment[]>("get_conflict_hunks", { path }),
+  resolveConflict: (path: string, resolvedContent: string) =>
+    invoke("resolve_conflict", { path, resolvedContent }),
+  abortMerge: () => invoke("abort_merge"),
+  getMergeMessage: () => invoke<string | null>("get_merge_message"),
 };

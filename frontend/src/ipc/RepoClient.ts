@@ -52,6 +52,16 @@ export interface BlameLine {
   timestamp: number;
 }
 
+export type MergeOutcome =
+  | { kind: "UpToDate" }
+  | { kind: "FastForwarded" }
+  | { kind: "Merged" }
+  | { kind: "Conflicted"; files: string[] };
+
+export type ConflictSegment =
+  | { kind: "Clean"; content: string }
+  | { kind: "Conflict"; ours: string; theirs: string };
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -74,4 +84,9 @@ export interface RepoClient {
   applyStash(index: number): Promise<void>;
   dropStash(index: number): Promise<void>;
   getBlame(commitId: string, path: string): Promise<BlameLine[]>;
+  mergeBranch(branchName: string): Promise<MergeOutcome>;
+  getConflictHunks(path: string): Promise<ConflictSegment[]>;
+  resolveConflict(path: string, resolvedContent: string): Promise<void>;
+  abortMerge(): Promise<void>;
+  getMergeMessage(): Promise<string | null>;
 }
