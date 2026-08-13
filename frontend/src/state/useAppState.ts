@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type {
   BranchInfo,
+  FileConflictChoice,
   GraphCommit,
   MergeOutcome,
   RepoClient,
@@ -47,6 +48,7 @@ export interface UseAppStateResult {
   dropStash(index: number): Promise<void>;
   mergeBranch(branchName: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
+  resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
   refresh(): Promise<void>;
 }
@@ -200,6 +202,11 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       runMutation(() => client.resolveConflict(path, resolvedContent)),
     [client, runMutation],
   );
+  const resolveAddDeleteConflict = useCallback(
+    (path: string, choice: FileConflictChoice) =>
+      runMutation(() => client.resolveAddDeleteConflict(path, choice)),
+    [client, runMutation],
+  );
   const abortMerge = useCallback(
     () => runMutation(() => client.abortMerge()),
     [client, runMutation],
@@ -223,6 +230,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     dropStash,
     mergeBranch,
     resolveConflict,
+    resolveAddDeleteConflict,
     abortMerge,
     refresh,
   };

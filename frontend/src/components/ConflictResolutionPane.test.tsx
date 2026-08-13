@@ -35,6 +35,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: unused,
+    resolveAddDeleteConflict: unused,
     ...overrides,
   };
 }

@@ -6,7 +6,7 @@ use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
-use git_core::merge::{ConflictSegment, MergeOutcome};
+use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -108,6 +108,11 @@ pub(crate) enum Command {
     #[allow(dead_code)]
     GetMergeMessage {
         reply: Sender<Result<Option<String>, String>>,
+    },
+    ResolveAddDeleteConflict {
+        path: String,
+        choice: FileConflictChoice,
+        reply: Sender<Result<(), String>>,
     },
 }
 
@@ -269,6 +274,16 @@ impl Worker {
                     Command::GetMergeMessage { reply } => {
                         let result: Result<Option<String>, String> =
                             Ok(git_core::merge::merge_message(&repo));
+                        let _ = reply.send(result);
+                    }
+                    Command::ResolveAddDeleteConflict {
+                        path,
+                        choice,
+                        reply,
+                    } => {
+                        let result =
+                            git_core::merge::resolve_add_delete_conflict(&repo, &path, choice)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                 }
@@ -578,6 +593,24 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::GetMergeMessage { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn resolve_add_delete_conflict(
+        &self,
+        path: String,
+        choice: FileConflictChoice,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ResolveAddDeleteConflict {
+                path,
+                choice,
+                reply: reply_tx,
+            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
@@ -919,5 +952,38 @@ mod tests {
 
         assert!(handle.get_merge_message().unwrap().is_none());
         assert!(handle.get_status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn resolve_add_delete_conflict_round_trips_through_the_worker() {
+        let (dir, mut repo) = init_repo();
+        write_file(dir.path(), "shared.txt", "v1\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "shared.txt", "v2\n");
+        commit_all(&repo, "feature commit modifies");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+        git_core::stage::stage_file(&repo, "shared.txt").unwrap();
+        git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.start_merge("feature".into()).unwrap();
+
+        handle
+            .resolve_add_delete_conflict(
+                "shared.txt".into(),
+                git_core::merge::FileConflictChoice::Theirs,
+            )
+            .unwrap();
+
+        let status = handle.get_status().unwrap();
+        assert_eq!(status.len(), 1);
+        assert!(status[0].staged);
     }
 }

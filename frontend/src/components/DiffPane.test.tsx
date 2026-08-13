@@ -29,6 +29,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
+    resolveAddDeleteConflict: unused,
     getWorkingDiff: unused,
     getCommitDiff: unused,
     getCommitFiles: unused,
