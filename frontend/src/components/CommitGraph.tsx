@@ -1,6 +1,8 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import { assignLanes } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
+import { CommitLaneGraphic } from "./CommitLaneGraphic";
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
   if (a === "uncommitted" || b === "uncommitted") {
@@ -61,6 +63,15 @@ export function CommitGraph({
     setContextMenu({ commitId, x: event.clientX, y: event.clientY });
   };
 
+  const commitLayouts = assignLanes(commits);
+  const laneCount =
+    Math.max(
+      0,
+      ...commitLayouts.map((l) => l.lane),
+      ...commitLayouts.flatMap((l) => l.passThroughLanes),
+      ...commitLayouts.flatMap((l) => l.parentConnections.map((c) => c.lane)),
+    ) + 1;
+
   return (
     <ul onKeyDown={handleKeyDown} tabIndex={0}>
       <li
@@ -99,16 +110,25 @@ export function CommitGraph({
           </button>
         </li>
       ))}
-      {commits.map((commit) => (
+      {commits.map((commit, index) => (
         <li
           key={commit.id}
+          className="commit-row"
           aria-selected={
             typeof selectedRow === "object" && selectedRow.commitId === commit.id
           }
           onClick={() => onSelectRow({ commitId: commit.id })}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
         >
-          {commit.shortId} {commit.summary}
+          <CommitLaneGraphic layout={commitLayouts[index]} totalLanes={laneCount} />
+          {commit.branchRefs.map((ref) => (
+            <span key={ref} className="branch-badge">
+              {ref}
+            </span>
+          ))}
+          <span className="commit-summary">
+            {commit.shortId} {commit.summary}
+          </span>
         </li>
       ))}
       {contextMenu !== null && (
