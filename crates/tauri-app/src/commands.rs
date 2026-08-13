@@ -337,6 +337,7 @@ mod tests {
             StatusKind::Deleted => "Deleted",
             StatusKind::Renamed => "Renamed",
             StatusKind::TypeChange => "TypeChange",
+            StatusKind::Conflicted => "Conflicted",
         }
     }
 
@@ -348,6 +349,7 @@ mod tests {
             StatusKind::Deleted,
             StatusKind::Renamed,
             StatusKind::TypeChange,
+            StatusKind::Conflicted,
         ] {
             assert_eq!(format!("{:?}", kind), expected_wire_value(kind));
         }

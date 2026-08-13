@@ -1,4 +1,4 @@
-export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange";
+export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
 export interface StatusEntry {
   path: string;

@@ -132,3 +132,32 @@ fn reports_a_clean_repository_as_empty() {
 
     assert!(entries.is_empty());
 }
+
+#[test]
+fn reports_a_conflicted_file_as_conflicted() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\nline three\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(
+        dir.path(),
+        "shared.txt",
+        "line one\nfeature two\nline three\n",
+    );
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
+    commit_all(&repo, "main commit");
+
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+
+    let entries = git_core::status::status(&repo).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "shared.txt");
+    assert_eq!(entries[0].kind, StatusKind::Conflicted);
+}

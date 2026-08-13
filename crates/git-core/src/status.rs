@@ -13,6 +13,7 @@ pub enum StatusKind {
     Deleted,
     Renamed,
     TypeChange,
+    Conflicted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,15 @@ pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> 
     for entry in statuses.iter() {
         let Ok(path) = entry.path() else { continue };
         let flags = entry.status();
+
+        if flags.is_conflicted() {
+            entries.push(StatusEntry {
+                path: path.to_string(),
+                staged: false,
+                kind: StatusKind::Conflicted,
+            });
+            continue;
+        }
 
         if let Some(kind) = staged_kind(flags) {
             entries.push(StatusEntry {
