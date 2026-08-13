@@ -73,11 +73,19 @@ of debug/release.
 
 ### git2 API gotchas
 
-- `StatusEntry::path()` (and `Signature::name()`/`email()`, `Reference::shorthand()`,
-  `Commit::summary()`) return `Result<&str, Error>` or `Result<Option<&str>, Error>`, not a
-  bare `Option`/`&str` — verified against the vendored `git2` 0.21 source. Handle with
-  `let Ok(x) = ... else { continue };` in a loop, or `.ok().flatten().unwrap_or_default()`
-  otherwise. See `crates/git-core/src/status.rs`.
+- `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
+  `Result<&str, Error>` — never `Option`, not even nested. Handle with `let Ok(x) = ... else {
+  continue };` in a loop, or `.ok().unwrap_or_default()` otherwise (no `.flatten()` — there's no
+  `Option` layer to flatten; it won't compile). See `crates/git-core/src/status.rs`,
+  `crates/git-core/src/log.rs`.
+- `Commit::summary()` is the one in this family that's actually `Result<Option<&str>, Error>` —
+  `Ok(None)` means no summary, not an error. This is the one that wants
+  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/log.rs`.
+- All of the above verified against the vendored `git2` 0.21 source — don't assume a shared
+  shape across "similar-sounding" accessors; check the actual signature, since this crate mixes
+  both shapes and an incorrect assumption in either direction fails to compile with an
+  unhelpful-looking error at the call site (a plain-`Result` accessor rejects `.flatten()`,
+  which is where this note came from).
 - `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>`
   per slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`, once remote
   support is added.
