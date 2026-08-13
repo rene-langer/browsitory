@@ -46,12 +46,18 @@ fn apply_stash_restores_the_stashed_changes() {
     write_file(dir.path(), "file.txt", "v1");
     commit_all(&repo, "initial commit");
     write_file(dir.path(), "file.txt", "v2");
+    // Also cover an untracked file on the apply side — the save side already asserts it's
+    // captured and removed (see the test above); this is the assertion that actually protects
+    // "untracked files always included" on the round trip back.
+    write_file(dir.path(), "untracked.txt", "new");
     git_core::stash::save_stash(&mut repo).unwrap();
 
     git_core::stash::apply_stash(&mut repo, 0).unwrap();
 
     let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
     assert_eq!(contents, "v2");
+    let untracked_contents = std::fs::read_to_string(dir.path().join("untracked.txt")).unwrap();
+    assert_eq!(untracked_contents, "new");
     // apply, not pop — the stash entry stays in the list.
     assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
 }
@@ -94,7 +100,7 @@ fn drop_stash_removes_the_entry_and_shifts_remaining_indices() {
     git_core::stash::save_stash(&mut repo).unwrap();
     write_file(dir.path(), "file.txt", "v3");
     git_core::stash::save_stash(&mut repo).unwrap();
-    let second_stash_commit_id = git_core::stash::list_stashes(&mut repo).unwrap()[1]
+    let surviving_stash_commit_id = git_core::stash::list_stashes(&mut repo).unwrap()[1]
         .commit_id
         .clone();
 
@@ -103,5 +109,5 @@ fn drop_stash_removes_the_entry_and_shifts_remaining_indices() {
     let stashes = git_core::stash::list_stashes(&mut repo).unwrap();
     assert_eq!(stashes.len(), 1);
     assert_eq!(stashes[0].index, 0);
-    assert_eq!(stashes[0].commit_id, second_stash_commit_id);
+    assert_eq!(stashes[0].commit_id, surviving_stash_commit_id);
 }
