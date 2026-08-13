@@ -14,6 +14,8 @@ pub enum MergeError {
     NoConflict(String),
     #[error("'{0}' is an add/delete conflict, not a text conflict")]
     NotATextConflict(String),
+    #[error("no merge is currently in progress")]
+    NotMerging,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +173,9 @@ pub fn resolve_conflict(
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
+    if !is_merging(repo) {
+        return Err(MergeError::NotMerging);
+    }
     let head_commit = repo.head()?.peel_to_commit()?;
     repo.reset(head_commit.as_object(), ResetType::Hard, None)?;
     repo.cleanup_state()?;

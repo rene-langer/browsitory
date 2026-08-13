@@ -202,6 +202,21 @@ fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
 }
 
 #[test]
+fn abort_merge_errors_and_leaves_uncommitted_work_untouched_when_no_merge_is_in_progress() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    write_file(dir.path(), "base.txt", "v1\nuncommitted change\n");
+
+    let result = git_core::merge::abort_merge(&repo);
+
+    assert!(result.is_err());
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let contents = std::fs::read_to_string(dir.path().join("base.txt")).unwrap();
+    assert_eq!(contents, "v1\nuncommitted change\n");
+}
+
+#[test]
 fn merge_message_and_is_merging_reflect_an_in_progress_merge() {
     let (_dir, repo) = make_conflicted_repo();
 
