@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import type {
   BranchInfo,
   GraphCommit,
+  MergeOutcome,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -19,6 +20,7 @@ export interface AppState {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
+  mergeMessage: string | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
@@ -43,6 +45,9 @@ export interface UseAppStateResult {
   saveStash(): Promise<void>;
   applyStash(index: number): Promise<void>;
   dropStash(index: number): Promise<void>;
+  mergeBranch(branchName: string): Promise<void>;
+  resolveConflict(path: string, resolvedContent: string): Promise<void>;
+  abortMerge(): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -55,19 +60,29 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     branches: [],
     createBranchDraft: null,
     stashes: [],
+    mergeMessage: null,
     error: null,
     pending: false,
   });
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, stashes] = await Promise.all([
+      const [status, commits, branches, stashes, mergeMessage] = await Promise.all([
         client.getStatus(),
         client.getCommitGraph(GRAPH_LIMIT),
         client.listBranches(),
         client.listStashes(),
+        client.getMergeMessage(),
       ]);
-      setState((prev) => ({ ...prev, status, commits, branches, stashes, error: null }));
+      setState((prev) => ({
+        ...prev,
+        status,
+        commits,
+        branches,
+        stashes,
+        mergeMessage,
+        error: null,
+      }));
     } catch (err) {
       setState((prev) => ({ ...prev, error: String(err) }));
     }
@@ -172,6 +187,24 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation, state],
   );
 
+  const mergeBranch = useCallback(
+    (branchName: string): Promise<void> =>
+      runMutation(async () => {
+        const outcome: MergeOutcome = await client.mergeBranch(branchName);
+        void outcome;
+      }),
+    [client, runMutation],
+  );
+  const resolveConflict = useCallback(
+    (path: string, resolvedContent: string) =>
+      runMutation(() => client.resolveConflict(path, resolvedContent)),
+    [client, runMutation],
+  );
+  const abortMerge = useCallback(
+    () => runMutation(() => client.abortMerge()),
+    [client, runMutation],
+  );
+
   return {
     state,
     openRepo,
@@ -188,6 +221,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     saveStash,
     applyStash,
     dropStash,
+    mergeBranch,
+    resolveConflict,
+    abortMerge,
     refresh,
   };
 }
