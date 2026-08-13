@@ -74,6 +74,34 @@ impl From<git_core::blame::BlameLine> for BlameLineDto {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCommitDto {
+    pub id: String,
+    pub short_id: String,
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub parent_ids: Vec<String>,
+    pub branch_refs: Vec<String>,
+}
+
+impl From<git_core::graph::GraphCommit> for GraphCommitDto {
+    fn from(c: git_core::graph::GraphCommit) -> Self {
+        GraphCommitDto {
+            id: c.id,
+            short_id: c.short_id,
+            summary: c.summary,
+            author_name: c.author_name,
+            author_email: c.author_email,
+            timestamp: c.timestamp,
+            parent_ids: c.parent_ids,
+            branch_refs: c.branch_refs,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -168,6 +196,15 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<Vec<StatusEntryDto
             kind: format!("{:?}", e.kind),
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_commit_graph(
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<GraphCommitDto>, String> {
+    let commits = worker_handle(&state)?.get_commit_graph(limit)?;
+    Ok(commits.into_iter().map(GraphCommitDto::from).collect())
 }
 
 #[tauri::command]
