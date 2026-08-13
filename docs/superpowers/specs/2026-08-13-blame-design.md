@@ -16,8 +16,11 @@ subsystems. This spec covers the third: a per-line blame viewer. Phase 2's remai
 - Blame targets HEAD when opened from the uncommitted pane, or the selected commit when opened
   from a commit's file list.
 - Clicking a blame line selects that line's commit in `HistoryList`, showing its diff in
-  `DiffPane` (blame view stays open for the file until the user switches back to diff view or
-  picks a different file).
+  `DiffPane`. This closes blame view: `DiffPane` is one region, so selecting a different row (the
+  usual outcome of a blame-line click) necessarily remounts it into diff mode for the new
+  selection — there is no dedicated space to keep blame open in *and* show the newly-selected
+  commit's diff at the same time. Blame view only stays open across a re-render that keeps
+  `selectedRow` unchanged (e.g. the file list's own file switch within the same pane).
 - Blame replaces the diff view in place — a toggle within the same per-file display area, not a
   new panel or route.
 
