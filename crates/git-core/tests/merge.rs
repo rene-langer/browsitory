@@ -271,3 +271,74 @@ fn a_commit_made_after_resolving_a_conflict_has_two_parents() {
         .unwrap();
     assert_eq!(commit.parent_count(), 2);
 }
+
+use git_core::merge::FileConflictChoice;
+
+fn make_delete_modify_conflict() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "shared.txt", "v2\n");
+    commit_all(&repo, "feature commit modifies");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    git_core::stage::stage_file(&repo, "shared.txt").unwrap();
+    git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
+
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn resolve_add_delete_conflict_with_theirs_restores_the_modified_file() {
+    let (dir, repo) = make_delete_modify_conflict();
+
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)
+        .unwrap();
+
+    assert!(!repo.index().unwrap().has_conflicts());
+    let contents = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(contents, "v2\n");
+}
+
+#[test]
+fn resolve_add_delete_conflict_with_ours_keeps_the_file_deleted() {
+    let (dir, repo) = make_delete_modify_conflict();
+
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Ours)
+        .unwrap();
+
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert!(!dir.path().join("shared.txt").exists());
+}
+
+#[test]
+fn resolve_add_delete_conflict_with_delete_removes_the_file_regardless() {
+    let (dir, repo) = make_delete_modify_conflict();
+
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Delete)
+        .unwrap();
+
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert!(!dir.path().join("shared.txt").exists());
+}
+
+#[test]
+fn resolve_add_delete_conflict_then_commit_has_two_parents() {
+    let (_dir, repo) = make_delete_modify_conflict();
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)
+        .unwrap();
+
+    let mut repo = repo;
+    let oid = git_core::commit::commit(&mut repo, "merge feature into main").unwrap();
+
+    let commit = repo
+        .find_commit(git2::Oid::from_str(&oid).unwrap())
+        .unwrap();
+    assert_eq!(commit.parent_count(), 2);
+}

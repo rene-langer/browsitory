@@ -189,3 +189,43 @@ pub fn merge_message(repo: &Repository) -> Option<String> {
 pub fn is_merging(repo: &Repository) -> bool {
     repo.state() == git2::RepositoryState::Merge
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileConflictChoice {
+    Ours,
+    Theirs,
+    Delete,
+}
+
+pub fn resolve_add_delete_conflict(
+    repo: &Repository,
+    path: &str,
+    choice: FileConflictChoice,
+) -> Result<(), MergeError> {
+    let conflict = find_conflict(repo, path)?;
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    let mut index = repo.index()?;
+
+    let entry = match choice {
+        FileConflictChoice::Ours => conflict.our.as_ref(),
+        FileConflictChoice::Theirs => conflict.their.as_ref(),
+        FileConflictChoice::Delete => None,
+    };
+
+    match entry {
+        Some(entry) => {
+            let blob = repo.find_blob(entry.id)?;
+            std::fs::write(workdir.join(path), blob.content())?;
+            index.add_path(Path::new(path))?;
+        }
+        None => {
+            // Ignore a missing file — the case where the chosen side already means
+            // "deleted" (e.g. `Theirs` when `their` is `None`), so there's nothing on disk
+            // to remove in the first place.
+            let _ = std::fs::remove_file(workdir.join(path));
+            index.remove_path(Path::new(path))?;
+        }
+    }
+    index.write()?;
+    Ok(())
+}
