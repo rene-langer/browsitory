@@ -1,14 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
-import { HistoryList } from "./HistoryList";
+import { CommitGraph } from "./CommitGraph";
 
 const status: StatusEntry[] = [
   { path: "src/main.rs", staged: false, kind: "Modified" },
   { path: "README.md", staged: true, kind: "New" },
 ];
 
-const log: GraphCommit[] = [
+const commits: GraphCommit[] = [
   {
     id: "aaa111...",
     shortId: "aaa1111",
@@ -34,9 +34,9 @@ const log: GraphCommit[] = [
 describe("HistoryList", () => {
   it("renders the Uncommitted Changes row with a change-count badge", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -52,9 +52,9 @@ describe("HistoryList", () => {
 
   it("renders each commit's short id and summary", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -74,9 +74,9 @@ describe("HistoryList", () => {
   it("clicking a commit row calls onSelectRow with that commit's id", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -95,9 +95,9 @@ describe("HistoryList", () => {
   it("ArrowDown moves from Uncommitted Changes to the first commit", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -117,9 +117,9 @@ describe("HistoryList", () => {
   it("ArrowUp from the first row does nothing (clamped, not wrapped)", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -139,9 +139,9 @@ describe("HistoryList", () => {
   it("ArrowDown from the last commit does nothing (clamped)", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow={{ commitId: "bbb222..." }}
         pending={false}
@@ -160,9 +160,9 @@ describe("HistoryList", () => {
 
   it("right-clicking a commit row shows a 'Branch from here' menu entry", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -181,9 +181,9 @@ describe("HistoryList", () => {
   it("clicking 'Branch from here' calls onBranchFromCommit with that commit's id and closes the menu", () => {
     const onBranchFromCommit = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -203,9 +203,9 @@ describe("HistoryList", () => {
 
   it("right-clicking the Uncommitted Changes row does not show the menu", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={[]}
         selectedRow="uncommitted"
         pending={false}
@@ -231,9 +231,9 @@ describe("HistoryList", () => {
 
   it("renders each stash's message", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={false}
@@ -251,9 +251,9 @@ describe("HistoryList", () => {
   it("clicking a stash row calls onSelectRow with its commit id", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={false}
@@ -273,9 +273,9 @@ describe("HistoryList", () => {
     const onApplyStash = vi.fn();
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={false}
@@ -297,9 +297,9 @@ describe("HistoryList", () => {
     const onDropStash = vi.fn();
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={false}
@@ -319,9 +319,9 @@ describe("HistoryList", () => {
 
   it("disables every stash row's Apply and Drop buttons while pending", () => {
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={true}
@@ -343,9 +343,9 @@ describe("HistoryList", () => {
   it("ArrowDown from Uncommitted Changes lands on the first stash when stashes are present", () => {
     const onSelectRow = vi.fn();
     render(
-      <HistoryList
+      <CommitGraph
         status={status}
-        log={log}
+        commits={commits}
         stashes={stashes}
         selectedRow="uncommitted"
         pending={false}

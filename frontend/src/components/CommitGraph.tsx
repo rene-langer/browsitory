@@ -9,9 +9,9 @@ function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
   return a.commitId === b.commitId;
 }
 
-export function HistoryList({
+export function CommitGraph({
   status,
-  log,
+  commits,
   stashes,
   selectedRow,
   pending,
@@ -21,7 +21,7 @@ export function HistoryList({
   onDropStash,
 }: {
   status: StatusEntry[];
-  log: GraphCommit[];
+  commits: GraphCommit[];
   stashes: StashEntry[];
   selectedRow: SelectedRow;
   // True while a mutation (e.g. an Apply/Drop stash) is in flight. Disables the Apply/Drop
@@ -42,7 +42,7 @@ export function HistoryList({
   const rows: SelectedRow[] = [
     "uncommitted",
     ...stashes.map((stash) => ({ commitId: stash.commitId })),
-    ...log.map((commit) => ({ commitId: commit.id })),
+    ...commits.map((commit) => ({ commitId: commit.id })),
   ];
   const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
 
@@ -99,7 +99,7 @@ export function HistoryList({
           </button>
         </li>
       ))}
-      {log.map((commit) => (
+      {commits.map((commit) => (
         <li
           key={commit.id}
           aria-selected={
