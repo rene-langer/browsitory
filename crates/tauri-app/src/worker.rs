@@ -5,7 +5,7 @@ use std::thread;
 use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
-use git_core::log::CommitInfo;
+use git_core::graph::GraphCommit;
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -13,9 +13,9 @@ pub(crate) enum Command {
     GetStatus {
         reply: Sender<Result<Vec<StatusEntry>, String>>,
     },
-    GetLog {
+    GetCommitGraph {
         limit: usize,
-        reply: Sender<Result<Vec<CommitInfo>, String>>,
+        reply: Sender<Result<Vec<GraphCommit>, String>>,
     },
     GetWorkingDiff {
         path: String,
@@ -112,8 +112,9 @@ impl Worker {
                         let result = git_core::status::status(&repo).map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::GetLog { limit, reply } => {
-                        let result = git_core::log::log(&repo, limit).map_err(|e| e.to_string());
+                    Command::GetCommitGraph { limit, reply } => {
+                        let result =
+                            git_core::graph::graph_log(&repo, limit).map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::GetWorkingDiff {
@@ -242,10 +243,10 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn get_log(&self, limit: usize) -> Result<Vec<CommitInfo>, String> {
+    pub fn get_commit_graph(&self, limit: usize) -> Result<Vec<GraphCommit>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
-            .send(Command::GetLog {
+            .send(Command::GetCommitGraph {
                 limit,
                 reply: reply_tx,
             })
@@ -537,13 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn get_log_reflects_a_commit() {
+    fn get_commit_graph_reflects_a_commit() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "file.txt", "hello");
         commit_all(&repo, "initial commit");
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-        let commits = worker.handle().get_log(10).unwrap();
+        let commits = worker.handle().get_commit_graph(10).unwrap();
 
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0].summary, "initial commit");

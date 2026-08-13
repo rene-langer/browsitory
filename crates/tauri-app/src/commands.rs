@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use git_core::diff::DiffHunk;
-use git_core::log::CommitInfo;
 use serde::Serialize;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
@@ -14,30 +13,6 @@ pub struct StatusEntryDto {
     pub path: String,
     pub staged: bool,
     pub kind: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitInfoDto {
-    pub id: String,
-    pub short_id: String,
-    pub summary: String,
-    pub author_name: String,
-    pub author_email: String,
-    pub timestamp: i64,
-}
-
-impl From<CommitInfo> for CommitInfoDto {
-    fn from(c: CommitInfo) -> Self {
-        CommitInfoDto {
-            id: c.id,
-            short_id: c.short_id,
-            summary: c.summary,
-            author_name: c.author_name,
-            author_email: c.author_email,
-            timestamp: c.timestamp,
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -193,15 +168,6 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<Vec<StatusEntryDto
             kind: format!("{:?}", e.kind),
         })
         .collect())
-}
-
-#[tauri::command]
-pub async fn get_log(
-    limit: usize,
-    state: State<'_, AppState>,
-) -> Result<Vec<CommitInfoDto>, String> {
-    let commits = worker_handle(&state)?.get_log(limit)?;
-    Ok(commits.into_iter().map(CommitInfoDto::from).collect())
 }
 
 #[tauri::command]
