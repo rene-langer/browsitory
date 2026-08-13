@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
+import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
-import { HistoryList } from "./components/HistoryList";
 import { RepoPicker } from "./components/RepoPicker";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
@@ -49,9 +49,9 @@ export default function App() {
         onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
       />
       <div className="app-layout">
-        <HistoryList
+        <CommitGraph
           status={appState.state.status}
-          log={appState.state.commits}
+          commits={appState.state.commits}
           stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
           pending={appState.state.pending}
