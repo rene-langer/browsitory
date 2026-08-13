@@ -536,5 +536,95 @@ describe("DiffPane", () => {
 
       expect(screen.queryByText("Stash")).toBeNull();
     });
+
+    it("renders a Blame button per file", async () => {
+      const client = fakeClient({ getCommitFiles, getCommitDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+      expect(screen.getByText("Blame")).toBeInTheDocument();
+    });
+
+    it("clicking Blame fetches and renders blame for that commit's file", async () => {
+      const blameLines: BlameLine[] = [
+        {
+          lineNumber: 1,
+          content: "fn main() {}",
+          commitId: "abc123",
+          shortId: "abc1234",
+          authorName: "Rene",
+          timestamp: 1,
+        },
+      ];
+      const getBlame = vi.fn(async () => blameLines);
+      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      await screen.findByText("src/main.rs");
+      fireEvent.click(screen.getByText("Blame"));
+
+      expect(await screen.findByText("fn main() {}")).toBeInTheDocument();
+      expect(getBlame).toHaveBeenCalledWith("abc123", "src/main.rs");
+    });
+
+    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+      const blameLines: BlameLine[] = [
+        {
+          lineNumber: 1,
+          content: "fn main() {}",
+          commitId: "abc123",
+          shortId: "abc1234",
+          authorName: "Rene",
+          timestamp: 1,
+        },
+      ];
+      const getBlame = vi.fn(async () => blameLines);
+      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
+      const onSelectRow = vi.fn();
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={onSelectRow}
+        />,
+      );
+
+      await screen.findByText("src/main.rs");
+      fireEvent.click(screen.getByText("Blame"));
+      const row = await screen.findByText("fn main() {}");
+      fireEvent.click(row.closest("tr")!);
+
+      expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
+    });
   });
 });
