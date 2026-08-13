@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BlameLine, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
 import { DiffView } from "./DiffView";
 
@@ -12,6 +13,7 @@ export function DiffPane({
   onUnstageFile,
   onCommit,
   onSaveStash,
+  onSelectRow,
 }: {
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -20,6 +22,7 @@ export function DiffPane({
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  onSelectRow: (row: SelectedRow) => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -30,6 +33,7 @@ export function DiffPane({
         onUnstageFile={onUnstageFile}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
+        onSelectRow={onSelectRow}
       />
     );
   }
@@ -45,6 +49,7 @@ function UncommittedDiffPane({
   onUnstageFile,
   onCommit,
   onSaveStash,
+  onSelectRow,
 }: {
   client: RepoClient;
   status: StatusEntry[];
@@ -52,9 +57,12 @@ function UncommittedDiffPane({
   onUnstageFile: (path: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  onSelectRow: (row: SelectedRow) => void;
 }) {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
+  const [viewMode, setViewMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // `status` is a dependency even though it isn't read here: staging, unstaging or committing
@@ -67,7 +75,7 @@ function UncommittedDiffPane({
   // flight, and a slow earlier one resolving after a fast later one would clobber the correct
   // diff. Anything whose effect has already been cleaned up is discarded.
   useEffect(() => {
-    if (selected === null) {
+    if (selected === null || viewMode !== "diff") {
       return;
     }
     let ignore = false;
@@ -87,18 +95,57 @@ function UncommittedDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, selected, status]);
+  }, [client, selected, status, viewMode]);
+
+  // Same `ignore` guard, gated on `viewMode === "blame"` instead. Blame always targets `"HEAD"`
+  // — blaming a dirty working-tree edit isn't meaningful (see the design spec's non-goals).
+  useEffect(() => {
+    if (selected === null || viewMode !== "blame") {
+      return;
+    }
+    let ignore = false;
+    client
+      .getBlame("HEAD", selected.path)
+      .then((next) => {
+        if (!ignore) {
+          setBlameLines(next);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(String(err));
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [client, selected, viewMode]);
 
   const stagedCount = status.filter((entry) => entry.staged).length;
-  const displayedHunks = selected === null ? [] : hunks;
+  const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
+  const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
 
   return (
     <div>
       <ul>
         {status.map((entry) => (
           <li key={`${entry.staged}:${entry.path}`}>
-            <button onClick={() => setSelected({ path: entry.path, staged: entry.staged })}>
+            <button
+              onClick={() => {
+                setSelected({ path: entry.path, staged: entry.staged });
+                setViewMode("diff");
+              }}
+            >
               {entry.path} ({entry.kind})
+            </button>
+            <button
+              onClick={() => {
+                setSelected({ path: entry.path, staged: entry.staged });
+                setViewMode("blame");
+              }}
+            >
+              Blame
             </button>
             {entry.staged ? (
               <button onClick={() => onUnstageFile(entry.path)}>Unstage</button>
@@ -108,7 +155,20 @@ function UncommittedDiffPane({
           </li>
         ))}
       </ul>
-      {error !== null ? <p role="alert">{error}</p> : <DiffView hunks={displayedHunks} />}
+      {viewMode === "blame" ? (
+        <>
+          {error !== null ? (
+            <p role="alert">{error}</p>
+          ) : (
+            <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
+          )}
+          <button onClick={() => setViewMode("diff")}>Back to Diff</button>
+        </>
+      ) : error !== null ? (
+        <p role="alert">{error}</p>
+      ) : (
+        <DiffView hunks={displayedHunks} />
+      )}
       <button onClick={onSaveStash} disabled={status.length === 0}>
         Stash
       </button>
