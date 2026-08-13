@@ -70,6 +70,7 @@ export default function App() {
           onCommit={appState.commit}
           onSaveStash={appState.saveStash}
           onSelectRow={appState.selectRow}
+          onResolveConflict={appState.resolveConflict}
         />
       </div>
     </main>

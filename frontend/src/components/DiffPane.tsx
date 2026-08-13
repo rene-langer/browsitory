@@ -3,6 +3,7 @@ import type { BlameLine, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoCl
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
+import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 
 export function DiffPane({
@@ -14,6 +15,7 @@ export function DiffPane({
   onCommit,
   onSaveStash,
   onSelectRow,
+  onResolveConflict,
 }: {
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -23,6 +25,7 @@ export function DiffPane({
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
+  onResolveConflict: (path: string, resolvedContent: string) => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -34,6 +37,7 @@ export function DiffPane({
         onCommit={onCommit}
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
+        onResolveConflict={onResolveConflict}
       />
     );
   }
@@ -55,6 +59,7 @@ function UncommittedDiffPane({
   onCommit,
   onSaveStash,
   onSelectRow,
+  onResolveConflict,
 }: {
   client: RepoClient;
   status: StatusEntry[];
@@ -63,9 +68,10 @@ function UncommittedDiffPane({
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
+  onResolveConflict: (path: string, resolvedContent: string) => void;
 }) {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
-  const [viewMode, setViewMode] = useState<"diff" | "blame">("diff");
+  const [viewMode, setViewMode] = useState<"diff" | "blame" | "conflict">("diff");
   const [hunks, setHunks] = useState<DiffHunk[]>([]);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +153,7 @@ function UncommittedDiffPane({
             <button
               onClick={() => {
                 setSelected({ path: entry.path, staged: entry.staged });
-                setViewMode("diff");
+                setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
               }}
             >
               {entry.path} ({entry.kind})
@@ -177,6 +183,12 @@ function UncommittedDiffPane({
           )}
           <button onClick={() => setViewMode("diff")}>Back to Diff</button>
         </>
+      ) : viewMode === "conflict" && selected !== null ? (
+        <ConflictResolutionPane
+          client={client}
+          path={selected.path}
+          onResolve={onResolveConflict}
+        />
       ) : error !== null ? (
         <p role="alert">{error}</p>
       ) : (
