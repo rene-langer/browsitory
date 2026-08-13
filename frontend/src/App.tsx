@@ -68,6 +68,7 @@ export default function App() {
           onUnstageFile={appState.unstageFile}
           onCommit={appState.commit}
           onSaveStash={appState.saveStash}
+          onSelectRow={appState.selectRow}
         />
       </div>
     </main>
