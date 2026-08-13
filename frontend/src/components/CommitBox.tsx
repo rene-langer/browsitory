@@ -12,18 +12,31 @@ export function CommitBox({
   initialMessage?: string;
 }) {
   const [message, setMessage] = useState("");
+  // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
+  // "user hasn't touched the field since it was seeded" (message === lastSeeded) apart from "user
+  // edited it" (message !== lastSeeded) — and only ever overwrite the former.
+  const [lastSeeded, setLastSeeded] = useState("");
 
-  // Seeds the field once when a merge starts (`initialMessage` goes from unset to set) —
-  // deliberately not a dependency-driven re-seed on every render, or it would keep clobbering
-  // whatever the user has typed since.
+  // Seeds the field when a merge starts or when the pre-fill message changes to a different
+  // merge's message, and clears it when a merge ends — but in every case only if the field still
+  // holds exactly what was last auto-seeded, so a user's own edit is never clobbered.
   useEffect(() => {
-    if (initialMessage !== undefined) {
-      // Deliberate seed-once write, not a synchronization loop.
+    if (
+      initialMessage !== undefined &&
+      message === lastSeeded &&
+      initialMessage !== lastSeeded
+    ) {
+      // Deliberate seed write, not a synchronization loop.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMessage((prev) => (prev === "" ? initialMessage : prev));
+      setMessage(initialMessage);
+      setLastSeeded(initialMessage);
+    } else if (initialMessage === undefined && message === lastSeeded && lastSeeded !== "") {
+      // Merge ended (abort or otherwise) — clear the pre-fill, but only if the user hasn't typed
+      // something different in the meantime.
+      setMessage("");
+      setLastSeeded("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessage !== undefined]);
+  }, [initialMessage, message, lastSeeded]);
 
   const commitIfReady = () => {
     if (disabled || message.trim() === "") {

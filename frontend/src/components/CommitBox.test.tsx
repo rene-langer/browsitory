@@ -70,6 +70,81 @@ describe("CommitBox", () => {
     expect(screen.getByDisplayValue("edited by user")).toBeInTheDocument();
   });
 
+  it("clears the message when initialMessage goes from set to unset (merge ends, e.g. abort)", () => {
+    const { rerender } = render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'feature'"
+      />,
+    );
+    expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
+
+    rerender(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} />);
+
+    expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
+  });
+
+  it("reseeds with the new merge's message (not the leftover from a previous, aborted merge)", () => {
+    const { rerender } = render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'A'"
+      />,
+    );
+    expect(screen.getByDisplayValue("Merge branch 'A'")).toBeInTheDocument();
+
+    // Merge A aborts.
+    rerender(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} />);
+    expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
+
+    // Merge B starts.
+    rerender(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'B'"
+      />,
+    );
+
+    expect(screen.getByDisplayValue("Merge branch 'B'")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Merge branch 'A'")).not.toBeInTheDocument();
+  });
+
+  it("does not clobber a user's edit made between an abort and the next merge's auto-seed", () => {
+    const { rerender } = render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'A'"
+      />,
+    );
+
+    // Merge A aborts.
+    rerender(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} />);
+    // User types something of their own before merge B starts.
+    fireEvent.change(screen.getByPlaceholderText("Commit message"), {
+      target: { value: "my own draft message" },
+    });
+
+    // Merge B starts.
+    rerender(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'B'"
+      />,
+    );
+
+    expect(screen.getByDisplayValue("my own draft message")).toBeInTheDocument();
+  });
+
   it("renders an Abort merge button only when initialMessage is set, and calls onAbortMerge", () => {
     const onAbortMerge = vi.fn();
     const { rerender } = render(
