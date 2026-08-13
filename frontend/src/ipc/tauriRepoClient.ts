@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  BlameLine,
   BranchInfo,
   CommitInfo,
   DiffHunk,
@@ -35,4 +36,6 @@ export const tauriRepoClient: RepoClient = {
   saveStash: () => invoke("save_stash"),
   applyStash: (index: number) => invoke("apply_stash", { index }),
   dropStash: (index: number) => invoke("drop_stash", { index }),
+  getBlame: (commitId: string, path: string) =>
+    invoke<BlameLine[]>("get_blame", { commitId, path }),
 };

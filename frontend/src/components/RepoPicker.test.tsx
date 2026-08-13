@@ -23,6 +23,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     saveStash: async () => unimplemented(),
     applyStash: async () => unimplemented(),
     dropStash: async () => unimplemented(),
+    getBlame: async () => unimplemented(),
     getWorkingDiff: async () => unimplemented(),
     getCommitDiff: async () => unimplemented(),
     getCommitFiles: async () => unimplemented(),

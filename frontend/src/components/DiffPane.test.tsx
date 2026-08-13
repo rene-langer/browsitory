@@ -23,6 +23,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     saveStash: unused,
     applyStash: unused,
     dropStash: unused,
+    getBlame: unused,
     getWorkingDiff: unused,
     getCommitDiff: unused,
     getCommitFiles: unused,
