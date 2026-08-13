@@ -77,3 +77,73 @@ fn conflict_path(conflict: &IndexConflict) -> Option<String> {
         .or(conflict.ancestor.as_ref())
         .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
 }
+
+fn find_conflict(repo: &Repository, path: &str) -> Result<IndexConflict, MergeError> {
+    let index = repo.index()?;
+    for conflict in index.conflicts()? {
+        let conflict = conflict?;
+        if conflict_path(&conflict).as_deref() == Some(path) {
+            return Ok(conflict);
+        }
+    }
+    Err(MergeError::NoConflict(path.to_string()))
+}
+
+pub fn conflict_hunks(repo: &Repository, path: &str) -> Result<Vec<ConflictSegment>, MergeError> {
+    let conflict = find_conflict(repo, path)?;
+    let (ancestor, our, their) = match (&conflict.ancestor, &conflict.our, &conflict.their) {
+        (Some(a), Some(o), Some(t)) => (a, o, t),
+        _ => return Err(MergeError::NotATextConflict(path.to_string())),
+    };
+
+    let result = repo.merge_file_from_index(ancestor, our, their, None)?;
+    let content = String::from_utf8_lossy(result.content()).into_owned();
+
+    Ok(parse_conflict_markers(&content))
+}
+
+// git2's default `MergeFileOptions` use `GIT_MERGE_FILE_STYLE_MERGE` (not diff3), so a conflict
+// block is exactly `<<<<<<< ...\n`ours`\n=======\n`theirs`\n>>>>>>> ...\n` — no separate
+// ancestor section to account for.
+fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
+    let mut segments = Vec::new();
+    let mut clean_lines: Vec<&str> = Vec::new();
+    let mut lines = content.lines();
+
+    while let Some(line) = lines.next() {
+        if line.starts_with("<<<<<<<") {
+            if !clean_lines.is_empty() {
+                segments.push(ConflictSegment::Clean {
+                    content: clean_lines.join("\n"),
+                });
+                clean_lines.clear();
+            }
+            let mut ours_lines = Vec::new();
+            for line in lines.by_ref() {
+                if line.starts_with("=======") {
+                    break;
+                }
+                ours_lines.push(line);
+            }
+            let mut theirs_lines = Vec::new();
+            for line in lines.by_ref() {
+                if line.starts_with(">>>>>>>") {
+                    break;
+                }
+                theirs_lines.push(line);
+            }
+            segments.push(ConflictSegment::Conflict {
+                ours: ours_lines.join("\n"),
+                theirs: theirs_lines.join("\n"),
+            });
+        } else {
+            clean_lines.push(line);
+        }
+    }
+    if !clean_lines.is_empty() {
+        segments.push(ConflictSegment::Clean {
+            content: clean_lines.join("\n"),
+        });
+    }
+    segments
+}
