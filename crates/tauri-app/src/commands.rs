@@ -102,6 +102,48 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum MergeOutcomeDto {
+    UpToDate,
+    FastForwarded,
+    Merged,
+    Conflicted { files: Vec<String> },
+}
+
+impl From<git_core::merge::MergeOutcome> for MergeOutcomeDto {
+    fn from(outcome: git_core::merge::MergeOutcome) -> Self {
+        match outcome {
+            git_core::merge::MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
+            git_core::merge::MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
+            git_core::merge::MergeOutcome::Merged => MergeOutcomeDto::Merged,
+            git_core::merge::MergeOutcome::Conflicted { files } => {
+                MergeOutcomeDto::Conflicted { files }
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum ConflictSegmentDto {
+    Clean { content: String },
+    Conflict { ours: String, theirs: String },
+}
+
+impl From<git_core::merge::ConflictSegment> for ConflictSegmentDto {
+    fn from(segment: git_core::merge::ConflictSegment) -> Self {
+        match segment {
+            git_core::merge::ConflictSegment::Clean { content } => {
+                ConflictSegmentDto::Clean { content }
+            }
+            git_core::merge::ConflictSegment::Conflict { ours, theirs } => {
+                ConflictSegmentDto::Conflict { ours, theirs }
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -317,6 +359,43 @@ pub async fn apply_stash(index: usize, state: State<'_, AppState>) -> Result<(),
 #[tauri::command]
 pub async fn drop_stash(index: usize, state: State<'_, AppState>) -> Result<(), String> {
     worker_handle(&state)?.drop_stash(index)
+}
+
+#[tauri::command]
+pub async fn start_merge(
+    branch_name: String,
+    state: State<'_, AppState>,
+) -> Result<MergeOutcomeDto, String> {
+    let outcome = worker_handle(&state)?.start_merge(branch_name)?;
+    Ok(MergeOutcomeDto::from(outcome))
+}
+
+#[tauri::command]
+pub async fn get_conflict_hunks(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ConflictSegmentDto>, String> {
+    let segments = worker_handle(&state)?.get_conflict_hunks(path)?;
+    Ok(segments.into_iter().map(ConflictSegmentDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn resolve_conflict(
+    path: String,
+    resolved_content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.resolve_conflict(path, resolved_content)
+}
+
+#[tauri::command]
+pub async fn abort_merge(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.abort_merge()
+}
+
+#[tauri::command]
+pub async fn get_merge_message(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    worker_handle(&state)?.get_merge_message()
 }
 
 #[cfg(test)]
