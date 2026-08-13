@@ -31,7 +31,7 @@ const commits: GraphCommit[] = [
   },
 ];
 
-describe("HistoryList", () => {
+describe("CommitGraph", () => {
   it("renders the Uncommitted Changes row with a change-count badge", () => {
     render(
       <CommitGraph
@@ -420,7 +420,26 @@ describe("HistoryList", () => {
     const row = screen.getByText(/second commit/).closest("li");
     expect(row).not.toBeNull();
     expect(row?.tagName).toBe("LI");
-    expect(row?.textContent).toContain("aaa1111");
-    expect(row?.textContent).toContain("second commit");
+    expect(row?.textContent).toContain("aaa1111 second commit");
+  });
+
+  it("still sets aria-selected on the selected commit's li (hard E2E compatibility constraint)", () => {
+    render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow={{ commitId: "aaa111..." }}
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText(/second commit/).closest("li");
+    expect(row).not.toBeNull();
+    expect(row?.getAttribute("aria-selected")).toBe("true");
   });
 });

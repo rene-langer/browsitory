@@ -59,6 +59,45 @@ fn graph_log_reports_branch_refs_only_for_tip_commits() {
 }
 
 #[test]
+fn graph_log_reports_empty_branch_refs_for_a_non_tip_commit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "middle commit");
+    write_file(dir.path(), "file.txt", "v3");
+    commit_all(&repo, "tip commit");
+    let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+
+    let commits = git_core::graph::graph_log(&repo, 10).unwrap();
+
+    let middle_commit = commits
+        .iter()
+        .find(|c| c.summary == "middle commit")
+        .unwrap();
+    assert!(middle_commit.branch_refs.is_empty());
+    let tip_commit = commits.iter().find(|c| c.summary == "tip commit").unwrap();
+    assert_eq!(tip_commit.branch_refs, vec![branch_name]);
+}
+
+#[test]
+fn graph_log_respects_the_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "second commit");
+    write_file(dir.path(), "file.txt", "v3");
+    commit_all(&repo, "third commit");
+
+    let commits = git_core::graph::graph_log(&repo, 2).unwrap();
+
+    assert_eq!(commits.len(), 2);
+}
+
+#[test]
 fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "base.txt", "v1");

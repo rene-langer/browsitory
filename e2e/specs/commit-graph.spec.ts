@@ -54,7 +54,10 @@ describe("Browsitory commit graph", () => {
 
     // The feature branch's tip commit should carry a branch-name badge in the same row —
     // confirms `branch_refs` made it end-to-end from git-core through to the rendered row.
-    const featureCommitWithBadge = await $("li*=e2e-graph-feature");
-    await expect(featureCommitWithBadge).toBeExisting();
+    // Assert on `featureCommitEntry` itself (not a fresh `$("li*=...")` lookup) so this can
+    // only pass if the badge is in that specific commit's row, not some unrelated `<li>`
+    // elsewhere in the app (e.g. BranchSwitcher's popover).
+    const featureCommitEntryText = await featureCommitEntry.getText();
+    expect(featureCommitEntryText).toContain("e2e-graph-feature");
   });
 });
