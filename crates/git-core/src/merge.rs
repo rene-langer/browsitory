@@ -1,4 +1,5 @@
-use git2::{IndexConflict, Repository};
+use git2::{IndexConflict, Repository, ResetType};
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -51,6 +52,11 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
     }
 
     repo.merge(&[&their_annotated], None, None)?;
+
+    // Set a proper merge message that includes the branch name
+    let merge_msg = format!("Merge branch '{}'\n", branch_name);
+    let merge_msg_path = repo.path().join("MERGE_MSG");
+    std::fs::write(&merge_msg_path, merge_msg)?;
 
     let index = repo.index()?;
     if index.has_conflicts() {
@@ -146,4 +152,33 @@ fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
         });
     }
     segments
+}
+
+pub fn resolve_conflict(
+    repo: &Repository,
+    path: &str,
+    resolved_content: &str,
+) -> Result<(), MergeError> {
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    std::fs::write(workdir.join(path), resolved_content)?;
+
+    let mut index = repo.index()?;
+    index.add_path(Path::new(path))?;
+    index.write()?;
+    Ok(())
+}
+
+pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
+    let head_commit = repo.head()?.peel_to_commit()?;
+    repo.reset(head_commit.as_object(), ResetType::Hard, None)?;
+    repo.cleanup_state()?;
+    Ok(())
+}
+
+pub fn merge_message(repo: &Repository) -> Option<String> {
+    repo.message().ok()
+}
+
+pub fn is_merging(repo: &Repository) -> bool {
+    repo.state() == git2::RepositoryState::Merge
 }
