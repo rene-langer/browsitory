@@ -32,8 +32,9 @@ pub enum ConflictSegment {
 
 pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome, MergeError> {
     let branch_ref = format!("refs/heads/{branch_name}");
-    let their_commit = repo.find_reference(&branch_ref)?.peel_to_commit()?;
-    let their_annotated = repo.find_annotated_commit(their_commit.id())?;
+    let their_reference = repo.find_reference(&branch_ref)?;
+    let their_commit = their_reference.peel_to_commit()?;
+    let their_annotated = repo.reference_to_annotated_commit(&their_reference)?;
 
     let (analysis, _preference) = repo.merge_analysis(&[&their_annotated])?;
 
@@ -52,11 +53,6 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
     }
 
     repo.merge(&[&their_annotated], None, None)?;
-
-    // Set a proper merge message that includes the branch name
-    let merge_msg = format!("Merge branch '{}'\n", branch_name);
-    let merge_msg_path = repo.path().join("MERGE_MSG");
-    std::fs::write(&merge_msg_path, merge_msg)?;
 
     let index = repo.index()?;
     if index.has_conflicts() {
