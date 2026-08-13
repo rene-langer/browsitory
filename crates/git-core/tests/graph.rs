@@ -33,7 +33,9 @@ fn graph_log_reports_branch_refs_only_for_tip_commits() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "v1");
     commit_all(&repo, "initial commit");
-    let initial_branch = git_core::branch::list_branches(&repo).unwrap()[0].name.clone();
+    let initial_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
 
     git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
     write_file(dir.path(), "file.txt", "v2");
@@ -42,11 +44,17 @@ fn graph_log_reports_branch_refs_only_for_tip_commits() {
 
     let commits = git_core::graph::graph_log(&repo, 10).unwrap();
 
-    let feature_commit = commits.iter().find(|c| c.summary == "feature commit").unwrap();
+    let feature_commit = commits
+        .iter()
+        .find(|c| c.summary == "feature commit")
+        .unwrap();
     assert_eq!(feature_commit.branch_refs, vec!["feature".to_string()]);
     // "initial commit" is the initial branch's tip (feature has moved past it) — it should
     // carry the initial branch's name, not be empty.
-    let initial_commit = commits.iter().find(|c| c.summary == "initial commit").unwrap();
+    let initial_commit = commits
+        .iter()
+        .find(|c| c.summary == "initial commit")
+        .unwrap();
     assert_eq!(initial_commit.branch_refs, vec![initial_branch]);
 }
 
@@ -55,7 +63,9 @@ fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "base.txt", "v1");
     commit_all(&repo, "base commit");
-    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0].name.clone();
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
 
     git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
     write_file(dir.path(), "feature.txt", "v1");
@@ -87,6 +97,9 @@ fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
 
     let commits = git_core::graph::graph_log(&repo, 10).unwrap();
 
-    let merge_commit = commits.iter().find(|c| c.summary == "merge feature into main").unwrap();
+    let merge_commit = commits
+        .iter()
+        .find(|c| c.summary == "merge feature into main")
+        .unwrap();
     assert_eq!(merge_commit.parent_ids.len(), 2);
 }
