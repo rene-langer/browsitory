@@ -6,6 +6,7 @@ use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
+use git_core::merge::{ConflictSegment, MergeOutcome};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -83,6 +84,30 @@ pub(crate) enum Command {
     DropStash {
         index: usize,
         reply: Sender<Result<(), String>>,
+    },
+    #[allow(dead_code)]
+    StartMerge {
+        branch_name: String,
+        reply: Sender<Result<MergeOutcome, String>>,
+    },
+    #[allow(dead_code)]
+    GetConflictHunks {
+        path: String,
+        reply: Sender<Result<Vec<ConflictSegment>, String>>,
+    },
+    #[allow(dead_code)]
+    ResolveConflict {
+        path: String,
+        resolved_content: String,
+        reply: Sender<Result<(), String>>,
+    },
+    #[allow(dead_code)]
+    AbortMerge {
+        reply: Sender<Result<(), String>>,
+    },
+    #[allow(dead_code)]
+    GetMergeMessage {
+        reply: Sender<Result<Option<String>, String>>,
     },
 }
 
@@ -215,6 +240,35 @@ impl Worker {
                     Command::DropStash { index, reply } => {
                         let result = git_core::stash::drop_stash(&mut repo, index)
                             .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::StartMerge { branch_name, reply } => {
+                        let result = git_core::merge::start_merge(&repo, &branch_name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetConflictHunks { path, reply } => {
+                        let result = git_core::merge::conflict_hunks(&repo, &path)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ResolveConflict {
+                        path,
+                        resolved_content,
+                        reply,
+                    } => {
+                        let result =
+                            git_core::merge::resolve_conflict(&repo, &path, &resolved_content)
+                                .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::AbortMerge { reply } => {
+                        let result = git_core::merge::abort_merge(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetMergeMessage { reply } => {
+                        let result: Result<Option<String>, String> =
+                            Ok(git_core::merge::merge_message(&repo));
                         let _ = reply.send(result);
                     }
                 }
@@ -464,6 +518,71 @@ impl WorkerHandle {
             .recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
+
+    #[allow(dead_code)]
+    pub fn start_merge(&self, branch_name: String) -> Result<MergeOutcome, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::StartMerge {
+                branch_name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetConflictHunks {
+                path,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn resolve_conflict(&self, path: String, resolved_content: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ResolveConflict {
+                path,
+                resolved_content,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn abort_merge(&self) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::AbortMerge { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn get_merge_message(&self) -> Result<Option<String>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetMergeMessage { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
 }
 
 #[cfg(test)]
@@ -706,5 +825,93 @@ mod tests {
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].content, "hello");
+    }
+
+    #[test]
+    fn start_merge_and_get_merge_message_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "shared.txt", "line one\nline two\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nfeature two\n");
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nmain two\n");
+        commit_all(&repo, "main commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let outcome = handle.start_merge("feature".into()).unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::merge::MergeOutcome::Conflicted { .. }
+        ));
+        assert!(handle
+            .get_merge_message()
+            .unwrap()
+            .unwrap()
+            .contains("feature"));
+    }
+
+    #[test]
+    fn get_conflict_hunks_then_resolve_conflict_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "shared.txt", "line one\nline two\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nfeature two\n");
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nmain two\n");
+        commit_all(&repo, "main commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.start_merge("feature".into()).unwrap();
+
+        let segments = handle.get_conflict_hunks("shared.txt".into()).unwrap();
+        assert!(!segments.is_empty());
+
+        handle
+            .resolve_conflict("shared.txt".into(), "line one\nresolved\n".into())
+            .unwrap();
+
+        let status = handle.get_status().unwrap();
+        assert!(status.is_empty());
+    }
+
+    #[test]
+    fn abort_merge_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "shared.txt", "line one\nline two\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nfeature two\n");
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "shared.txt", "line one\nmain two\n");
+        commit_all(&repo, "main commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.start_merge("feature".into()).unwrap();
+
+        handle.abort_merge().unwrap();
+
+        assert!(handle.get_merge_message().unwrap().is_none());
+        assert!(handle.get_status().unwrap().is_empty());
     }
 }
