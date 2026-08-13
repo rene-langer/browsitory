@@ -38,7 +38,12 @@ export function DiffPane({
     );
   }
   return (
-    <CommitDiffPane key={selectedRow.commitId} client={client} commitId={selectedRow.commitId} />
+    <CommitDiffPane
+      key={selectedRow.commitId}
+      client={client}
+      commitId={selectedRow.commitId}
+      onSelectRow={onSelectRow}
+    />
   );
 }
 
@@ -177,10 +182,20 @@ function UncommittedDiffPane({
   );
 }
 
-function CommitDiffPane({ client, commitId }: { client: RepoClient; commitId: string }) {
+function CommitDiffPane({
+  client,
+  commitId,
+  onSelectRow,
+}: {
+  client: RepoClient;
+  commitId: string;
+  onSelectRow: (row: SelectedRow) => void;
+}) {
   const [files, setFiles] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Same `ignore` guard as `UncommittedDiffPane`: `commitId` changes remount this component
@@ -207,7 +222,7 @@ function CommitDiffPane({ client, commitId }: { client: RepoClient; commitId: st
   }, [client, commitId]);
 
   useEffect(() => {
-    if (selectedPath === null) {
+    if (selectedPath === null || viewMode !== "diff") {
       return;
     }
     let ignore = false;
@@ -227,20 +242,72 @@ function CommitDiffPane({ client, commitId }: { client: RepoClient; commitId: st
     return () => {
       ignore = true;
     };
-  }, [client, commitId, selectedPath]);
+  }, [client, commitId, selectedPath, viewMode]);
 
-  const displayedHunks = selectedPath === null ? [] : hunks;
+  useEffect(() => {
+    if (selectedPath === null || viewMode !== "blame") {
+      return;
+    }
+    let ignore = false;
+    client
+      .getBlame(commitId, selectedPath)
+      .then((next) => {
+        if (!ignore) {
+          setBlameLines(next);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(String(err));
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [client, commitId, selectedPath, viewMode]);
+
+  const displayedHunks = selectedPath === null || viewMode !== "diff" ? [] : hunks;
+  const displayedBlameLines = selectedPath === null || viewMode !== "blame" ? [] : blameLines;
 
   return (
     <div>
       <ul>
         {files.map((path) => (
           <li key={path}>
-            <button onClick={() => setSelectedPath(path)}>{path}</button>
+            <button
+              onClick={() => {
+                setSelectedPath(path);
+                setViewMode("diff");
+              }}
+            >
+              {path}
+            </button>
+            <button
+              onClick={() => {
+                setSelectedPath(path);
+                setViewMode("blame");
+              }}
+            >
+              Blame
+            </button>
           </li>
         ))}
       </ul>
-      {error !== null ? <p role="alert">{error}</p> : <DiffView hunks={displayedHunks} />}
+      {viewMode === "blame" ? (
+        <>
+          {error !== null ? (
+            <p role="alert">{error}</p>
+          ) : (
+            <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
+          )}
+          <button onClick={() => setViewMode("diff")}>Back to Diff</button>
+        </>
+      ) : error !== null ? (
+        <p role="alert">{error}</p>
+      ) : (
+        <DiffView hunks={displayedHunks} />
+      )}
     </div>
   );
 }
