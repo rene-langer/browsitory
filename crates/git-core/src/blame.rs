@@ -16,7 +16,7 @@ pub struct BlameLine {
     pub commit_id: String,
     pub short_id: String,
     pub author_name: String,
-    pub timestamp: i64, // Unix seconds, UTC — matches CommitInfo's existing convention
+    pub timestamp: i64, // Unix seconds, UTC — matches GraphCommit's existing convention
 }
 
 fn resolve_commit_id(repo: &Repository, commit_id: &str) -> Result<Oid, BlameError> {
