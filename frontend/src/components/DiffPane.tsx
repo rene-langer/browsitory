@@ -16,6 +16,8 @@ export function DiffPane({
   onSaveStash,
   onSelectRow,
   onResolveConflict,
+  mergeMessage,
+  onAbortMerge,
 }: {
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -26,6 +28,8 @@ export function DiffPane({
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
+  mergeMessage: string | null;
+  onAbortMerge: () => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -38,6 +42,8 @@ export function DiffPane({
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
+        mergeMessage={mergeMessage}
+        onAbortMerge={onAbortMerge}
       />
     );
   }
@@ -60,6 +66,8 @@ function UncommittedDiffPane({
   onSaveStash,
   onSelectRow,
   onResolveConflict,
+  mergeMessage,
+  onAbortMerge,
 }: {
   client: RepoClient;
   status: StatusEntry[];
@@ -69,6 +77,8 @@ function UncommittedDiffPane({
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
+  mergeMessage: string | null;
+  onAbortMerge: () => void;
 }) {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
   const [viewMode, setViewMode] = useState<"diff" | "blame" | "conflict">("diff");
@@ -197,7 +207,12 @@ function UncommittedDiffPane({
       <button onClick={onSaveStash} disabled={status.length === 0}>
         Stash
       </button>
-      <CommitBox onCommit={onCommit} disabled={stagedCount === 0} />
+      <CommitBox
+        onCommit={onCommit}
+        disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
+        onAbortMerge={onAbortMerge}
+        initialMessage={mergeMessage ?? undefined}
+      />
     </div>
   );
 }
