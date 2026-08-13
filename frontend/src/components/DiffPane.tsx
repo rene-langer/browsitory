@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import type { BlameLine, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type {
+  BlameLine,
+  DiffHunk,
+  FileConflictChoice,
+  RepoClient,
+  StatusEntry,
+} from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
@@ -16,6 +22,7 @@ export function DiffPane({
   onSaveStash,
   onSelectRow,
   onResolveConflict,
+  onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
 }: {
@@ -28,6 +35,7 @@ export function DiffPane({
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
+  onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
 }) {
@@ -42,6 +50,7 @@ export function DiffPane({
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
+        onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         mergeMessage={mergeMessage}
         onAbortMerge={onAbortMerge}
       />
@@ -66,6 +75,7 @@ function UncommittedDiffPane({
   onSaveStash,
   onSelectRow,
   onResolveConflict,
+  onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
 }: {
@@ -77,6 +87,7 @@ function UncommittedDiffPane({
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
+  onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
 }) {
@@ -200,6 +211,7 @@ function UncommittedDiffPane({
           client={client}
           path={selected.path}
           onResolve={onResolveConflict}
+          onResolveAddDelete={onResolveAddDeleteConflict}
         />
       ) : error !== null ? (
         <p role="alert">{error}</p>

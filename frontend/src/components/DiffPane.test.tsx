@@ -61,6 +61,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -85,6 +86,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -119,6 +121,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -154,6 +157,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -193,6 +197,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -219,6 +224,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -244,6 +250,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -267,6 +274,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -296,6 +304,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -319,6 +328,7 @@ describe("DiffPane", () => {
           onSaveStash={onSaveStash}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -343,6 +353,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -365,6 +376,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -387,6 +399,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -420,6 +433,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -457,6 +471,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -486,6 +501,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -528,6 +544,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -559,6 +576,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -588,6 +606,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={"Merge branch 'feature'"}
           onAbortMerge={vi.fn()}
         />,
@@ -609,6 +628,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -635,6 +655,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -672,6 +693,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -699,6 +721,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -724,6 +747,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -748,6 +772,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -782,6 +807,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -820,6 +846,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,
@@ -852,6 +879,7 @@ describe("DiffPane", () => {
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
           onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
         />,

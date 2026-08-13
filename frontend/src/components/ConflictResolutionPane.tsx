@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConflictSegment, RepoClient } from "../ipc/RepoClient";
+import type { ConflictSegment, FileConflictChoice, RepoClient } from "../ipc/RepoClient";
 
 type Resolution = "ours" | "theirs" | "both";
 
@@ -7,14 +7,17 @@ export function ConflictResolutionPane({
   client,
   path,
   onResolve,
+  onResolveAddDelete,
 }: {
   client: RepoClient;
   path: string;
   onResolve: (path: string, resolvedContent: string) => void;
+  onResolveAddDelete: (path: string, choice: FileConflictChoice) => void;
 }) {
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isAddDeleteConflict, setIsAddDeleteConflict] = useState(false);
   // Guards "Save resolution" against a click landing before the fetch below completes — without
   // this, an early click sees `segments = []`, reconstructs an empty string, and silently
   // overwrites the file via `onResolve(path, "")`. Tracked by path rather than a plain boolean
@@ -38,7 +41,9 @@ export function ConflictResolutionPane({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          const message = String(err);
+          setError(message);
+          setIsAddDeleteConflict(message.includes("add/delete conflict"));
           setLoadedPath(path);
         }
       });
@@ -48,6 +53,16 @@ export function ConflictResolutionPane({
   }, [client, path]);
 
   if (error !== null) {
+    if (isAddDeleteConflict) {
+      return (
+        <div>
+          <p>{error}</p>
+          <button onClick={() => onResolveAddDelete(path, "Ours")}>Keep Our Version</button>
+          <button onClick={() => onResolveAddDelete(path, "Theirs")}>Keep Their Version</button>
+          <button onClick={() => onResolveAddDelete(path, "Delete")}>Delete File</button>
+        </div>
+      );
+    }
     return <p role="alert">{error}</p>;
   }
 
