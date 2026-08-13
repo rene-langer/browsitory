@@ -53,7 +53,7 @@ describe("ConflictResolutionPane", () => {
   it("renders clean segments as text and conflict segments with both sides", async () => {
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={vi.fn()} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText(/line one/));
     expect(screen.getByText(/main two/)).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText(/line one/));
     fireEvent.click(screen.getByText("Save resolution"));
@@ -77,7 +77,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Theirs"));
     fireEvent.click(screen.getByText("Accept Theirs"));
@@ -90,7 +90,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Both"));
     fireEvent.click(screen.getByText("Accept Both"));
@@ -109,7 +109,7 @@ describe("ConflictResolutionPane", () => {
       getConflictHunks: () => new Promise((resolve) => (resolveHunks = resolve)),
     });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     const saveButton = screen.getByText("Save resolution").closest("button");
     expect(saveButton).toBeDisabled();
@@ -129,7 +129,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => oneEmptySide });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Both"));
     fireEvent.click(screen.getByText("Accept Both"));
@@ -147,7 +147,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => theirsEmpty });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Ours"));
     fireEvent.click(screen.getByText("Accept Ours"));
@@ -165,7 +165,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => oursEmpty });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Theirs"));
     fireEvent.click(screen.getByText("Accept Theirs"));
@@ -174,16 +174,68 @@ describe("ConflictResolutionPane", () => {
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
   });
 
-  it("shows an error message when the conflict is not a text conflict", async () => {
+  it("shows a keep-ours/keep-theirs/delete fallback for an add/delete conflict", async () => {
     const client = fakeClient({
       getConflictHunks: async () => {
         throw new Error("'binary.dat' is an add/delete conflict, not a text conflict");
       },
     });
 
-    render(<ConflictResolutionPane client={client} path="binary.dat" onResolve={vi.fn()} />);
+    render(
+      <ConflictResolutionPane
+        client={client}
+        path="binary.dat"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => screen.getByText("Keep Our Version"));
+    expect(screen.getByText("Keep Their Version")).toBeInTheDocument();
+    expect(screen.getByText("Delete File")).toBeInTheDocument();
+  });
+
+  it("clicking Keep Their Version calls onResolveAddDelete with Theirs", async () => {
+    const onResolveAddDelete = vi.fn();
+    const client = fakeClient({
+      getConflictHunks: async () => {
+        throw new Error("'binary.dat' is an add/delete conflict, not a text conflict");
+      },
+    });
+
+    render(
+      <ConflictResolutionPane
+        client={client}
+        path="binary.dat"
+        onResolve={vi.fn()}
+        onResolveAddDelete={onResolveAddDelete}
+      />,
+    );
+
+    await waitFor(() => screen.getByText("Keep Their Version"));
+    fireEvent.click(screen.getByText("Keep Their Version"));
+
+    expect(onResolveAddDelete).toHaveBeenCalledWith("binary.dat", "Theirs");
+  });
+
+  it("still shows a plain error message for an unrelated failure", async () => {
+    const client = fakeClient({
+      getConflictHunks: async () => {
+        throw new Error("network error");
+      },
+    });
+
+    render(
+      <ConflictResolutionPane
+        client={client}
+        path="shared.txt"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+      />,
+    );
 
     await waitFor(() => screen.getByRole("alert"));
-    expect(screen.getByRole("alert")).toHaveTextContent(/add\/delete conflict/);
+    expect(screen.getByRole("alert")).toHaveTextContent("network error");
+    expect(screen.queryByText("Keep Our Version")).not.toBeInTheDocument();
   });
 });
