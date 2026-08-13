@@ -72,12 +72,16 @@ h1 {
   text-overflow: ellipsis;
 }
 
+/* This row has buttons as children, not just text — the base `.app-layout > ul > li` rule's
+   `white-space: nowrap; overflow: hidden` is a trap for any row with interactive children: it
+   clips them off the visible/clickable area for a long stash message. So this row gets its own
+   flex layout instead, with truncation confined to the message `<span>` below. */
 .app-layout > ul > li.stash-row {
   display: flex;
   align-items: center;
   gap: 4px;
   white-space: normal;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .app-layout > ul > li.stash-row > span {

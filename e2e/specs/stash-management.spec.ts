@@ -19,6 +19,15 @@ describe("Browsitory stash", () => {
     fs.writeFileSync(filePath, "dirty content\n");
   });
 
+  // `wdio.conf.ts`'s `onPrepare` builds the fixture repo once for the whole suite run, and
+  // specs run alphabetically — leaving the one stash entry this spec creates (and the file's
+  // dirty content) behind would corrupt the fixture for any spec sorting after "stash-".
+  after(() => {
+    const filePath = path.join(E2E_REPO_PATH, STASH_FIXTURE_FILE);
+    execFileSync("git", ["stash", "drop", "0"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    fs.writeFileSync(filePath, "committed content\n");
+  });
+
   it("saves a stash, sees it listed, applies it, and restores the file's dirty content", async () => {
     const uncommittedRow = await $("li*=Uncommitted Changes");
     await uncommittedRow.waitForExist({ timeout: 10000 });
