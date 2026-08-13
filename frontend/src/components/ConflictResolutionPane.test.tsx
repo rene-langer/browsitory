@@ -39,10 +39,13 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   };
 }
 
+// Segment content carries embedded trailing newlines, mirroring what
+// `parse_conflict_markers` (crates/git-core/src/merge.rs) actually produces via
+// `split_inclusive('\n')` — each piece keeps its own line terminator.
 const segments: ConflictSegment[] = [
-  { kind: "Clean", content: "line one" },
-  { kind: "Conflict", ours: "main two", theirs: "feature two" },
-  { kind: "Clean", content: "line three" },
+  { kind: "Clean", content: "line one\n" },
+  { kind: "Conflict", ours: "main two\n", theirs: "feature two\n" },
+  { kind: "Clean", content: "line three\n" },
 ];
 
 describe("ConflictResolutionPane", () => {
@@ -66,7 +69,7 @@ describe("ConflictResolutionPane", () => {
     await waitFor(() => screen.getByText(/line one/));
     fireEvent.click(screen.getByText("Save resolution"));
 
-    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nmain two\nline three");
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nmain two\nline three\n");
   });
 
   it("Accept Theirs changes that conflict's contribution to the saved text", async () => {
@@ -79,7 +82,7 @@ describe("ConflictResolutionPane", () => {
     fireEvent.click(screen.getByText("Accept Theirs"));
     fireEvent.click(screen.getByText("Save resolution"));
 
-    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nfeature two\nline three");
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nfeature two\nline three\n");
   });
 
   it("Accept Both concatenates ours then theirs", async () => {
@@ -94,7 +97,7 @@ describe("ConflictResolutionPane", () => {
 
     expect(onResolve).toHaveBeenCalledWith(
       "shared.txt",
-      "line one\nmain two\nfeature two\nline three",
+      "line one\nmain two\nfeature two\nline three\n",
     );
   });
 
@@ -119,9 +122,9 @@ describe("ConflictResolutionPane", () => {
   it("Accept Both does not insert a spurious blank line when one side of a conflict is empty", async () => {
     const onResolve = vi.fn();
     const oneEmptySide: ConflictSegment[] = [
-      { kind: "Clean", content: "line one" },
-      { kind: "Conflict", ours: "line two", theirs: "" },
-      { kind: "Clean", content: "line three" },
+      { kind: "Clean", content: "line one\n" },
+      { kind: "Conflict", ours: "line two\n", theirs: "" },
+      { kind: "Clean", content: "line three\n" },
     ];
     const client = fakeClient({ getConflictHunks: async () => oneEmptySide });
 
@@ -131,7 +134,43 @@ describe("ConflictResolutionPane", () => {
     fireEvent.click(screen.getByText("Accept Both"));
     fireEvent.click(screen.getByText("Save resolution"));
 
-    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three");
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
+  });
+
+  it("Accept Ours does not insert a spurious blank line when theirs is empty", async () => {
+    const onResolve = vi.fn();
+    const theirsEmpty: ConflictSegment[] = [
+      { kind: "Clean", content: "line one\n" },
+      { kind: "Conflict", ours: "line two\n", theirs: "" },
+      { kind: "Clean", content: "line three\n" },
+    ];
+    const client = fakeClient({ getConflictHunks: async () => theirsEmpty });
+
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+
+    await waitFor(() => screen.getByText("Accept Ours"));
+    fireEvent.click(screen.getByText("Accept Ours"));
+    fireEvent.click(screen.getByText("Save resolution"));
+
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
+  });
+
+  it("Accept Theirs does not insert a spurious blank line when ours is empty", async () => {
+    const onResolve = vi.fn();
+    const oursEmpty: ConflictSegment[] = [
+      { kind: "Clean", content: "line one\n" },
+      { kind: "Conflict", ours: "", theirs: "line two\n" },
+      { kind: "Clean", content: "line three\n" },
+    ];
+    const client = fakeClient({ getConflictHunks: async () => oursEmpty });
+
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+
+    await waitFor(() => screen.getByText("Accept Theirs"));
+    fireEvent.click(screen.getByText("Accept Theirs"));
+    fireEvent.click(screen.getByText("Save resolution"));
+
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
   });
 
   it("shows an error message when the conflict is not a text conflict", async () => {
