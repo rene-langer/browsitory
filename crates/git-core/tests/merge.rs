@@ -137,11 +137,35 @@ fn conflict_hunks_returns_clean_and_conflict_segments_for_a_conflicted_file() {
         .expect("expected a Conflict segment");
     match conflict {
         ConflictSegment::Conflict { ours, theirs } => {
-            assert_eq!(ours, "main two");
-            assert_eq!(theirs, "feature two");
+            // Each side keeps its own trailing newline — `parse_conflict_markers` now splits on
+            // `split_inclusive('\n')` rather than `.lines()`, so terminators aren't stripped.
+            assert_eq!(ours, "main two\n");
+            assert_eq!(theirs, "feature two\n");
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn conflict_hunks_round_trip_preserves_the_original_files_trailing_newline() {
+    let (_dir, repo) = make_conflicted_repo();
+
+    let segments = git_core::merge::conflict_hunks(&repo, "shared.txt").unwrap();
+
+    // Reconstruct by choosing "ours" for every conflict, exactly like the frontend's Accept
+    // Ours path, and confirm the round trip reproduces the original file's content byte for
+    // byte — including its trailing newline. The original file (see `make_conflicted_repo`)
+    // was "line one\nmain two\nline three\n" on the "ours" (main) side.
+    let reconstructed = segments
+        .into_iter()
+        .map(|segment| match segment {
+            ConflictSegment::Clean { content } => content,
+            ConflictSegment::Conflict { ours, .. } => ours,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    assert_eq!(reconstructed, "line one\nmain two\nline three\n");
 }
 
 #[test]

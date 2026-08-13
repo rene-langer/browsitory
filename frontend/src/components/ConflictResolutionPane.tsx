@@ -56,6 +56,10 @@ export function ConflictResolutionPane({
   };
 
   const save = () => {
+    // Each segment already carries its own embedded line terminators (see
+    // `parse_conflict_markers` in `crates/git-core/src/merge.rs`), so segments are joined with
+    // "" — no synthetic separator needed, and none of the old empty-side blank-line guards are
+    // needed either: concatenating "" with anything is a no-op.
     const parts = segments.map((segment, index) => {
       if (segment.kind === "Clean") {
         return segment.content;
@@ -65,22 +69,11 @@ export function ConflictResolutionPane({
           return segment.ours;
         case "theirs":
           return segment.theirs;
-        case "both": {
-          // Concatenating unconditionally would insert a spurious blank line (or a leading
-          // one) whenever either side is empty — a real case, not just a hypothetical: an
-          // ordinary in-hunk conflict where one branch deleted a line the other edited.
-          if (segment.ours === "") {
-            return segment.theirs;
-          }
-          if (segment.theirs === "") {
-            return segment.ours;
-          }
-          const separator = segment.ours.endsWith("\n") ? "" : "\n";
-          return `${segment.ours}${separator}${segment.theirs}`;
-        }
+        case "both":
+          return segment.ours + segment.theirs;
       }
     });
-    onResolve(path, parts.join("\n"));
+    onResolve(path, parts.join(""));
   };
 
   return (

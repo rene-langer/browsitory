@@ -107,16 +107,22 @@ pub fn conflict_hunks(repo: &Repository, path: &str) -> Result<Vec<ConflictSegme
 // git2's default `MergeFileOptions` use `GIT_MERGE_FILE_STYLE_MERGE` (not diff3), so a conflict
 // block is exactly `<<<<<<< ...\n`ours`\n=======\n`theirs`\n>>>>>>> ...\n` — no separate
 // ancestor section to account for.
+//
+// Iterating with `split_inclusive('\n')` (rather than `.lines()`, which strips line terminators
+// including the `\r` of a CRLF ending) means every yielded piece keeps its own trailing `\n` (and
+// any preceding `\r`) attached. Segments are therefore joined with `""`, not `"\n"` — each piece
+// already carries its own terminator, so this naturally preserves the file's exact original line
+// endings, including a final line with no trailing newline at all.
 fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
     let mut segments = Vec::new();
     let mut clean_lines: Vec<&str> = Vec::new();
-    let mut lines = content.lines();
+    let mut lines = content.split_inclusive('\n');
 
     while let Some(line) = lines.next() {
         if line.starts_with("<<<<<<<") {
             if !clean_lines.is_empty() {
                 segments.push(ConflictSegment::Clean {
-                    content: clean_lines.join("\n"),
+                    content: clean_lines.join(""),
                 });
                 clean_lines.clear();
             }
@@ -135,8 +141,8 @@ fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
                 theirs_lines.push(line);
             }
             segments.push(ConflictSegment::Conflict {
-                ours: ours_lines.join("\n"),
-                theirs: theirs_lines.join("\n"),
+                ours: ours_lines.join(""),
+                theirs: theirs_lines.join(""),
             });
         } else {
             clean_lines.push(line);
@@ -144,7 +150,7 @@ fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
     }
     if !clean_lines.is_empty() {
         segments.push(ConflictSegment::Clean {
-            content: clean_lines.join("\n"),
+            content: clean_lines.join(""),
         });
     }
     segments
