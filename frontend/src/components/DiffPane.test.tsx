@@ -568,6 +568,54 @@ describe("DiffPane", () => {
       await waitFor(() => screen.getByText("Save resolution"));
     });
 
+    it("closes the conflict pane when a status refresh no longer lists the selected path as Conflicted (e.g. after abort)", async () => {
+      const conflictedStatus: StatusEntry[] = [
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const client = fakeClient({
+        getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
+      });
+
+      const { rerender } = render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={conflictedStatus}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          mergeMessage={"Merge branch 'feature'"}
+          onAbortMerge={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
+      await waitFor(() => screen.getByText("Save resolution"));
+
+      // Simulate a status refresh after an abort (or after the conflict was already resolved
+      // through this same pane): the conflicted entry is gone.
+      rerender(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
+    });
+
     it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
       const mixedStatus: StatusEntry[] = [
         { path: "a.txt", staged: true, kind: "New" },

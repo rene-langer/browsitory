@@ -193,7 +193,9 @@ function UncommittedDiffPane({
           )}
           <button onClick={() => setViewMode("diff")}>Back to Diff</button>
         </>
-      ) : viewMode === "conflict" && selected !== null ? (
+      ) : viewMode === "conflict" &&
+        selected !== null &&
+        status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted") ? (
         <ConflictResolutionPane
           client={client}
           path={selected.path}
