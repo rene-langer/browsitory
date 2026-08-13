@@ -526,4 +526,123 @@ describe("useAppState", () => {
 
     expect(dropStashArg).toBe(0);
   });
+
+  it("dropStash resets selectedRow to uncommitted when dropping the currently selected stash", async () => {
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    let listStashesCalls = 0;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => {
+        listStashesCalls += 1;
+        return listStashesCalls === 1 ? [stash] : [];
+      },
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => {},
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    act(() => result.current.selectRow({ commitId: "s1" }));
+    expect(result.current.state.selectedRow).toEqual({ commitId: "s1" });
+
+    await act(() => result.current.dropStash(0));
+
+    expect(result.current.state.selectedRow).toBe("uncommitted");
+  });
+
+  it("dropStash leaves selectedRow untouched when dropping a stash that isn't selected", async () => {
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [stash],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => {},
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    act(() => result.current.selectRow({ commitId: "some-other-commit" }));
+
+    await act(() => result.current.dropStash(0));
+
+    expect(result.current.state.selectedRow).toEqual({ commitId: "some-other-commit" });
+  });
+
+  it("pending is true only while a mutation is in flight", async () => {
+    let resolveStage: (() => void) | null = null;
+    const client: RepoClient = {
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getLog: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () =>
+        new Promise<void>((resolve) => {
+          resolveStage = resolve;
+        }),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    expect(result.current.state.pending).toBe(false);
+
+    let mutationPromise!: Promise<void>;
+    act(() => {
+      mutationPromise = result.current.stageFile("a.txt");
+    });
+    expect(result.current.state.pending).toBe(true);
+
+    await act(async () => {
+      resolveStage?.();
+      await mutationPromise;
+    });
+
+    expect(result.current.state.pending).toBe(false);
+  });
 });

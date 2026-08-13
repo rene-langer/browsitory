@@ -20,6 +20,11 @@ export interface AppState {
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   error: string | null;
+  // True only while a `runMutation` call is in flight (from just before its `mutate()` call
+  // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
+  // disable themselves so a rapid double-click can't fire the same index-based mutation twice
+  // before the first one's refresh lands — see the stash Drop race this was added for.
+  pending: boolean;
 }
 
 export interface UseAppStateResult {
@@ -51,6 +56,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     createBranchDraft: null,
     stashes: [],
     error: null,
+    pending: false,
   });
 
   const refresh = useCallback(async () => {
@@ -70,10 +76,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const runMutation = useCallback(
     async (mutate: () => Promise<void>) => {
       try {
+        setState((prev) => ({ ...prev, pending: true }));
         await mutate();
         await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: String(err) }));
+        setState((prev) => ({ ...prev, error: String(err), pending: false }));
       }
     },
     [refresh],
@@ -146,8 +154,22 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const dropStash = useCallback(
-    (index: number) => runMutation(() => client.dropStash(index)),
-    [client, runMutation],
+    (index: number) =>
+      runMutation(async () => {
+        // Read the about-to-be-dropped stash's commitId before calling the client: if it's
+        // the one currently selected, `DiffPane` would otherwise keep showing a diff for a
+        // commit that's about to become unreachable until GC.
+        const droppedCommitId = state.stashes[index]?.commitId;
+        const dropsSelectedStash =
+          droppedCommitId !== undefined &&
+          typeof state.selectedRow === "object" &&
+          state.selectedRow.commitId === droppedCommitId;
+        await client.dropStash(index);
+        if (dropsSelectedStash) {
+          setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
+        }
+      }),
+    [client, runMutation, state],
   );
 
   return {

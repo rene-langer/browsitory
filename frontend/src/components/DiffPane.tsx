@@ -109,7 +109,9 @@ function UncommittedDiffPane({
         ))}
       </ul>
       {error !== null ? <p role="alert">{error}</p> : <DiffView hunks={displayedHunks} />}
-      <button onClick={onSaveStash}>Stash</button>
+      <button onClick={onSaveStash} disabled={status.length === 0}>
+        Stash
+      </button>
       <CommitBox onCommit={onCommit} disabled={stagedCount === 0} />
     </div>
   );

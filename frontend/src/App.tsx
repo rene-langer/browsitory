@@ -54,6 +54,7 @@ export default function App() {
           log={appState.state.log}
           stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
+          pending={appState.state.pending}
           onSelectRow={appState.selectRow}
           onBranchFromCommit={appState.openCreateBranchDraft}
           onApplyStash={appState.applyStash}

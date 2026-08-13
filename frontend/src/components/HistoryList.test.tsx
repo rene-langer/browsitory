@@ -35,6 +35,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -52,6 +53,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -73,6 +75,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -93,6 +96,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -114,6 +118,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -135,6 +140,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow={{ commitId: "bbb222..." }}
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -155,6 +161,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -175,6 +182,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={onBranchFromCommit}
         onApplyStash={vi.fn()}
@@ -196,6 +204,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={[]}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -223,6 +232,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={stashes}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -242,6 +252,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={stashes}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -263,6 +274,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={stashes}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={onApplyStash}
@@ -286,6 +298,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={stashes}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
@@ -300,6 +313,29 @@ describe("HistoryList", () => {
     expect(onSelectRow).not.toHaveBeenCalled();
   });
 
+  it("disables every stash row's Apply and Drop buttons while pending", () => {
+    render(
+      <HistoryList
+        status={status}
+        log={log}
+        stashes={stashes}
+        selectedRow="uncommitted"
+        pending={true}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    for (const button of screen.getAllByText("Apply")) {
+      expect(button).toBeDisabled();
+    }
+    for (const button of screen.getAllByText("Drop")) {
+      expect(button).toBeDisabled();
+    }
+  });
+
   it("ArrowDown from Uncommitted Changes lands on the first stash when stashes are present", () => {
     const onSelectRow = vi.fn();
     render(
@@ -308,6 +344,7 @@ describe("HistoryList", () => {
         log={log}
         stashes={stashes}
         selectedRow="uncommitted"
+        pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
