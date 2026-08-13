@@ -152,3 +152,47 @@ fn conflict_hunks_errors_for_a_path_with_no_conflict() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn resolve_conflict_clears_the_conflict_and_stages_the_result() {
+    let (dir, repo) = make_conflicted_repo();
+
+    git_core::merge::resolve_conflict(&repo, "shared.txt", "line one\nresolved two\nline three\n")
+        .unwrap();
+
+    assert!(!repo.index().unwrap().has_conflicts());
+    let contents = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(contents, "line one\nresolved two\nline three\n");
+}
+
+#[test]
+fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
+    let (dir, repo) = make_conflicted_repo();
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(!repo.index().unwrap().has_conflicts());
+    let contents = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(contents, "line one\nmain two\nline three\n");
+}
+
+#[test]
+fn merge_message_and_is_merging_reflect_an_in_progress_merge() {
+    let (_dir, repo) = make_conflicted_repo();
+
+    assert!(git_core::merge::is_merging(&repo));
+    assert!(git_core::merge::merge_message(&repo)
+        .unwrap()
+        .contains("feature"));
+}
+
+#[test]
+fn merge_message_and_is_merging_are_clear_outside_a_merge() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+
+    assert!(!git_core::merge::is_merging(&repo));
+    assert!(git_core::merge::merge_message(&repo).is_none());
+}
