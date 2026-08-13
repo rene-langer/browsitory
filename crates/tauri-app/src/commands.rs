@@ -75,6 +75,30 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlameLineDto {
+    pub line_number: usize,
+    pub content: String,
+    pub commit_id: String,
+    pub short_id: String,
+    pub author_name: String,
+    pub timestamp: i64,
+}
+
+impl From<git_core::blame::BlameLine> for BlameLineDto {
+    fn from(l: git_core::blame::BlameLine) -> Self {
+        BlameLineDto {
+            line_number: l.line_number,
+            content: l.content,
+            commit_id: l.commit_id,
+            short_id: l.short_id,
+            author_name: l.author_name,
+            timestamp: l.timestamp,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -206,6 +230,16 @@ pub async fn get_commit_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     worker_handle(&state)?.get_commit_files(commit_id)
+}
+
+#[tauri::command]
+pub async fn get_blame(
+    commit_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<BlameLineDto>, String> {
+    let lines = worker_handle(&state)?.get_blame(commit_id, path)?;
+    Ok(lines.into_iter().map(BlameLineDto::from).collect())
 }
 
 #[tauri::command]
