@@ -15,6 +15,14 @@ export function ConflictResolutionPane({
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Guards "Save resolution" against a click landing before the fetch below completes — without
+  // this, an early click sees `segments = []`, reconstructs an empty string, and silently
+  // overwrites the file via `onResolve(path, "")`. Tracked by path rather than a plain boolean
+  // so it self-resets on every `path` change (re-arming the guard for that path's own fetch)
+  // without a synchronous `setState` call in the effect body, which the lint rule
+  // `react-hooks/set-state-in-effect` forbids.
+  const [loadedPath, setLoadedPath] = useState<string | null>(null);
+  const loaded = loadedPath === path;
 
   useEffect(() => {
     let ignore = false;
@@ -25,11 +33,13 @@ export function ConflictResolutionPane({
           setSegments(next);
           setResolutions(next.map(() => "ours"));
           setError(null);
+          setLoadedPath(path);
         }
       })
       .catch((err: unknown) => {
         if (!ignore) {
           setError(String(err));
+          setLoadedPath(path);
         }
       });
     return () => {
@@ -56,6 +66,15 @@ export function ConflictResolutionPane({
         case "theirs":
           return segment.theirs;
         case "both": {
+          // Concatenating unconditionally would insert a spurious blank line (or a leading
+          // one) whenever either side is empty — a real case, not just a hypothetical: an
+          // ordinary in-hunk conflict where one branch deleted a line the other edited.
+          if (segment.ours === "") {
+            return segment.theirs;
+          }
+          if (segment.theirs === "") {
+            return segment.ours;
+          }
           const separator = segment.ours.endsWith("\n") ? "" : "\n";
           return `${segment.ours}${separator}${segment.theirs}`;
         }
@@ -79,7 +98,9 @@ export function ConflictResolutionPane({
           </div>
         ),
       )}
-      <button onClick={save}>Save resolution</button>
+      <button onClick={save} disabled={!loaded}>
+        Save resolution
+      </button>
     </div>
   );
 }
