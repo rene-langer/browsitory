@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
+use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::log::CommitInfo;
@@ -29,6 +30,11 @@ pub(crate) enum Command {
     GetCommitFiles {
         commit_id: String,
         reply: Sender<Result<Vec<String>, String>>,
+    },
+    GetBlame {
+        commit_id: String,
+        path: String,
+        reply: Sender<Result<Vec<BlameLine>, String>>,
     },
     StageFile {
         path: String,
@@ -130,6 +136,15 @@ impl Worker {
                     }
                     Command::GetCommitFiles { commit_id, reply } => {
                         let result = git_core::diff::commit_files(&repo, &commit_id)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetBlame {
+                        commit_id,
+                        path,
+                        reply,
+                    } => {
+                        let result = git_core::blame::blame_file(&repo, &commit_id, &path)
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
@@ -277,6 +292,20 @@ impl WorkerHandle {
         self.tx
             .send(Command::GetCommitFiles {
                 commit_id,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetBlame {
+                commit_id,
+                path,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -660,5 +689,21 @@ mod tests {
 
         handle.drop_stash(0).unwrap();
         assert!(handle.list_stashes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_blame_reflects_a_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "hello\n");
+        commit_all(&repo, "initial commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let lines = worker
+            .handle()
+            .get_blame("HEAD".into(), "file.txt".into())
+            .unwrap();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].content, "hello");
     }
 }
