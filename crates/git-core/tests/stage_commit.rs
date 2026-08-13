@@ -21,10 +21,10 @@ fn stage_file_adds_a_new_file_to_the_index() {
 
 #[test]
 fn stage_file_stages_a_deletion() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "hello");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&repo, "add file").unwrap();
+    commit(&mut repo, "add file").unwrap();
 
     std::fs::remove_file(dir.path().join("tracked.txt")).unwrap();
     stage_file(&repo, "tracked.txt").unwrap();
@@ -38,10 +38,10 @@ fn stage_file_stages_a_deletion() {
 
 #[test]
 fn unstage_file_restores_the_index_entry_from_head() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "hello");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&repo, "add file").unwrap();
+    commit(&mut repo, "add file").unwrap();
 
     write_file(dir.path(), "tracked.txt", "changed");
     stage_file(&repo, "tracked.txt").unwrap();
@@ -72,11 +72,11 @@ fn unstage_file_on_a_newly_staged_file_makes_it_untracked_again() {
 
 #[test]
 fn commit_creates_a_commit_with_the_given_message_and_staged_content() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    let oid = commit(&repo, "add greeting").unwrap();
+    let oid = commit(&mut repo, "add greeting").unwrap();
 
     assert!(git_core::status::status(&repo).unwrap().is_empty());
     let commit = repo
@@ -87,11 +87,11 @@ fn commit_creates_a_commit_with_the_given_message_and_staged_content() {
 
 #[test]
 fn commit_on_a_fresh_repo_creates_a_parentless_first_commit() {
-    let (dir, repo) = init_repo();
+    let (dir, mut repo) = init_repo();
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    let oid = commit(&repo, "add greeting").unwrap();
+    let oid = commit(&mut repo, "add greeting").unwrap();
 
     let commit = repo
         .find_commit(git2::Oid::from_str(&oid).unwrap())
@@ -171,9 +171,9 @@ fn commit_without_a_configured_identity_returns_an_error() {
     let _config_override = ConfigSearchPathOverride::install(empty_config_dir.path());
 
     let dir = tempfile::TempDir::new().unwrap();
-    let repo = git2::Repository::init(dir.path()).unwrap();
+    let mut repo = git2::Repository::init(dir.path()).unwrap();
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    assert!(commit(&repo, "msg").is_err());
+    assert!(commit(&mut repo, "msg").is_err());
 }
