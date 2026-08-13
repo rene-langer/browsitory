@@ -885,8 +885,14 @@ mod tests {
             .resolve_conflict("shared.txt".into(), "line one\nresolved\n".into())
             .unwrap();
 
+        // Resolving and staging a conflict does not empty the status list — the file now
+        // differs from HEAD, so it shows as one staged entry, exactly like any other staged
+        // change. It only leaves `status()` once actually committed.
         let status = handle.get_status().unwrap();
-        assert!(status.is_empty());
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].path, "shared.txt");
+        assert!(status[0].staged);
+        assert_eq!(status[0].kind, git_core::status::StatusKind::Modified);
     }
 
     #[test]
