@@ -41,6 +41,15 @@ export interface StashEntry {
   commitId: string;
 }
 
+export interface BlameLine {
+  lineNumber: number;
+  content: string;
+  commitId: string;
+  shortId: string;
+  authorName: string;
+  timestamp: number;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -62,4 +71,5 @@ export interface RepoClient {
   saveStash(): Promise<void>;
   applyStash(index: number): Promise<void>;
   dropStash(index: number): Promise<void>;
+  getBlame(commitId: string, path: string): Promise<BlameLine[]>;
 }
