@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BlameLine,
   BranchInfo,
-  CommitInfo,
   DiffHunk,
+  GraphCommit,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -14,7 +14,8 @@ export const tauriRepoClient: RepoClient = {
   listRecentRepos: () => invoke<string[]>("list_recent_repos"),
   openRepo: (path: string) => invoke("open_repo", { path }),
   getStatus: () => invoke<StatusEntry[]>("get_status"),
-  getLog: (limit: number) => invoke<CommitInfo[]>("get_log", { limit }),
+  getCommitGraph: (limit: number) =>
+    invoke<GraphCommit[]>("get_commit_graph", { limit }),
   getWorkingDiff: (path: string, staged: boolean) =>
     invoke<DiffHunk[]>("get_working_diff", { path, staged }),
   getCommitDiff: (commitId: string, path: string) =>

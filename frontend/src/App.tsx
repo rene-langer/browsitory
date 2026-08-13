@@ -51,7 +51,7 @@ export default function App() {
       <div className="app-layout">
         <HistoryList
           status={appState.state.status}
-          log={appState.state.log}
+          log={appState.state.commits}
           stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
           pending={appState.state.pending}
