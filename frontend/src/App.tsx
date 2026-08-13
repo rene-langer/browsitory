@@ -47,6 +47,7 @@ export default function App() {
         onRenameBranch={appState.renameBranch}
         onOpenCreateBranchDraft={appState.openCreateBranchDraft}
         onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
+        onMergeBranch={appState.mergeBranch}
       />
       <div className="app-layout">
         <CommitGraph

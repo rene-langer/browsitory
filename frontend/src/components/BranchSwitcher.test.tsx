@@ -19,6 +19,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       onRenameBranch={vi.fn()}
       onOpenCreateBranchDraft={vi.fn()}
       onCloseCreateBranchDraft={vi.fn()}
+      onMergeBranch={vi.fn()}
       {...overrides}
     />,
   );
@@ -153,5 +154,23 @@ describe("BranchSwitcher", () => {
 
     expect(screen.queryByDisplayValue("feature")).toBeNull();
     expect(screen.getAllByText("Rename").length).toBe(2);
+  });
+
+  it("clicking Merge into current branch calls onMergeBranch with that branch's name", () => {
+    const onMergeBranch = vi.fn();
+    renderSwitcher({ onMergeBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    fireEvent.click(screen.getByText("Merge into current branch"));
+
+    expect(onMergeBranch).toHaveBeenCalledWith("feature");
+  });
+
+  it("does not render a merge action for the current branch", () => {
+    renderSwitcher({ branches: [{ name: "main", isCurrent: true }] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.queryByText("Merge into current branch")).not.toBeInTheDocument();
   });
 });

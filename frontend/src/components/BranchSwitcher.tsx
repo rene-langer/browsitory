@@ -10,6 +10,7 @@ export function BranchSwitcher({
   onRenameBranch,
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
+  onMergeBranch,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -19,6 +20,7 @@ export function BranchSwitcher({
   onRenameBranch: (oldName: string, newName: string) => void;
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
+  onMergeBranch: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -110,6 +112,16 @@ export function BranchSwitcher({
                 >
                   Rename
                 </button>
+                {!b.isCurrent && (
+                  <button
+                    onClick={() => {
+                      onMergeBranch(b.name);
+                      closePopoverState();
+                    }}
+                  >
+                    Merge into current branch
+                  </button>
+                )}
                 {pendingForceFor === b.name ? (
                   <button
                     onClick={() => {
