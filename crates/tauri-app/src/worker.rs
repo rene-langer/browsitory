@@ -160,8 +160,8 @@ impl Worker {
                         let _ = reply.send(result);
                     }
                     Command::Commit { message, reply } => {
-                        let result =
-                            git_core::commit::commit(&repo, &message).map_err(|e| e.to_string());
+                        let result = git_core::commit::commit(&mut repo, &message)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::ListBranches { reply } => {

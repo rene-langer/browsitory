@@ -196,3 +196,39 @@ fn merge_message_and_is_merging_are_clear_outside_a_merge() {
     assert!(!git_core::merge::is_merging(&repo));
     assert!(git_core::merge::merge_message(&repo).is_none());
 }
+
+#[test]
+fn commit_after_a_fast_forward_has_a_single_parent_as_before() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "feature.txt", "new\n");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+
+    // A fast-forward moves the ref directly — there's nothing to commit, and no merge state to
+    // clean up. This test exists to document that `commit()`'s merge-parent logic only engages
+    // for `RepositoryState::Merge`, not for every post-merge repo state.
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn a_commit_made_after_resolving_a_conflict_has_two_parents() {
+    let (_dir, repo) = make_conflicted_repo();
+    git_core::merge::resolve_conflict(&repo, "shared.txt", "line one\nresolved two\nline three\n")
+        .unwrap();
+
+    let mut repo = repo;
+    let oid = git_core::commit::commit(&mut repo, "merge feature into base").unwrap();
+
+    let commit = repo
+        .find_commit(git2::Oid::from_str(&oid).unwrap())
+        .unwrap();
+    assert_eq!(commit.parent_count(), 2);
+}
