@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BlameLine, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
 
 function unused(): never {
@@ -53,6 +53,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -73,6 +74,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -103,6 +105,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -134,6 +137,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -169,6 +173,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -191,6 +196,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -212,6 +218,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -231,6 +238,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -256,6 +264,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -275,6 +284,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={onSaveStash}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -295,6 +305,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -313,10 +324,136 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
       expect(screen.getByText("Stash")).not.toBeDisabled();
+    });
+
+    it("renders a Blame button per file", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      expect(screen.getAllByText("Blame")).toHaveLength(2);
+    });
+
+    it("clicking Blame fetches and renders blame for that file", async () => {
+      const blameLines: BlameLine[] = [
+        {
+          lineNumber: 1,
+          content: "hello",
+          commitId: "abc123",
+          shortId: "abc1234",
+          authorName: "Rene",
+          timestamp: 1,
+        },
+      ];
+      const getBlame = vi.fn(async () => blameLines);
+      const client = fakeClient({ getBlame });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+
+      expect(await screen.findByText("hello")).toBeInTheDocument();
+      expect(getBlame).toHaveBeenCalledWith("HEAD", "a.txt");
+    });
+
+    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+      const blameLines: BlameLine[] = [
+        {
+          lineNumber: 1,
+          content: "hello",
+          commitId: "abc123",
+          shortId: "abc1234",
+          authorName: "Rene",
+          timestamp: 1,
+        },
+      ];
+      const getBlame = vi.fn(async () => blameLines);
+      const client = fakeClient({ getBlame });
+      const onSelectRow = vi.fn();
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={onSelectRow}
+        />,
+      );
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      const row = await screen.findByText("hello");
+      fireEvent.click(row.closest("tr")!);
+
+      expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
+    });
+
+    it("Back to Diff switches back to the diff view", async () => {
+      const blameLines: BlameLine[] = [
+        {
+          lineNumber: 1,
+          content: "hello",
+          commitId: "abc123",
+          shortId: "abc1234",
+          authorName: "Rene",
+          timestamp: 1,
+        },
+      ];
+      const getBlame = vi.fn(async () => blameLines);
+      // Switching back to diff view re-triggers the diff-fetch effect (this file's diff was
+      // never fetched, since we went straight to blame) — see UncommittedDiffPane's diff
+      // effect comment on why every viewMode/selected change refetches.
+      const getWorkingDiff = vi.fn(async () => []);
+      const client = fakeClient({ getBlame, getWorkingDiff });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      await screen.findByText("hello");
+      fireEvent.click(screen.getByText("Back to Diff"));
+
+      expect(screen.queryByText("Back to Diff")).not.toBeInTheDocument();
     });
   });
 
@@ -345,6 +482,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -368,6 +506,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
@@ -389,6 +528,7 @@ describe("DiffPane", () => {
           onUnstageFile={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
         />,
       );
 
