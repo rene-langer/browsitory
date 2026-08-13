@@ -6,15 +6,6 @@ export interface StatusEntry {
   kind: StatusKind;
 }
 
-export interface CommitInfo {
-  id: string;
-  shortId: string;
-  summary: string;
-  authorName: string;
-  authorEmail: string;
-  timestamp: number;
-}
-
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
 export interface DiffLine {
@@ -41,6 +32,17 @@ export interface StashEntry {
   commitId: string;
 }
 
+export interface GraphCommit {
+  id: string;
+  shortId: string;
+  summary: string;
+  authorName: string;
+  authorEmail: string;
+  timestamp: number;
+  parentIds: string[];
+  branchRefs: string[];
+}
+
 export interface BlameLine {
   lineNumber: number;
   content: string;
@@ -55,7 +57,7 @@ export interface RepoClient {
   listRecentRepos(): Promise<string[]>;
   openRepo(path: string): Promise<void>;
   getStatus(): Promise<StatusEntry[]>;
-  getLog(limit: number): Promise<CommitInfo[]>;
+  getCommitGraph(limit: number): Promise<GraphCommit[]>;
   getWorkingDiff(path: string, staged: boolean): Promise<DiffHunk[]>;
   getCommitDiff(commitId: string, path: string): Promise<DiffHunk[]>;
   getCommitFiles(commitId: string): Promise<string[]>;

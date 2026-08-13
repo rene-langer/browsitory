@@ -1,13 +1,13 @@
 import { useCallback, useState } from "react";
 import type {
   BranchInfo,
-  CommitInfo,
+  GraphCommit,
   RepoClient,
   StashEntry,
   StatusEntry,
 } from "../ipc/RepoClient";
 
-const LOG_LIMIT = 300;
+const GRAPH_LIMIT = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
 
@@ -15,7 +15,7 @@ export interface AppState {
   repoPath: string | null;
   selectedRow: SelectedRow;
   status: StatusEntry[];
-  log: CommitInfo[];
+  commits: GraphCommit[];
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
@@ -51,7 +51,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     repoPath: null,
     selectedRow: "uncommitted",
     status: [],
-    log: [],
+    commits: [],
     branches: [],
     createBranchDraft: null,
     stashes: [],
@@ -61,13 +61,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, log, branches, stashes] = await Promise.all([
+      const [status, commits, branches, stashes] = await Promise.all([
         client.getStatus(),
-        client.getLog(LOG_LIMIT),
+        client.getCommitGraph(GRAPH_LIMIT),
         client.listBranches(),
         client.listStashes(),
       ]);
-      setState((prev) => ({ ...prev, status, log, branches, stashes, error: null }));
+      setState((prev) => ({ ...prev, status, commits, branches, stashes, error: null }));
     } catch (err) {
       setState((prev) => ({ ...prev, error: String(err) }));
     }

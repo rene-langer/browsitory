@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { CommitInfo, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
@@ -21,7 +21,7 @@ export function HistoryList({
   onDropStash,
 }: {
   status: StatusEntry[];
-  log: CommitInfo[];
+  log: GraphCommit[];
   stashes: StashEntry[];
   selectedRow: SelectedRow;
   // True while a mutation (e.g. an Apply/Drop stash) is in flight. Disables the Apply/Drop

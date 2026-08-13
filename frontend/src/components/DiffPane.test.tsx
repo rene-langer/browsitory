@@ -13,7 +13,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     listRecentRepos: unused,
     openRepo: unused,
     getStatus: unused,
-    getLog: unused,
+    getCommitGraph: unused,
     listBranches: unused,
     createBranch: unused,
     switchBranch: unused,

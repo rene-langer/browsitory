@@ -13,7 +13,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     listRecentRepos: async () => unimplemented(),
     openRepo: async () => {},
     getStatus: async () => unimplemented(),
-    getLog: async () => unimplemented(),
+    getCommitGraph: async () => unimplemented(),
     listBranches: async () => unimplemented(),
     createBranch: async () => unimplemented(),
     switchBranch: async () => unimplemented(),

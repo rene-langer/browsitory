@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { BranchInfo, CommitInfo, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { BranchInfo, GraphCommit, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -8,22 +8,24 @@ function unimplemented(): never {
 }
 
 describe("useAppState", () => {
-  it("openRepo populates status and log and sets repoPath", async () => {
+  it("openRepo populates status and commits and sets repoPath", async () => {
     const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
-    const commit: CommitInfo = {
+    const graphCommit: GraphCommit = {
       id: "abc123",
       shortId: "abc123",
       summary: "initial commit",
       authorName: "Author",
       authorEmail: "author@example.com",
       timestamp: 0,
+      parentIds: [],
+      branchRefs: [],
     };
     const client: RepoClient = {
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [entry],
-      getLog: async () => [commit],
+      getCommitGraph: async () => [graphCommit],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -48,7 +50,7 @@ describe("useAppState", () => {
 
     expect(result.current.state.repoPath).toBe("/repo");
     expect(result.current.state.status.length).toBe(1);
-    expect(result.current.state.log.length).toBe(1);
+    expect(result.current.state.commits.length).toBe(1);
     expect(result.current.state.selectedRow).toBe("uncommitted");
   });
 
@@ -62,7 +64,7 @@ describe("useAppState", () => {
         getStatusCalls += 1;
         return [];
       },
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -104,7 +106,7 @@ describe("useAppState", () => {
         getStatusCalls += 1;
         return getStatusCalls === 1 ? [entryA] : [];
       },
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -144,7 +146,7 @@ describe("useAppState", () => {
         throw new Error("no such directory");
       },
       getStatus: async () => unimplemented(),
-      getLog: async () => unimplemented(),
+      getCommitGraph: async () => unimplemented(),
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -177,7 +179,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [branch],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -211,7 +213,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => {
         branchesCallCount += 1;
         return branchesCallCount === 1
@@ -255,7 +257,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => {},
@@ -291,7 +293,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async (name: string, startPoint: string) => {
         createArgs = [name, startPoint];
@@ -329,7 +331,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => {},
       switchBranch: async () => unimplemented(),
@@ -364,7 +366,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -398,7 +400,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -432,7 +434,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -476,7 +478,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -512,7 +514,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -549,7 +551,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -588,7 +590,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),
@@ -623,7 +625,7 @@ describe("useAppState", () => {
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
-      getLog: async () => [],
+      getCommitGraph: async () => [],
       listBranches: async () => [],
       createBranch: async () => unimplemented(),
       switchBranch: async () => unimplemented(),

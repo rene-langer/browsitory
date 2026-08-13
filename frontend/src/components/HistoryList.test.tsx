@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitInfo, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import { HistoryList } from "./HistoryList";
 
 const status: StatusEntry[] = [
@@ -8,7 +8,7 @@ const status: StatusEntry[] = [
   { path: "README.md", staged: true, kind: "New" },
 ];
 
-const log: CommitInfo[] = [
+const log: GraphCommit[] = [
   {
     id: "aaa111...",
     shortId: "aaa1111",
@@ -16,6 +16,8 @@ const log: CommitInfo[] = [
     authorName: "Rene",
     authorEmail: "rene@example.com",
     timestamp: 2,
+    parentIds: [],
+    branchRefs: [],
   },
   {
     id: "bbb222...",
@@ -24,6 +26,8 @@ const log: CommitInfo[] = [
     authorName: "Rene",
     authorEmail: "rene@example.com",
     timestamp: 1,
+    parentIds: [],
+    branchRefs: [],
   },
 ];
 
