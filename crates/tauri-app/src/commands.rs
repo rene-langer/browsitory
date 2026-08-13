@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use git_core::diff::DiffHunk;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
@@ -139,6 +139,23 @@ impl From<git_core::merge::ConflictSegment> for ConflictSegmentDto {
             git_core::merge::ConflictSegment::Conflict { ours, theirs } => {
                 ConflictSegmentDto::Conflict { ours, theirs }
             }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub enum FileConflictChoiceDto {
+    Ours,
+    Theirs,
+    Delete,
+}
+
+impl From<FileConflictChoiceDto> for git_core::merge::FileConflictChoice {
+    fn from(dto: FileConflictChoiceDto) -> Self {
+        match dto {
+            FileConflictChoiceDto::Ours => git_core::merge::FileConflictChoice::Ours,
+            FileConflictChoiceDto::Theirs => git_core::merge::FileConflictChoice::Theirs,
+            FileConflictChoiceDto::Delete => git_core::merge::FileConflictChoice::Delete,
         }
     }
 }
@@ -396,6 +413,15 @@ pub async fn abort_merge(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_merge_message(state: State<'_, AppState>) -> Result<Option<String>, String> {
     worker_handle(&state)?.get_merge_message()
+}
+
+#[tauri::command]
+pub async fn resolve_add_delete_conflict(
+    path: String,
+    choice: FileConflictChoiceDto,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.resolve_add_delete_conflict(path, choice.into())
 }
 
 #[cfg(test)]

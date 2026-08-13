@@ -7,8 +7,8 @@ use commands::{
     abort_merge, apply_stash, commit, create_branch, delete_branch, drop_stash, get_blame,
     get_commit_diff, get_commit_files, get_commit_graph, get_conflict_hunks, get_merge_message,
     get_status, get_working_diff, list_branches, list_recent_repos, list_stashes, open_repo,
-    pick_repo_folder, rename_branch, resolve_conflict, save_stash, stage_file, start_merge,
-    switch_branch, unstage_file, AppState,
+    pick_repo_folder, rename_branch, resolve_add_delete_conflict, resolve_conflict, save_stash,
+    stage_file, start_merge, switch_branch, unstage_file, AppState,
 };
 
 fn main() {
@@ -40,6 +40,7 @@ fn main() {
             start_merge,
             get_conflict_hunks,
             resolve_conflict,
+            resolve_add_delete_conflict,
             abort_merge,
             get_merge_message,
         ])

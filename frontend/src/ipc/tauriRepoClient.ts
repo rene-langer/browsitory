@@ -4,6 +4,7 @@ import type {
   BranchInfo,
   ConflictSegment,
   DiffHunk,
+  FileConflictChoice,
   GraphCommit,
   MergeOutcome,
   RepoClient,
@@ -49,4 +50,6 @@ export const tauriRepoClient: RepoClient = {
     invoke("resolve_conflict", { path, resolvedContent }),
   abortMerge: () => invoke("abort_merge"),
   getMergeMessage: () => invoke<string | null>("get_merge_message"),
+  resolveAddDeleteConflict: (path: string, choice: FileConflictChoice) =>
+    invoke("resolve_add_delete_conflict", { path, choice }),
 };

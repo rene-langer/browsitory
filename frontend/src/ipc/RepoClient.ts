@@ -62,6 +62,8 @@ export type ConflictSegment =
   | { kind: "Clean"; content: string }
   | { kind: "Conflict"; ours: string; theirs: string };
 
+export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -89,4 +91,5 @@ export interface RepoClient {
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   abortMerge(): Promise<void>;
   getMergeMessage(): Promise<string | null>;
+  resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
 }
