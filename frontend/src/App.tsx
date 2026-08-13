@@ -71,6 +71,8 @@ export default function App() {
           onSaveStash={appState.saveStash}
           onSelectRow={appState.selectRow}
           onResolveConflict={appState.resolveConflict}
+          mergeMessage={appState.state.mergeMessage}
+          onAbortMerge={appState.abortMerge}
         />
       </div>
     </main>
