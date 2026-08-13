@@ -94,3 +94,61 @@ fn start_merge_reports_conflicted_files_when_the_same_line_diverges() {
         other => panic!("expected Conflicted, got {other:?}"),
     }
 }
+
+use git_core::merge::ConflictSegment;
+
+fn make_conflicted_repo() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\nline three\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(
+        dir.path(),
+        "shared.txt",
+        "line one\nfeature two\nline three\n",
+    );
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
+    commit_all(&repo, "main commit");
+
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn conflict_hunks_returns_clean_and_conflict_segments_for_a_conflicted_file() {
+    let (_dir, repo) = make_conflicted_repo();
+
+    let segments = git_core::merge::conflict_hunks(&repo, "shared.txt").unwrap();
+
+    // "line one" and "line three" are unchanged on both sides — git2's own 3-way merge
+    // auto-resolves them, leaving only the middle line as a real conflict.
+    assert!(segments
+        .iter()
+        .any(|s| matches!(s, ConflictSegment::Clean { content } if content.contains("line one"))));
+    let conflict = segments
+        .iter()
+        .find(|s| matches!(s, ConflictSegment::Conflict { .. }))
+        .expect("expected a Conflict segment");
+    match conflict {
+        ConflictSegment::Conflict { ours, theirs } => {
+            assert_eq!(ours, "main two");
+            assert_eq!(theirs, "feature two");
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn conflict_hunks_errors_for_a_path_with_no_conflict() {
+    let (_dir, repo) = make_conflicted_repo();
+
+    let result = git_core::merge::conflict_hunks(&repo, "does-not-exist.txt");
+
+    assert!(result.is_err());
+}
