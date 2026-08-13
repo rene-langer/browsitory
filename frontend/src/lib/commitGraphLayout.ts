@@ -7,6 +7,8 @@ export interface CommitLayout {
   passThroughLanes: number[];
 }
 
+// `commits` must be in reverse-topological order (children before parents), as `graph_log`'s
+// `Sort::TOPOLOGICAL | Sort::TIME` returns; any other order silently produces wrong lanes.
 export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
   // `lanes[i]` holds the commit id lane `i` is currently waiting to display next, or `null` if
   // that lane is free and its slot can be reused by an unrelated later commit.

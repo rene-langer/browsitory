@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
@@ -63,7 +63,7 @@ export function CommitGraph({
     setContextMenu({ commitId, x: event.clientX, y: event.clientY });
   };
 
-  const commitLayouts = assignLanes(commits);
+  const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   const laneCount =
     Math.max(
       0,

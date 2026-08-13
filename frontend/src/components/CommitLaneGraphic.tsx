@@ -41,7 +41,7 @@ export function CommitLaneGraphic({
       y1={midY}
       x2={laneCenterX(conn.lane)}
       y2={ROW_HEIGHT}
-      stroke={laneColor(layout.lane)}
+      stroke={laneColor(conn.lane)}
       strokeWidth={2}
     />
   ));
