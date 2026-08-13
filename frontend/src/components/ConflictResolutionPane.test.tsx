@@ -63,7 +63,7 @@ describe("ConflictResolutionPane", () => {
 
     render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
 
-    await waitFor(() => screen.getByText("Save resolution"));
+    await waitFor(() => screen.getByText(/line one/));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nmain two\nline three");
@@ -96,6 +96,42 @@ describe("ConflictResolutionPane", () => {
       "shared.txt",
       "line one\nmain two\nfeature two\nline three",
     );
+  });
+
+  it("Save resolution is disabled until the conflict hunks finish loading", async () => {
+    const onResolve = vi.fn();
+    let resolveHunks: (segments: ConflictSegment[]) => void = () => {};
+    const client = fakeClient({
+      getConflictHunks: () => new Promise((resolve) => (resolveHunks = resolve)),
+    });
+
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+
+    const saveButton = screen.getByText("Save resolution").closest("button");
+    expect(saveButton).toBeDisabled();
+    fireEvent.click(screen.getByText("Save resolution"));
+    expect(onResolve).not.toHaveBeenCalled();
+
+    resolveHunks(segments);
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+  });
+
+  it("Accept Both does not insert a spurious blank line when one side of a conflict is empty", async () => {
+    const onResolve = vi.fn();
+    const oneEmptySide: ConflictSegment[] = [
+      { kind: "Clean", content: "line one" },
+      { kind: "Conflict", ours: "line two", theirs: "" },
+      { kind: "Clean", content: "line three" },
+    ];
+    const client = fakeClient({ getConflictHunks: async () => oneEmptySide });
+
+    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} />);
+
+    await waitFor(() => screen.getByText("Accept Both"));
+    fireEvent.click(screen.getByText("Accept Both"));
+    fireEvent.click(screen.getByText("Save resolution"));
+
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three");
   });
 
   it("shows an error message when the conflict is not a text conflict", async () => {
