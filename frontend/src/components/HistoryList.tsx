@@ -14,6 +14,7 @@ export function HistoryList({
   log,
   stashes,
   selectedRow,
+  pending,
   onSelectRow,
   onBranchFromCommit,
   onApplyStash,
@@ -23,6 +24,10 @@ export function HistoryList({
   log: CommitInfo[];
   stashes: StashEntry[];
   selectedRow: SelectedRow;
+  // True while a mutation (e.g. an Apply/Drop stash) is in flight. Disables the Apply/Drop
+  // buttons below so a rapid double-click can't fire the same index-based mutation twice
+  // before the first one's refresh has landed — see `useAppState.ts`'s `runMutation`.
+  pending: boolean;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
   onApplyStash: (index: number) => void;
@@ -75,6 +80,7 @@ export function HistoryList({
         >
           <span>{stash.message}</span>
           <button
+            disabled={pending}
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();
               onApplyStash(stash.index);
@@ -83,6 +89,7 @@ export function HistoryList({
             Apply
           </button>
           <button
+            disabled={pending}
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();
               onDropStash(stash.index);

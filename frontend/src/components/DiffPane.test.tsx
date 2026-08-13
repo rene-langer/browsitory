@@ -281,6 +281,42 @@ describe("DiffPane", () => {
 
       expect(onSaveStash).toHaveBeenCalled();
     });
+
+    it("Stash button is disabled when the working tree is clean", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={[]}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Stash")).toBeDisabled();
+    });
+
+    it("Stash button is enabled when there are changes", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Stash")).not.toBeDisabled();
+    });
   });
 
   describe("commit", () => {
