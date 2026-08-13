@@ -361,4 +361,66 @@ describe("HistoryList", () => {
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });
   });
+
+  it("renders a branch badge for a commit that is a branch tip", () => {
+    const commitsWithBranch: GraphCommit[] = [
+      { ...commits[0], branchRefs: ["main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithBranch}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("main")).toBeInTheDocument();
+  });
+
+  it("renders a lane graphic for every commit row", () => {
+    const { container } = render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelectorAll("li.commit-row svg").length).toBe(commits.length);
+  });
+
+  it("still renders each commit's short id and summary as plain text in its own li (hard E2E compatibility constraint)", () => {
+    render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText(/second commit/).closest("li");
+    expect(row).not.toBeNull();
+    expect(row?.tagName).toBe("LI");
+    expect(row?.textContent).toContain("aaa1111");
+    expect(row?.textContent).toContain("second commit");
+  });
 });
