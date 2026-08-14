@@ -4,11 +4,12 @@ mod commands;
 mod worker;
 
 use commands::{
-    abort_merge, apply_stash, commit, create_branch, delete_branch, drop_stash, get_blame,
-    get_commit_diff, get_commit_files, get_commit_graph, get_conflict_hunks, get_merge_message,
-    get_status, get_working_diff, list_branches, list_recent_repos, list_stashes, open_repo,
-    pick_repo_folder, rename_branch, resolve_add_delete_conflict, resolve_conflict, save_stash,
-    stage_file, start_merge, switch_branch, unstage_file, AppState,
+    abort_merge, abort_rebase, apply_stash, commit, commits_since, create_branch, delete_branch,
+    drop_stash, get_blame, get_commit_diff, get_commit_files, get_commit_graph, get_conflict_hunks,
+    get_merge_message, get_rebase_progress, get_status, get_working_diff, list_branches,
+    list_recent_repos, list_stashes, open_repo, pick_repo_folder, rebase_continue, rename_branch,
+    resolve_add_delete_conflict, resolve_conflict, save_stash, stage_file, start_merge,
+    start_rebase, switch_branch, unstage_file, AppState,
 };
 
 fn main() {
@@ -43,6 +44,11 @@ fn main() {
             resolve_add_delete_conflict,
             abort_merge,
             get_merge_message,
+            commits_since,
+            start_rebase,
+            rebase_continue,
+            abort_rebase,
+            get_rebase_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
