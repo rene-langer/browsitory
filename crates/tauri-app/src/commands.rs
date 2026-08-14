@@ -1,12 +1,75 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::thread;
 
 use git_core::diff::DiffHunk;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::worker::Worker;
+use crate::worker::{TransferEvent, Worker};
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgressDto {
+    pub operation_id: String,
+    pub phase: String,
+    pub current: usize,
+    pub total: usize,
+    pub received_bytes: usize,
+    pub message: Option<String>,
+}
+
+impl From<git_core::remote::TransferProgress> for TransferProgressDto {
+    fn from(progress: git_core::remote::TransferProgress) -> Self {
+        Self {
+            operation_id: progress.operation_id,
+            phase: format!("{:?}", progress.phase),
+            current: progress.current,
+            total: progress.total,
+            received_bytes: progress.received_bytes,
+            message: progress.message,
+        }
+    }
+}
+
+fn emit_transfer_events(app: AppHandle, events: mpsc::Receiver<TransferEvent>) {
+    thread::spawn(move || {
+        for event in events {
+            let result = match event {
+                TransferEvent::Started { operation_id } => app.emit(
+                    "transfer-progress",
+                    TransferProgressDto {
+                        operation_id,
+                        phase: "Starting".to_string(),
+                        current: 0,
+                        total: 0,
+                        received_bytes: 0,
+                        message: None,
+                    },
+                ),
+                TransferEvent::Progress(progress) => {
+                    app.emit("transfer-progress", TransferProgressDto::from(progress))
+                }
+                TransferEvent::Completed {
+                    operation_id,
+                    error,
+                } => app.emit(
+                    "transfer-complete",
+                    TransferProgressDto {
+                        operation_id,
+                        phase: "Completed".to_string(),
+                        current: 0,
+                        total: 0,
+                        received_bytes: 0,
+                        message: error,
+                    },
+                ),
+            };
+            let _ = result;
+        }
+    });
+}
 
 #[derive(Serialize)]
 pub struct StatusEntryDto {
@@ -563,6 +626,18 @@ pub async fn set_current_upstream(
 #[tauri::command]
 pub async fn clear_current_upstream(state: State<'_, AppState>) -> Result<(), String> {
     worker_handle(&state)?.clear_current_upstream()
+}
+
+#[tauri::command]
+pub async fn fetch_remote(
+    remote_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.fetch_remote(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
 }
 
 #[tauri::command]

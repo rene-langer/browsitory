@@ -38,6 +38,15 @@ export interface UpstreamInfo {
   remoteBranch: string;
 }
 
+export interface TransferProgress {
+  operationId: string;
+  phase: "Starting" | "Receiving" | "Updating" | "Completed";
+  current: number;
+  total: number;
+  receivedBytes: number;
+  message: string | null;
+}
+
 export interface StashEntry {
   index: number;
   message: string;
@@ -130,6 +139,8 @@ export interface RepoClient {
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
+  fetchRemote(remoteName: string): Promise<string>;
+  subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(): Promise<StashEntry[]>;
   saveStash(): Promise<void>;
   applyStash(index: number): Promise<void>;

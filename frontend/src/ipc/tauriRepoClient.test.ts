@@ -1,9 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriRepoClient } from "./tauriRepoClient";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(),
 }));
 
 describe("tauriRepoClient remote URL validation", () => {
@@ -30,5 +35,63 @@ describe("tauriRepoClient remote URL validation", () => {
       "Remote URLs must not contain embedded credentials",
     );
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("tauriRepoClient transfer progress subscription", () => {
+  it("normalizes progress events and unregisters its listeners", async () => {
+    const unlisten = vi.fn();
+    let progressListener: ((event: { payload: unknown }) => void) | undefined;
+    let completedListener: ((event: { payload: unknown }) => void) | undefined;
+    vi.mocked(listen).mockImplementation(async (event, listener) => {
+      if (event === "transfer-progress") progressListener = listener as typeof progressListener;
+      if (event === "transfer-complete") completedListener = listener as typeof completedListener;
+      return unlisten;
+    });
+    const received = vi.fn();
+
+    const unsubscribe = tauriRepoClient.subscribeTransferProgress(received);
+    await vi.waitFor(() => expect(progressListener).toBeDefined());
+    await vi.waitFor(() => expect(completedListener).toBeDefined());
+    progressListener?.({
+      payload: {
+        operationId: "fetch-42",
+        phase: "Receiving",
+        current: 2,
+        total: 4,
+        receivedBytes: 1024,
+        message: null,
+      },
+    });
+    completedListener?.({
+      payload: {
+        operationId: "fetch-42",
+        phase: "Completed",
+        current: 4,
+        total: 4,
+        receivedBytes: 1024,
+        message: null,
+      },
+    });
+
+    expect(received).toHaveBeenNthCalledWith(1, {
+      operationId: "fetch-42",
+      phase: "Receiving",
+      current: 2,
+      total: 4,
+      receivedBytes: 1024,
+      message: null,
+    });
+    expect(received).toHaveBeenNthCalledWith(2, {
+      operationId: "fetch-42",
+      phase: "Completed",
+      current: 4,
+      total: 4,
+      receivedBytes: 1024,
+      message: null,
+    });
+
+    unsubscribe();
+    expect(unlisten).toHaveBeenCalledTimes(2);
   });
 });
