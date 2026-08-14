@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
+import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
@@ -78,6 +79,14 @@ export default function App() {
           onAbortMerge={appState.abortMerge}
         />
       </div>
+      {appState.state.rebaseOnto !== null && (
+        <RebasePlanner
+          client={tauriRepoClient}
+          onto={appState.state.rebaseOnto}
+          onStartRebase={appState.startRebase}
+          onCancel={appState.closeRebasePlanner}
+        />
+      )}
     </main>
   );
 }
