@@ -100,17 +100,22 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(false);
   });
 
-  it("surfaces a fast fetch failure without reporting successful completion", async () => {
+  it("clears a failed transfer so retry can start while retaining safe error feedback", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    let fetchCalls = 0;
     const client = transferClient({
       subscribeTransferProgress: (next) => {
         listener = next;
         return () => {};
       },
       fetchRemote: async () => {
-        listener?.({ operationId: "failed-fetch", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "failed-fetch", phase: "Failed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
-        return "failed-fetch";
+        fetchCalls += 1;
+        const operationId = `fetch-${fetchCalls}`;
+        listener?.({ operationId, phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        if (fetchCalls === 1) {
+          listener?.({ operationId, phase: "Failed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
+        }
+        return operationId;
       },
     });
 
@@ -118,9 +123,16 @@ describe("useAppState", () => {
     await act(() => result.current.openRepo("/repo"));
     await act(() => result.current.fetchRemote("origin"));
 
-    expect(result.current.state.transfer?.phase).toBe("Failed");
+    expect(result.current.state.transfer).toBeNull();
     expect(result.current.state.error).toBe("Fetch failed");
     expect(result.current.state.pending).toBe(false);
+
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(fetchCalls).toBe(2);
+    expect(result.current.state.transfer?.operationId).toBe("fetch-2");
+    expect(result.current.state.pending).toBe(true);
+    expect(result.current.state.error).toBeNull();
   });
 
   it("ignores a former repository's transfer completion after switching repositories", async () => {

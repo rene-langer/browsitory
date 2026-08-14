@@ -163,7 +163,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         activeTransferId.current = null;
         setState((prev) => ({
           ...prev,
-          transfer: progress,
+          transfer: null,
           error: "Fetch failed",
           pending: false,
         }));
