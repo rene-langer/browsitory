@@ -7,6 +7,9 @@ import type {
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  RebasePlanCommit,
+  RebasePlanEntry,
+  RebaseStepResult,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -52,4 +55,12 @@ export const tauriRepoClient: RepoClient = {
   getMergeMessage: () => invoke<string | null>("get_merge_message"),
   resolveAddDeleteConflict: (path: string, choice: FileConflictChoice) =>
     invoke("resolve_add_delete_conflict", { path, choice }),
+  commitsSince: (onto: string) =>
+    invoke<RebasePlanCommit[]>("commits_since", { onto }),
+  startRebase: (onto: string, plan: RebasePlanEntry[]) =>
+    invoke<RebaseStepResult>("start_rebase", { onto, plan }),
+  rebaseContinue: () => invoke<RebaseStepResult>("rebase_continue"),
+  abortRebase: () => invoke("abort_rebase"),
+  getRebaseProgress: () =>
+    invoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress"),
 };

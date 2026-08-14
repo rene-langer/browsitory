@@ -36,6 +36,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     abortMerge: unused,
     getMergeMessage: unused,
     resolveAddDeleteConflict: unused,
+    commitsSince: unused,
+    startRebase: unused,
+    rebaseContinue: unused,
+    abortRebase: unused,
+    getRebaseProgress: async () => null,
     ...overrides,
   };
 }

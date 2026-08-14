@@ -4,6 +4,8 @@ import type {
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  RebasePlanEntry,
+  RebaseStepResult,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -22,6 +24,8 @@ export interface AppState {
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
+  rebaseProgress: { currentStep: number; totalSteps: number } | null;
+  rebaseOnto: string | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
@@ -50,6 +54,11 @@ export interface UseAppStateResult {
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
+  openRebasePlanner(commitId: string): void;
+  closeRebasePlanner(): void;
+  startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
+  rebaseContinue(): Promise<void>;
+  abortRebase(): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -63,19 +72,23 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
+    rebaseProgress: null,
+    rebaseOnto: null,
     error: null,
     pending: false,
   });
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, stashes, mergeMessage] = await Promise.all([
-        client.getStatus(),
-        client.getCommitGraph(GRAPH_LIMIT),
-        client.listBranches(),
-        client.listStashes(),
-        client.getMergeMessage(),
-      ]);
+      const [status, commits, branches, stashes, mergeMessage, rebaseProgress] =
+        await Promise.all([
+          client.getStatus(),
+          client.getCommitGraph(GRAPH_LIMIT),
+          client.listBranches(),
+          client.listStashes(),
+          client.getMergeMessage(),
+          client.getRebaseProgress(),
+        ]);
       setState((prev) => ({
         ...prev,
         status,
@@ -83,6 +96,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         branches,
         stashes,
         mergeMessage,
+        rebaseProgress,
         error: null,
       }));
     } catch (err) {
@@ -212,6 +226,35 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
 
+  const openRebasePlanner = useCallback((commitId: string) => {
+    setState((prev) => ({ ...prev, rebaseOnto: commitId }));
+  }, []);
+  const closeRebasePlanner = useCallback(() => {
+    setState((prev) => ({ ...prev, rebaseOnto: null }));
+  }, []);
+
+  const startRebase = useCallback(
+    (onto: string, plan: RebasePlanEntry[]): Promise<void> =>
+      runMutation(async () => {
+        const result: RebaseStepResult = await client.startRebase(onto, plan);
+        void result;
+        setState((prev) => ({ ...prev, rebaseOnto: null }));
+      }),
+    [client, runMutation],
+  );
+  const rebaseContinue = useCallback(
+    (): Promise<void> =>
+      runMutation(async () => {
+        const result: RebaseStepResult = await client.rebaseContinue();
+        void result;
+      }),
+    [client, runMutation],
+  );
+  const abortRebase = useCallback(
+    () => runMutation(() => client.abortRebase()),
+    [client, runMutation],
+  );
+
   return {
     state,
     openRepo,
@@ -232,6 +275,11 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     resolveConflict,
     resolveAddDeleteConflict,
     abortMerge,
+    openRebasePlanner,
+    closeRebasePlanner,
+    startRebase,
+    rebaseContinue,
+    abortRebase,
     refresh,
   };
 }
