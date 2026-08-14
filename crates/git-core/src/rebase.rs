@@ -360,3 +360,15 @@ fn finish(repo: &Repository, state: &RebaseState) -> Result<RebaseStepResult, Re
     repo.cleanup_state()?;
     Ok(RebaseStepResult::Done)
 }
+
+pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseError> {
+    // The original branch ref was never touched during the rebase — only the detached HEAD
+    // moved — so recovery is just reattaching to it and force-checking-out its tree over
+    // whatever the in-progress rebase left in the working directory/index.
+    repo.set_head(&state.original_branch_ref)?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout))?;
+    repo.cleanup_state()?;
+    Ok(())
+}
