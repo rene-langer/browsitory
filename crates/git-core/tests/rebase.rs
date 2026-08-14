@@ -7,7 +7,13 @@ fn commits_since_lists_commits_oldest_first_between_onto_and_head() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "base.txt", "v1\n");
     commit_all(&repo, "base commit");
-    let onto_id = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    let onto_id = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
 
     write_file(dir.path(), "a.txt", "a\n");
     commit_all(&repo, "add a");
