@@ -1178,7 +1178,8 @@ mod tests {
         }];
         let result = handle.start_rebase(onto, plan).unwrap();
         assert_eq!(result, git_core::rebase::RebaseStepResult::PausedForEdit);
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((0, 1)));
+        // 1-indexed: the first (and here only) paused step reports "Step 1 of 1", not "0 of 1".
+        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 1)));
 
         handle.abort_rebase().unwrap();
 
