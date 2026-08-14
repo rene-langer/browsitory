@@ -64,6 +64,34 @@ export type ConflictSegment =
 
 export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 
+export interface RebasePlanCommit {
+  id: string;
+  shortId: string;
+  summary: string;
+  authorName: string;
+  timestamp: number;
+}
+
+export type RebaseAction =
+  | { kind: "Pick" }
+  | { kind: "Reword"; message: string }
+  | { kind: "Edit" }
+  | { kind: "Squash" }
+  | { kind: "Fixup" }
+  | { kind: "Drop" };
+
+export interface RebasePlanEntry {
+  commitId: string;
+  action: RebaseAction;
+  combinedMessage: string | null;
+}
+
+export type RebaseStepResult =
+  | { kind: "Conflicted"; files: string[] }
+  | { kind: "PausedForEdit" }
+  | { kind: "Advanced" }
+  | { kind: "Done" };
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -92,4 +120,9 @@ export interface RepoClient {
   abortMerge(): Promise<void>;
   getMergeMessage(): Promise<string | null>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
+  commitsSince(onto: string): Promise<RebasePlanCommit[]>;
+  startRebase(onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
+  rebaseContinue(): Promise<RebaseStepResult>;
+  abortRebase(): Promise<void>;
+  getRebaseProgress(): Promise<{ currentStep: number; totalSteps: number } | null>;
 }
