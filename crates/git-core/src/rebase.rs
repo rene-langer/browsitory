@@ -9,6 +9,12 @@ pub enum RebaseError {
     InvalidPlan(String),
     #[error("no rebase is currently in progress")]
     NotRebasing,
+    #[error(
+        "HEAD moved out from under the in-progress rebase (expected {expected}, found {actual}) \
+         — something else (a branch switch, an external git command) moved it; abort the rebase \
+         and start over"
+    )]
+    HeadMoved { expected: String, actual: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +33,12 @@ pub fn commits_since(repo: &Repository, onto: &str) -> Result<Vec<RebasePlanComm
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     revwalk.push_head()?;
     revwalk.hide(onto_oid)?;
+    // First-parent only: a rebase replays a linear sequence of commits, so a merge commit's
+    // second-parent side must not be pulled into the plan as a flat run of unrelated commits.
+    // The merge commit itself still shows up here (`--first-parent` includes it) — that's
+    // deliberate: `validate_plan` rejects a plan containing one with an explicit error rather
+    // than silently dropping it (which would lose the merged side's content from the replay).
+    revwalk.simplify_first_parent()?;
 
     let mut commits = Vec::new();
     for oid_result in revwalk {
@@ -89,13 +101,19 @@ pub struct RebaseState {
     #[allow(dead_code)]
     original_tip: Oid,
     group_start_parent: Option<Oid>,
+    /// The OID this crate last moved `HEAD` to (the initial detach, then each landed step or
+    /// group collapse). `rebase_continue` refuses to run when the real `HEAD` has drifted from
+    /// it — e.g. because something else switched branches on the same repo mid-pause — since
+    /// continuing would commit the rebased step onto whatever ref happened to be checked out.
+    expected_head: Oid,
 }
 
 impl RebaseState {
-    /// 1-indexed count of plan entries processed so far, for a "Step N of M" display. Reaches
-    /// `total_steps()` once the rebase is `Done`.
+    /// 1-indexed number of the plan entry currently in flight, for a "Step N of M" display —
+    /// the first pause reports step 1, not 0. Clamped to `total_steps()` so a state whose cursor
+    /// has run past the end (the rebase is finished) still reports "N of N" rather than N+1.
     pub fn current_step(&self) -> usize {
-        self.cursor
+        (self.cursor + 1).min(self.plan.len())
     }
 
     pub fn total_steps(&self) -> usize {
@@ -103,7 +121,25 @@ impl RebaseState {
     }
 }
 
-fn validate_plan(plan: &[RebasePlanEntry]) -> Result<(), RebaseError> {
+fn validate_plan(repo: &Repository, plan: &[RebasePlanEntry]) -> Result<(), RebaseError> {
+    // A merge commit can't be replayed by `Repository::cherrypick` (libgit2 errors with
+    // "mainline branch is not specified but ... is a merge commit"), and the rebase model here is
+    // first-parent-only anyway. Reject the plan up front — before `start_rebase` detaches HEAD —
+    // rather than letting `advance` blow up mid-flight.
+    for entry in plan {
+        if matches!(entry.action, RebaseAction::Drop) {
+            continue;
+        }
+        let commit = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+        if commit.parent_count() > 1 {
+            return Err(RebaseError::InvalidPlan(format!(
+                "{} is a merge commit — merge commits cannot be rebased (drop it from the plan \
+                 or pick a different starting point)",
+                &entry.commit_id[..7.min(entry.commit_id.len())]
+            )));
+        }
+    }
+
     // Look past any leading `Drop` entries — a plan like `[Drop, Squash]` has no earlier entry
     // for the `Squash` to combine into either, since `Drop` never lands a commit.
     if let Some(first_non_drop) = plan
@@ -129,7 +165,7 @@ pub fn start_rebase(
     onto: &str,
     plan: Vec<RebasePlanEntry>,
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
-    validate_plan(&plan)?;
+    validate_plan(repo, &plan)?;
 
     // `Reference::name()` returns `Ok("HEAD")` for a detached HEAD — it only errors on a
     // non-UTF-8 name — so it can't be used to detect "not on a branch". Check explicitly instead;
@@ -159,16 +195,48 @@ pub fn start_rebase(
         original_branch_ref,
         original_tip,
         group_start_parent: None,
+        expected_head: onto_commit.id(),
     };
 
-    let result = advance(repo, &mut state)?;
-    Ok((state, result))
+    // Everything past the detach above must roll back on failure: an `Err` escaping here would
+    // otherwise leave the repo on a detached HEAD with no `RebaseState` anywhere for the caller
+    // to abort with (`worker.rs` only stores the state on `Ok`), stranding the user with no
+    // in-app way back to their branch.
+    match advance(repo, &mut state) {
+        Ok(result) => Ok((state, result)),
+        Err(err) => {
+            // Best-effort: report the *original* failure even if the rollback itself fails,
+            // since that's the actionable one.
+            let _ = restore_original_branch(repo, &state.original_branch_ref);
+            Err(err)
+        }
+    }
 }
 
 pub fn rebase_continue(
     repo: &Repository,
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
+    // Past the end of the plan there's no step left to land — without this guard,
+    // `land_current_step`'s `state.plan[state.cursor]` panics and takes the whole worker thread
+    // (and every later command for this repo) down with it. Reachable from a double-clicked
+    // Continue, or from a `finish()` that failed after the cursor had already run off the end.
+    if state.cursor >= state.plan.len() {
+        return Err(RebaseError::NotRebasing);
+    }
+
+    // Nothing but this module is supposed to move HEAD while a rebase is paused. If something
+    // did (a branch switch, an external `git checkout`), landing this step would commit it onto
+    // the wrong ref and silently rewrite unrelated history — refuse instead, leaving `abort` as
+    // the way out.
+    let actual_head = repo.head()?.peel_to_commit()?.id();
+    if actual_head != state.expected_head {
+        return Err(RebaseError::HeadMoved {
+            expected: state.expected_head.to_string(),
+            actual: actual_head.to_string(),
+        });
+    }
+
     // The working index is presumed ready — either a conflict was just resolved, or an `Edit`
     // pause's amendment is staged. Land it as this step's commit, then keep advancing.
     land_current_step(repo, state)?;
@@ -297,15 +365,21 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
                         .to_string(),
                 )
             })?;
+        // The collapsed commit keeps the LEADER's author and message, not the last group
+        // member's — `original_commit`/`message` at this point belong to this step's own (last)
+        // commit, which is the wrong one; the leader is the semantically-original commit for the
+        // whole group.
+        let leader_commit =
+            repo.find_commit(Oid::from_str(&state.plan[leader_index].commit_id)?)?;
         let combined_message = state.plan[leader_index]
             .combined_message
             .clone()
-            .unwrap_or_else(|| message.clone());
-        // The collapsed commit keeps the LEADER's author, not the last group member's —
-        // `original_commit` at this point is this step's own (last) commit, which is the wrong
-        // one; the leader is the semantically-original commit for the whole group.
-        let leader_commit =
-            repo.find_commit(Oid::from_str(&state.plan[leader_index].commit_id)?)?;
+            .unwrap_or_else(|| match &state.plan[leader_index].action {
+                // A `Reword`ed leader's new message is what the user asked this commit to say,
+                // so it wins over the leader's original message as the implicit fallback.
+                RebaseAction::Reword { message } => message.clone(),
+                _ => leader_commit.message().ok().unwrap_or_default().to_string(),
+            });
 
         let final_tree = repo.head()?.peel_to_commit()?.tree()?;
         let group_parent = repo.find_commit(state.group_start_parent.ok_or_else(|| {
@@ -331,6 +405,10 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
         repo.set_head_detached(final_oid)?;
         state.group_start_parent = None;
     }
+
+    // This function is the only place (besides `start_rebase`'s initial detach) that moves HEAD
+    // during a rebase, so re-baseline the drift check from wherever it just landed.
+    state.expected_head = repo.head()?.peel_to_commit()?.id();
 
     Ok(())
 }
@@ -362,10 +440,15 @@ fn finish(repo: &Repository, state: &RebaseState) -> Result<RebaseStepResult, Re
 }
 
 pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseError> {
-    // The original branch ref was never touched during the rebase — only the detached HEAD
-    // moved — so recovery is just reattaching to it and force-checking-out its tree over
-    // whatever the in-progress rebase left in the working directory/index.
-    repo.set_head(&state.original_branch_ref)?;
+    restore_original_branch(repo, &state.original_branch_ref)
+}
+
+/// Undoes an in-progress rebase: the original branch ref is never touched while a rebase runs —
+/// only the detached HEAD moves — so recovery is just reattaching to it and force-checking-out
+/// its tree over whatever the in-progress rebase left in the working directory/index. Shared by
+/// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
+fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
+    repo.set_head(branch_ref)?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     repo.checkout_head(Some(&mut checkout))?;

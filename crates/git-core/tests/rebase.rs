@@ -1,7 +1,7 @@
 mod common;
 
 use common::{commit_all, init_repo, write_file};
-use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStepResult};
+use git_core::rebase::{RebaseAction, RebaseError, RebasePlanEntry, RebaseStepResult};
 
 fn commit_id_at(repo: &git2::Repository, offset_from_head: usize) -> String {
     // Walks back `offset_from_head` first-parent steps from HEAD and returns that commit's id —
@@ -609,4 +609,272 @@ fn abort_rebase_after_a_conflict_also_recovers_cleanly() {
     assert!(!repo.index().unwrap().has_conflicts());
     let contents = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
     assert_eq!(contents, "line one\nchanged again\n");
+}
+
+/// Creates a real merge commit on `HEAD`: branches off `HEAD`'s parent, commits there, then
+/// commits a two-parent commit on `HEAD` carrying `HEAD`'s tree. Enough to exercise the
+/// merge-commit guard — the merged content itself doesn't matter here.
+fn make_merge_commit(repo: &git2::Repository) -> String {
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    let side_parent = head_commit.parent(0).unwrap();
+    let signature = repo.signature().unwrap();
+    let side_oid = repo
+        .commit(
+            None,
+            &signature,
+            &signature,
+            "side branch commit",
+            &side_parent.tree().unwrap(),
+            &[&side_parent],
+        )
+        .unwrap();
+    let side_commit = repo.find_commit(side_oid).unwrap();
+    let merge_oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "merge side branch",
+            &head_commit.tree().unwrap(),
+            &[&head_commit, &side_commit],
+        )
+        .unwrap();
+    merge_oid.to_string()
+}
+
+#[test]
+fn start_rebase_rejects_a_plan_containing_a_merge_commit_without_detaching() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    let merge_id = make_merge_commit(&repo);
+    let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let original_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let plan = vec![pick(&commit_id_at(&repo, 1)), pick(&merge_id)];
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, plan);
+
+    assert!(matches!(result, Err(RebaseError::InvalidPlan(_))));
+    // Rejected before any detach: the repo is untouched, still on its branch at its old tip —
+    // `Repository::cherrypick` would otherwise have errored *after* the detach, stranding the
+    // user on a detached HEAD with no RebaseState to abort with.
+    assert!(!repo.head_detached().unwrap());
+    let head_ref = repo.head().unwrap();
+    assert_eq!(head_ref.shorthand().unwrap(), branch_name);
+    assert_eq!(head_ref.peel_to_commit().unwrap().id(), original_tip);
+}
+
+#[test]
+fn commits_since_does_not_walk_into_a_merged_side_branch() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    make_merge_commit(&repo);
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+
+    // First-parent only: "add a" and the merge itself, never the side branch's own commit.
+    let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
+    assert_eq!(summaries, vec!["add a", "merge side branch"]);
+}
+
+/// Commits `contents` at `path` on top of `parent` without moving any ref — a side commit to
+/// build plans around that isn't on the current branch.
+fn detached_commit_adding(
+    repo: &git2::Repository,
+    parent: &git2::Commit,
+    path: &str,
+    contents: &str,
+    message: &str,
+) -> String {
+    let blob = repo.blob(contents.as_bytes()).unwrap();
+    let mut builder = repo.treebuilder(Some(&parent.tree().unwrap())).unwrap();
+    builder.insert(path, blob, 0o100644).unwrap();
+    let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+    let signature = repo.signature().unwrap();
+    repo.commit(None, &signature, &signature, message, &tree, &[parent])
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn start_rebase_rolls_back_to_the_original_branch_when_a_step_fails_after_detaching() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    // A commit that adds `blocked.txt`, replayed while an untracked `blocked.txt` already sits
+    // in the working tree: the cherry-pick's checkout refuses to clobber it, so `advance` fails
+    // *after* `start_rebase` has already detached HEAD — exactly the shape of failure that used
+    // to strand the repo detached with no `RebaseState` for the UI to abort with.
+    let side_id = detached_commit_adding(
+        &repo,
+        &base_commit,
+        "blocked.txt",
+        "from the side commit\n",
+        "add blocked.txt",
+    );
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "blocked.txt", "untracked local content\n");
+
+    let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let original_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let plan = vec![pick(&side_id)];
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, plan);
+
+    assert!(result.is_err());
+    assert!(!repo.head_detached().unwrap());
+    let head_ref = repo.head().unwrap();
+    assert_eq!(head_ref.shorthand().unwrap(), branch_name);
+    assert_eq!(head_ref.peel_to_commit().unwrap().id(), original_tip);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "a\n"
+    );
+}
+
+#[test]
+fn rebase_continue_past_the_end_of_the_plan_reports_not_rebasing_instead_of_panicking() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![RebasePlanEntry {
+        commit_id: commits[0].id.clone(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    }];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+
+    // A second Continue on the same, now-exhausted state (a double-click, or a caller holding a
+    // state whose `finish` failed after the cursor ran off the end): an error, never an
+    // index-out-of-bounds panic — that panic would kill the worker thread owning this repo.
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::NotRebasing)));
+}
+
+#[test]
+fn rebase_continue_refuses_when_head_moved_out_from_under_the_rebase() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+    let elsewhere = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![RebasePlanEntry {
+        commit_id: commits[0].id.clone(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    }];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+
+    // Simulates something else (a branch switch in the UI, an external `git checkout`) moving
+    // HEAD while the rebase sits paused.
+    repo.set_head_detached(elsewhere).unwrap();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::HeadMoved { .. })));
+    // And it refused *before* committing anything: HEAD is still where the interloper put it.
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        elsewhere
+    );
+}
+
+#[test]
+fn a_squash_group_without_an_explicit_combined_message_falls_back_to_the_leaders_message() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "leader message");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "last member message");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Pick,
+            combined_message: None,
+        },
+        RebasePlanEntry {
+            commit_id: commits[1].id.clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    // The leader is the semantically-original commit for the whole group, so its message is the
+    // fallback when no explicit `combined_message` was set — not the last member's.
+    assert_eq!(
+        head_commit.message().ok().unwrap_or_default(),
+        "leader message"
+    );
+}
+
+#[test]
+fn current_step_is_one_indexed_at_the_first_pause() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Edit,
+            combined_message: None,
+        },
+        pick(&commits[1].id),
+    ];
+
+    let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+    // Pausing on the first of two entries reads "Step 1 of 2", not "Step 0 of 2".
+    assert_eq!(state.current_step(), 1);
+    assert_eq!(state.total_steps(), 2);
 }
