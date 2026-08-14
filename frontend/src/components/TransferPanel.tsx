@@ -14,7 +14,6 @@ export function TransferPanel({ progress }: { progress: TransferProgress | null 
       <p>{progress.phase}</p>
       <p>{progress.current} / {progress.total} objects</p>
       <p>{formatBytes(progress.receivedBytes)} received</p>
-      {progress.message !== null && <p role="alert">{progress.message}</p>}
     </section>
   );
 }
