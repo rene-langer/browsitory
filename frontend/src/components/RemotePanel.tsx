@@ -75,6 +75,11 @@ export function RemotePanel({
     }
   };
 
+  const clearUpstreamForRemoval = async () => {
+    await onClearUpstream();
+    setRemoveConfirmation(null);
+  };
+
   return (
     <section className="remote-panel" aria-labelledby="remote-panel-heading">
       <h2 id="remote-panel-heading">Remotes</h2>
@@ -120,7 +125,7 @@ export function RemotePanel({
           {removeConfirmation.startsWith("clear:") ? (
             <>
               <p>Clear {upstream?.localBranch}'s upstream before removing {removeConfirmation.slice(6)}.</p>
-              <button type="button" onClick={() => { void onClearUpstream(); setRemoveConfirmation(null); }}>Clear upstream</button>
+              <button type="button" onClick={() => void clearUpstreamForRemoval()}>Clear upstream</button>
             </>
           ) : (
             <>
@@ -135,7 +140,7 @@ export function RemotePanel({
       <form onSubmit={submitAdd} aria-label="Add remote">
         <h3>Add remote</h3>
         <label>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
-        <label>Fetch URL<input value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
+        <label>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
         <label>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
         <button type="submit">Add remote</button>
       </form>

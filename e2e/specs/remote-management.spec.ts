@@ -21,7 +21,7 @@ describe("Browsitory remote management", () => {
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
     await remoteNameInput.setValue("origin");
-    const fetchUrlInput = await $("form[aria-label='Add remote'] input:nth-of-type(2)");
+    const fetchUrlInput = await $("[data-testid='add-remote-fetch-url']");
     await fetchUrlInput.setValue(BARE_REMOTE_PATH);
     await (await $("button=Add remote")).click();
 
@@ -42,6 +42,10 @@ describe("Browsitory remote management", () => {
     expect(await blockingDialog.getText()).toContain("Clear");
 
     await (await $("div[role='alertdialog'] button=Clear upstream")).click();
+    await browser.waitUntil(
+      async () => (await (await $("section[aria-labelledby='upstream-heading']")).getText()).includes("No upstream"),
+      { timeout: 10000, timeoutMsg: "expected the refreshed upstream state to be cleared" },
+    );
     await browser.waitUntil(async () => !(await $("div[role='alertdialog']")).isExisting(), {
       timeout: 10000,
       timeoutMsg: "expected the upstream-clear confirmation to close",
