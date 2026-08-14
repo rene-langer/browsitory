@@ -51,21 +51,66 @@ function defaultCombinedMessage(rows: Row[], leaderIndex: number): string {
   return parts.join("\n\n");
 }
 
-function recomputeGroupLeaders(rows: Row[]): Row[] {
-  const next = rows.map((r) => ({ ...r, combinedMessage: null as string | null }));
-  for (let i = 0; i < next.length; i++) {
-    // A group leader must be neither a group member itself nor a Drop (a Drop never lands, so
-    // it can't be the commit the group gets squashed onto — see `land_current_step`'s backward
-    // walk, which excludes Drop from leader candidates the same way).
-    if (isGroupMember(next[i].actionKind) || next[i].actionKind === "Drop") {
+function isLeader(rows: Row[], index: number): boolean {
+  // A group leader must be neither a group member itself nor a Drop (a Drop never lands, so it
+  // can't be the commit the group gets squashed onto — see `land_current_step`'s backward walk,
+  // which excludes Drop from leader candidates the same way), and must be followed by at least
+  // one group member.
+  if (isGroupMember(rows[index].actionKind) || rows[index].actionKind === "Drop") {
+    return false;
+  }
+  const followingKind = nextNonDropActionKind(rows, index);
+  return followingKind !== undefined && isGroupMember(followingKind);
+}
+
+// A stable fingerprint of every group's membership, keyed by the leader's commit id: the ordered
+// list of the members' commit ids and their kinds (Squash vs Fixup changes the default message,
+// so it's part of the identity). Drop rows are excluded — they contribute nothing to the group's
+// default message, so a Drop moving in or out of the middle of a group doesn't make it a
+// different group.
+function groupFingerprints(rows: Row[]): Map<string, string> {
+  const fingerprints = new Map<string, string>();
+  for (let i = 0; i < rows.length; i++) {
+    if (!isLeader(rows, i)) {
       continue;
     }
-    const followingKind = nextNonDropActionKind(next, i);
-    if (followingKind !== undefined && isGroupMember(followingKind)) {
-      next[i].combinedMessage = defaultCombinedMessage(next, i);
+    const members: string[] = [];
+    for (let j = i + 1; j < rows.length; j++) {
+      const kind = rows[j].actionKind;
+      if (kind === "Drop") {
+        continue;
+      }
+      if (!isGroupMember(kind)) {
+        break;
+      }
+      members.push(`${rows[j].commit.id}:${kind}`);
     }
+    fingerprints.set(rows[i].commit.id, members.join("|"));
   }
-  return next;
+  return fingerprints;
+}
+
+// Re-derives which rows are group leaders after a reorder or action change, recomputing a fresh
+// default combined message only for groups that actually changed. A leader whose group is
+// untouched by the mutation keeps its current `combinedMessage` verbatim — otherwise editing any
+// row would silently wipe a combined message the user hand-typed on an unrelated group.
+function recomputeGroupLeaders(prev: Row[], next: Row[]): Row[] {
+  const before = groupFingerprints(prev);
+  const after = groupFingerprints(next);
+  return next.map((row, index) => {
+    if (!after.has(row.commit.id)) {
+      // Not a leader (any more): no combined-message field belongs on this row.
+      return { ...row, combinedMessage: null };
+    }
+    const unchanged =
+      before.has(row.commit.id) &&
+      before.get(row.commit.id) === after.get(row.commit.id) &&
+      row.combinedMessage !== null;
+    return {
+      ...row,
+      combinedMessage: unchanged ? row.combinedMessage : defaultCombinedMessage(next, index),
+    };
+  });
 }
 
 export function RebasePlanner({
@@ -107,13 +152,13 @@ export function RebasePlanner({
     }
     const next = [...rows];
     [next[index], next[target]] = [next[target], next[index]];
-    setRows(recomputeGroupLeaders(next));
+    setRows(recomputeGroupLeaders(rows, next));
   };
 
   const setActionKind = (index: number, actionKind: ActionKind) => {
     const next = [...rows];
     next[index] = { ...next[index], actionKind };
-    setRows(recomputeGroupLeaders(next));
+    setRows(recomputeGroupLeaders(rows, next));
   };
 
   const setRewordMessage = (index: number, rewordMessage: string) => {

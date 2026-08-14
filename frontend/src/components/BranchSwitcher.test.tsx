@@ -21,6 +21,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       onCloseCreateBranchDraft={vi.fn()}
       onMergeBranch={vi.fn()}
       isMerging={false}
+      isRebasing={false}
       {...overrides}
     />,
   );
@@ -181,5 +182,40 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
 
     expect(screen.getByText("Merge into current branch")).toBeDisabled();
+  });
+
+  it("disables every branch-mutating action while a rebase is in progress", () => {
+    // A rebase runs on a detached HEAD and only moves the original branch ref at the very end,
+    // so switching/creating/deleting/renaming a branch mid-pause silently retargets an unrelated
+    // branch — same reasoning as the merge gating above.
+    renderSwitcher({ isRebasing: true, createBranchDraft: { startPoint: "HEAD" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByRole("button", { name: /^main/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^feature/ })).toBeDisabled();
+    for (const button of screen.getAllByText("Rename")) {
+      expect(button).toBeDisabled();
+    }
+    for (const button of screen.getAllByText("Delete")) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByText("Merge into current branch")).toBeDisabled();
+    expect(screen.getByText("New Branch…")).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "my-feature" },
+    });
+    expect(screen.getByText("Create")).toBeDisabled();
+  });
+
+  it("does not switch branches while a rebase is in progress", () => {
+    const onSwitchBranch = vi.fn();
+    renderSwitcher({ isRebasing: true, onSwitchBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    fireEvent.click(screen.getByText("feature"));
+
+    expect(onSwitchBranch).not.toHaveBeenCalled();
   });
 });
