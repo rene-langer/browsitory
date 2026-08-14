@@ -6,6 +6,19 @@ use git2::{
 use thiserror::Error;
 use url::Url;
 
+#[cfg(test)]
+mod tests {
+    use super::sanitize_remote_message;
+
+    #[test]
+    fn arbitrary_remote_messages_are_dropped_before_progress_records_are_built() {
+        assert_eq!(
+            sanitize_remote_message(b"https://alice:secret@example.test/repo.git"),
+            None
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferOperation {
     Fetch,
@@ -42,6 +55,10 @@ pub trait CredentialProvider {
         username: Option<&str>,
         allowed: CredentialType,
     ) -> Result<Cred, git2::Error>;
+}
+
+fn sanitize_remote_message(_message: &[u8]) -> Option<String> {
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,11 +120,11 @@ pub fn fetch_remote(
             current: 0,
             total: 0,
             received_bytes: 0,
-            message: Some(String::from_utf8_lossy(message).into_owned()),
+            message: sanitize_remote_message(message),
         });
         true
     });
-    callbacks.update_tips(|reference, old, new| {
+    callbacks.update_tips(|_reference, _old, _new| {
         reporter.borrow_mut().report(TransferProgress {
             operation_id: operation_id.clone(),
             operation: TransferOperation::Fetch,
@@ -115,7 +132,7 @@ pub fn fetch_remote(
             current: 0,
             total: 0,
             received_bytes: 0,
-            message: Some(format!("{reference}: {old} -> {new}")),
+            message: None,
         });
         true
     });

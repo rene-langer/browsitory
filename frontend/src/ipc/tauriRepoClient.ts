@@ -19,6 +19,8 @@ import type {
   UpstreamInfo,
 } from "./RepoClient";
 
+let transferListenersReady: Promise<void> = Promise.resolve();
+
 export const tauriRepoClient: RepoClient = {
   pickRepoFolder: () => invoke<string | null>("pick_repo_folder"),
   listRecentRepos: () => invoke<string[]>("list_recent_repos"),
@@ -60,16 +62,23 @@ export const tauriRepoClient: RepoClient = {
   setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
     invoke("set_current_upstream", { remoteName, remoteBranch }),
   clearCurrentUpstream: () => invoke("clear_current_upstream"),
-  fetchRemote: (remoteName: string) => invoke<string>("fetch_remote", { remoteName }),
+  fetchRemote: async (remoteName: string) => {
+    await transferListenersReady;
+    return invoke<string>("fetch_remote", { remoteName });
+  },
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     let disposed = false;
     const unlisten: Array<() => void> = [];
-    for (const event of ["transfer-progress", "transfer-complete"]) {
-      void listen<TransferProgress>(event, ({ payload }) => listener(payload)).then((stop) => {
+    const registrations = ["transfer-progress", "transfer-complete"].map((event) =>
+      listen<TransferProgress>(event, ({ payload }) => listener(payload)),
+    );
+    transferListenersReady = Promise.all(registrations).then((stops) => {
+      for (const stop of stops) {
         if (disposed) stop();
         else unlisten.push(stop);
-      });
-    }
+      }
+    });
+    void transferListenersReady.catch(() => {});
     return () => {
       if (disposed) return;
       disposed = true;

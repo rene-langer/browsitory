@@ -40,7 +40,7 @@ export interface UpstreamInfo {
 
 export interface TransferProgress {
   operationId: string;
-  phase: "Starting" | "Receiving" | "Updating" | "Completed";
+  phase: "Starting" | "Receiving" | "Updating" | "Completed" | "Failed";
   current: number;
   total: number;
   receivedBytes: number;
