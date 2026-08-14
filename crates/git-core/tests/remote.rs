@@ -1,10 +1,82 @@
 mod common;
 
 use git_core::remote::{
-    add_remote, clear_current_upstream, current_upstream, list_remotes, remote_upstreams,
-    remove_remote, remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
-    update_remote_urls, RemoteError,
+    add_remote, clear_current_upstream, current_upstream, fetch_remote, list_remotes,
+    remote_upstreams, remove_remote, remove_remote_and_clear_upstreams, rename_remote,
+    set_current_upstream, update_remote_urls, CredentialProvider, RemoteError, TransferOperation,
+    TransferPhase, TransferProgress, TransferReporter,
 };
+
+#[derive(Default)]
+struct VecReporter {
+    events: Vec<TransferProgress>,
+}
+
+impl TransferReporter for VecReporter {
+    fn report(&mut self, event: TransferProgress) {
+        self.events.push(event);
+    }
+}
+
+struct NoCredentials;
+
+impl CredentialProvider for NoCredentials {
+    fn credential(
+        &mut self,
+        _url: &str,
+        _username: Option<&str>,
+        _allowed: git2::CredentialType,
+    ) -> Result<git2::Cred, git2::Error> {
+        Err(git2::Error::from_str(
+            "credentials were not expected for a local remote",
+        ))
+    }
+}
+
+#[test]
+fn fetch_updates_tracking_ref_and_reports_owned_progress() {
+    let (source_dir, source) = common::init_repo();
+    common::write_file(source_dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&source, "initial commit");
+    let remote_dir = tempfile::TempDir::new().unwrap();
+    let remote_repo = git2::Repository::init_bare(remote_dir.path()).unwrap();
+    let branch_name = source.head().unwrap().shorthand().unwrap().to_string();
+    let branch_ref = format!("refs/heads/{branch_name}");
+    source
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    source
+        .find_remote("origin")
+        .unwrap()
+        .push(&[format!("{branch_ref}:{branch_ref}")], None)
+        .unwrap();
+    let (_local_dir, local) = common::init_repo();
+    local
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    drop(remote_repo);
+
+    let mut events = VecReporter::default();
+    fetch_remote(
+        &local,
+        "origin",
+        "fetch-42".to_string(),
+        &mut NoCredentials,
+        &mut events,
+    )
+    .unwrap();
+
+    assert!(local
+        .find_reference(&format!("refs/remotes/origin/{branch_name}"))
+        .is_ok());
+    assert!(events
+        .events
+        .iter()
+        .any(|event| event.phase == TransferPhase::Receiving));
+    assert!(events.events.iter().all(|event| {
+        event.operation_id == "fetch-42" && event.operation == TransferOperation::Fetch
+    }));
+}
 
 #[test]
 fn remote_crud_and_upstream_round_trip() {
