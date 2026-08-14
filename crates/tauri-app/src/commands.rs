@@ -161,6 +161,101 @@ impl From<FileConflictChoiceDto> for git_core::merge::FileConflictChoice {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebasePlanCommitDto {
+    pub id: String,
+    pub short_id: String,
+    pub summary: String,
+    pub author_name: String,
+    pub timestamp: i64,
+}
+
+impl From<git_core::rebase::RebasePlanCommit> for RebasePlanCommitDto {
+    fn from(c: git_core::rebase::RebasePlanCommit) -> Self {
+        RebasePlanCommitDto {
+            id: c.id,
+            short_id: c.short_id,
+            summary: c.summary,
+            author_name: c.author_name,
+            timestamp: c.timestamp,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+pub enum RebaseActionDto {
+    Pick,
+    Reword { message: String },
+    Edit,
+    Squash,
+    Fixup,
+    Drop,
+}
+
+impl From<RebaseActionDto> for git_core::rebase::RebaseAction {
+    fn from(dto: RebaseActionDto) -> Self {
+        match dto {
+            RebaseActionDto::Pick => git_core::rebase::RebaseAction::Pick,
+            RebaseActionDto::Reword { message } => {
+                git_core::rebase::RebaseAction::Reword { message }
+            }
+            RebaseActionDto::Edit => git_core::rebase::RebaseAction::Edit,
+            RebaseActionDto::Squash => git_core::rebase::RebaseAction::Squash,
+            RebaseActionDto::Fixup => git_core::rebase::RebaseAction::Fixup,
+            RebaseActionDto::Drop => git_core::rebase::RebaseAction::Drop,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebasePlanEntryDto {
+    pub commit_id: String,
+    pub action: RebaseActionDto,
+    pub combined_message: Option<String>,
+}
+
+impl From<RebasePlanEntryDto> for git_core::rebase::RebasePlanEntry {
+    fn from(dto: RebasePlanEntryDto) -> Self {
+        git_core::rebase::RebasePlanEntry {
+            commit_id: dto.commit_id,
+            action: dto.action.into(),
+            combined_message: dto.combined_message,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum RebaseStepResultDto {
+    Conflicted { files: Vec<String> },
+    PausedForEdit,
+    Advanced,
+    Done,
+}
+
+impl From<git_core::rebase::RebaseStepResult> for RebaseStepResultDto {
+    fn from(result: git_core::rebase::RebaseStepResult) -> Self {
+        match result {
+            git_core::rebase::RebaseStepResult::Conflicted { files } => {
+                RebaseStepResultDto::Conflicted { files }
+            }
+            git_core::rebase::RebaseStepResult::PausedForEdit => RebaseStepResultDto::PausedForEdit,
+            git_core::rebase::RebaseStepResult::Advanced => RebaseStepResultDto::Advanced,
+            git_core::rebase::RebaseStepResult::Done => RebaseStepResultDto::Done,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseProgressDto {
+    pub current_step: usize,
+    pub total_steps: usize,
+}
+
+#[derive(Serialize)]
 pub struct DiffLineDto {
     pub origin: String,
     pub content: String,
@@ -422,6 +517,50 @@ pub async fn resolve_add_delete_conflict(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state)?.resolve_add_delete_conflict(path, choice.into())
+}
+
+#[tauri::command]
+pub async fn commits_since(
+    onto: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RebasePlanCommitDto>, String> {
+    let commits = worker_handle(&state)?.commits_since(onto)?;
+    Ok(commits.into_iter().map(RebasePlanCommitDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn start_rebase(
+    onto: String,
+    plan: Vec<RebasePlanEntryDto>,
+    state: State<'_, AppState>,
+) -> Result<RebaseStepResultDto, String> {
+    let plan = plan.into_iter().map(Into::into).collect();
+    let result = worker_handle(&state)?.start_rebase(onto, plan)?;
+    Ok(RebaseStepResultDto::from(result))
+}
+
+#[tauri::command]
+pub async fn rebase_continue(state: State<'_, AppState>) -> Result<RebaseStepResultDto, String> {
+    let result = worker_handle(&state)?.rebase_continue()?;
+    Ok(RebaseStepResultDto::from(result))
+}
+
+#[tauri::command]
+pub async fn abort_rebase(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.abort_rebase()
+}
+
+#[tauri::command]
+pub async fn get_rebase_progress(
+    state: State<'_, AppState>,
+) -> Result<Option<RebaseProgressDto>, String> {
+    let progress = worker_handle(&state)?.get_rebase_progress()?;
+    Ok(
+        progress.map(|(current_step, total_steps)| RebaseProgressDto {
+            current_step,
+            total_steps,
+        }),
+    )
 }
 
 #[cfg(test)]
