@@ -19,6 +19,8 @@ pub struct UpstreamInfo {
 pub enum RemoteError {
     #[error("git remote operation failed: {0}")]
     Git(#[from] git2::Error),
+    #[error("remote URLs must not contain embedded credentials")]
+    CredentialBearingUrl,
     #[error("remote '{name}' is the upstream for local branch(es): {branches:?}")]
     RemoteInUse { name: String, branches: Vec<String> },
 }
@@ -27,10 +29,17 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
     let mut remotes = Vec::new();
     for name in repo.remotes()?.iter().flatten().flatten() {
         let remote = repo.find_remote(name)?;
+        let fetch_url = remote.url()?;
+        let push_url = remote.pushurl()?;
+        if contains_embedded_credentials(fetch_url)
+            || push_url.is_some_and(contains_embedded_credentials)
+        {
+            return Err(RemoteError::CredentialBearingUrl);
+        }
         remotes.push(RemoteInfo {
             name: name.to_string(),
-            fetch_url: remote.url()?.to_string(),
-            push_url: remote.pushurl()?.map(str::to_string),
+            fetch_url: fetch_url.to_string(),
+            push_url: push_url.map(str::to_string),
         });
     }
     Ok(remotes)
@@ -42,6 +51,7 @@ pub fn add_remote(
     fetch_url: &str,
     push_url: Option<&str>,
 ) -> Result<(), RemoteError> {
+    validate_urls(fetch_url, push_url)?;
     repo.remote(name, fetch_url)?;
     if let Some(push_url) = push_url {
         repo.remote_set_pushurl(name, Some(push_url))?;
@@ -60,6 +70,7 @@ pub fn update_remote_urls(
     fetch_url: &str,
     push_url: Option<&str>,
 ) -> Result<(), RemoteError> {
+    validate_urls(fetch_url, push_url)?;
     let remote = repo.find_remote(name)?;
     let has_push_url = remote.pushurl()?.is_some();
     drop(remote);
@@ -97,6 +108,7 @@ pub fn set_current_upstream(
     remote_name: &str,
     remote_branch: &str,
 ) -> Result<(), RemoteError> {
+    repo.find_remote(remote_name)?;
     let local_branch = current_local_branch_name(repo)?;
     let mut branch = repo.find_branch(&local_branch, BranchType::Local)?;
     let upstream = format!("{remote_name}/{remote_branch}");
@@ -136,6 +148,26 @@ pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
 
 fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
     Ok(repo.head()?.shorthand()?.to_string())
+}
+
+fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteError> {
+    if contains_embedded_credentials(fetch_url)
+        || push_url.is_some_and(contains_embedded_credentials)
+    {
+        return Err(RemoteError::CredentialBearingUrl);
+    }
+    Ok(())
+}
+
+fn contains_embedded_credentials(url: &str) -> bool {
+    let Some((scheme, remainder)) = url.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme, "http" | "https") {
+        return false;
+    }
+    let authority = remainder.split('/').next().unwrap_or_default();
+    authority.contains('@')
 }
 
 fn local_branches_using_remote(
