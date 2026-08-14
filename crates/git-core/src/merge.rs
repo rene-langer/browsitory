@@ -81,7 +81,7 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
     }
 }
 
-fn conflict_path(conflict: &IndexConflict) -> Option<String> {
+pub(crate) fn conflict_path(conflict: &IndexConflict) -> Option<String> {
     conflict
         .our
         .as_ref()
