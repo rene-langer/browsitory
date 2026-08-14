@@ -44,8 +44,11 @@ fn updating_a_remote_without_a_push_url_keeps_push_url_unset() {
 fn credential_bearing_urls_are_rejected_and_never_returned() {
     let (_dir, repo) = common::init_repo();
     let credential_url = "https://user:secret@example.com/repo.git";
+    let mixed_case_credential_url = "HtTpS://user:secret@example.com/repo.git";
 
     assert!(add_remote(&repo, "origin", credential_url, None).is_err());
+    assert!(list_remotes(&repo).unwrap().is_empty());
+    assert!(add_remote(&repo, "origin", mixed_case_credential_url, None).is_err());
     assert!(list_remotes(&repo).unwrap().is_empty());
     assert!(add_remote(
         &repo,
@@ -73,6 +76,24 @@ fn credential_bearing_urls_are_rejected_and_never_returned() {
     repo.remote_set_pushurl("origin", Some(credential_url))
         .unwrap();
     assert!(list_remotes(&repo).is_err());
+}
+
+#[test]
+fn normal_ssh_urls_are_accepted() {
+    let (_dir, repo) = common::init_repo();
+
+    add_remote(
+        &repo,
+        "origin",
+        "git@github.com:browsitory/browsitory.git",
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        list_remotes(&repo).unwrap()[0].fetch_url,
+        "git@github.com:browsitory/browsitory.git"
+    );
 }
 
 #[test]
