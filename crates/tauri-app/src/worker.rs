@@ -1424,6 +1424,25 @@ mod tests {
     }
 
     #[test]
+    fn transfer_fetch_failure_streams_only_a_sanitized_terminal_error() {
+        let (local_dir, _repo) = init_repo();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let operation_id = worker
+            .handle()
+            .fetch_remote("missing-remote".into(), event_tx)
+            .expect("start fetch");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(matches!(
+            events.last(),
+            Some(TransferEvent::Completed { operation_id: id, error: Some(error) })
+                if id == &operation_id && error == "fetch failed"
+        ));
+    }
+
+    #[test]
     fn apply_then_drop_stash_round_trips_through_the_worker() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "file.txt", "v1");

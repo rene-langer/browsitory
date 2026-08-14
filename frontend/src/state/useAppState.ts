@@ -133,19 +133,40 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   }, [client]);
 
   const activeTransferId = useRef<string | null>(null);
+  const transferRequestPending = useRef(false);
 
   useEffect(() => {
     if (state.repoPath === null) return;
 
     return client.subscribeTransferProgress((progress) => {
+      if (progress.phase === "Starting") {
+        if (!transferRequestPending.current || activeTransferId.current !== null) return;
+        activeTransferId.current = progress.operationId;
+        setState((prev) => ({ ...prev, transfer: progress }));
+        return;
+      }
+
       if (progress.operationId !== activeTransferId.current) return;
 
       if (progress.phase === "Completed") {
+        transferRequestPending.current = false;
         void refresh().finally(() => {
           if (activeTransferId.current !== progress.operationId) return;
           activeTransferId.current = null;
           setState((prev) => ({ ...prev, transfer: null, pending: false }));
         });
+        return;
+      }
+
+      if (progress.phase === "Failed") {
+        transferRequestPending.current = false;
+        activeTransferId.current = null;
+        setState((prev) => ({
+          ...prev,
+          transfer: progress,
+          error: "Fetch failed",
+          pending: false,
+        }));
         return;
       }
 
@@ -173,6 +194,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       // event can arrive while the worker is changing repositories; it must never refresh or
       // clear pending state for the newly opened repository.
       activeTransferId.current = null;
+      transferRequestPending.current = false;
       setState((prev) => ({ ...prev, transfer: null }));
       return runMutation(async () => {
         await client.openRepo(path);
@@ -257,21 +279,27 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const fetchRemote = useCallback(
     async (remoteName: string) => {
       try {
+        transferRequestPending.current = true;
+        activeTransferId.current = null;
         setState((prev) => ({ ...prev, pending: true, error: null }));
         const operationId = await client.fetchRemote(remoteName);
-        activeTransferId.current = operationId;
-        setState((prev) => ({
-          ...prev,
-          transfer: {
-            operationId,
-            phase: "Starting",
-            current: 0,
-            total: 0,
-            receivedBytes: 0,
-            message: null,
-          },
-        }));
+        if (transferRequestPending.current && activeTransferId.current === null) {
+          activeTransferId.current = operationId;
+          setState((prev) => ({
+            ...prev,
+            transfer: {
+              operationId,
+              phase: "Starting",
+              current: 0,
+              total: 0,
+              receivedBytes: 0,
+              message: null,
+            },
+          }));
+        }
       } catch (err) {
+        transferRequestPending.current = false;
+        activeTransferId.current = null;
         setState((prev) => ({ ...prev, error: String(err), pending: false }));
       }
     },

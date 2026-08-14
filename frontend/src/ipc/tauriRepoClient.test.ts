@@ -39,6 +39,36 @@ describe("tauriRepoClient remote URL validation", () => {
 });
 
 describe("tauriRepoClient transfer progress subscription", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(listen).mockReset();
+  });
+
+  it("waits for both transfer listeners before invoking a fetch", async () => {
+    let resolveProgress!: (unlisten: () => void) => void;
+    let resolveCompleted!: (unlisten: () => void) => void;
+    vi.mocked(listen).mockImplementation((event) =>
+      new Promise((resolve) => {
+        if (event === "transfer-progress") resolveProgress = resolve;
+        if (event === "transfer-complete") resolveCompleted = resolve;
+      }),
+    );
+    vi.mocked(invoke).mockResolvedValue("fetch-42");
+
+    tauriRepoClient.subscribeTransferProgress(() => {});
+    const fetch = tauriRepoClient.fetchRemote("origin");
+    await Promise.resolve();
+    expect(invoke).not.toHaveBeenCalled();
+
+    resolveProgress(() => {});
+    await Promise.resolve();
+    expect(invoke).not.toHaveBeenCalled();
+
+    resolveCompleted(() => {});
+    await expect(fetch).resolves.toBe("fetch-42");
+    expect(invoke).toHaveBeenCalledWith("fetch_remote", { remoteName: "origin" });
+  });
+
   it("normalizes progress events and unregisters its listeners", async () => {
     const unlisten = vi.fn();
     let progressListener: ((event: { payload: unknown }) => void) | undefined;

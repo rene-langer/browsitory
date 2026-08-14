@@ -53,18 +53,21 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
         }
         TransferEvent::Completed {
             operation_id,
-            error: _,
-        } => (
-            "transfer-complete",
-            TransferProgressDto {
-                operation_id,
-                phase: "Completed".to_string(),
-                current: 0,
-                total: 0,
-                received_bytes: 0,
-                message: None,
-            },
-        ),
+            error,
+        } => {
+            let failed = error.is_some();
+            (
+                "transfer-complete",
+                TransferProgressDto {
+                    operation_id,
+                    phase: if failed { "Failed" } else { "Completed" }.to_string(),
+                    current: 0,
+                    total: 0,
+                    received_bytes: 0,
+                    message: failed.then(|| "Fetch failed".to_string()),
+                },
+            )
+        }
     }
 }
 
@@ -785,7 +788,59 @@ mod tests {
         });
 
         assert_eq!(progress.message, None);
-        assert_eq!(completed.message, None);
+        assert_eq!(completed.message.as_deref(), Some("Fetch failed"));
+    }
+
+    #[test]
+    fn transfer_failure_is_emitted_as_a_sanitized_failed_terminal_event() {
+        let (event_name, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            error: Some("https://alice:secret@example.test/repo.git".into()),
+        });
+
+        assert_eq!(event_name, "transfer-complete");
+        assert_eq!(failed.phase, "Failed");
+        assert_eq!(failed.message.as_deref(), Some("Fetch failed"));
+    }
+
+    fn expected_transfer_phase_wire_value(phase: TransferPhase) -> &'static str {
+        match phase {
+            TransferPhase::Receiving => "Receiving",
+            TransferPhase::Updating => "Updating",
+        }
+    }
+
+    #[test]
+    fn transfer_phase_wire_values_match_the_typescript_union() {
+        for phase in [TransferPhase::Receiving, TransferPhase::Updating] {
+            let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
+                operation_id: "fetch-42".into(),
+                operation: TransferOperation::Fetch,
+                phase,
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            }));
+
+            assert_eq!(progress.phase, expected_transfer_phase_wire_value(phase));
+        }
+
+        let (_, started) = transfer_event_payload(TransferEvent::Started {
+            operation_id: "fetch-42".into(),
+        });
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            error: None,
+        });
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            error: Some("raw remote error".into()),
+        });
+        assert_eq!(
+            [started.phase, completed.phase, failed.phase],
+            ["Starting", "Completed", "Failed"]
+        );
     }
 
     /// The `kind` field of `StatusEntryDto` is produced by `format!("{:?}", kind)`, so the

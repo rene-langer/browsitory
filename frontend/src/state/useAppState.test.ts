@@ -32,7 +32,97 @@ const remoteManagementClient = {
   subscribeTransferProgress: () => () => {},
 };
 
+function transferClient(overrides: Partial<RepoClient>): RepoClient {
+  return {
+    ...remoteManagementClient,
+    pickRepoFolder: async () => unimplemented(),
+    listRecentRepos: async () => unimplemented(),
+    openRepo: async () => {},
+    getStatus: async () => [],
+    getCommitGraph: async () => [],
+    getWorkingDiff: async () => unimplemented(),
+    getCommitDiff: async () => unimplemented(),
+    getCommitFiles: async () => unimplemented(),
+    stageFile: async () => unimplemented(),
+    unstageFile: async () => unimplemented(),
+    commit: async () => unimplemented(),
+    listBranches: async () => [],
+    createBranch: async () => unimplemented(),
+    switchBranch: async () => unimplemented(),
+    deleteBranch: async () => unimplemented(),
+    renameBranch: async () => unimplemented(),
+    listStashes: async () => [],
+    saveStash: async () => unimplemented(),
+    applyStash: async () => unimplemented(),
+    dropStash: async () => unimplemented(),
+    getBlame: async () => unimplemented(),
+    mergeBranch: async () => unimplemented(),
+    getConflictHunks: async () => unimplemented(),
+    resolveConflict: async () => unimplemented(),
+    abortMerge: async () => unimplemented(),
+    getMergeMessage: async () => null,
+    resolveAddDeleteConflict: async () => unimplemented(),
+    commitsSince: async () => unimplemented(),
+    startRebase: async () => unimplemented(),
+    rebaseContinue: async () => unimplemented(),
+    abortRebase: async () => unimplemented(),
+    getRebaseProgress: async () => null,
+    ...overrides,
+  };
+}
+
 describe("useAppState", () => {
+  it("handles a fast fetch that completes before its operation ID reply", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    let statusCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        statusCalls += 1;
+        return [];
+      },
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchRemote: async () => {
+        listener?.({ operationId: "fast-fetch", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "fast-fetch", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+        return "fast-fetch";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(statusCalls).toBe(2);
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("surfaces a fast fetch failure without reporting successful completion", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchRemote: async () => {
+        listener?.({ operationId: "failed-fetch", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "failed-fetch", phase: "Failed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
+        return "failed-fetch";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(result.current.state.transfer?.phase).toBe("Failed");
+    expect(result.current.state.error).toBe("Fetch failed");
+    expect(result.current.state.pending).toBe(false);
+  });
+
   it("ignores a former repository's transfer completion after switching repositories", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     let statusCalls = 0;
