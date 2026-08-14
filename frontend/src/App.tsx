@@ -59,6 +59,7 @@ export default function App() {
           pending={appState.state.pending}
           onSelectRow={appState.selectRow}
           onBranchFromCommit={appState.openCreateBranchDraft}
+          onRebaseFromCommit={appState.openRebasePlanner}
           onApplyStash={appState.applyStash}
           onDropStash={appState.dropStash}
         />

@@ -42,6 +42,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -60,6 +61,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -82,6 +84,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -103,6 +106,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -125,6 +129,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -147,6 +152,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -168,6 +174,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -189,6 +196,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={onBranchFromCommit}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -211,6 +219,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -239,6 +248,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -259,6 +269,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -281,6 +292,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={onApplyStash}
         onDropStash={vi.fn()}
       />,
@@ -305,6 +317,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={onDropStash}
       />,
@@ -327,6 +340,7 @@ describe("CommitGraph", () => {
         pending={true}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -351,6 +365,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -376,6 +391,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -394,6 +410,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -412,6 +429,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -433,6 +451,7 @@ describe("CommitGraph", () => {
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
         onApplyStash={vi.fn()}
         onDropStash={vi.fn()}
       />,
@@ -441,5 +460,29 @@ describe("CommitGraph", () => {
     const row = screen.getByText(/second commit/).closest("li");
     expect(row).not.toBeNull();
     expect(row?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("right-clicking a commit and choosing Rebase onto here calls onRebaseFromCommit", () => {
+    const onRebaseFromCommit = vi.fn();
+    render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={onRebaseFromCommit}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText(/second commit/).closest("li");
+    fireEvent.contextMenu(row!);
+    fireEvent.click(screen.getByText("Rebase onto here"));
+
+    expect(onRebaseFromCommit).toHaveBeenCalledWith("aaa111...");
   });
 });
