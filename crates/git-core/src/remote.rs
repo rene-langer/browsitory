@@ -1,5 +1,6 @@
 use git2::{BranchType, ErrorCode, Repository};
 use thiserror::Error;
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteInfo {
@@ -160,14 +161,13 @@ fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteEr
 }
 
 fn contains_embedded_credentials(url: &str) -> bool {
-    let Some((scheme, remainder)) = url.split_once("://") else {
+    let Ok(parsed) = Url::parse(url) else {
         return false;
     };
-    if !matches!(scheme, "http" | "https") {
+    if !matches!(parsed.scheme(), "http" | "https") {
         return false;
     }
-    let authority = remainder.split('/').next().unwrap_or_default();
-    authority.contains('@')
+    !parsed.username().is_empty() || parsed.password().is_some()
 }
 
 fn local_branches_using_remote(
