@@ -104,11 +104,19 @@ impl RebaseState {
 }
 
 fn validate_plan(plan: &[RebasePlanEntry]) -> Result<(), RebaseError> {
-    if let Some(first) = plan.first() {
-        if matches!(first.action, RebaseAction::Squash | RebaseAction::Fixup) {
+    // Look past any leading `Drop` entries — a plan like `[Drop, Squash]` has no earlier entry
+    // for the `Squash` to combine into either, since `Drop` never lands a commit.
+    if let Some(first_non_drop) = plan
+        .iter()
+        .find(|e| !matches!(e.action, RebaseAction::Drop))
+    {
+        if matches!(
+            first_non_drop.action,
+            RebaseAction::Squash | RebaseAction::Fixup
+        ) {
             return Err(RebaseError::InvalidPlan(
-                "the first entry cannot be Squash or Fixup — there is no preceding commit in \
-                 the plan for it to combine into"
+                "the first non-Drop entry cannot be Squash or Fixup — there is no preceding \
+                 commit in the plan for it to combine into"
                     .to_string(),
             ));
         }
@@ -123,12 +131,20 @@ pub fn start_rebase(
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
     validate_plan(&plan)?;
 
+    // `Reference::name()` returns `Ok("HEAD")` for a detached HEAD — it only errors on a
+    // non-UTF-8 name — so it can't be used to detect "not on a branch". Check explicitly instead;
+    // without this, `finish()` would move the literal `HEAD` ref rather than a real branch ref,
+    // silently stranding every rebased commit as unreachable with no error surfaced.
+    if repo.head_detached()? {
+        return Err(RebaseError::InvalidPlan(
+            "cannot start a rebase while HEAD is already detached — check out a branch first"
+                .to_string(),
+        ));
+    }
+
     let onto_commit = repo.revparse_single(onto)?.peel_to_commit()?;
     let head_ref = repo.head()?;
-    let original_branch_ref = head_ref
-        .name()
-        .map_err(|_| RebaseError::InvalidPlan("HEAD is not on a branch".to_string()))?
-        .to_string();
+    let original_branch_ref = head_ref.name()?.to_string();
     let original_tip = head_ref.peel_to_commit()?.id();
 
     // Checking out before detaching HEAD means a refused checkout (modified/untracked files in
@@ -198,9 +214,20 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
     }
 }
 
+/// The action of the nearest entry strictly after `index` that isn't itself `Drop` — `Drop`
+/// entries never land a commit, so a group boundary must look past them rather than at the
+/// literal next slot (a `Drop` sitting between a group's leader and its members, or between two
+/// members, must not hide the group from `starts_a_group`/`ends_a_group`).
+fn next_non_drop_action(plan: &[RebasePlanEntry], index: usize) -> Option<&RebaseAction> {
+    plan[index + 1..]
+        .iter()
+        .find(|e| !matches!(e.action, RebaseAction::Drop))
+        .map(|e| &e.action)
+}
+
 fn starts_a_group(plan: &[RebasePlanEntry], index: usize) -> bool {
     matches!(
-        plan.get(index + 1).map(|e| &e.action),
+        next_non_drop_action(plan, index),
         Some(RebaseAction::Squash) | Some(RebaseAction::Fixup)
     )
 }
@@ -210,7 +237,7 @@ fn ends_a_group(plan: &[RebasePlanEntry], index: usize) -> bool {
         plan[index].action,
         RebaseAction::Squash | RebaseAction::Fixup
     ) && !matches!(
-        plan.get(index + 1).map(|e| &e.action),
+        next_non_drop_action(plan, index),
         Some(RebaseAction::Squash) | Some(RebaseAction::Fixup)
     )
 }
@@ -219,9 +246,11 @@ fn ends_a_group(plan: &[RebasePlanEntry], index: usize) -> bool {
 /// (parent = current `HEAD`, author preserved from the original commit, committer = the current
 /// user) — then, if this entry ends a squash/fixup group, collapses the whole group's chain of
 /// intermediate commits into one final commit reparented onto `group_start_parent`, carrying the
-/// group leader's `combined_message`. The leader is found by walking backward from this entry to
-/// the nearest preceding entry that isn't itself `Squash`/`Fixup` — guaranteed to exist, since
-/// `validate_plan` rejects a plan whose very first entry is `Squash`/`Fixup`.
+/// group leader's `combined_message` and the group leader's author (not this last member's). The
+/// leader is found by walking backward from this entry to the nearest preceding entry that's
+/// neither `Squash`/`Fixup` nor `Drop` (a `Drop` never lands a commit, so it can't be the leader
+/// either, even if one sits between the leader and the group) — guaranteed to exist, since
+/// `validate_plan` rejects a plan whose first non-`Drop` entry is `Squash`/`Fixup`.
 fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
     let entry = state.plan[state.cursor].clone();
     let original_commit = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
@@ -249,26 +278,43 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     )?;
 
     if ends_a_group(&state.plan, state.cursor) {
+        // Walk backward to the nearest preceding entry that's neither `Squash`/`Fixup` (a group
+        // member) nor `Drop` (never landed, so it can't be the leader either) — that's the group
+        // leader. Guaranteed to exist: `validate_plan` rejects a plan whose first non-`Drop`
+        // entry is `Squash`/`Fixup`.
         let leader_index = (0..=state.cursor)
             .rev()
             .find(|&i| {
                 !matches!(
                     state.plan[i].action,
-                    RebaseAction::Squash | RebaseAction::Fixup
+                    RebaseAction::Squash | RebaseAction::Fixup | RebaseAction::Drop
                 )
             })
-            .expect("validate_plan guarantees a non-squash/fixup leader precedes any group");
+            .ok_or_else(|| {
+                RebaseError::InvalidPlan(
+                    "a squash/fixup group has no leader — validate_plan should have rejected \
+                     this plan"
+                        .to_string(),
+                )
+            })?;
         let combined_message = state.plan[leader_index]
             .combined_message
             .clone()
             .unwrap_or_else(|| message.clone());
+        // The collapsed commit keeps the LEADER's author, not the last group member's —
+        // `original_commit` at this point is this step's own (last) commit, which is the wrong
+        // one; the leader is the semantically-original commit for the whole group.
+        let leader_commit =
+            repo.find_commit(Oid::from_str(&state.plan[leader_index].commit_id)?)?;
 
         let final_tree = repo.head()?.peel_to_commit()?.tree()?;
-        let group_parent = repo.find_commit(
-            state
-                .group_start_parent
-                .expect("ends_a_group implies a group was started"),
-        )?;
+        let group_parent = repo.find_commit(state.group_start_parent.ok_or_else(|| {
+            RebaseError::InvalidPlan(
+                "ends_a_group fired without a recorded group_start_parent — internal rebase \
+                 state error"
+                    .to_string(),
+            )
+        })?)?;
         // Not `update_ref: Some("HEAD")` here: libgit2 rejects a ref-updating commit() whose
         // first parent isn't the ref's *current* target, and the current target is the last
         // intermediate commit in the group's chain, not `group_parent` — that's the whole point
@@ -276,7 +322,7 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
         // HEAD to it directly.
         let final_oid = repo.commit(
             None,
-            &original_commit.author(),
+            &leader_commit.author(),
             &committer,
             &combined_message,
             &final_tree,

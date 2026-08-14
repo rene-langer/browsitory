@@ -351,3 +351,189 @@ fn finishing_moves_the_original_branch_and_reattaches_head() {
     assert_eq!(head_ref.shorthand().unwrap(), branch_name);
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
+
+/// Stages `relative_path` (already written to disk) and commits it on `HEAD` with an explicit
+/// author distinct from the repo's ambient `user.name`/`user.email` — `commit_all` always uses
+/// the ambient signature for both author and committer, so it can't be used to pin the
+/// author-preservation behavior this test group covers.
+fn commit_with_author(
+    repo: &git2::Repository,
+    relative_path: &str,
+    message: &str,
+    author_name: &str,
+    author_email: &str,
+) {
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(relative_path)).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let author = git2::Signature::now(author_name, author_email).unwrap();
+    let committer = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &author,
+        &committer,
+        message,
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+}
+
+#[test]
+fn pick_preserves_the_original_authors_identity_but_uses_a_fresh_committer() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_with_author(&repo, "a.txt", "add a", "Alice", "alice@example.com");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![pick(&commits[0].id)];
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    // Author: preserved from the original commit, per the plan's stated constraint.
+    assert_eq!(head_commit.author().name().unwrap(), "Alice");
+    // Committer: a fresh signature for the rebase itself, i.e. the ambient test-repo identity
+    // set up by `init_repo` — not Alice's.
+    assert_eq!(head_commit.committer().name().unwrap(), "Test User");
+}
+
+#[test]
+fn squash_group_preserves_the_leaders_author_not_the_last_members() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_with_author(&repo, "a.txt", "add a", "Alice", "alice@example.com");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_with_author(&repo, "b.txt", "add b", "Bob", "bob@example.com");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Pick,
+            combined_message: Some("combined: a and b".to_string()),
+        },
+        RebasePlanEntry {
+            commit_id: commits[1].id.clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    // The leader (Alice's commit) is the semantically-original commit for the whole group — the
+    // collapsed commit must keep her authorship, not the last member's (Bob's).
+    assert_eq!(head_commit.author().name().unwrap(), "Alice");
+}
+
+#[test]
+fn start_rebase_rejects_a_plan_where_the_first_non_drop_entry_is_squash_or_fixup() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Drop,
+            combined_message: None,
+        },
+        RebasePlanEntry {
+            commit_id: commits[1].id.clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, plan);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn a_drop_between_a_squash_groups_leader_and_member_does_not_panic() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "x.txt", "x\n");
+    commit_all(&repo, "add x (to drop)");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Pick,
+            combined_message: Some("combined: a and b".to_string()),
+        },
+        RebasePlanEntry {
+            commit_id: commits[1].id.clone(),
+            action: RebaseAction::Drop,
+            combined_message: None,
+        },
+        RebasePlanEntry {
+            commit_id: commits[2].id.clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let commits_after = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    assert_eq!(commits_after.len(), 1);
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        head_commit.message().ok().unwrap_or_default(),
+        "combined: a and b"
+    );
+    assert!(dir.path().join("a.txt").exists());
+    assert!(dir.path().join("b.txt").exists());
+    assert!(!dir.path().join("x.txt").exists());
+}
+
+#[test]
+fn start_rebase_rejects_starting_from_an_already_detached_head() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+
+    let tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+    repo.set_head_detached(tip).unwrap();
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![pick(&commits[0].id)];
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, plan);
+
+    assert!(result.is_err());
+}
