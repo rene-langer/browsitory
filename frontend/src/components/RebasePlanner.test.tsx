@@ -50,6 +50,12 @@ const commits: RebasePlanCommit[] = [
   { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2 },
 ];
 
+const threeCommits: RebasePlanCommit[] = [
+  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1 },
+  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2 },
+  { id: "ccc", shortId: "ccc3333", summary: "add c", authorName: "Rene", timestamp: 3 },
+];
+
 describe("RebasePlanner", () => {
   it("lists commits oldest-first with a default Pick action each", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
@@ -127,6 +133,48 @@ describe("RebasePlanner", () => {
 
     const combined = await screen.findByLabelText("Combined message");
     expect(combined).toHaveValue("add a\n\nadd b");
+  });
+
+  it("a Drop between the leader and a Squash row doesn't steal the combined-message field", async () => {
+    // Regression test: `recomputeGroupLeaders` used to treat the row immediately before a
+    // Squash/Fixup row as the group leader without checking whether that row was itself a
+    // Drop. `git-core::rebase`'s `land_current_step` always walks past Drop entries to find
+    // the real leader (the nearest Pick/Reword/Edit), so a UI mismatch here meant the combined
+    // message a user typed landed on a row the backend never reads — see
+    // e2e/specs/rebase.spec.ts for the black-box repro this was caught by.
+    const onStartRebase = vi.fn();
+    const client = fakeClient({ commitsSince: async () => threeCommits });
+
+    render(
+      <RebasePlanner
+        client={client}
+        onto="base"
+        onStartRebase={onStartRebase}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+
+    // Row 0 = "add a" (Pick, the real leader), row 1 = "add b" (Drop), row 2 = "add c" (Squash).
+    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Drop" } });
+    fireEvent.change(screen.getAllByLabelText("Action")[2], { target: { value: "Squash" } });
+
+    // Exactly one combined-message field should exist, pre-filled from the leader ("add a")
+    // and the surviving squash member ("add c") — not from the dropped row.
+    const combinedFields = await screen.findAllByLabelText("Combined message");
+    expect(combinedFields).toHaveLength(1);
+    expect(combinedFields[0]).toHaveValue("add a\n\nadd c");
+
+    fireEvent.change(combinedFields[0], { target: { value: "e2e: combined rebase commit" } });
+    fireEvent.click(screen.getByText("Start Rebase"));
+
+    const [, plan] = onStartRebase.mock.calls[0];
+    expect(plan[0].commitId).toBe("aaa");
+    expect(plan[0].combinedMessage).toBe("e2e: combined rebase commit");
+    expect(plan[1].commitId).toBe("bbb");
+    expect(plan[1].action).toEqual({ kind: "Drop" });
+    expect(plan[2].commitId).toBe("ccc");
+    expect(plan[2].combinedMessage).toBeNull();
   });
 
   it("disables Squash and Fixup on the first row", async () => {
