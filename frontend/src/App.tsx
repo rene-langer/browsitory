@@ -77,6 +77,9 @@ export default function App() {
           onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
           mergeMessage={appState.state.mergeMessage}
           onAbortMerge={appState.abortMerge}
+          rebaseProgress={appState.state.rebaseProgress}
+          onRebaseContinue={appState.rebaseContinue}
+          onRebaseAbort={appState.abortRebase}
         />
       </div>
       {appState.state.rebaseOnto !== null && (
