@@ -6,9 +6,11 @@ import type {
   MergeOutcome,
   RebasePlanEntry,
   RebaseStepResult,
+  RemoteInfo,
   RepoClient,
   StashEntry,
   StatusEntry,
+  UpstreamInfo,
 } from "../ipc/RepoClient";
 
 const GRAPH_LIMIT = 300;
@@ -21,6 +23,8 @@ export interface AppState {
   status: StatusEntry[];
   commits: GraphCommit[];
   branches: BranchInfo[];
+  remotes: RemoteInfo[];
+  upstream: UpstreamInfo | null;
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
@@ -45,6 +49,12 @@ export interface UseAppStateResult {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  renameRemote(oldName: string, newName: string): Promise<void>;
+  updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  removeRemote(name: string): Promise<void>;
+  setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
+  clearCurrentUpstream(): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -69,6 +79,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     status: [],
     commits: [],
     branches: [],
+    remotes: [],
+    upstream: null,
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
@@ -80,11 +92,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, remotes, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
+          client.listRemotes(),
+          client.getCurrentUpstream(),
           client.listStashes(),
           client.getMergeMessage(),
           client.getRebaseProgress(),
@@ -94,6 +108,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         status,
         commits,
         branches,
+        remotes,
+        upstream,
         stashes,
         mergeMessage,
         rebaseProgress,
@@ -166,6 +182,30 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
   const renameBranch = useCallback(
     (oldName: string, newName: string) => runMutation(() => client.renameBranch(oldName, newName)),
+    [client, runMutation],
+  );
+  const addRemote = useCallback(
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(name, fetchUrl, pushUrl)),
+    [client, runMutation],
+  );
+  const renameRemote = useCallback(
+    (oldName: string, newName: string) => runMutation(() => client.renameRemote(oldName, newName)),
+    [client, runMutation],
+  );
+  const updateRemoteUrls = useCallback(
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(name, fetchUrl, pushUrl)),
+    [client, runMutation],
+  );
+  const removeRemote = useCallback(
+    (name: string) => runMutation(() => client.removeRemote(name)),
+    [client, runMutation],
+  );
+  const setCurrentUpstream = useCallback(
+    (remoteName: string, remoteBranch: string) => runMutation(() => client.setCurrentUpstream(remoteName, remoteBranch)),
+    [client, runMutation],
+  );
+  const clearCurrentUpstream = useCallback(
+    () => runMutation(() => client.clearCurrentUpstream()),
     [client, runMutation],
   );
 
@@ -266,6 +306,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     switchBranch,
     deleteBranch,
     renameBranch,
+    addRemote,
+    renameRemote,
+    updateRemoteUrls,
+    removeRemote,
+    setCurrentUpstream,
+    clearCurrentUpstream,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

@@ -1,15 +1,26 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { BranchInfo, GraphCommit, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type {
+  BranchInfo,
+  GraphCommit,
+  RemoteInfo,
+  RepoClient,
+  StashEntry,
+  StatusEntry,
+  UpstreamInfo,
+} from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
   throw new Error("not implemented in this fake");
 }
 
+const remote: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null };
+const upstream: UpstreamInfo = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
+
 const remoteManagementClient = {
-  listRemotes: async () => [],
-  getCurrentUpstream: async () => null,
+  listRemotes: async () => [remote],
+  getCurrentUpstream: async () => upstream,
   addRemote: async () => unimplemented(),
   renameRemote: async () => unimplemented(),
   updateRemoteUrls: async () => unimplemented(),
@@ -19,7 +30,7 @@ const remoteManagementClient = {
 };
 
 describe("useAppState", () => {
-  it("openRepo populates status and commits and sets repoPath", async () => {
+  it("openRepo populates repository state including remotes and upstream", async () => {
     const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
     const graphCommit: GraphCommit = {
       id: "abc123",
@@ -74,6 +85,8 @@ describe("useAppState", () => {
     expect(result.current.state.repoPath).toBe("/repo");
     expect(result.current.state.status.length).toBe(1);
     expect(result.current.state.commits.length).toBe(1);
+    expect(result.current.state.remotes).toEqual([remote]);
+    expect(result.current.state.upstream).toEqual(upstream);
     expect(result.current.state.selectedRow).toBe("uncommitted");
   });
 
