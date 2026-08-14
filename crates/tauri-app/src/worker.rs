@@ -79,6 +79,7 @@ pub(crate) enum Command {
     GetCurrentUpstream {
         reply: Sender<Result<Option<UpstreamInfo>, String>>,
     },
+    GetRemoteUpstreams { name: String, reply: Sender<Result<Vec<UpstreamInfo>, String>> },
     AddRemote {
         name: String,
         fetch_url: String,
@@ -98,6 +99,7 @@ pub(crate) enum Command {
     },
     RemoveRemote {
         name: String,
+        clear_upstreams: bool,
         reply: Sender<Result<(), String>>,
     },
     SetCurrentUpstream {
@@ -337,8 +339,12 @@ impl Worker {
                         .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::RemoveRemote { name, reply } => {
-                        let result = git_core::remote::remove_remote(&repo, &name)
+                    Command::GetRemoteUpstreams { name, reply } => {
+                        let result = git_core::remote::remote_upstreams(&repo, &name).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RemoveRemote { name, clear_upstreams, reply } => {
+                        let result = (if clear_upstreams { git_core::remote::remove_remote_and_clear_upstreams(&repo, &name) } else { git_core::remote::remove_remote(&repo, &name) })
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
@@ -681,6 +687,11 @@ impl WorkerHandle {
             .recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
+    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx.send(Command::GetRemoteUpstreams { name, reply: reply_tx }).map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx.recv().map_err(|_| "worker thread stopped before replying".to_string())?
+    }
 
     pub fn add_remote(
         &self,
@@ -736,11 +747,12 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn remove_remote(&self, name: String) -> Result<(), String> {
+    pub fn remove_remote(&self, name: String, clear_upstreams: bool) -> Result<(), String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::RemoveRemote {
                 name,
+                clear_upstreams,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

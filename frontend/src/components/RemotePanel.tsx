@@ -4,6 +4,7 @@ import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 export function RemotePanel({
   remotes,
   upstream,
+  remoteUpstreams = {},
   onAddRemote,
   onRenameRemote,
   onUpdateRemoteUrls,
@@ -13,10 +14,11 @@ export function RemotePanel({
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
+  remoteUpstreams?: Record<string, UpstreamInfo[]>;
   onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
-  onRenameRemote: (oldName: string, newName: string) => Promise<void>;
+  onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
-  onRemoveRemote: (name: string) => Promise<void>;
+  onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
 }) {
@@ -54,7 +56,7 @@ export function RemotePanel({
     const name = editName.trim();
     const fetchUrl = editFetchUrl.trim();
     if (name === "" || fetchUrl === "") return;
-    if (name !== oldName) await onRenameRemote(oldName, name);
+    if (name !== oldName && !(await onRenameRemote(oldName, name))) return;
     await onUpdateRemoteUrls(name, fetchUrl, editPushUrl.trim() || null);
     setEditing(null);
   };
@@ -68,16 +70,11 @@ export function RemotePanel({
   };
 
   const requestRemove = (remote: RemoteInfo) => {
-    if (upstream?.remoteName === remote.name) {
+    if ((remoteUpstreams[remote.name] ?? []).length > 0) {
       setRemoveConfirmation(`clear:${remote.name}`);
     } else {
       setRemoveConfirmation(remote.name);
     }
-  };
-
-  const clearUpstreamForRemoval = async () => {
-    await onClearUpstream();
-    setRemoveConfirmation(null);
   };
 
   return (
@@ -124,13 +121,13 @@ export function RemotePanel({
         <div role="alertdialog" aria-label="Remove remote confirmation">
           {removeConfirmation.startsWith("clear:") ? (
             <>
-              <p>Clear {upstream?.localBranch}'s upstream before removing {removeConfirmation.slice(6)}.</p>
-              <button type="button" onClick={() => void clearUpstreamForRemoval()}>Clear upstream</button>
+              <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {(remoteUpstreams[removeConfirmation.slice(6)] ?? []).map((item) => item.localBranch).join(", ")}?</p>
+              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation.slice(6), true).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
             </>
           ) : (
             <>
               <p>Remove remote {removeConfirmation}?</p>
-              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation); setRemoveConfirmation(null); }}>Confirm remove</button>
+              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation, false).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
             </>
           )}
           <button type="button" onClick={() => setRemoveConfirmation(null)}>Cancel</button>

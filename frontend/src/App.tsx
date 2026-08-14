@@ -56,6 +56,7 @@ export default function App() {
       <RemotePanel
         remotes={appState.state.remotes}
         upstream={appState.state.upstream}
+        remoteUpstreams={appState.state.remoteUpstreams}
         onAddRemote={appState.addRemote}
         onRenameRemote={appState.renameRemote}
         onUpdateRemoteUrls={appState.updateRemoteUrls}

@@ -43,13 +43,18 @@ export const tauriRepoClient: RepoClient = {
     invoke("rename_branch", { oldName, newName }),
   listRemotes: () => invoke<RemoteInfo[]>("list_remotes"),
   getCurrentUpstream: () => invoke<UpstreamInfo | null>("get_current_upstream"),
-  addRemote: (name: string, fetchUrl: string, pushUrl: string | null) =>
-    invoke("add_remote", { name, fetchUrl, pushUrl }),
+  getRemoteUpstreams: (name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { name }),
+  addRemote: (name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return invoke("add_remote", { name, fetchUrl, pushUrl });
+  },
   renameRemote: (oldName: string, newName: string) =>
     invoke("rename_remote", { oldName, newName }),
-  updateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) =>
-    invoke("update_remote_urls", { name, fetchUrl, pushUrl }),
-  removeRemote: (name: string) => invoke("remove_remote", { name }),
+  updateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return invoke("update_remote_urls", { name, fetchUrl, pushUrl });
+  },
+  removeRemote: (name: string, clearUpstreams: boolean) => invoke("remove_remote", { name, clearUpstreams }),
   setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
     invoke("set_current_upstream", { remoteName, remoteBranch }),
   clearCurrentUpstream: () => invoke("clear_current_upstream"),
@@ -78,3 +83,17 @@ export const tauriRepoClient: RepoClient = {
   getRebaseProgress: () =>
     invoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress"),
 };
+
+export function validateRemoteUrls(fetchUrl: string, pushUrl: string | null) {
+  for (const url of [fetchUrl, pushUrl]) {
+    if (url === null) continue;
+    try {
+      const parsed = new URL(url);
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (parsed.username !== "" || parsed.password !== "")) {
+        throw new Error("Remote URLs must not contain embedded credentials");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "Remote URLs must not contain embedded credentials") throw error;
+    }
+  }
+}
