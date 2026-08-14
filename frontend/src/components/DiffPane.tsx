@@ -253,7 +253,11 @@ function UncommittedDiffPane({
       ) : (
         <DiffView hunks={displayedHunks} />
       )}
-      <button onClick={onSaveStash} disabled={status.length === 0}>
+      {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
+          resolved/amended content lives in the working tree, so stashing it away and continuing
+          lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
+          `BranchSwitcher`'s ref-mutating actions. */}
+      <button onClick={onSaveStash} disabled={status.length === 0 || rebaseProgress !== null}>
         Stash
       </button>
       {rebaseProgress !== null ? (

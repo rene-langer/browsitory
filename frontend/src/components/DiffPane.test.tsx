@@ -426,6 +426,36 @@ describe("DiffPane", () => {
       expect(screen.getByText("Stash")).not.toBeDisabled();
     });
 
+    it("Stash button is disabled while a rebase is in progress", () => {
+      // Stashing a paused rebase step's resolved/amended working tree away and then continuing
+      // lands an empty or wrong commit, with nothing in the rebase state that notices — so the
+      // action is off the table for the whole pause (see the backend's own HEAD-drift guard in
+      // `git-core::rebase::rebase_continue`).
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={{ currentStep: 1, totalSteps: 3 }}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Stash")).toBeDisabled();
+    });
+
     it("renders a Blame button per file", () => {
       const client = fakeClient({});
 

@@ -12,6 +12,7 @@ export function BranchSwitcher({
   onCloseCreateBranchDraft,
   onMergeBranch,
   isMerging,
+  isRebasing,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -23,6 +24,12 @@ export function BranchSwitcher({
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
   isMerging: boolean;
+  // Every ref-mutating action here is disabled while a rebase is paused mid-flight: the rebase
+  // runs on a detached HEAD and `git-core::rebase`'s `finish` moves the *original* branch ref at
+  // the end, so switching/renaming/deleting branches underneath it silently retargets an
+  // unrelated branch. `git-core::rebase::rebase_continue` also refuses outright once HEAD has
+  // drifted — this just stops the user from getting there.
+  isRebasing: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -97,6 +104,7 @@ export function BranchSwitcher({
                   />
                 ) : (
                   <button
+                    disabled={isRebasing}
                     onClick={() => {
                       onSwitchBranch(b.name);
                       closePopoverState();
@@ -107,6 +115,7 @@ export function BranchSwitcher({
                   </button>
                 )}
                 <button
+                  disabled={isRebasing}
                   onClick={() => {
                     setRenaming(b.name);
                     setRenameValue(b.name);
@@ -116,7 +125,7 @@ export function BranchSwitcher({
                 </button>
                 {!b.isCurrent && (
                   <button
-                    disabled={isMerging}
+                    disabled={isMerging || isRebasing}
                     onClick={() => {
                       onMergeBranch(b.name);
                       closePopoverState();
@@ -127,6 +136,7 @@ export function BranchSwitcher({
                 )}
                 {pendingForceFor === b.name ? (
                   <button
+                    disabled={isRebasing}
                     onClick={() => {
                       onDeleteBranch(b.name, true);
                       setPendingForceFor(null);
@@ -135,12 +145,16 @@ export function BranchSwitcher({
                     Force Delete
                   </button>
                 ) : (
-                  <button onClick={() => handleDeleteClick(b.name)}>Delete</button>
+                  <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
+                    Delete
+                  </button>
                 )}
               </li>
             ))}
           </ul>
-          <button onClick={() => onOpenCreateBranchDraft("HEAD")}>New Branch…</button>
+          <button disabled={isRebasing} onClick={() => onOpenCreateBranchDraft("HEAD")}>
+            New Branch…
+          </button>
         </div>
       )}
       {createBranchDraft !== null && (
@@ -155,7 +169,7 @@ export function BranchSwitcher({
               }
             }}
           />
-          <button onClick={submitCreate} disabled={newBranchName.trim() === ""}>
+          <button onClick={submitCreate} disabled={newBranchName.trim() === "" || isRebasing}>
             Create
           </button>
           <button onClick={onCloseCreateBranchDraft}>Cancel</button>
