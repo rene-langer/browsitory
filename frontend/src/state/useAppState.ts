@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BranchInfo,
   FileConflictChoice,
@@ -10,6 +10,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  TransferProgress,
   UpstreamInfo,
 } from "../ipc/RepoClient";
 
@@ -31,6 +32,7 @@ export interface AppState {
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
+  transfer: TransferProgress | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
@@ -56,6 +58,7 @@ export interface UseAppStateResult {
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
+  fetchRemote(remoteName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -88,6 +91,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     mergeMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
+    transfer: null,
     error: null,
     pending: false,
   });
@@ -127,6 +131,27 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       setState((prev) => ({ ...prev, error: String(err) }));
     }
   }, [client]);
+
+  const activeTransferId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (state.repoPath === null) return;
+
+    return client.subscribeTransferProgress((progress) => {
+      if (progress.operationId !== activeTransferId.current) return;
+
+      if (progress.phase === "Completed") {
+        void refresh().finally(() => {
+          if (activeTransferId.current !== progress.operationId) return;
+          activeTransferId.current = null;
+          setState((prev) => ({ ...prev, transfer: null, pending: false }));
+        });
+        return;
+      }
+
+      setState((prev) => ({ ...prev, transfer: progress }));
+    });
+  }, [client, refresh, state.repoPath]);
 
   const runMutation = useCallback(
     async (mutate: () => Promise<void>) => {
@@ -222,6 +247,29 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const clearCurrentUpstream = useCallback(
     () => runMutation(() => client.clearCurrentUpstream()),
     [client, runMutation],
+  );
+  const fetchRemote = useCallback(
+    async (remoteName: string) => {
+      try {
+        setState((prev) => ({ ...prev, pending: true, error: null }));
+        const operationId = await client.fetchRemote(remoteName);
+        activeTransferId.current = operationId;
+        setState((prev) => ({
+          ...prev,
+          transfer: {
+            operationId,
+            phase: "Starting",
+            current: 0,
+            total: 0,
+            receivedBytes: 0,
+            message: null,
+          },
+        }));
+      } catch (err) {
+        setState((prev) => ({ ...prev, error: String(err), pending: false }));
+      }
+    },
+    [client],
   );
 
   const openCreateBranchDraft = useCallback((startPoint: string) => {
@@ -327,6 +375,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     removeRemote,
     setCurrentUpstream,
     clearCurrentUpstream,
+    fetchRemote,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,
