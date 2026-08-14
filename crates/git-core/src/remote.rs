@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 
 use git2::{
-    BranchType, Cred, CredentialType, ErrorCode, FetchOptions, RemoteCallbacks, Repository,
+    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions,
+    RemoteCallbacks, Repository, StatusOptions,
 };
 use thiserror::Error;
 use url::Url;
@@ -75,6 +76,13 @@ pub struct UpstreamInfo {
     pub remote_branch: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PullOutcome {
+    UpToDate,
+    FastForwarded { upstream_ref: String },
+    Diverged { upstream_ref: String },
+}
+
 #[derive(Debug, Error)]
 pub enum RemoteError {
     #[error("git remote operation failed: {0}")]
@@ -83,6 +91,8 @@ pub enum RemoteError {
     CredentialBearingUrl,
     #[error("remote '{name}' is the upstream for local branch(es): {branches:?}")]
     RemoteInUse { name: String, branches: Vec<String> },
+    #[error("cannot pull with a dirty worktree")]
+    DirtyWorktree,
 }
 
 pub fn fetch_remote(
@@ -141,6 +151,36 @@ pub fn fetch_remote(
     options.remote_callbacks(callbacks);
     remote.fetch(&[] as &[&str], Some(&mut options), None)?;
     Ok(())
+}
+
+pub fn pull_after_fetch(
+    repo: &Repository,
+    remote_name: &str,
+    remote_branch: &str,
+) -> Result<PullOutcome, RemoteError> {
+    if !worktree_is_clean(repo)? {
+        return Err(RemoteError::DirtyWorktree);
+    }
+
+    let local_branch = current_local_branch_name(repo)?;
+    let upstream_ref = format!("refs/remotes/{remote_name}/{remote_branch}");
+    let upstream_oid = repo.find_reference(&upstream_ref)?.peel_to_commit()?.id();
+    let local_oid = repo.head()?.peel_to_commit()?.id();
+
+    if local_oid == upstream_oid {
+        return Ok(PullOutcome::UpToDate);
+    }
+    if !repo.graph_descendant_of(upstream_oid, local_oid)? {
+        return Ok(PullOutcome::Diverged { upstream_ref });
+    }
+
+    let local_ref = format!("refs/heads/{local_branch}");
+    repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout))?;
+
+    Ok(PullOutcome::FastForwarded { upstream_ref })
 }
 
 pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
@@ -303,6 +343,12 @@ pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Resul
 
 fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
     Ok(repo.head()?.shorthand()?.to_string())
+}
+
+fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {
+    let mut options = StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    Ok(repo.statuses(Some(&mut options))?.is_empty())
 }
 
 fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteError> {
