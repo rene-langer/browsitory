@@ -168,11 +168,17 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
 
   const openRepo = useCallback(
-    (path: string) =>
-      runMutation(async () => {
+    (path: string) => {
+      // Invalidate a former repository's transfer before opening the replacement. A completion
+      // event can arrive while the worker is changing repositories; it must never refresh or
+      // clear pending state for the newly opened repository.
+      activeTransferId.current = null;
+      setState((prev) => ({ ...prev, transfer: null }));
+      return runMutation(async () => {
         await client.openRepo(path);
         setState((prev) => ({ ...prev, repoPath: path, selectedRow: "uncommitted" }));
-      }),
+      });
+    },
     [client, runMutation],
   );
 

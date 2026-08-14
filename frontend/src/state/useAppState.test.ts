@@ -33,7 +33,7 @@ const remoteManagementClient = {
 };
 
 describe("useAppState", () => {
-  it("tracks only its fetch operation and refreshes after its completion", async () => {
+  it("ignores a former repository's transfer completion after switching repositories", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     let statusCalls = 0;
     const client: RepoClient = {
@@ -81,15 +81,17 @@ describe("useAppState", () => {
     };
 
     const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.openRepo("/repo-a"));
     await act(() => result.current.fetchRemote("origin"));
 
     expect(result.current.state.transfer?.operationId).toBe("op-1");
     expect(result.current.state.pending).toBe(true);
 
-    act(() => listener?.({ operationId: "other", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null }));
-    expect(result.current.state.transfer?.operationId).toBe("op-1");
-    expect(statusCalls).toBe(1);
+    await act(() => result.current.openRepo("/repo-b"));
+    expect(result.current.state.repoPath).toBe("/repo-b");
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+    expect(statusCalls).toBe(2);
 
     await act(async () => {
       listener?.({ operationId: "op-1", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
