@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -11,6 +12,43 @@ use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseSte
 use git_core::remote::{RemoteInfo, UpstreamInfo};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
+
+static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TransferEvent {
+    Started {
+        operation_id: String,
+    },
+    Progress(git_core::remote::TransferProgress),
+    Completed {
+        operation_id: String,
+        error: Option<String>,
+    },
+}
+
+struct ChannelReporter(Sender<TransferEvent>);
+
+impl git_core::remote::TransferReporter for ChannelReporter {
+    fn report(&mut self, progress: git_core::remote::TransferProgress) {
+        let _ = self.0.send(TransferEvent::Progress(progress));
+    }
+}
+
+struct NoCredentials;
+
+impl git_core::remote::CredentialProvider for NoCredentials {
+    fn credential(
+        &mut self,
+        _url: &str,
+        _username: Option<&str>,
+        _allowed: git2::CredentialType,
+    ) -> Result<git2::Cred, git2::Error> {
+        Err(git2::Error::from_str(
+            "authentication is not configured for this remote",
+        ))
+    }
+}
 
 pub(crate) enum Command {
     GetStatus {
@@ -178,6 +216,12 @@ pub(crate) enum Command {
     #[allow(dead_code)]
     GetRebaseProgress {
         reply: Sender<Result<Option<(usize, usize)>, String>>,
+    },
+    FetchRemote {
+        remote_name: String,
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
     },
 }
 
@@ -478,6 +522,33 @@ impl Worker {
                             .map(|s| (s.current_step(), s.total_steps()));
                         let _ = reply.send(Ok(progress));
                     }
+                    Command::FetchRemote {
+                        remote_name,
+                        operation_id,
+                        events,
+                        reply,
+                    } => {
+                        let _ = events.send(TransferEvent::Started {
+                            operation_id: operation_id.clone(),
+                        });
+                        let _ = reply.send(Ok(operation_id.clone()));
+
+                        let mut credentials = NoCredentials;
+                        let mut reporter = ChannelReporter(events.clone());
+                        let result = git_core::remote::fetch_remote(
+                            &repo,
+                            &remote_name,
+                            operation_id.clone(),
+                            &mut credentials,
+                            &mut reporter,
+                        );
+                        let _ = events.send(TransferEvent::Completed {
+                            operation_id,
+                            // libgit2 may include remote-provided text in an error. Keep events
+                            // secret-free and let a later credential workflow surface remediation.
+                            error: result.err().map(|_| "fetch failed".to_string()),
+                        });
+                    }
                 }
             }
         });
@@ -494,6 +565,26 @@ impl Worker {
 }
 
 impl WorkerHandle {
+    pub(crate) fn fetch_remote(
+        &self,
+        remote_name: String,
+        events: Sender<TransferEvent>,
+    ) -> Result<String, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let operation_id = format!("fetch-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        self.tx
+            .send(Command::FetchRemote {
+                remote_name,
+                operation_id,
+                events,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     pub fn get_status(&self) -> Result<Vec<StatusEntry>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -1007,11 +1098,12 @@ impl WorkerHandle {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::mpsc;
 
     use git2::Repository;
     use tempfile::TempDir;
 
-    use super::Worker;
+    use super::{TransferEvent, Worker};
 
     fn init_repo() -> (TempDir, Repository) {
         let dir = TempDir::new().expect("create temp dir");
@@ -1052,6 +1144,38 @@ mod tests {
             &parents,
         )
         .expect("commit");
+    }
+
+    fn local_and_bare_remote() -> (TempDir, TempDir, TempDir) {
+        let (source_dir, source) = init_repo();
+        write_file(source_dir.path(), "README.md", "initial commit\n");
+        commit_all(&source, "initial commit");
+
+        let remote_dir = TempDir::new().expect("create bare remote");
+        let remote = Repository::init_bare(remote_dir.path()).expect("init bare remote");
+        let branch = source
+            .head()
+            .expect("source head")
+            .shorthand()
+            .expect("source branch")
+            .to_string();
+        let branch_ref = format!("refs/heads/{branch}");
+        source
+            .remote("origin", remote_dir.path().to_str().expect("remote path"))
+            .expect("add source remote");
+        source
+            .find_remote("origin")
+            .expect("source remote")
+            .push(&[format!("{branch_ref}:{branch_ref}")], None)
+            .expect("push source commit");
+        drop(remote);
+
+        let (local_dir, local) = init_repo();
+        local
+            .remote("origin", remote_dir.path().to_str().expect("remote path"))
+            .expect("add local remote");
+
+        (source_dir, remote_dir, local_dir)
     }
 
     #[test]
@@ -1271,6 +1395,32 @@ mod tests {
             .get_remote_upstreams("origin".into())
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn transfer_fetch_streams_ordered_owned_events() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let operation_id = worker
+            .handle()
+            .fetch_remote("origin".into(), event_tx)
+            .expect("start fetch");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(matches!(
+            events.first(),
+            Some(TransferEvent::Started { operation_id: id }) if id == &operation_id
+        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TransferEvent::Progress(progress) if progress.operation_id == operation_id
+        )));
+        assert!(matches!(
+            events.last(),
+            Some(TransferEvent::Completed { operation_id: id, error: None }) if id == &operation_id
+        ));
     }
 
     #[test]

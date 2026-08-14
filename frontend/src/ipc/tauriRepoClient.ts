@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   BlameLine,
   BranchInfo,
@@ -14,6 +15,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  TransferProgress,
   UpstreamInfo,
 } from "./RepoClient";
 
@@ -58,6 +60,22 @@ export const tauriRepoClient: RepoClient = {
   setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
     invoke("set_current_upstream", { remoteName, remoteBranch }),
   clearCurrentUpstream: () => invoke("clear_current_upstream"),
+  fetchRemote: (remoteName: string) => invoke<string>("fetch_remote", { remoteName }),
+  subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
+    let disposed = false;
+    const unlisten: Array<() => void> = [];
+    for (const event of ["transfer-progress", "transfer-complete"]) {
+      void listen<TransferProgress>(event, ({ payload }) => listener(payload)).then((stop) => {
+        if (disposed) stop();
+        else unlisten.push(stop);
+      });
+    }
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      for (const stop of unlisten) stop();
+    };
+  },
   listStashes: () => invoke<StashEntry[]>("list_stashes"),
   saveStash: () => invoke("save_stash"),
   applyStash: (index: number) => invoke("apply_stash", { index }),
