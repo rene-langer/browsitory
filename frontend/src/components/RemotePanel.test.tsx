@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { RemotePanel } from "./RemotePanel";
@@ -55,9 +55,15 @@ describe("RemotePanel", () => {
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "main");
   });
 
-  it("requires clearing the upstream before removing its remote", () => {
+  it("keeps the removal dialog open until clearing the upstream completes", async () => {
     const onRemoveRemote = vi.fn();
-    const onClearUpstream = vi.fn();
+    let resolveClear!: () => void;
+    const onClearUpstream = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveClear = resolve;
+        }),
+    );
     renderPanel({ upstream, onRemoveRemote, onClearUpstream });
 
     fireEvent.click(screen.getByRole("button", { name: "Remove origin" }));
@@ -71,6 +77,12 @@ describe("RemotePanel", () => {
       }),
     );
     expect(onClearUpstream).toHaveBeenCalledOnce();
+    expect(screen.getByRole("alertdialog", { name: "Remove remote confirmation" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveClear();
+    });
+    expect(screen.queryByRole("alertdialog", { name: "Remove remote confirmation" })).not.toBeInTheDocument();
   });
 
   it("removes a remote after explicit confirmation when it has no upstream", () => {
