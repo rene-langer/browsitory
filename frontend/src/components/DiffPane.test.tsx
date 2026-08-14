@@ -69,6 +69,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -94,6 +97,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -129,6 +135,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -165,6 +174,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -205,6 +217,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -232,6 +247,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -258,6 +276,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -282,6 +303,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -312,6 +336,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -336,6 +363,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -361,6 +391,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -384,6 +417,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -407,6 +443,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -441,6 +480,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -479,6 +521,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -509,6 +554,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -552,6 +600,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -584,6 +635,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -618,6 +672,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={"Merge branch 'feature'"}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -640,6 +697,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -685,6 +745,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -725,11 +788,41 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
       const commitButton = screen.getByText("Commit").closest("button");
       expect(commitButton).toBeDisabled();
+    });
+
+    it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={{ currentStep: 1, totalSteps: 3 }}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("Commit message")).not.toBeInTheDocument();
     });
   });
 
@@ -763,6 +856,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -791,6 +887,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -817,6 +916,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -842,6 +944,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -877,6 +982,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -916,6 +1024,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -949,6 +1060,9 @@ describe("DiffPane", () => {
           onResolveAddDeleteConflict={vi.fn()}
           mergeMessage={null}
           onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
         />,
       );
 

@@ -11,6 +11,7 @@ import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
+import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 export function DiffPane({
   client,
@@ -25,6 +26,9 @@ export function DiffPane({
   onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
+  rebaseProgress,
+  onRebaseContinue,
+  onRebaseAbort,
 }: {
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -38,6 +42,9 @@ export function DiffPane({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
+  rebaseProgress: { currentStep: number; totalSteps: number } | null;
+  onRebaseContinue: () => void;
+  onRebaseAbort: () => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -53,6 +60,9 @@ export function DiffPane({
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         mergeMessage={mergeMessage}
         onAbortMerge={onAbortMerge}
+        rebaseProgress={rebaseProgress}
+        onRebaseContinue={onRebaseContinue}
+        onRebaseAbort={onRebaseAbort}
       />
     );
   }
@@ -78,6 +88,9 @@ function UncommittedDiffPane({
   onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
+  rebaseProgress,
+  onRebaseContinue,
+  onRebaseAbort,
 }: {
   client: RepoClient;
   status: StatusEntry[];
@@ -90,6 +103,9 @@ function UncommittedDiffPane({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
+  rebaseProgress: { currentStep: number; totalSteps: number } | null;
+  onRebaseContinue: () => void;
+  onRebaseAbort: () => void;
 }) {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
   const [viewMode, setViewMode] = useState<"diff" | "blame" | "conflict">("diff");
@@ -240,12 +256,22 @@ function UncommittedDiffPane({
       <button onClick={onSaveStash} disabled={status.length === 0}>
         Stash
       </button>
-      <CommitBox
-        onCommit={onCommit}
-        disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
-        onAbortMerge={onAbortMerge}
-        initialMessage={mergeMessage ?? undefined}
-      />
+      {rebaseProgress !== null ? (
+        <RebaseProgressPanel
+          currentStep={rebaseProgress.currentStep}
+          totalSteps={rebaseProgress.totalSteps}
+          disabled={status.some((entry) => entry.kind === "Conflicted")}
+          onContinue={onRebaseContinue}
+          onAbort={onRebaseAbort}
+        />
+      ) : (
+        <CommitBox
+          onCommit={onCommit}
+          disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
+          onAbortMerge={onAbortMerge}
+          initialMessage={mergeMessage ?? undefined}
+        />
+      )}
     </div>
   );
 }
