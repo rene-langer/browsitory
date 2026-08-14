@@ -6,12 +6,12 @@ mod worker;
 use commands::{
     abort_merge, abort_rebase, add_remote, apply_stash, clear_current_upstream, commit,
     commits_since, create_branch, delete_branch, drop_stash, get_blame, get_commit_diff,
-    get_commit_files, get_commit_graph, get_conflict_hunks, get_current_upstream, get_remote_upstreams,
-    get_merge_message, get_rebase_progress, get_status, get_working_diff, list_branches,
-    list_recent_repos, list_remotes, list_stashes, open_repo, pick_repo_folder, rebase_continue,
-    remove_remote, rename_branch, rename_remote, resolve_add_delete_conflict, resolve_conflict,
-    save_stash, set_current_upstream, stage_file, start_merge, start_rebase, switch_branch,
-    unstage_file, update_remote_urls, AppState,
+    get_commit_files, get_commit_graph, get_conflict_hunks, get_current_upstream,
+    get_merge_message, get_rebase_progress, get_remote_upstreams, get_status, get_working_diff,
+    list_branches, list_recent_repos, list_remotes, list_stashes, open_repo, pick_repo_folder,
+    rebase_continue, remove_remote, rename_branch, rename_remote, resolve_add_delete_conflict,
+    resolve_conflict, save_stash, set_current_upstream, stage_file, start_merge, start_rebase,
+    switch_branch, unstage_file, update_remote_urls, AppState,
 };
 
 fn main() {
