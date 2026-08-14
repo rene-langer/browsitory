@@ -28,44 +28,51 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
             current: progress.current,
             total: progress.total,
             received_bytes: progress.received_bytes,
-            message: progress.message,
+            // Sideband and reference-update text comes from the remote. It is not safe to
+            // expose over IPC, even when it looks like ordinary progress output.
+            message: None,
         }
+    }
+}
+
+fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgressDto) {
+    match event {
+        TransferEvent::Started { operation_id } => (
+            "transfer-progress",
+            TransferProgressDto {
+                operation_id,
+                phase: "Starting".to_string(),
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            },
+        ),
+        TransferEvent::Progress(progress) => {
+            ("transfer-progress", TransferProgressDto::from(progress))
+        }
+        TransferEvent::Completed {
+            operation_id,
+            error: _,
+        } => (
+            "transfer-complete",
+            TransferProgressDto {
+                operation_id,
+                phase: "Completed".to_string(),
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            },
+        ),
     }
 }
 
 fn emit_transfer_events(app: AppHandle, events: mpsc::Receiver<TransferEvent>) {
     thread::spawn(move || {
         for event in events {
-            let result = match event {
-                TransferEvent::Started { operation_id } => app.emit(
-                    "transfer-progress",
-                    TransferProgressDto {
-                        operation_id,
-                        phase: "Starting".to_string(),
-                        current: 0,
-                        total: 0,
-                        received_bytes: 0,
-                        message: None,
-                    },
-                ),
-                TransferEvent::Progress(progress) => {
-                    app.emit("transfer-progress", TransferProgressDto::from(progress))
-                }
-                TransferEvent::Completed {
-                    operation_id,
-                    error,
-                } => app.emit(
-                    "transfer-complete",
-                    TransferProgressDto {
-                        operation_id,
-                        phase: "Completed".to_string(),
-                        current: 0,
-                        total: 0,
-                        received_bytes: 0,
-                        message: error,
-                    },
-                ),
-            };
+            let (name, payload) = transfer_event_payload(event);
+            let result = app.emit(name, payload);
             let _ = result;
         }
     });
@@ -754,7 +761,32 @@ pub async fn get_rebase_progress(
 #[cfg(test)]
 mod tests {
     use git_core::diff::DiffLineOrigin;
+    use git_core::remote::{TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
+
+    use crate::worker::TransferEvent;
+
+    use super::transfer_event_payload;
+
+    #[test]
+    fn transfer_event_bridge_redacts_sideband_and_failure_messages() {
+        let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            phase: TransferPhase::Receiving,
+            current: 2,
+            total: 4,
+            received_bytes: 1024,
+            message: Some("Authorization: Bearer secret-token".into()),
+        }));
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            error: Some("fetch failed".into()),
+        });
+
+        assert_eq!(progress.message, None);
+        assert_eq!(completed.message, None);
+    }
 
     /// The `kind` field of `StatusEntryDto` is produced by `format!("{:?}", kind)`, so the
     /// `Debug` output *is* the wire format. Its counterpart contract is the `StatusKind`
