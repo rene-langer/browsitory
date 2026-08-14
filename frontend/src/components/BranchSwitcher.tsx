@@ -11,6 +11,7 @@ export function BranchSwitcher({
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
   onMergeBranch,
+  isMerging,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -21,6 +22,7 @@ export function BranchSwitcher({
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
+  isMerging: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -114,6 +116,7 @@ export function BranchSwitcher({
                 </button>
                 {!b.isCurrent && (
                   <button
+                    disabled={isMerging}
                     onClick={() => {
                       onMergeBranch(b.name);
                       closePopoverState();
