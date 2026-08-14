@@ -153,7 +153,10 @@ pub fn remote_upstreams(repo: &Repository, remote_name: &str) -> Result<Vec<Upst
     for entry in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = entry?;
         let Ok(Some(local_branch)) = branch.name() else { continue };
-        if config.get_string(&format!("branch.{local_branch}.remote"))? != remote_name { continue }
+        match config.get_string(&format!("branch.{local_branch}.remote")) {
+            Ok(configured_remote) if configured_remote == remote_name => {}
+            Ok(_) | Err(git2::Error { .. }) => continue,
+        }
         let merge_ref = config.get_string(&format!("branch.{local_branch}.merge"))?;
         upstreams.push(UpstreamInfo {
             local_branch: local_branch.to_string(),
