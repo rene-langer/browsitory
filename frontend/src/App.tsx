@@ -4,6 +4,7 @@ import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
+import { RemotePanel } from "./components/RemotePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
 
@@ -51,6 +52,16 @@ export default function App() {
         onMergeBranch={appState.mergeBranch}
         isMerging={appState.state.mergeMessage !== null}
         isRebasing={appState.state.rebaseProgress !== null}
+      />
+      <RemotePanel
+        remotes={appState.state.remotes}
+        upstream={appState.state.upstream}
+        onAddRemote={appState.addRemote}
+        onRenameRemote={appState.renameRemote}
+        onUpdateRemoteUrls={appState.updateRemoteUrls}
+        onRemoveRemote={appState.removeRemote}
+        onSetUpstream={appState.setCurrentUpstream}
+        onClearUpstream={appState.clearCurrentUpstream}
       />
       <div className="app-layout">
         <CommitGraph
