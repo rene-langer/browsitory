@@ -1,6 +1,48 @@
-use git2::{BranchType, ErrorCode, Repository};
+use std::cell::RefCell;
+
+use git2::{
+    BranchType, Cred, CredentialType, ErrorCode, FetchOptions, RemoteCallbacks, Repository,
+};
 use thiserror::Error;
 use url::Url;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferOperation {
+    Fetch,
+    Pull,
+    PushBranch,
+    PushTags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferPhase {
+    Receiving,
+    Updating,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferProgress {
+    pub operation_id: String,
+    pub operation: TransferOperation,
+    pub phase: TransferPhase,
+    pub current: usize,
+    pub total: usize,
+    pub received_bytes: usize,
+    pub message: Option<String>,
+}
+
+pub trait TransferReporter {
+    fn report(&mut self, event: TransferProgress);
+}
+
+pub trait CredentialProvider {
+    fn credential(
+        &mut self,
+        url: &str,
+        username: Option<&str>,
+        allowed: CredentialType,
+    ) -> Result<Cred, git2::Error>;
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteInfo {
@@ -24,6 +66,64 @@ pub enum RemoteError {
     CredentialBearingUrl,
     #[error("remote '{name}' is the upstream for local branch(es): {branches:?}")]
     RemoteInUse { name: String, branches: Vec<String> },
+}
+
+pub fn fetch_remote(
+    repo: &Repository,
+    remote_name: &str,
+    operation_id: String,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+) -> Result<(), RemoteError> {
+    let mut remote = repo.find_remote(remote_name)?;
+    let credentials = RefCell::new(credentials);
+    let reporter = RefCell::new(reporter);
+    let mut callbacks = RemoteCallbacks::new();
+
+    callbacks.credentials(|url, username, allowed| {
+        credentials.borrow_mut().credential(url, username, allowed)
+    });
+    callbacks.transfer_progress(|progress| {
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: operation_id.clone(),
+            operation: TransferOperation::Fetch,
+            phase: TransferPhase::Receiving,
+            current: progress.received_objects(),
+            total: progress.total_objects(),
+            received_bytes: progress.received_bytes(),
+            message: None,
+        });
+        true
+    });
+    callbacks.sideband_progress(|message| {
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: operation_id.clone(),
+            operation: TransferOperation::Fetch,
+            phase: TransferPhase::Receiving,
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: Some(String::from_utf8_lossy(message).into_owned()),
+        });
+        true
+    });
+    callbacks.update_tips(|reference, old, new| {
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: operation_id.clone(),
+            operation: TransferOperation::Fetch,
+            phase: TransferPhase::Updating,
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: Some(format!("{reference}: {old} -> {new}")),
+        });
+        true
+    });
+
+    let mut options = FetchOptions::new();
+    options.remote_callbacks(callbacks);
+    remote.fetch(&[] as &[&str], Some(&mut options), None)?;
+    Ok(())
 }
 
 pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
