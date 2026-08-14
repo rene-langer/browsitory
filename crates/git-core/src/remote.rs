@@ -147,6 +147,31 @@ pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
+pub fn remote_upstreams(repo: &Repository, remote_name: &str) -> Result<Vec<UpstreamInfo>, RemoteError> {
+    let config = repo.config()?;
+    let mut upstreams = Vec::new();
+    for entry in repo.branches(Some(BranchType::Local))? {
+        let (branch, _) = entry?;
+        let Ok(Some(local_branch)) = branch.name() else { continue };
+        if config.get_string(&format!("branch.{local_branch}.remote"))? != remote_name { continue }
+        let merge_ref = config.get_string(&format!("branch.{local_branch}.merge"))?;
+        upstreams.push(UpstreamInfo {
+            local_branch: local_branch.to_string(),
+            remote_name: remote_name.to_string(),
+            remote_branch: merge_ref.strip_prefix("refs/heads/").unwrap_or(&merge_ref).to_string(),
+        });
+    }
+    Ok(upstreams)
+}
+
+pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    for upstream in remote_upstreams(repo, name)? {
+        repo.find_branch(&upstream.local_branch, BranchType::Local)?.set_upstream(None)?;
+    }
+    repo.remote_delete(name)?;
+    Ok(())
+}
+
 fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
     Ok(repo.head()?.shorthand()?.to_string())
 }

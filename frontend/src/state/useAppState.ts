@@ -25,6 +25,7 @@ export interface AppState {
   branches: BranchInfo[];
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
+  remoteUpstreams: Record<string, UpstreamInfo[]>;
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
@@ -50,9 +51,9 @@ export interface UseAppStateResult {
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
   addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
-  renameRemote(oldName: string, newName: string): Promise<void>;
+  renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
-  removeRemote(name: string): Promise<void>;
+  removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
@@ -81,6 +82,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     branches: [],
     remotes: [],
     upstream: null,
+    remoteUpstreams: {},
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
@@ -103,6 +105,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           client.getMergeMessage(),
           client.getRebaseProgress(),
         ]);
+      const remoteUpstreams = Object.fromEntries(await Promise.all(remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams?.(remote.name) ?? []])));
       setState((prev) => ({
         ...prev,
         status,
@@ -110,6 +113,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         branches,
         remotes,
         upstream,
+        remoteUpstreams,
         stashes,
         mergeMessage,
         rebaseProgress,
@@ -189,7 +193,14 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const renameRemote = useCallback(
-    (oldName: string, newName: string) => runMutation(() => client.renameRemote(oldName, newName)),
+    async (oldName: string, newName: string) => {
+      let renamed = false;
+      await runMutation(async () => {
+        await client.renameRemote(oldName, newName);
+        renamed = true;
+      });
+      return renamed;
+    },
     [client, runMutation],
   );
   const updateRemoteUrls = useCallback(
@@ -197,7 +208,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const removeRemote = useCallback(
-    (name: string) => runMutation(() => client.removeRemote(name)),
+    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(name, clearUpstreams)),
     [client, runMutation],
   );
   const setCurrentUpstream = useCallback(

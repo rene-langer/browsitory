@@ -501,6 +501,10 @@ pub async fn get_current_upstream(
     let upstream = worker_handle(&state)?.get_current_upstream()?;
     Ok(upstream.map(UpstreamInfoDto::from))
 }
+#[tauri::command]
+pub async fn get_remote_upstreams(name: String, state: State<'_, AppState>) -> Result<Vec<UpstreamInfoDto>, String> {
+    Ok(worker_handle(&state)?.get_remote_upstreams(name)?.into_iter().map(UpstreamInfoDto::from).collect())
+}
 
 #[tauri::command]
 pub async fn add_remote(
@@ -532,8 +536,8 @@ pub async fn update_remote_urls(
 }
 
 #[tauri::command]
-pub async fn remove_remote(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.remove_remote(name)
+pub async fn remove_remote(name: String, clear_upstreams: bool, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.remove_remote(name, clear_upstreams)
 }
 
 #[tauri::command]
