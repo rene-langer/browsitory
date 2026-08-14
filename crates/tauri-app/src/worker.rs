@@ -7,6 +7,7 @@ use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
+use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -114,6 +115,29 @@ pub(crate) enum Command {
         choice: FileConflictChoice,
         reply: Sender<Result<(), String>>,
     },
+    #[allow(dead_code)]
+    CommitsSince {
+        onto: String,
+        reply: Sender<Result<Vec<RebasePlanCommit>, String>>,
+    },
+    #[allow(dead_code)]
+    StartRebase {
+        onto: String,
+        plan: Vec<RebasePlanEntry>,
+        reply: Sender<Result<RebaseStepResult, String>>,
+    },
+    #[allow(dead_code)]
+    RebaseContinue {
+        reply: Sender<Result<RebaseStepResult, String>>,
+    },
+    #[allow(dead_code)]
+    AbortRebase {
+        reply: Sender<Result<(), String>>,
+    },
+    #[allow(dead_code)]
+    GetRebaseProgress {
+        reply: Sender<Result<Option<(usize, usize)>, String>>,
+    },
 }
 
 pub struct Worker {
@@ -136,6 +160,7 @@ impl Worker {
 
         thread::spawn(move || {
             let mut repo = repo;
+            let mut rebase_state: Option<RebaseState> = None;
             for command in rx {
                 match command {
                     Command::GetStatus { reply } => {
@@ -285,6 +310,47 @@ impl Worker {
                             git_core::merge::resolve_add_delete_conflict(&repo, &path, choice)
                                 .map_err(|e| e.to_string());
                         let _ = reply.send(result);
+                    }
+                    Command::CommitsSince { onto, reply } => {
+                        let result = git_core::rebase::commits_since(&repo, &onto)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::StartRebase { onto, plan, reply } => {
+                        let result = git_core::rebase::start_rebase(&repo, &onto, plan)
+                            .map_err(|e| e.to_string())
+                            .map(|(state, step)| {
+                                if !matches!(step, RebaseStepResult::Done) {
+                                    rebase_state = Some(state);
+                                }
+                                step
+                            });
+                        let _ = reply.send(result);
+                    }
+                    Command::RebaseContinue { reply } => {
+                        let result = match rebase_state.as_mut() {
+                            Some(state) => git_core::rebase::rebase_continue(&repo, state)
+                                .map_err(|e| e.to_string()),
+                            None => Err("no rebase is currently in progress".to_string()),
+                        };
+                        if matches!(result, Ok(RebaseStepResult::Done)) {
+                            rebase_state = None;
+                        }
+                        let _ = reply.send(result);
+                    }
+                    Command::AbortRebase { reply } => {
+                        let result = match rebase_state.take() {
+                            Some(state) => git_core::rebase::abort_rebase(&repo, state)
+                                .map_err(|e| e.to_string()),
+                            None => Err("no rebase is currently in progress".to_string()),
+                        };
+                        let _ = reply.send(result);
+                    }
+                    Command::GetRebaseProgress { reply } => {
+                        let progress = rebase_state
+                            .as_ref()
+                            .map(|s| (s.current_step(), s.total_steps()));
+                        let _ = reply.send(Ok(progress));
                     }
                 }
             }
@@ -611,6 +677,72 @@ impl WorkerHandle {
                 choice,
                 reply: reply_tx,
             })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::CommitsSince {
+                onto,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn start_rebase(
+        &self,
+        onto: String,
+        plan: Vec<RebasePlanEntry>,
+    ) -> Result<RebaseStepResult, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::StartRebase {
+                onto,
+                plan,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn rebase_continue(&self) -> Result<RebaseStepResult, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RebaseContinue { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn abort_rebase(&self) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::AbortRebase { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    #[allow(dead_code)]
+    pub fn get_rebase_progress(&self) -> Result<Option<(usize, usize)>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetRebaseProgress { reply: reply_tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
@@ -985,5 +1117,72 @@ mod tests {
         let status = handle.get_status().unwrap();
         assert_eq!(status.len(), 1);
         assert!(status[0].staged);
+    }
+
+    #[test]
+    fn commits_since_and_start_rebase_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "v1\n");
+        commit_all(&repo, "base commit");
+        let onto = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "add a");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let commits = handle.commits_since(onto.clone()).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].summary, "add a");
+
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        }];
+        let result = handle.start_rebase(onto, plan).unwrap();
+
+        assert_eq!(result, git_core::rebase::RebaseStepResult::Done);
+        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+    }
+
+    #[test]
+    fn rebase_continue_and_abort_rebase_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "v1\n");
+        commit_all(&repo, "base commit");
+        let onto = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "add a");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let commits = handle.commits_since(onto.clone()).unwrap();
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: git_core::rebase::RebaseAction::Edit,
+            combined_message: None,
+        }];
+        let result = handle.start_rebase(onto, plan).unwrap();
+        assert_eq!(result, git_core::rebase::RebaseStepResult::PausedForEdit);
+        assert_eq!(handle.get_rebase_progress().unwrap(), Some((0, 1)));
+
+        handle.abort_rebase().unwrap();
+
+        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert!(handle.get_status().unwrap().is_empty());
     }
 }
