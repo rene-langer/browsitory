@@ -28,9 +28,78 @@ const remoteManagementClient = {
   removeRemote: async () => unimplemented(),
   setCurrentUpstream: async () => unimplemented(),
   clearCurrentUpstream: async () => unimplemented(),
+  fetchRemote: async () => unimplemented(),
+  subscribeTransferProgress: () => () => {},
 };
 
 describe("useAppState", () => {
+  it("tracks only its fetch operation and refreshes after its completion", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    let statusCalls = 0;
+    const client: RepoClient = {
+      ...remoteManagementClient,
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => {
+        statusCalls += 1;
+        return [];
+      },
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getBlame: async () => unimplemented(),
+      mergeBranch: async () => unimplemented(),
+      getConflictHunks: async () => unimplemented(),
+      resolveConflict: async () => unimplemented(),
+      abortMerge: async () => unimplemented(),
+      getMergeMessage: async () => null,
+      resolveAddDeleteConflict: async () => unimplemented(),
+      commitsSince: async () => unimplemented(),
+      startRebase: async () => unimplemented(),
+      rebaseContinue: async () => unimplemented(),
+      abortRebase: async () => unimplemented(),
+      getRebaseProgress: async () => null,
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      commit: async () => unimplemented(),
+      fetchRemote: async () => "op-1",
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+    };
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(result.current.state.transfer?.operationId).toBe("op-1");
+    expect(result.current.state.pending).toBe(true);
+
+    act(() => listener?.({ operationId: "other", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.transfer?.operationId).toBe("op-1");
+    expect(statusCalls).toBe(1);
+
+    await act(async () => {
+      listener?.({ operationId: "op-1", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+    });
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+    expect(statusCalls).toBe(2);
+  });
+
   it("openRepo populates repository state including remotes and upstream", async () => {
     const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
     const graphCommit: GraphCommit = {

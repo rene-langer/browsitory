@@ -5,6 +5,7 @@ import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
 import { RemotePanel } from "./components/RemotePanel";
+import { TransferPanel } from "./components/TransferPanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
 
@@ -63,7 +64,15 @@ export default function App() {
         onRemoveRemote={appState.removeRemote}
         onSetUpstream={appState.setCurrentUpstream}
         onClearUpstream={appState.clearCurrentUpstream}
+        onFetchRemote={appState.fetchRemote}
+        fetchDisabled={
+          appState.state.pending ||
+          appState.state.mergeMessage !== null ||
+          appState.state.rebaseProgress !== null ||
+          appState.state.transfer !== null
+        }
       />
+      <TransferPanel progress={appState.state.transfer} />
       <div className="app-layout">
         <CommitGraph
           status={appState.state.status}

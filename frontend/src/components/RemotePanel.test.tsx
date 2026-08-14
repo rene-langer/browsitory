@@ -35,12 +35,26 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onRemoveRemote={vi.fn().mockResolvedValue(undefined)}
       onSetUpstream={vi.fn()}
       onClearUpstream={vi.fn()}
+      onFetchRemote={vi.fn()}
+      fetchDisabled={false}
       {...overrides}
     />,
   );
 }
 
 describe("RemotePanel", () => {
+  it("fetches the selected remote and disables Fetch while an operation is active", () => {
+    const onFetchRemote = vi.fn();
+    renderPanel({ onFetchRemote, fetchDisabled: true });
+
+    expect(screen.getByRole("button", { name: "Fetch origin" })).toBeDisabled();
+
+    renderPanel({ onFetchRemote, fetchDisabled: false });
+    screen.getAllByRole("button", { name: "Fetch origin" })[1].click();
+
+    expect(onFetchRemote).toHaveBeenCalledWith("origin");
+  });
+
   it("requires upstream discovery in both the client and panel contracts", () => {
     expectTypeOf<IsOptional<RepoClient, "getRemoteUpstreams">>().toEqualTypeOf<false>();
     expectTypeOf<
