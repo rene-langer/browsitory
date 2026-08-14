@@ -8,6 +8,7 @@ use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
+use git_core::remote::{RemoteInfo, UpstreamInfo};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -70,6 +71,41 @@ pub(crate) enum Command {
     RenameBranch {
         old_name: String,
         new_name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ListRemotes {
+        reply: Sender<Result<Vec<RemoteInfo>, String>>,
+    },
+    GetCurrentUpstream {
+        reply: Sender<Result<Option<UpstreamInfo>, String>>,
+    },
+    AddRemote {
+        name: String,
+        fetch_url: String,
+        push_url: Option<String>,
+        reply: Sender<Result<(), String>>,
+    },
+    RenameRemote {
+        old_name: String,
+        new_name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    UpdateRemoteUrls {
+        name: String,
+        fetch_url: String,
+        push_url: Option<String>,
+        reply: Sender<Result<(), String>>,
+    },
+    RemoveRemote {
+        name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    SetCurrentUpstream {
+        remote_name: String,
+        remote_branch: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ClearCurrentUpstream {
         reply: Sender<Result<(), String>>,
     },
     ListStashes {
@@ -249,6 +285,78 @@ impl Worker {
                         reply,
                     } => {
                         let result = git_core::branch::rename_branch(&repo, &old_name, &new_name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListRemotes { reply } => {
+                        let result =
+                            git_core::remote::list_remotes(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetCurrentUpstream { reply } => {
+                        let result =
+                            git_core::remote::current_upstream(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::AddRemote {
+                        name,
+                        fetch_url,
+                        push_url,
+                        reply,
+                    } => {
+                        let result = git_core::remote::add_remote(
+                            &repo,
+                            &name,
+                            &fetch_url,
+                            push_url.as_deref(),
+                        )
+                        .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RenameRemote {
+                        old_name,
+                        new_name,
+                        reply,
+                    } => {
+                        let result = git_core::remote::rename_remote(&repo, &old_name, &new_name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::UpdateRemoteUrls {
+                        name,
+                        fetch_url,
+                        push_url,
+                        reply,
+                    } => {
+                        let result = git_core::remote::update_remote_urls(
+                            &repo,
+                            &name,
+                            &fetch_url,
+                            push_url.as_deref(),
+                        )
+                        .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RemoveRemote { name, reply } => {
+                        let result = git_core::remote::remove_remote(&repo, &name)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::SetCurrentUpstream {
+                        remote_name,
+                        remote_branch,
+                        reply,
+                    } => {
+                        let result = git_core::remote::set_current_upstream(
+                            &repo,
+                            &remote_name,
+                            &remote_branch,
+                        )
+                        .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ClearCurrentUpstream { reply } => {
+                        let result = git_core::remote::clear_current_upstream(&repo)
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
@@ -548,6 +656,121 @@ impl WorkerHandle {
                 new_name,
                 reply: reply_tx,
             })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListRemotes { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetCurrentUpstream { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn add_remote(
+        &self,
+        name: String,
+        fetch_url: String,
+        push_url: Option<String>,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::AddRemote {
+                name,
+                fetch_url,
+                push_url,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn rename_remote(&self, old_name: String, new_name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RenameRemote {
+                old_name,
+                new_name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn update_remote_urls(
+        &self,
+        name: String,
+        fetch_url: String,
+        push_url: Option<String>,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::UpdateRemoteUrls {
+                name,
+                fetch_url,
+                push_url,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn remove_remote(&self, name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RemoveRemote {
+                name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn set_current_upstream(
+        &self,
+        remote_name: String,
+        remote_branch: String,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SetCurrentUpstream {
+                remote_name,
+                remote_branch,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn clear_current_upstream(&self) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ClearCurrentUpstream { reply: reply_tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
@@ -955,6 +1178,38 @@ mod tests {
 
         let stashes = handle.list_stashes().unwrap();
         assert_eq!(stashes.len(), 1);
+    }
+
+    #[test]
+    fn remote_and_current_upstream_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        repo.remote("origin", "https://example.com/owner/repo.git")
+            .unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .set_current_upstream("origin".into(), "main".into())
+            .unwrap();
+
+        assert_eq!(
+            handle.list_remotes().unwrap(),
+            vec![git_core::remote::RemoteInfo {
+                name: "origin".into(),
+                fetch_url: "https://example.com/owner/repo.git".into(),
+                push_url: None,
+            }]
+        );
+        assert_eq!(
+            handle.get_current_upstream().unwrap(),
+            Some(git_core::remote::UpstreamInfo {
+                local_branch: repo.head().unwrap().shorthand().unwrap().into(),
+                remote_name: "origin".into(),
+                remote_branch: "main".into(),
+            })
+        );
     }
 
     #[test]

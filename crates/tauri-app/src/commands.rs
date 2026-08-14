@@ -22,6 +22,42 @@ pub struct BranchInfoDto {
     pub is_current: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInfoDto {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: Option<String>,
+}
+
+impl From<git_core::remote::RemoteInfo> for RemoteInfoDto {
+    fn from(remote: git_core::remote::RemoteInfo) -> Self {
+        Self {
+            name: remote.name,
+            fetch_url: remote.fetch_url,
+            push_url: remote.push_url,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpstreamInfoDto {
+    pub local_branch: String,
+    pub remote_name: String,
+    pub remote_branch: String,
+}
+
+impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
+    fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
+        Self {
+            local_branch: upstream.local_branch,
+            remote_name: upstream.remote_name,
+            remote_branch: upstream.remote_branch,
+        }
+    }
+}
+
 impl From<git_core::branch::BranchInfo> for BranchInfoDto {
     fn from(b: git_core::branch::BranchInfo) -> Self {
         BranchInfoDto {
@@ -450,6 +486,68 @@ pub async fn rename_branch(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state)?.rename_branch(old_name, new_name)
+}
+
+#[tauri::command]
+pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteInfoDto>, String> {
+    let remotes = worker_handle(&state)?.list_remotes()?;
+    Ok(remotes.into_iter().map(RemoteInfoDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn get_current_upstream(
+    state: State<'_, AppState>,
+) -> Result<Option<UpstreamInfoDto>, String> {
+    let upstream = worker_handle(&state)?.get_current_upstream()?;
+    Ok(upstream.map(UpstreamInfoDto::from))
+}
+
+#[tauri::command]
+pub async fn add_remote(
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.add_remote(name, fetch_url, push_url)
+}
+
+#[tauri::command]
+pub async fn rename_remote(
+    old_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.rename_remote(old_name, new_name)
+}
+
+#[tauri::command]
+pub async fn update_remote_urls(
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.update_remote_urls(name, fetch_url, push_url)
+}
+
+#[tauri::command]
+pub async fn remove_remote(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.remove_remote(name)
+}
+
+#[tauri::command]
+pub async fn set_current_upstream(
+    remote_name: String,
+    remote_branch: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.set_current_upstream(remote_name, remote_branch)
+}
+
+#[tauri::command]
+pub async fn clear_current_upstream(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.clear_current_upstream()
 }
 
 #[tauri::command]

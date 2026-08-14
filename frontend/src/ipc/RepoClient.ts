@@ -26,6 +26,18 @@ export interface BranchInfo {
   isCurrent: boolean;
 }
 
+export interface RemoteInfo {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string | null;
+}
+
+export interface UpstreamInfo {
+  localBranch: string;
+  remoteName: string;
+  remoteBranch: string;
+}
+
 export interface StashEntry {
   index: number;
   message: string;
@@ -109,6 +121,14 @@ export interface RepoClient {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  listRemotes(): Promise<RemoteInfo[]>;
+  getCurrentUpstream(): Promise<UpstreamInfo | null>;
+  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  renameRemote(oldName: string, newName: string): Promise<void>;
+  updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  removeRemote(name: string): Promise<void>;
+  setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
+  clearCurrentUpstream(): Promise<void>;
   listStashes(): Promise<StashEntry[]>;
   saveStash(): Promise<void>;
   applyStash(index: number): Promise<void>;
