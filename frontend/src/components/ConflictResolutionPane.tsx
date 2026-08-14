@@ -57,9 +57,15 @@ export function ConflictResolutionPane({
       return (
         <div>
           <p>{error}</p>
-          <button onClick={() => onResolveAddDelete(path, "Ours")}>Keep Our Version</button>
-          <button onClick={() => onResolveAddDelete(path, "Theirs")}>Keep Their Version</button>
-          <button onClick={() => onResolveAddDelete(path, "Delete")}>Delete File</button>
+          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Ours")}>
+            Keep Our Version
+          </button>
+          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Theirs")}>
+            Keep Their Version
+          </button>
+          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Delete")}>
+            Delete File
+          </button>
         </div>
       );
     }

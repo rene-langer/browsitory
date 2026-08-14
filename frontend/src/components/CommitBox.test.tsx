@@ -145,6 +145,39 @@ describe("CommitBox", () => {
     expect(screen.getByDisplayValue("my own draft message")).toBeInTheDocument();
   });
 
+  it("re-seeds the message when merging the same branch twice in a row (commit clears lastSeeded too)", () => {
+    const { rerender } = render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'feature'"
+      />,
+    );
+    expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
+
+    // Commit the first merge. This clears both `message` and `lastSeeded` internally.
+    fireEvent.click(screen.getByText("Commit"));
+
+    // Merge ends (mergeMessage goes back to null after the commit).
+    rerender(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} />);
+
+    // The SAME branch is merged again, producing the identical merge message. Without also
+    // clearing `lastSeeded` on commit, `message` ("") would no longer equal the stale
+    // `lastSeeded` ("Merge branch 'feature'"), so the seed effect would refuse to re-seed and
+    // the box would stay empty.
+    rerender(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage="Merge branch 'feature'"
+      />,
+    );
+
+    expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
+  });
+
   it("renders an Abort merge button only when initialMessage is set, and calls onAbortMerge", () => {
     const onAbortMerge = vi.fn();
     const { rerender } = render(

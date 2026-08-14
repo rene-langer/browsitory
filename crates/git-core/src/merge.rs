@@ -18,6 +18,8 @@ pub enum MergeError {
     NotMerging,
     #[error("a merge is already in progress or has unresolved conflicts")]
     AlreadyMerging,
+    #[error("'{0}' is a text conflict, not an add/delete conflict")]
+    NotAnAddDeleteConflict(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +211,9 @@ pub fn resolve_add_delete_conflict(
     choice: FileConflictChoice,
 ) -> Result<(), MergeError> {
     let conflict = find_conflict(repo, path)?;
+    if let (Some(_), Some(_), Some(_)) = (&conflict.ancestor, &conflict.our, &conflict.their) {
+        return Err(MergeError::NotAnAddDeleteConflict(path.to_string()));
+    }
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     let mut index = repo.index()?;
 
