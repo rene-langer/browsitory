@@ -537,3 +537,76 @@ fn start_rebase_rejects_starting_from_an_already_detached_head() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn abort_rebase_restores_the_original_branch_and_tip_exactly() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let original_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![pick(&commits[0].id)];
+    let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    // Deliberately re-derive a fresh, still-in-progress-looking state isn't possible once
+    // `start_rebase` already reached `Done` in one shot for a clean plan — abort a rebase that's
+    // still genuinely paused instead, so this test exercises the real "abort mid-flight" case.
+    let _ = state;
+
+    // Rebuild a genuinely paused rebase to abort: an Edit step, still open when we abort.
+    write_file(dir.path(), "base.txt", "v1\n"); // no-op rewrite, just to get a clean starting point
+    let commits_again = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![RebasePlanEntry {
+        commit_id: commits_again[0].id.clone(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    }];
+    let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+
+    git_core::rebase::abort_rebase(&repo, state).unwrap();
+
+    let head_ref = repo.head().unwrap();
+    assert_eq!(head_ref.shorthand().unwrap(), branch_name);
+    assert_eq!(head_ref.peel_to_commit().unwrap().id(), original_tip);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let contents = std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
+    assert_eq!(contents, "a\n");
+}
+
+#[test]
+fn abort_rebase_after_a_conflict_also_recovers_cleanly() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let original_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![pick(&commits[1].id)];
+    let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+
+    git_core::rebase::abort_rebase(&repo, state).unwrap();
+
+    let head_ref = repo.head().unwrap();
+    assert_eq!(head_ref.shorthand().unwrap(), branch_name);
+    assert_eq!(head_ref.peel_to_commit().unwrap().id(), original_tip);
+    assert!(!repo.index().unwrap().has_conflicts());
+    let contents = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(contents, "line one\nchanged again\n");
+}
