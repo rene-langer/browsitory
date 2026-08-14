@@ -46,6 +46,8 @@ Remote configuration follows normal Git semantics: remotes are named and have a 
 
 HTTPS secrets are stored in the OS credential manager using a deterministic Browsitory service/account key derived from protocol, host, port, and username. The frontend sends a just-entered secret only to the credential-save command; it is never placed in useAppState, logged, returned by a command, or included in transfer events. A user can update or forget a stored credential explicitly.
 
+The repository's local Git config records only the selected authentication mode and HTTPS username for each remote, so a later transfer can derive the matching keychain entry. Renaming a remote moves this metadata and removing one clears it. Neither the token nor any other secret is written to Git config.
+
 The keyring 4.1.6 crate with its v1 feature supplies cross-platform keychain integration. Its Apache-2.0 license is permitted by this repository's license policy and is recorded in docs/LICENSE_COMPLIANCE.md when added.
 
 git2 is configured with its https and ssh features. HTTPS uses stored username/token credentials; SSH uses the local SSH agent only. Browsitory does not read private-key files, prompt for a passphrase, or write credential.helper configuration.
