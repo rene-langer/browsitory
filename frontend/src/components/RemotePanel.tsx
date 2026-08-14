@@ -4,7 +4,7 @@ import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 export function RemotePanel({
   remotes,
   upstream,
-  remoteUpstreams = {},
+  remoteUpstreams,
   onAddRemote,
   onRenameRemote,
   onUpdateRemoteUrls,
@@ -14,7 +14,7 @@ export function RemotePanel({
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
-  remoteUpstreams?: Record<string, UpstreamInfo[]>;
+  remoteUpstreams: Record<string, UpstreamInfo[]>;
   onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
   onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
@@ -70,7 +70,7 @@ export function RemotePanel({
   };
 
   const requestRemove = (remote: RemoteInfo) => {
-    if ((remoteUpstreams[remote.name] ?? []).length > 0) {
+    if (remoteUpstreams[remote.name].length > 0) {
       setRemoveConfirmation(`clear:${remote.name}`);
     } else {
       setRemoveConfirmation(remote.name);
@@ -121,7 +121,7 @@ export function RemotePanel({
         <div role="alertdialog" aria-label="Remove remote confirmation">
           {removeConfirmation.startsWith("clear:") ? (
             <>
-              <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {(remoteUpstreams[removeConfirmation.slice(6)] ?? []).map((item) => item.localBranch).join(", ")}?</p>
+              <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?</p>
               <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation.slice(6), true).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
             </>
           ) : (

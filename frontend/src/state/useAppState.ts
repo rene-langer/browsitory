@@ -105,7 +105,11 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           client.getMergeMessage(),
           client.getRebaseProgress(),
         ]);
-      const remoteUpstreams = Object.fromEntries(await Promise.all(remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams?.(remote.name) ?? []])));
+      const remoteUpstreams = Object.fromEntries(
+        await Promise.all(
+          remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(remote.name)]),
+        ),
+      );
       setState((prev) => ({
         ...prev,
         status,
