@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { RemotePanel } from "./RemotePanel";
@@ -7,6 +7,12 @@ const origin: RemoteInfo = {
   name: "origin",
   fetchUrl: "../origin.git",
   pushUrl: "../push-origin.git",
+};
+
+const backup: RemoteInfo = {
+  name: "backup",
+  fetchUrl: "../backup.git",
+  pushUrl: "../push-backup.git",
 };
 
 const upstream: UpstreamInfo = {
@@ -56,14 +62,50 @@ describe("RemotePanel", () => {
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "main");
   });
 
-  it("keeps the removal dialog open until clearing the upstream completes", async () => {
+  it("does not update an existing remote's URLs when rename fails", async () => {
+    const onRenameRemote = vi.fn().mockResolvedValue(false);
+    const onUpdateRemoteUrls = vi.fn();
+    renderPanel({ remotes: [origin, backup], onRenameRemote, onUpdateRemoteUrls });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit origin" }));
+    const editForm = screen.getByRole("form", { name: "Edit origin" });
+    fireEvent.change(within(editForm).getByLabelText("Remote name"), {
+      target: { value: "backup" },
+    });
+    fireEvent.change(within(editForm).getByLabelText("Fetch URL"), {
+      target: { value: "../replacement.git" },
+    });
+    fireEvent.change(within(editForm).getByLabelText("Push URL (optional)"), {
+      target: { value: "../replacement-push.git" },
+    });
+    fireEvent.click(within(editForm).getByRole("button", { name: "Save remote" }));
+
+    await waitFor(() => expect(onRenameRemote).toHaveBeenCalledWith("origin", "backup"));
+    expect(onUpdateRemoteUrls).not.toHaveBeenCalled();
+    const backupItem = screen.getByText("backup", { selector: "strong" }).closest("li");
+    expect(backupItem).not.toBeNull();
+    expect(within(backupItem!).getByText("Fetch: ../backup.git")).toBeInTheDocument();
+    expect(within(backupItem!).getByText("Push: ../push-backup.git")).toBeInTheDocument();
+  });
+
+  it("requires explicit removal to clear every branch upstream for the remote", async () => {
     const onRemoveRemote = vi.fn().mockResolvedValue(undefined);
     const onClearUpstream = vi.fn().mockResolvedValue(undefined);
-    renderPanel({ upstream, remoteUpstreams: { origin: [upstream] }, onRemoveRemote, onClearUpstream });
+    const topicUpstream: UpstreamInfo = {
+      localBranch: "topic",
+      remoteName: "origin",
+      remoteBranch: "topic",
+    };
+    renderPanel({
+      upstream,
+      remoteUpstreams: { origin: [upstream, topicUpstream] },
+      onRemoveRemote,
+      onClearUpstream,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Remove origin" }));
 
-    expect(screen.getByText(/clear upstreams for main/i)).toBeInTheDocument();
+    expect(screen.getByText(/clear upstreams for main, topic/i)).toBeInTheDocument();
     expect(onRemoveRemote).not.toHaveBeenCalled();
 
     fireEvent.click(within(screen.getByRole("alertdialog", { name: "Remove remote confirmation" })).getByRole("button", { name: "Confirm remove" }));

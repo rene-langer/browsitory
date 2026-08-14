@@ -1,8 +1,9 @@
 mod common;
 
 use git_core::remote::{
-    add_remote, clear_current_upstream, current_upstream, list_remotes, remove_remote,
-    rename_remote, set_current_upstream, update_remote_urls, RemoteError,
+    add_remote, clear_current_upstream, current_upstream, list_remotes, remote_upstreams,
+    remove_remote, remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
+    update_remote_urls, RemoteError,
 };
 
 #[test]
@@ -145,4 +146,53 @@ fn removal_is_blocked_by_a_non_current_branchs_upstream() {
         remove_remote(&repo, "origin"),
         Err(RemoteError::RemoteInUse { branches, .. }) if branches == ["topic"]
     ));
+}
+
+#[test]
+fn explicit_removal_clears_every_upstream_for_only_the_selected_remote() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    add_remote(&repo, "origin", "file:///tmp/origin.git", None).unwrap();
+    add_remote(&repo, "backup", "file:///tmp/backup.git", None).unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let current_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    repo.branch("topic", &head, false).unwrap();
+    repo.branch("backup-topic", &head, false).unwrap();
+    let mut config = repo.config().unwrap();
+    for branch in [&current_branch, "topic"] {
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(&format!("branch.{branch}.merge"), "refs/heads/main")
+            .unwrap();
+    }
+    config
+        .set_str("branch.backup-topic.remote", "backup")
+        .unwrap();
+    config
+        .set_str("branch.backup-topic.merge", "refs/heads/main")
+        .unwrap();
+    drop(config);
+
+    let mut affected_branches: Vec<_> = remote_upstreams(&repo, "origin")
+        .unwrap()
+        .into_iter()
+        .map(|upstream| upstream.local_branch)
+        .collect();
+    affected_branches.sort();
+    let mut expected_branches = vec![current_branch.clone(), "topic".to_string()];
+    expected_branches.sort();
+    assert_eq!(affected_branches, expected_branches);
+
+    remove_remote_and_clear_upstreams(&repo, "origin").unwrap();
+
+    assert!(repo.find_remote("origin").is_err());
+    assert!(remote_upstreams(&repo, "origin").unwrap().is_empty());
+    assert_eq!(
+        remote_upstreams(&repo, "backup").unwrap()[0].local_branch,
+        "backup-topic"
+    );
 }

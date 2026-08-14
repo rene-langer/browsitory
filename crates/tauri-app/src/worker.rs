@@ -79,7 +79,10 @@ pub(crate) enum Command {
     GetCurrentUpstream {
         reply: Sender<Result<Option<UpstreamInfo>, String>>,
     },
-    GetRemoteUpstreams { name: String, reply: Sender<Result<Vec<UpstreamInfo>, String>> },
+    GetRemoteUpstreams {
+        name: String,
+        reply: Sender<Result<Vec<UpstreamInfo>, String>>,
+    },
     AddRemote {
         name: String,
         fetch_url: String,
@@ -340,12 +343,21 @@ impl Worker {
                         let _ = reply.send(result);
                     }
                     Command::GetRemoteUpstreams { name, reply } => {
-                        let result = git_core::remote::remote_upstreams(&repo, &name).map_err(|e| e.to_string());
+                        let result = git_core::remote::remote_upstreams(&repo, &name)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::RemoveRemote { name, clear_upstreams, reply } => {
-                        let result = (if clear_upstreams { git_core::remote::remove_remote_and_clear_upstreams(&repo, &name) } else { git_core::remote::remove_remote(&repo, &name) })
-                            .map_err(|e| e.to_string());
+                    Command::RemoveRemote {
+                        name,
+                        clear_upstreams,
+                        reply,
+                    } => {
+                        let result = (if clear_upstreams {
+                            git_core::remote::remove_remote_and_clear_upstreams(&repo, &name)
+                        } else {
+                            git_core::remote::remove_remote(&repo, &name)
+                        })
+                        .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::SetCurrentUpstream {
@@ -689,8 +701,15 @@ impl WorkerHandle {
     }
     pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx.send(Command::GetRemoteUpstreams { name, reply: reply_tx }).map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx.recv().map_err(|_| "worker thread stopped before replying".to_string())?
+        self.tx
+            .send(Command::GetRemoteUpstreams {
+                name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
     pub fn add_remote(
@@ -1199,6 +1218,14 @@ mod tests {
         commit_all(&repo, "initial commit");
         repo.remote("origin", "https://example.com/owner/repo.git")
             .unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("topic", &head, false).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("branch.topic.remote", "origin").unwrap();
+        config
+            .set_str("branch.topic.merge", "refs/heads/topic")
+            .unwrap();
+        drop(config);
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
@@ -1222,6 +1249,28 @@ mod tests {
                 remote_branch: "main".into(),
             })
         );
+
+        let mut affected_branches: Vec<_> = handle
+            .get_remote_upstreams("origin".into())
+            .unwrap()
+            .into_iter()
+            .map(|upstream| upstream.local_branch)
+            .collect();
+        affected_branches.sort();
+        let mut expected_branches = vec![
+            repo.head().unwrap().shorthand().unwrap().to_string(),
+            "topic".to_string(),
+        ];
+        expected_branches.sort();
+        assert_eq!(affected_branches, expected_branches);
+
+        handle.remove_remote("origin".into(), true).unwrap();
+        assert!(handle.list_remotes().unwrap().is_empty());
+        assert_eq!(handle.get_current_upstream().unwrap(), None);
+        assert!(handle
+            .get_remote_upstreams("origin".into())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
