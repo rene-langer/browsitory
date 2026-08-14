@@ -345,6 +345,16 @@ fn start_merge_refuses_when_already_merging_and_leaves_conflict_state_untouched(
 }
 
 #[test]
+fn resolve_add_delete_conflict_on_a_genuine_text_conflict_is_rejected() {
+    let (_dir, repo) = make_conflicted_repo();
+
+    let result =
+        git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Ours);
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn resolve_add_delete_conflict_then_commit_has_two_parents() {
     let (_dir, repo) = make_delete_modify_conflict();
     git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)

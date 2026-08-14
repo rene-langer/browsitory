@@ -72,6 +72,13 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const mergeCommitEntry = await $("li*=e2e-merge-feature");
     await mergeCommitEntry.waitForExist({ timeout: 10000 });
+
+    const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
+      cwd: E2E_REPO_PATH,
+    })
+      .toString()
+      .trim();
+    expect(parentsLine.split(" ").length).toBe(3); // commit oid + 2 parents = a real merge commit
   });
 
   it("resolves an add/delete conflict via keep-theirs", async () => {
@@ -139,5 +146,12 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const mergeCommitEntry = await $("li*=e2e-merge-adddelete-feature");
     await mergeCommitEntry.waitForExist({ timeout: 10000 });
+
+    const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
+      cwd: E2E_REPO_PATH,
+    })
+      .toString()
+      .trim();
+    expect(parentsLine.split(" ").length).toBe(3); // commit oid + 2 parents = a real merge commit
   });
 });

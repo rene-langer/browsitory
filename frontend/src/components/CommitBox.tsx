@@ -44,6 +44,7 @@ export function CommitBox({
     }
     onCommit(message);
     setMessage("");
+    setLastSeeded("");
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

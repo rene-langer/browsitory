@@ -162,6 +162,24 @@ function UncommittedDiffPane({
     };
   }, [client, selected, viewMode, status]);
 
+  // Once the selected file's conflict is resolved (via this pane, or externally e.g. abort),
+  // `status` no longer lists it as `Conflicted`, so the render below correctly stops showing
+  // `ConflictResolutionPane` — but `viewMode` itself is still `"conflict"`, and the diff-fetch
+  // effect above only runs when `viewMode === "diff"`. Left alone, the pane falls through to
+  // `DiffView` with stale/empty `hunks` instead of the real post-resolution diff. Transitioning
+  // back to `"diff"` here lets that effect fire and fetch the real diff.
+  useEffect(() => {
+    if (
+      viewMode === "conflict" &&
+      selected !== null &&
+      !status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted")
+    ) {
+      // Deliberate view-mode transition, not a synchronization loop — see comment above.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setViewMode("diff");
+    }
+  }, [viewMode, selected, status]);
+
   const stagedCount = status.filter((entry) => entry.staged).length;
   const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
   const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
@@ -208,6 +226,7 @@ function UncommittedDiffPane({
         selected !== null &&
         status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted") ? (
         <ConflictResolutionPane
+          key={selected.path}
           client={client}
           path={selected.path}
           onResolve={onResolveConflict}

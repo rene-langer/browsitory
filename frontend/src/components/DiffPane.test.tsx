@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { BlameLine, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
 
 function unused(): never {
@@ -593,6 +593,10 @@ describe("DiffPane", () => {
       ];
       const client = fakeClient({
         getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
+        // Finding 5: once the conflicted entry disappears from `status`, `viewMode` now
+        // transitions back to `"diff"`, which fires the normal diff-fetch effect for the
+        // (no-longer-conflicted) selected file — so a real stub is needed here.
+        getWorkingDiff: vi.fn(async () => []),
       });
 
       const { rerender } = render(
@@ -635,6 +639,64 @@ describe("DiffPane", () => {
       );
 
       expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
+      // Finding 5: the pane falls back to the real diff view (which fetches), not a
+      // permanently blank one — `viewMode` transitioned back to `"diff"`.
+      await waitFor(() =>
+        expect(client.getWorkingDiff).toHaveBeenCalledWith("shared.txt", false),
+      );
+    });
+
+    it("switching the selected conflicted file discards stale add/delete fallback state (remounts via key)", async () => {
+      const twoConflicts: StatusEntry[] = [
+        { path: "binary.dat", staged: false, kind: "Conflicted" },
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      let resolveSharedHunks: (segments: ConflictSegment[]) => void = () => {};
+      const getConflictHunks = vi.fn((path: string): Promise<ConflictSegment[]> => {
+        if (path === "binary.dat") {
+          return Promise.reject(
+            new Error("'binary.dat' is an add/delete conflict, not a text conflict"),
+          );
+        }
+        // shared.txt: a fetch that never resolves during this test, simulating the window
+        // where the new path's fetch is still in flight.
+        return new Promise((resolve) => {
+          resolveSharedHunks = resolve;
+        });
+      });
+      const client = fakeClient({ getConflictHunks });
+
+      render(
+        <DiffPane
+          client={client}
+          selectedRow="uncommitted"
+          status={twoConflicts}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("binary.dat (Conflicted)"));
+      await waitFor(() => screen.getByText("Keep Our Version"));
+
+      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
+
+      // The add/delete fallback buttons (bound to the OLD path) must not survive into the new
+      // render while the new path's fetch is still pending — the `key={selected.path}` on
+      // `ConflictResolutionPane` forces a fresh mount, discarding the stale state.
+      expect(screen.queryByText("Keep Our Version")).not.toBeInTheDocument();
+      expect(screen.queryByText("Keep Their Version")).not.toBeInTheDocument();
+      expect(screen.queryByText("Delete File")).not.toBeInTheDocument();
+
+      // Avoid an unresolved-promise/act warning leaking into other tests.
+      resolveSharedHunks([]);
     });
 
     it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
