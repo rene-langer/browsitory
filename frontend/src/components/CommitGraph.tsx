@@ -19,6 +19,7 @@ export function CommitGraph({
   pending,
   onSelectRow,
   onBranchFromCommit,
+  onRebaseFromCommit,
   onApplyStash,
   onDropStash,
 }: {
@@ -32,6 +33,7 @@ export function CommitGraph({
   pending: boolean;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
+  onRebaseFromCommit: (commitId: string) => void;
   onApplyStash: (index: number) => void;
   onDropStash: (index: number) => void;
 }) {
@@ -144,6 +146,16 @@ export function CommitGraph({
               }}
             >
               Branch from here
+            </button>
+          </li>
+          <li>
+            <button
+              onClick={() => {
+                onRebaseFromCommit(contextMenu.commitId);
+                setContextMenu(null);
+              }}
+            >
+              Rebase onto here
             </button>
           </li>
         </ul>
