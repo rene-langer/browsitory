@@ -2,9 +2,9 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, current_upstream, fetch_remote, list_remotes,
-    remote_upstreams, remove_remote, remove_remote_and_clear_upstreams, rename_remote,
-    set_current_upstream, update_remote_urls, CredentialProvider, RemoteError, TransferOperation,
-    TransferPhase, TransferProgress, TransferReporter,
+    pull_after_fetch, remote_upstreams, remove_remote, remove_remote_and_clear_upstreams,
+    rename_remote, set_current_upstream, update_remote_urls, CredentialProvider, PullOutcome,
+    RemoteError, TransferOperation, TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -31,6 +31,139 @@ impl CredentialProvider for NoCredentials {
             "credentials were not expected for a local remote",
         ))
     }
+}
+
+struct RemoteFixture {
+    source_dir: tempfile::TempDir,
+    _remote_dir: tempfile::TempDir,
+    local_dir: tempfile::TempDir,
+    source: git2::Repository,
+    local: git2::Repository,
+}
+
+impl RemoteFixture {
+    fn remote_commit(&self, message: &str) {
+        common::write_file(self.source_dir.path(), "remote.txt", message);
+        common::commit_all(&self.source, message);
+
+        let branch = self.source.head().unwrap().shorthand().unwrap().to_string();
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        self.source
+            .find_remote("origin")
+            .unwrap()
+            .push(&[refspec], None)
+            .unwrap();
+        self.local
+            .find_remote("origin")
+            .unwrap()
+            .fetch(&[] as &[&str], None, None)
+            .unwrap();
+    }
+
+    fn local_commit(&self, message: &str) {
+        common::write_file(self.local_dir.path(), "local.txt", message);
+        common::commit_all(&self.local, message);
+    }
+
+    fn remote_tip(&self) -> git2::Oid {
+        self.source.head().unwrap().target().unwrap()
+    }
+
+    fn write_local(&self, path: &str, contents: &str) {
+        common::write_file(self.local_dir.path(), path, contents);
+    }
+}
+
+fn local_and_bare_remote() -> RemoteFixture {
+    let (source_dir, source) = common::init_repo();
+    source.set_head("refs/heads/main").unwrap();
+    common::write_file(source_dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&source, "initial commit");
+
+    let remote_dir = tempfile::TempDir::new().unwrap();
+    let remote = git2::Repository::init_bare(remote_dir.path()).unwrap();
+    let branch = source.head().unwrap().shorthand().unwrap().to_string();
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    source
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    source
+        .find_remote("origin")
+        .unwrap()
+        .push(&[refspec], None)
+        .unwrap();
+    remote.set_head("refs/heads/main").unwrap();
+    drop(remote);
+
+    let local_dir = tempfile::TempDir::new().unwrap();
+    let local =
+        git2::Repository::clone(remote_dir.path().to_str().unwrap(), local_dir.path()).unwrap();
+    {
+        let mut config = local.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+
+    RemoteFixture {
+        source_dir,
+        _remote_dir: remote_dir,
+        local_dir,
+        source,
+        local,
+    }
+}
+
+fn diverged_local_and_bare_remote() -> RemoteFixture {
+    local_and_bare_remote()
+}
+
+#[test]
+fn pull_fast_forwards_a_clean_branch_after_fetch() {
+    let fixture = diverged_local_and_bare_remote();
+    fixture.remote_commit("remote change");
+
+    let outcome = pull_after_fetch(&fixture.local, "origin", "main").unwrap();
+
+    assert!(matches!(outcome, PullOutcome::FastForwarded { .. }));
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(fixture.remote_tip())
+    );
+}
+
+#[test]
+fn pull_rejects_a_dirty_worktree_before_changing_head() {
+    let fixture = local_and_bare_remote();
+    fixture.write_local("dirty.txt", "dirty");
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Err(RemoteError::DirtyWorktree)
+    ));
+}
+
+#[test]
+fn pull_reports_up_to_date_when_local_matches_tracking_ref() {
+    let fixture = local_and_bare_remote();
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Ok(PullOutcome::UpToDate)
+    ));
+}
+
+#[test]
+fn pull_reports_diverged_without_moving_head() {
+    let fixture = diverged_local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture.local_commit("local change");
+    let local_head = fixture.local.head().unwrap().target();
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Ok(PullOutcome::Diverged { .. })
+    ));
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
 }
 
 #[test]
