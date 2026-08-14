@@ -7,6 +7,17 @@ function unimplemented(): never {
   throw new Error("not implemented in this fake");
 }
 
+const remoteManagementClient = {
+  listRemotes: async () => [],
+  getCurrentUpstream: async () => null,
+  addRemote: async () => unimplemented(),
+  renameRemote: async () => unimplemented(),
+  updateRemoteUrls: async () => unimplemented(),
+  removeRemote: async () => unimplemented(),
+  setCurrentUpstream: async () => unimplemented(),
+  clearCurrentUpstream: async () => unimplemented(),
+};
+
 describe("useAppState", () => {
   it("openRepo populates status and commits and sets repoPath", async () => {
     const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
@@ -21,6 +32,7 @@ describe("useAppState", () => {
       branchRefs: [],
     };
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -68,6 +80,7 @@ describe("useAppState", () => {
   it("selectRow updates selectedRow without refetching", async () => {
     let getStatusCalls = 0;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -121,6 +134,7 @@ describe("useAppState", () => {
     let getStatusCalls = 0;
     let stageFileArg: string | null = null;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -173,6 +187,7 @@ describe("useAppState", () => {
 
   it("errors surface in state.error without throwing", async () => {
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {
@@ -219,6 +234,7 @@ describe("useAppState", () => {
   it("openRepo also populates branches", async () => {
     const branch: BranchInfo = { name: "main", isCurrent: true };
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -264,6 +280,7 @@ describe("useAppState", () => {
     let switchArg: string | null = null;
     let branchesCallCount = 0;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -319,6 +336,7 @@ describe("useAppState", () => {
 
   it("switchBranch resets selectedRow to uncommitted", async () => {
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -366,6 +384,7 @@ describe("useAppState", () => {
   it("createBranch calls client.createBranch and clears the create-branch draft", async () => {
     let createArgs: [string, string] | null = null;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -415,6 +434,7 @@ describe("useAppState", () => {
 
   it("createBranch resets selectedRow to uncommitted", async () => {
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -461,6 +481,7 @@ describe("useAppState", () => {
 
   it("closeCreateBranchDraft clears the draft without calling the client", async () => {
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -506,6 +527,7 @@ describe("useAppState", () => {
   it("openRepo also populates stashes", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -551,6 +573,7 @@ describe("useAppState", () => {
     let saveStashCalls = 0;
     let listStashesCalls = 0;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -606,6 +629,7 @@ describe("useAppState", () => {
   it("applyStash calls client.applyStash with the given index", async () => {
     let applyStashArg: number | null = null;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -653,6 +677,7 @@ describe("useAppState", () => {
   it("dropStash calls client.dropStash with the given index", async () => {
     let dropStashArg: number | null = null;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -701,6 +726,7 @@ describe("useAppState", () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     let listStashesCalls = 0;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -751,6 +777,7 @@ describe("useAppState", () => {
   it("dropStash leaves selectedRow untouched when dropping a stash that isn't selected", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
@@ -797,6 +824,7 @@ describe("useAppState", () => {
   it("pending is true only while a mutation is in flight", async () => {
     let resolveStage: (() => void) | null = null;
     const client: RepoClient = {
+      ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
       openRepo: async () => {},
