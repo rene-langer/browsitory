@@ -19,10 +19,32 @@ function isGroupMember(kind: ActionKind): boolean {
   return kind === "Squash" || kind === "Fixup";
 }
 
+// The kind of the nearest row after `index` that isn't itself `Drop` — mirrors
+// `git-core::rebase`'s `next_non_drop_action`. A `Drop` row never lands a commit, so it can't
+// hide a squash/fixup group from the row before it, and it can't be a group's leader either
+// (see `recomputeGroupLeaders` below); both this and the backend's `land_current_step` have to
+// agree on where a group starts/who leads it, or the combined-message box in the UI ends up
+// attached to a different row than the one the backend actually uses.
+function nextNonDropActionKind(rows: Row[], index: number): ActionKind | undefined {
+  for (let i = index + 1; i < rows.length; i++) {
+    if (rows[i].actionKind !== "Drop") {
+      return rows[i].actionKind;
+    }
+  }
+  return undefined;
+}
+
 function defaultCombinedMessage(rows: Row[], leaderIndex: number): string {
   const parts = [rows[leaderIndex].commit.summary];
-  for (let i = leaderIndex + 1; i < rows.length && isGroupMember(rows[i].actionKind); i++) {
-    if (rows[i].actionKind === "Squash") {
+  for (let i = leaderIndex + 1; i < rows.length; i++) {
+    const kind = rows[i].actionKind;
+    if (kind === "Drop") {
+      continue;
+    }
+    if (!isGroupMember(kind)) {
+      break;
+    }
+    if (kind === "Squash") {
       parts.push(rows[i].commit.summary);
     }
   }
@@ -32,11 +54,14 @@ function defaultCombinedMessage(rows: Row[], leaderIndex: number): string {
 function recomputeGroupLeaders(rows: Row[]): Row[] {
   const next = rows.map((r) => ({ ...r, combinedMessage: null as string | null }));
   for (let i = 0; i < next.length; i++) {
-    if (isGroupMember(next[i].actionKind)) {
+    // A group leader must be neither a group member itself nor a Drop (a Drop never lands, so
+    // it can't be the commit the group gets squashed onto — see `land_current_step`'s backward
+    // walk, which excludes Drop from leader candidates the same way).
+    if (isGroupMember(next[i].actionKind) || next[i].actionKind === "Drop") {
       continue;
     }
-    const hasFollowingGroupMember = i + 1 < next.length && isGroupMember(next[i + 1].actionKind);
-    if (hasFollowingGroupMember) {
+    const followingKind = nextNonDropActionKind(next, i);
+    if (followingKind !== undefined && isGroupMember(followingKind)) {
       next[i].combinedMessage = defaultCombinedMessage(next, i);
     }
   }
