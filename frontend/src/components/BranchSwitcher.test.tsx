@@ -20,6 +20,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       onOpenCreateBranchDraft={vi.fn()}
       onCloseCreateBranchDraft={vi.fn()}
       onMergeBranch={vi.fn()}
+      isMerging={false}
       {...overrides}
     />,
   );
@@ -172,5 +173,13 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
 
     expect(screen.queryByText("Merge into current branch")).not.toBeInTheDocument();
+  });
+
+  it("disables the merge action while a merge is already in progress", () => {
+    renderSwitcher({ isMerging: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByText("Merge into current branch")).toBeDisabled();
   });
 });

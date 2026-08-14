@@ -16,6 +16,8 @@ pub enum MergeError {
     NotATextConflict(String),
     #[error("no merge is currently in progress")]
     NotMerging,
+    #[error("a merge is already in progress or has unresolved conflicts")]
+    AlreadyMerging,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,10 @@ pub enum ConflictSegment {
 }
 
 pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome, MergeError> {
+    if is_merging(repo) || repo.index()?.has_conflicts() {
+        return Err(MergeError::AlreadyMerging);
+    }
+
     let branch_ref = format!("refs/heads/{branch_name}");
     let their_reference = repo.find_reference(&branch_ref)?;
     let their_commit = their_reference.peel_to_commit()?;
@@ -173,7 +179,7 @@ pub fn resolve_conflict(
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
-    if !is_merging(repo) {
+    if !is_merging(repo) && !repo.index()?.has_conflicts() {
         return Err(MergeError::NotMerging);
     }
     let head_commit = repo.head()?.peel_to_commit()?;

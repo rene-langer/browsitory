@@ -329,6 +329,22 @@ fn resolve_add_delete_conflict_with_delete_removes_the_file_regardless() {
 }
 
 #[test]
+fn start_merge_refuses_when_already_merging_and_leaves_conflict_state_untouched() {
+    let (_dir, repo) = make_conflicted_repo();
+    assert!(git_core::merge::is_merging(&repo));
+    assert!(repo.index().unwrap().has_conflicts());
+
+    // Try to start a second merge (e.g. clicking "Merge into current branch" on a different
+    // branch) while the first is still conflicted.
+    let result = git_core::merge::start_merge(&repo, "feature");
+
+    assert!(result.is_err());
+    // The refused attempt must not itself corrupt anything: still merging, still conflicted.
+    assert!(git_core::merge::is_merging(&repo));
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+#[test]
 fn resolve_add_delete_conflict_then_commit_has_two_parents() {
     let (_dir, repo) = make_delete_modify_conflict();
     git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)
