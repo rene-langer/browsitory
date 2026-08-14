@@ -123,7 +123,7 @@ export interface RepoClient {
   renameBranch(oldName: string, newName: string): Promise<void>;
   listRemotes(): Promise<RemoteInfo[]>;
   getCurrentUpstream(): Promise<UpstreamInfo | null>;
-  getRemoteUpstreams?(name: string): Promise<UpstreamInfo[]>;
+  getRemoteUpstreams(name: string): Promise<UpstreamInfo[]>;
   addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   renameRemote(oldName: string, newName: string): Promise<void>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;

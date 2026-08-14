@@ -21,6 +21,7 @@ const upstream: UpstreamInfo = { localBranch: "main", remoteName: "origin", remo
 const remoteManagementClient = {
   listRemotes: async () => [remote],
   getCurrentUpstream: async () => upstream,
+  getRemoteUpstreams: async () => [upstream],
   addRemote: async () => unimplemented(),
   renameRemote: async () => unimplemented(),
   updateRemoteUrls: async () => unimplemented(),
@@ -87,6 +88,7 @@ describe("useAppState", () => {
     expect(result.current.state.commits.length).toBe(1);
     expect(result.current.state.remotes).toEqual([remote]);
     expect(result.current.state.upstream).toEqual(upstream);
+    expect(result.current.state.remoteUpstreams).toEqual({ origin: [upstream] });
     expect(result.current.state.selectedRow).toBe("uncommitted");
   });
 

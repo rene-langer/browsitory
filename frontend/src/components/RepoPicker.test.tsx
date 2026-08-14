@@ -21,6 +21,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     renameBranch: async () => unimplemented(),
     listRemotes: async () => unimplemented(),
     getCurrentUpstream: async () => null,
+    getRemoteUpstreams: async () => [],
     addRemote: async () => unimplemented(),
     renameRemote: async () => unimplemented(),
     updateRemoteUrls: async () => unimplemented(),

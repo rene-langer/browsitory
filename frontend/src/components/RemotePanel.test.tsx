@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { RemoteInfo, RepoClient, UpstreamInfo } from "../ipc/RepoClient";
 import { RemotePanel } from "./RemotePanel";
+
+type IsOptional<T, K extends keyof T> = Pick<T, K> extends Required<Pick<T, K>> ? false : true;
 
 const origin: RemoteInfo = {
   name: "origin",
@@ -26,7 +28,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
     <RemotePanel
       remotes={[origin]}
       upstream={null}
-      remoteUpstreams={{}}
+      remoteUpstreams={{ origin: [] }}
       onAddRemote={vi.fn()}
       onRenameRemote={vi.fn().mockResolvedValue(true)}
       onUpdateRemoteUrls={vi.fn()}
@@ -39,6 +41,13 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
 }
 
 describe("RemotePanel", () => {
+  it("requires upstream discovery in both the client and panel contracts", () => {
+    expectTypeOf<IsOptional<RepoClient, "getRemoteUpstreams">>().toEqualTypeOf<false>();
+    expectTypeOf<
+      IsOptional<Parameters<typeof RemotePanel>[0], "remoteUpstreams">
+    >().toEqualTypeOf<false>();
+  });
+
   it("adds a remote using the labelled URL form", () => {
     const onAddRemote = vi.fn();
     renderPanel({ onAddRemote });
@@ -88,7 +97,7 @@ describe("RemotePanel", () => {
     expect(within(backupItem!).getByText("Push: ../push-backup.git")).toBeInTheDocument();
   });
 
-  it("requires explicit removal to clear every branch upstream for the remote", async () => {
+  it("shows the explicit all-branch removal route for a remote with upstreams", async () => {
     const onRemoveRemote = vi.fn().mockResolvedValue(undefined);
     const onClearUpstream = vi.fn().mockResolvedValue(undefined);
     const topicUpstream: UpstreamInfo = {
