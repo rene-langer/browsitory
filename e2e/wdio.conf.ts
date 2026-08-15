@@ -26,6 +26,9 @@ const tauriAppBinary = path.resolve(__dirname, "../target/debug/tauri-app");
 // `VITE_E2E_REPO_PATH=<this exact path>` *before* `cargo build --workspace` embeds
 // `frontend/dist` (see the CI `e2e` job, and this file's `onPrepare` below).
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
+const CREDENTIAL_CERT_DIR = path.join(os.tmpdir(), "browsitory-e2e-credential-cert");
+const CREDENTIAL_KEY_PATH = path.join(CREDENTIAL_CERT_DIR, "key.pem");
+const CREDENTIAL_CERT_PATH = path.join(CREDENTIAL_CERT_DIR, "cert.pem");
 
 // The app auto-opens E2E_REPO_PATH as soon as it launches (App.tsx's mount effect), and the
 // app launches as part of establishing the WebDriver session — i.e. *before* any mocha
@@ -49,6 +52,22 @@ function setupFixtureRepo(repoPath: string) {
     stdio: "inherit",
   });
   fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
+}
+
+function setupCredentialCertificate() {
+  fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
+  fs.mkdirSync(CREDENTIAL_CERT_DIR, { recursive: true });
+  execFileSync("openssl", [
+    "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", CREDENTIAL_KEY_PATH,
+    "-out", CREDENTIAL_CERT_PATH, "-days", "1", "-subj", "/CN=localhost",
+    "-addext", "subjectAltName=DNS:localhost",
+  ], { stdio: "ignore" });
+  // git2 initializes vendored OpenSSL from the process environment; repository-local
+  // http.sslCAInfo is not consulted by that transport. This trusts only the ephemeral
+  // loopback fixture certificate, without disabling TLS verification.
+  process.env.SSL_CERT_FILE = CREDENTIAL_CERT_PATH;
+  process.env.BROWSITORY_E2E_CREDENTIAL_KEY = CREDENTIAL_KEY_PATH;
+  process.env.BROWSITORY_E2E_CREDENTIAL_CERT = CREDENTIAL_CERT_PATH;
 }
 
 // Keep track of the `tauri-driver` child process, following the official Tauri WebdriverIO
@@ -140,6 +159,7 @@ export const config: WebdriverIO.Config = {
       );
     }
     setupFixtureRepo(E2E_REPO_PATH);
+    setupCredentialCertificate();
   },
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
@@ -162,5 +182,6 @@ export const config: WebdriverIO.Config = {
 
   afterSession: () => {
     closeTauriDriver();
+    fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
   },
 };

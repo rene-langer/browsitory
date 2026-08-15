@@ -111,6 +111,24 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   frozen-lockfile install during Phase 1; a contributor running a different pnpm major without
   Corepack honoring this pin can hit the same failure.
 
+### Credential release acceptance
+
+Run this manual check only with disposable repositories, accounts, tokens, and SSH keys. Never
+put a token in a remote URL, Git config, issue, screenshot, or terminal transcript.
+
+1. Create a disposable HTTPS remote and a local repository, then add the remote in Browsitory.
+   Open its credentials, select **HTTPS token**, enter the disposable username and test token,
+   and save. Fetch twice; both fetches must succeed without requesting credentials again.
+2. Forget the HTTPS credential and fetch once more. The app must say **Save an HTTPS token for
+   this remote before retrying.** It must not show a libgit2 callback error or the remote URL.
+3. Create a separate disposable SSH remote, load its disposable private key into the local SSH
+   agent, select **SSH agent** in that remote's credentials, then fetch and push. SSH-agent mode
+   must show no token field and must not access the HTTPS credential store.
+4. Inspect the local `.git/config`, the app's visible error, and transfer-progress UI after each
+   step. Config may contain only `browsitory.remote.<name>.auth-mode` and, for HTTPS, the
+   non-secret username. Confirm the test token is absent from config, progress, errors, and all
+   visible UI before treating the release as accepted.
+
 ## Roadmap
 
 - **Phase 0**: workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal status view

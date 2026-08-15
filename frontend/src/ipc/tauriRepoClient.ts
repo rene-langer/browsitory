@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   BlameLine,
   BranchInfo,
@@ -7,13 +8,21 @@ import type {
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  PullOutcome,
   RebasePlanCommit,
   RebasePlanEntry,
   RebaseStepResult,
+  RemoteInfo,
+  RemoteAuthMode,
   RepoClient,
   StashEntry,
   StatusEntry,
+  TagInfo,
+  TransferProgress,
+  UpstreamInfo,
 } from "./RepoClient";
+
+let transferListenersReady: Promise<void> = Promise.resolve();
 
 export const tauriRepoClient: RepoClient = {
   pickRepoFolder: () => invoke<string | null>("pick_repo_folder"),
@@ -39,6 +48,66 @@ export const tauriRepoClient: RepoClient = {
     invoke("delete_branch", { name, force }),
   renameBranch: (oldName: string, newName: string) =>
     invoke("rename_branch", { oldName, newName }),
+  listRemotes: () => invoke<RemoteInfo[]>("list_remotes"),
+  getCurrentUpstream: () => invoke<UpstreamInfo | null>("get_current_upstream"),
+  getRemoteUpstreams: (name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { name }),
+  addRemote: (name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return invoke("add_remote", { name, fetchUrl, pushUrl });
+  },
+  renameRemote: (oldName: string, newName: string) =>
+    invoke("rename_remote", { oldName, newName }),
+  updateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return invoke("update_remote_urls", { name, fetchUrl, pushUrl });
+  },
+  removeRemote: (name: string, clearUpstreams: boolean) => invoke("remove_remote", { name, clearUpstreams }),
+  saveHttpsCredential: (remoteName: string, username: string, token: string) =>
+    invoke("save_https_credential", { remoteName, username, token }),
+  forgetHttpsCredential: (remoteName: string) => invoke("forget_https_credential", { remoteName }),
+  setRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+    invoke("set_remote_auth_mode", { remoteName, mode, username }),
+  setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
+    invoke("set_current_upstream", { remoteName, remoteBranch }),
+  clearCurrentUpstream: () => invoke("clear_current_upstream"),
+  listTags: () => invoke<TagInfo[]>("list_tags"),
+  createTag: (name: string, message: string | null) => invoke("create_tag", { name, message }),
+  deleteTag: (name: string) => invoke("delete_tag", { name }),
+  fetchRemote: async (remoteName: string) => {
+    await transferListenersReady;
+    return invoke<string>("fetch_remote", { remoteName });
+  },
+  pushCurrentBranch: async (remoteName: string) => {
+    await transferListenersReady;
+    return invoke<string>("push_current_branch", { remoteName });
+  },
+  pushTags: async (remoteName: string, names: string[]) => {
+    await transferListenersReady;
+    return invoke<string>("push_tags", { remoteName, names });
+  },
+  pullCurrentUpstream: async () => {
+    await transferListenersReady;
+    return invoke<PullOutcome>("pull_current_upstream");
+  },
+  subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
+    let disposed = false;
+    const unlisten: Array<() => void> = [];
+    const registrations = ["transfer-progress", "transfer-complete"].map((event) =>
+      listen<TransferProgress>(event, ({ payload }) => listener(payload)),
+    );
+    transferListenersReady = Promise.all(registrations).then((stops) => {
+      for (const stop of stops) {
+        if (disposed) stop();
+        else unlisten.push(stop);
+      }
+    });
+    void transferListenersReady.catch(() => {});
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      for (const stop of unlisten) stop();
+    };
+  },
   listStashes: () => invoke<StashEntry[]>("list_stashes"),
   saveStash: () => invoke("save_stash"),
   applyStash: (index: number) => invoke("apply_stash", { index }),
@@ -64,3 +133,17 @@ export const tauriRepoClient: RepoClient = {
   getRebaseProgress: () =>
     invoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress"),
 };
+
+export function validateRemoteUrls(fetchUrl: string, pushUrl: string | null) {
+  for (const url of [fetchUrl, pushUrl]) {
+    if (url === null) continue;
+    try {
+      const parsed = new URL(url);
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (parsed.username !== "" || parsed.password !== "")) {
+        throw new Error("Remote URLs must not contain embedded credentials");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === "Remote URLs must not contain embedded credentials") throw error;
+    }
+  }
+}

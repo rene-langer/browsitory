@@ -19,6 +19,26 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     switchBranch: unused,
     deleteBranch: unused,
     renameBranch: unused,
+    listRemotes: async () => unused(),
+    getCurrentUpstream: async () => null,
+    getRemoteUpstreams: async () => [],
+    addRemote: async () => unused(),
+    renameRemote: async () => unused(),
+    updateRemoteUrls: async () => unused(),
+    removeRemote: async () => unused(),
+    saveHttpsCredential: async () => unused(),
+    forgetHttpsCredential: async () => unused(),
+    setRemoteAuthMode: async () => unused(),
+    setCurrentUpstream: async () => unused(),
+    clearCurrentUpstream: async () => unused(),
+    listTags: async () => [],
+    createTag: async () => unused(),
+    deleteTag: async () => unused(),
+    fetchRemote: async () => unused(),
+    pushCurrentBranch: async () => unused(),
+    pushTags: async () => unused(),
+    pullCurrentUpstream: async () => unused(),
+    subscribeTransferProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
     applyStash: unused,
@@ -64,6 +84,23 @@ const fourCommits: RebasePlanCommit[] = [
 ];
 
 describe("RebasePlanner", () => {
+  it("disables Start Rebase while another repository operation is active", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(
+      <RebasePlanner
+        client={client}
+        onto="base"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+        operationDisabled={true}
+      />,
+    );
+    await screen.findByText(/add a/);
+
+    expect(screen.getByText("Start Rebase")).toBeDisabled();
+  });
+
   it("lists commits oldest-first with a default Pick action each", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
