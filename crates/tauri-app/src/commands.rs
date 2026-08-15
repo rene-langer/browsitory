@@ -1047,6 +1047,30 @@ mod tests {
     }
 
     #[test]
+    fn worktree_info_dto_serializes_an_unknown_head_as_null() {
+        let dto = WorktreeInfoDto::from(WorktreeInfo {
+            name: "stale-tree".into(),
+            path: PathBuf::from("/repos/stale-tree"),
+            head: String::new(),
+            is_main: false,
+            is_locked: false,
+            is_prunable: true,
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "name": "stale-tree",
+                "path": "/repos/stale-tree",
+                "head": null,
+                "isMain": false,
+                "isLocked": false,
+                "isPrunable": true,
+            })
+        );
+    }
+
+    #[test]
     fn remote_auth_mode_wire_values_match_the_typescript_union() {
         assert_eq!(
             serde_json::to_value(RemoteAuthModeDto::HttpsToken).unwrap(),

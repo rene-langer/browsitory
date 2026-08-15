@@ -433,17 +433,29 @@ impl Worker {
                         let _ = reply.send(result);
                     }
                     Command::RemoveWorktree { name, reply } => {
-                        let mut result = git_core::worktree::list_worktrees(&repo)
-                            .and_then(|worktrees| {
-                                worktrees
-                                    .into_iter()
-                                    .find(|worktree| worktree.name == name)
-                                    .ok_or(git_core::worktree::WorktreeError::Git)
-                            })
-                            .and_then(|worktree| {
-                                git_core::worktree::remove_worktree(&repo, &worktree.path)
-                            })
-                            .map_err(|e| e.to_string());
+                        let current_workdir = repo
+                            .workdir()
+                            .and_then(|path| path.canonicalize().ok())
+                            .ok_or_else(|| "cannot determine the open worktree".to_string());
+                        let mut result = current_workdir.and_then(|current_workdir| {
+                            git_core::worktree::list_worktrees(&repo)
+                                .and_then(|worktrees| {
+                                    worktrees
+                                        .into_iter()
+                                        .find(|worktree| !worktree.is_main && worktree.name == name)
+                                        .ok_or(git_core::worktree::WorktreeError::Git)
+                                })
+                                .map_err(|e| e.to_string())
+                                .and_then(|worktree| {
+                                    if worktree.path == current_workdir {
+                                        return Err(
+                                            "cannot remove the currently open worktree".to_string()
+                                        );
+                                    }
+                                    git_core::worktree::remove_worktree(&repo, &worktree.path)
+                                        .map_err(|e| e.to_string())
+                                })
+                        });
                         if result.is_ok() {
                             result = git_core::repo::open(&repo_path)
                                 .map(|reopened| repo = reopened)
@@ -1814,6 +1826,42 @@ mod tests {
 
         assert!(!linked.exists());
         assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn refuses_to_remove_the_worktree_open_in_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+        let linked = dir.path().join("feature-tree");
+        git_core::worktree::create_worktree(&repo, "feature-tree", &linked, "feature", None)
+            .unwrap();
+        let worker = Worker::spawn(linked.clone()).unwrap();
+
+        let result = worker.handle().remove_worktree("feature-tree".into());
+
+        assert!(result.is_err());
+        assert!(linked.exists());
+        assert!(worker.handle().get_status().is_ok());
+    }
+
+    #[test]
+    fn remove_worktree_ignores_the_synthetic_main_row_when_names_collide() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+        let linked = dir.path().join("linked-called-main");
+        git_core::worktree::create_worktree(&repo, "main", &linked, "feature", None).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        let result = worker.handle().remove_worktree("main".into());
+
+        assert!(result.is_ok());
+        assert!(!linked.exists());
     }
 
     #[test]

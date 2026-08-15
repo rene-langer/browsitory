@@ -7,6 +7,10 @@ pub enum BranchError {
     Git(#[from] git2::Error),
     #[error("branch '{0}' has unmerged commits; use force to delete anyway")]
     NotMerged(String),
+    #[error("branch '{0}' is checked out in another worktree")]
+    CheckedOutInAnotherWorktree(String),
+    #[error("worktree operation failed: {0}")]
+    Worktree(#[from] crate::worktree::WorktreeError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +56,13 @@ pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result
 
 pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     let branch_ref = format!("refs/heads/{name}");
+    let current_workdir = repo.workdir().and_then(|path| path.canonicalize().ok());
+    let checked_out_elsewhere = crate::worktree::list_worktrees(repo)?
+        .into_iter()
+        .any(|worktree| worktree.head == name && current_workdir.as_ref() != Some(&worktree.path));
+    if checked_out_elsewhere {
+        return Err(BranchError::CheckedOutInAnotherWorktree(name.to_string()));
+    }
     let target = repo.find_reference(&branch_ref)?.peel_to_commit()?;
     // Checking out the tree before moving HEAD means a refused checkout (libgit2's default
     // "safe" strategy errors rather than overwriting modified/untracked files that differ from

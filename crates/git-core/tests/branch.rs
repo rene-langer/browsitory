@@ -111,6 +111,37 @@ fn switch_branch_is_blocked_by_a_conflicting_dirty_file() {
 }
 
 #[test]
+fn switch_branch_rejects_a_branch_checked_out_in_another_worktree() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let initial_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &head, false).unwrap();
+    let linked = dir.path().join("feature-tree");
+    git_core::worktree::create_worktree(&repo, "feature-tree", &linked, "feature", None).unwrap();
+    let linked_repo = git2::Repository::open(&linked).unwrap();
+    write_file(&linked, "file.txt", "feature work");
+    commit_all(&linked_repo, "feature commit");
+
+    let result = git_core::branch::switch_branch(&repo, "feature");
+
+    assert!(result.is_err());
+    assert!(
+        git_core::branch::list_branches(&repo)
+            .unwrap()
+            .iter()
+            .find(|branch| branch.name == initial_branch)
+            .unwrap()
+            .is_current
+    );
+    let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
+    assert_eq!(contents, "v1");
+}
+
+#[test]
 fn rename_branch_updates_head_when_renaming_the_current_branch() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "v1");
