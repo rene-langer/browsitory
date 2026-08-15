@@ -695,17 +695,17 @@ impl Worker {
                             operation_id: operation_id.clone(),
                             operation: TransferOperation::Pull,
                         });
-                        let result = (|| {
-                            let upstream = git_core::remote::current_upstream(&repo)
-                                .map_err(|e| e.to_string())?
-                                .ok_or_else(|| "current branch has no upstream".to_string())?;
+                        let result = (|| -> Result<PullOutcome, git_core::remote::RemoteError> {
+                            let upstream = git_core::remote::current_upstream(&repo)?
+                                .ok_or(git_core::remote::RemoteError::NoUpstream)?;
                             let mut reporter = ChannelReporter {
                                 events: events.clone(),
                                 operation_id: operation_id.clone(),
                             };
-                            let profile =
-                                git_core::remote::remote_auth_profile(&repo, &upstream.remote_name)
-                                    .map_err(|e| e.to_string())?;
+                            let profile = git_core::remote::remote_auth_profile(
+                                &repo,
+                                &upstream.remote_name,
+                            )?;
                             let mut credentials =
                                 RemoteCredentialProvider::new(&credential_service, profile);
                             git_core::remote::fetch_remote(
@@ -714,26 +714,20 @@ impl Worker {
                                 operation_id.clone(),
                                 &mut credentials,
                                 &mut reporter,
-                            )
-                            // libgit2 transport errors may echo remote-controlled URLs or
-                            // messages. Pull has a synchronous reply in addition to its transfer
-                            // events, so sanitize that path just like Fetch's terminal event.
-                            .map_err(|_| "pull failed".to_string())?;
-                            let upstream = git_core::remote::current_upstream(&repo)
-                                .map_err(|e| e.to_string())?
-                                .ok_or_else(|| "current branch has no upstream".to_string())?;
+                            )?;
+                            let upstream = git_core::remote::current_upstream(&repo)?
+                                .ok_or(git_core::remote::RemoteError::NoUpstream)?;
                             git_core::remote::pull_after_fetch(
                                 &repo,
                                 &upstream.remote_name,
                                 &upstream.remote_branch,
                             )
-                            .map_err(|e| e.to_string())
                         })();
                         let completed_error = result
                             .as_ref()
                             .err()
-                            .map(|_| TransferErrorKind::TransferFailed);
-                        let _ = reply.send(result);
+                            .map(|error| error.transfer_error_kind());
+                        let _ = reply.send(result.map_err(|_| "pull failed".to_string()));
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
                             operation: TransferOperation::Pull,

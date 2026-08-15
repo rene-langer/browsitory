@@ -19,6 +19,8 @@ import type {
 
 function transferFailureMessage(progress: TransferProgress): string {
   if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
+  if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
+  if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
   const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
   if (isPush && progress.errorKind === "NonFastForward") {
     return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
