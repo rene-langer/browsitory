@@ -11,6 +11,7 @@ completion (not the full transitive tree).
 | Crate | License | Notes |
 |---|---|---|
 | git2 | MIT OR Apache-2.0 (binding); vendored libgit2 is GPL-2.0-with-linking-exception | Deliberate exception — see below. Direct dep of `git-core`; dev-dependency of `tauri-app`. |
+| keyring 4.1.6 | MIT OR Apache-2.0 | `tauri-app` — cross-platform operating-system credential storage. Source: [crates.io](https://crates.io/crates/keyring/4.1.6); verified with `cargo info keyring@4.1.6` on 2026-08-15. |
 | thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
 | url | MIT OR Apache-2.0 | `git-core` — parses HTTP(S) remote URLs before accepting them, so embedded credentials are rejected without applying fragile string matching. |
 | tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `config` |
