@@ -82,6 +82,19 @@ describe("RemotePanel", () => {
     expect(onCancelPull).toHaveBeenCalledOnce();
   });
 
+  it("keeps Pull disabled while a reconciliation choice is open and focuses Cancel", async () => {
+    renderPanel({
+      upstream,
+      pendingPull: { upstreamRef: "refs/remotes/origin/main" },
+    });
+
+    expect(screen.getByRole("button", { name: "Pull" })).toBeDisabled();
+    const dialog = screen.getByRole("dialog", { name: "Pull has diverged" });
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    });
+  });
+
   it("requires upstream discovery in both the client and panel contracts", () => {
     expectTypeOf<IsOptional<RepoClient, "getRemoteUpstreams">>().toEqualTypeOf<false>();
     expectTypeOf<
