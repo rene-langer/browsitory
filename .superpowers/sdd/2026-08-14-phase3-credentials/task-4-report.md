@@ -86,3 +86,10 @@
   synchronous reply remains `pull failed`.
 - `cargo test --workspace`, clippy, and fmt passed (41 tauri-app tests). Manual/E2E environment
   blockers remain unchanged.
+
+## Pull terminal-event ordering follow-up
+
+- A sanitized synchronous `pull failed` rejection now leaves the matching in-flight transfer for
+  its terminal event to resolve, so typed credential remediation is not overwritten. State tests
+  cover Pull ordering plus safe keychain Fetch and SSH-agent Push remediation without provider
+  diagnostics. Focused frontend tests (39), lint, and build pass; tauri-app tests and fmt pass.

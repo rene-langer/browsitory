@@ -354,7 +354,7 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("Commit or stash your changes before pulling.");
   });
 
-  it("disarms pull transfer tracking when the pull request rejects", async () => {
+  it("uses the terminal missing-credential event after a pull request rejects", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     const client = transferClient({
       subscribeTransferProgress: (next) => {
@@ -362,6 +362,7 @@ describe("useAppState", () => {
         return () => {};
       },
       pullCurrentUpstream: async () => {
+        listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
         throw new Error("pull failed");
       },
     });
@@ -371,11 +372,12 @@ describe("useAppState", () => {
     await act(() => result.current.pullCurrentUpstream());
 
     act(() => {
-      listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null });
     });
 
     expect(result.current.state.transfer).toBeNull();
     expect(result.current.state.pending).toBe(false);
+    expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
   });
 
   it("handles a fast fetch that completes before its operation ID reply", async () => {
@@ -469,6 +471,30 @@ describe("useAppState", () => {
     await act(() => result.current.fetchRemote("origin"));
 
     expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
+  });
+
+  it("renders safe keychain and SSH-agent transfer remediation without provider diagnostics", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => { listener = next; return () => {}; },
+      fetchRemote: async () => {
+        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Failed", errorKind: "CredentialStoreFailure", current: 0, total: 0, receivedBytes: 0, message: null });
+        return "keychain-fetch";
+      },
+      pushCurrentBranch: async () => {
+        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Failed", errorKind: "SshAgentFailure", current: 0, total: 0, receivedBytes: 0, message: null });
+        return "agent-push";
+      },
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+    await act(() => result.current.pushCurrentBranch("origin"));
+    expect(result.current.state.error).toBe("Load a key into your SSH agent and try again.");
+    expect(result.current.state.error).not.toContain("test SSH agent was invoked");
   });
 
   it("guides a non-fast-forward push toward pull or history reconciliation", async () => {
