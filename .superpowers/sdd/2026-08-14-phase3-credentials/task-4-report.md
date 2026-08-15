@@ -59,3 +59,21 @@
   exact procedure and required secret-safety inspection are documented in `docs/ARCHITECTURE.md`.
 - The loopback-only E2E assertion is implemented but has not completed in this environment due
   to the occupied existing WebDriver ports described above.
+
+## Review follow-up: trusted marker and valid HTTPS fixture
+
+- Tightened `MissingCredential` classification to the exact stable callback marker. A new
+  adversarial regression proves that a remote-controlled diagnostic merely containing that text
+  (including a credential-bearing URL) remains the generic `TransferFailed` kind.
+- Restricted the marker's emission to `CredentialStore::get` returning `Ok(None)`. Keychain
+  failures and invalid/non-HTTPS credential URLs now use a different internal generic error and
+  therefore remain sanitized generic transfer failures. No provider error message crosses IPC.
+- Replaced the loopback HTTP fixture with a valid `https://localhost:<port>` fixture. It creates
+  a one-day local test certificate with a `localhost` SAN, trusts that certificate through the
+  fixture repository's local `http.sslCAInfo`, and serves a 401 challenge. Thus the credential
+  provider reaches its valid HTTPS lookup path without disabling certificate validation or using
+  a live host/token.
+- Red: the wrapped-diagnostic regression initially classified as `MissingCredential`; the store
+  failure regression initially reused the missing-token marker. Green focused checks passed for
+  both. `cargo test --workspace` passed (23 remote tests and 40 tauri-app tests), as did clippy
+  and fmt. E2E typecheck still reports only the pre-existing `merge.spec.ts` errors.

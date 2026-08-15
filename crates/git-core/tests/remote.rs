@@ -45,6 +45,18 @@ fn classifies_the_known_missing_credential_callback_error_without_exposing_it() 
     );
 }
 
+#[test]
+fn does_not_classify_a_wrapped_remote_diagnostic_as_missing_credential() {
+    let error = RemoteError::from(git2::Error::from_str(
+        "remote reported missing credential for remote at https://alice:secret@example.test/repo.git",
+    ));
+
+    assert_eq!(
+        error.transfer_error_kind(),
+        TransferErrorKind::TransferFailed
+    );
+}
+
 struct RemoteFixture {
     source_dir: tempfile::TempDir,
     remote_dir: tempfile::TempDir,
