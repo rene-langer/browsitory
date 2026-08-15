@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 
 use git2::{
-    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions,
-    RemoteCallbacks, Repository, StatusOptions,
+    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, PushOptions,
+    RemoteCallbacks, Repository, StatusOptions, Tag,
 };
 use thiserror::Error;
 use url::Url;
@@ -74,6 +74,16 @@ pub struct UpstreamInfo {
     pub local_branch: String,
     pub remote_name: String,
     pub remote_branch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagInfo {
+    pub name: String,
+    pub target_id: String,
+    pub annotated: bool,
+    pub message: Option<String>,
+    pub tagger_name: Option<String>,
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +163,101 @@ pub fn fetch_remote(
     options.remote_callbacks(callbacks);
     remote.fetch(&[] as &[&str], Some(&mut options), None)?;
     Ok(())
+}
+
+pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>, RemoteError> {
+    let mut tags = Vec::new();
+    for name in repo.tag_names(None)?.iter().flatten().flatten() {
+        let reference = repo.find_reference(&format!("refs/tags/{name}"))?;
+        let target_id = reference
+            .target()
+            .ok_or_else(|| git2::Error::from_str("tag reference has no direct target"))?;
+        if let Ok(tag) = repo.find_tag(target_id) {
+            let tagger = tag.tagger();
+            tags.push(TagInfo {
+                name: name.to_string(),
+                target_id: tag.target_id().to_string(),
+                annotated: true,
+                message: tag.message()?.map(str::to_string),
+                tagger_name: tagger
+                    .as_ref()
+                    .and_then(|signature| signature.name().ok().map(str::to_string)),
+                timestamp: tagger.map(|signature| signature.when().seconds()),
+            });
+        } else {
+            tags.push(TagInfo {
+                name: name.to_string(),
+                target_id: target_id.to_string(),
+                annotated: false,
+                message: None,
+                tagger_name: None,
+                timestamp: None,
+            });
+        }
+    }
+    Ok(tags)
+}
+
+pub fn create_tag(repo: &Repository, name: &str, message: Option<&str>) -> Result<(), RemoteError> {
+    validate_tag_name(name)?;
+    let target = repo.head()?.peel_to_commit()?.into_object();
+    match message {
+        Some(message) => {
+            let tagger = repo.signature()?;
+            repo.tag(name, &target, &tagger, message, false)?;
+        }
+        None => {
+            repo.tag_lightweight(name, &target, false)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    validate_tag_name(name)?;
+    repo.find_reference(&format!("refs/tags/{name}"))?
+        .delete()?;
+    Ok(())
+}
+
+pub fn push_current_branch(
+    repo: &Repository,
+    remote_name: &str,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+) -> Result<(), RemoteError> {
+    let branch = current_local_branch_name(repo)?;
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    push_refs(
+        repo,
+        remote_name,
+        &[refspec],
+        TransferOperation::PushBranch,
+        credentials,
+        reporter,
+    )
+}
+
+pub fn push_tags(
+    repo: &Repository,
+    remote_name: &str,
+    names: &[String],
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+) -> Result<(), RemoteError> {
+    let mut refspecs = Vec::with_capacity(names.len());
+    for name in names {
+        validate_tag_name(name)?;
+        refspecs.push(format!("refs/tags/{name}:refs/tags/{name}"));
+    }
+    push_refs(
+        repo,
+        remote_name,
+        &refspecs,
+        TransferOperation::PushTags,
+        credentials,
+        reporter,
+    )
 }
 
 pub fn pull_after_fetch(
@@ -350,6 +455,62 @@ fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
         return Err(RemoteError::DetachedHead);
     }
     Ok(head.shorthand()?.to_string())
+}
+
+fn push_refs(
+    repo: &Repository,
+    remote_name: &str,
+    refspecs: &[String],
+    operation: TransferOperation,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+) -> Result<(), RemoteError> {
+    let mut remote = repo.find_remote(remote_name)?;
+    let credentials = RefCell::new(credentials);
+    let reporter = RefCell::new(reporter);
+    let mut callbacks = RemoteCallbacks::new();
+
+    callbacks.credentials(|url, username, allowed| {
+        credentials.borrow_mut().credential(url, username, allowed)
+    });
+    callbacks.push_transfer_progress(|current, total, transferred_bytes| {
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: String::new(),
+            operation,
+            phase: TransferPhase::Receiving,
+            current,
+            total,
+            received_bytes: transferred_bytes,
+            message: None,
+        });
+    });
+    callbacks.push_update_reference(|_reference, status| {
+        if let Some(status) = status {
+            return Err(git2::Error::from_str(status));
+        }
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: String::new(),
+            operation,
+            phase: TransferPhase::Updating,
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: None,
+        });
+        Ok(())
+    });
+
+    let mut options = PushOptions::new();
+    options.remote_callbacks(callbacks);
+    remote.push(refspecs, Some(&mut options))?;
+    Ok(())
+}
+
+fn validate_tag_name(name: &str) -> Result<(), RemoteError> {
+    if name.starts_with('+') || !Tag::is_valid_name(name) {
+        return Err(git2::Error::from_str("invalid tag name").into());
+    }
+    Ok(())
 }
 
 fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {

@@ -1,10 +1,11 @@
 mod common;
 
 use git_core::remote::{
-    add_remote, clear_current_upstream, current_upstream, fetch_remote, list_remotes,
-    pull_after_fetch, remote_upstreams, remove_remote, remove_remote_and_clear_upstreams,
-    rename_remote, set_current_upstream, update_remote_urls, CredentialProvider, PullOutcome,
-    RemoteError, TransferOperation, TransferPhase, TransferProgress, TransferReporter,
+    add_remote, clear_current_upstream, create_tag, current_upstream, delete_tag, fetch_remote,
+    list_remotes, list_tags, pull_after_fetch, push_current_branch, push_tags, remote_upstreams,
+    remove_remote, remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
+    update_remote_urls, CredentialProvider, PullOutcome, RemoteError, TransferOperation,
+    TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -35,7 +36,7 @@ impl CredentialProvider for NoCredentials {
 
 struct RemoteFixture {
     source_dir: tempfile::TempDir,
-    _remote_dir: tempfile::TempDir,
+    remote_dir: tempfile::TempDir,
     local_dir: tempfile::TempDir,
     source: git2::Repository,
     local: git2::Repository,
@@ -106,7 +107,7 @@ fn local_and_bare_remote() -> RemoteFixture {
 
     RemoteFixture {
         source_dir,
-        _remote_dir: remote_dir,
+        remote_dir,
         local_dir,
         source,
         local,
@@ -115,6 +116,100 @@ fn local_and_bare_remote() -> RemoteFixture {
 
 fn diverged_local_and_bare_remote() -> RemoteFixture {
     local_and_bare_remote()
+}
+
+#[test]
+fn tag_crud_preserves_lightweight_and_annotated_tag_metadata() {
+    // Removing tag creation, annotation selection, or ref deletion must fail this test.
+    let (_dir, repo) = common::init_repo();
+    common::write_file(_dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let target_id = repo.head().unwrap().target().unwrap().to_string();
+
+    create_tag(&repo, "v1.0.0", None).unwrap();
+    create_tag(&repo, "release-note", Some("ship it")).unwrap();
+
+    let tags = list_tags(&repo).unwrap();
+    assert!(tags.iter().any(|tag| {
+        tag.name == "v1.0.0"
+            && tag.target_id == target_id
+            && !tag.annotated
+            && tag.message.is_none()
+            && tag.tagger_name.is_none()
+            && tag.timestamp.is_none()
+    }));
+    assert!(tags.iter().any(|tag| {
+        tag.name == "release-note"
+            && tag.target_id == target_id
+            && tag.annotated
+            && tag.message.as_deref() == Some("ship it")
+            && tag.tagger_name.as_deref() == Some("Test User")
+            && tag.timestamp.is_some()
+    }));
+
+    delete_tag(&repo, "v1.0.0").unwrap();
+    assert!(list_tags(&repo)
+        .unwrap()
+        .iter()
+        .all(|tag| tag.name != "v1.0.0"));
+}
+
+#[test]
+fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
+    // Omitting either explicit refspec or pushing every local tag must fail this test.
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    create_tag(&fixture.local, "v1.0.0", None).unwrap();
+    create_tag(&fixture.local, "not-selected", None).unwrap();
+    let mut reporter = VecReporter::default();
+
+    push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter).unwrap();
+    push_tags(
+        &fixture.local,
+        "origin",
+        &["v1.0.0".to_string()],
+        &mut NoCredentials,
+        &mut reporter,
+    )
+    .unwrap();
+
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    let local_head = fixture.local.head().unwrap();
+    let branch = local_head.shorthand().unwrap();
+    assert_eq!(
+        remote_repo
+            .find_reference(&format!("refs/heads/{branch}"))
+            .unwrap()
+            .target(),
+        fixture.local.head().unwrap().target()
+    );
+    assert!(remote_repo.find_reference("refs/tags/v1.0.0").is_ok());
+    assert!(remote_repo
+        .find_reference("refs/tags/not-selected")
+        .is_err());
+    assert!(reporter.events.iter().any(|event| {
+        event.operation == TransferOperation::PushBranch && event.phase == TransferPhase::Receiving
+    }));
+    assert!(reporter.events.iter().any(|event| {
+        event.operation == TransferOperation::PushTags && event.phase == TransferPhase::Receiving
+    }));
+}
+
+#[test]
+fn branch_push_rejects_non_fast_forward_updates() {
+    // Enabling force on the generated refspec would make this unsafe push succeed.
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture.local_commit("local change");
+    let mut reporter = VecReporter::default();
+
+    assert!(
+        push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter).is_err()
+    );
+    assert_eq!(
+        fixture.remote_tip(),
+        fixture.source.head().unwrap().target().unwrap()
+    );
 }
 
 #[test]
