@@ -55,6 +55,37 @@ describe("Browsitory remote transfer", () => {
     await expect(fetchButton).toBeEnabled();
   });
 
+  it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {
+    await (await $("button=Credentials for transfer-origin")).click();
+    const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
+    await credentialsForm.waitForExist({ timeout: 10000 });
+    await credentialsForm.$("select").selectByAttribute("value", "SshAgent");
+
+    expect(await credentialsForm.$("input[type='password']").isExisting()).toBe(false);
+
+    await (await $("button=Use SSH agent")).click();
+    await browser.waitUntil(
+      () => {
+        try {
+          return execFileSync(
+            "git",
+            ["config", "--get", "browsitory.remote.transfer-origin.auth-mode"],
+            { cwd: E2E_REPO_PATH, encoding: "utf8" },
+          ).trim() === "ssh-agent";
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 10000, timeoutMsg: "expected SSH-agent mode to be stored without an HTTPS credential" },
+    );
+    expect(
+      execFileSync("git", ["config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."], {
+        cwd: E2E_REPO_PATH,
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
+  });
+
   it("fast-forwards a clean tracked upstream", async () => {
     const upstreamRemote = await $("form[aria-label='Set upstream'] select");
     await upstreamRemote.selectByAttribute("value", "transfer-origin");
