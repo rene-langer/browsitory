@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 
 export function RemotePanel({
@@ -38,6 +38,7 @@ export function RemotePanel({
   onRebasePull: (upstreamRef: string) => void;
   onCancelPull: () => void;
 }) {
+  const pullDialogRef = useRef<HTMLDialogElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
   const [newPushUrl, setNewPushUrl] = useState("");
@@ -92,6 +93,17 @@ export function RemotePanel({
       setRemoveConfirmation(remote.name);
     }
   };
+
+  useEffect(() => {
+    const dialog = pullDialogRef.current;
+    if (pendingPull === null || dialog === null) return;
+    if (!dialog.open && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    } else if (!dialog.open) {
+      dialog.setAttribute("open", "");
+    }
+    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
+  }, [pendingPull]);
 
   return (
     <section className="remote-panel" aria-labelledby="remote-panel-heading">
@@ -162,7 +174,7 @@ export function RemotePanel({
       <section aria-labelledby="upstream-heading">
         <h3 id="upstream-heading">Upstream</h3>
         {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
-        <button type="button" disabled={pullDisabled || upstream === null} onClick={() => void onPull()}>
+        <button type="button" disabled={pullDisabled || upstream === null || pendingPull !== null} onClick={() => void onPull()}>
           Pull
         </button>
         <form onSubmit={submitUpstream} aria-label="Set upstream">
@@ -179,12 +191,19 @@ export function RemotePanel({
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
       </section>
       {pendingPull !== null && (
-        <div role="dialog" aria-label="Pull has diverged">
+        <dialog
+          ref={pullDialogRef}
+          aria-label="Pull has diverged"
+          onCancel={(event) => {
+            event.preventDefault();
+            onCancelPull();
+          }}
+        >
           <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
           <button type="button" onClick={() => void onMergePull(pendingPull.upstreamRef)}>Merge</button>
           <button type="button" onClick={() => onRebasePull(pendingPull.upstreamRef)}>Rebase</button>
-          <button type="button" onClick={onCancelPull}>Cancel</button>
-        </div>
+          <button type="button" data-autofocus onClick={onCancelPull}>Cancel</button>
+        </dialog>
       )}
     </section>
   );

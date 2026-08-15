@@ -7,10 +7,12 @@ import { expect } from "@wdio/globals";
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
 const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-source");
+const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
 
 describe("Browsitory remote transfer", () => {
   before(() => {
-    execFileSync("git", ["add", "README.md"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    fs.writeFileSync(path.join(E2E_REPO_PATH, TRANSFER_SEED_FILE), "transfer seed\n");
+    execFileSync("git", ["add", TRANSFER_SEED_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["commit", "-m", "e2e: seed transfer base"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
