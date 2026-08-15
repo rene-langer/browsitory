@@ -73,6 +73,65 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
 }
 
 describe("useAppState", () => {
+  it("tracks synchronous pull progress and cleans up after completion", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    let resolvePull: ((outcome: import("../ipc/RepoClient").PullOutcome) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pullCurrentUpstream: () => new Promise((resolve) => {
+        resolvePull = resolve;
+        listener?.({ operationId: "pull-42", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "pull-42", phase: "Receiving", current: 1, total: 2, receivedBytes: 128, message: null });
+      }),
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    let pull: Promise<void> = Promise.resolve();
+    act(() => {
+      pull = result.current.pullCurrentUpstream();
+    });
+
+    expect(result.current.state.transfer).toMatchObject({ operationId: "pull-42", phase: "Receiving" });
+    expect(result.current.state.pending).toBe(true);
+
+    await act(async () => {
+      listener?.({ operationId: "pull-42", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+      resolvePull?.({ kind: "UpToDate" });
+      await pull;
+    });
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("accepts a pull start event that arrives after the outcome fallback", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+
+    act(() => {
+      listener?.({ operationId: "pull-late", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+    });
+
+    expect(result.current.state.transfer?.operationId).toBe("pull-late");
+  });
+
   it.each([
     { kind: "UpToDate" } as const,
     { kind: "FastForwarded", upstreamRef: "refs/remotes/origin/main" } as const,

@@ -312,6 +312,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const pullCurrentUpstream = useCallback(async () => {
     try {
+      transferRequestPending.current = true;
+      activeTransferId.current = null;
       setState((prev) => ({ ...prev, pending: true, error: null, pendingPull: null }));
       const outcome: PullOutcome = await client.pullCurrentUpstream();
       if (outcome.kind === "Diverged") {
