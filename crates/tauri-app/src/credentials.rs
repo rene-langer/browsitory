@@ -1,8 +1,10 @@
 use std::fmt;
 
+use git_core::remote::{CredentialProvider, RemoteAuthMode};
 use url::Url;
 
 const SERVICE_NAME: &str = "com.browsitory.git";
+pub(crate) const MISSING_CREDENTIAL_ERROR: &str = "missing credential for remote";
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
@@ -140,12 +142,62 @@ impl<S: CredentialStore> CredentialService<S> {
     }
 }
 
+pub(crate) struct RemoteCredentialProvider<'a, S: CredentialStore> {
+    service: &'a CredentialService<S>,
+    profile: Option<RemoteAuthMode>,
+}
+
+impl<'a, S: CredentialStore> RemoteCredentialProvider<'a, S> {
+    pub(crate) fn new(service: &'a CredentialService<S>, profile: Option<RemoteAuthMode>) -> Self {
+        Self { service, profile }
+    }
+}
+
+impl<S: CredentialStore> CredentialProvider for RemoteCredentialProvider<'_, S> {
+    fn credential(
+        &mut self,
+        url: &str,
+        username: Option<&str>,
+        _allowed: git2::CredentialType,
+    ) -> Result<git2::Cred, git2::Error> {
+        match &self.profile {
+            Some(RemoteAuthMode::HttpsToken { username }) => {
+                let credential = self
+                    .service
+                    .lookup_https(url, Some(username))
+                    .map_err(|_| git2::Error::from_str(MISSING_CREDENTIAL_ERROR))?
+                    .ok_or_else(|| git2::Error::from_str(MISSING_CREDENTIAL_ERROR))?;
+                git2::Cred::userpass_plaintext(&credential.username, &credential.token)
+            }
+            Some(RemoteAuthMode::SshAgent) => {
+                ssh_agent_credential(username, git2::Cred::ssh_key_from_agent)
+            }
+            None if _allowed.is_ssh_key() => {
+                ssh_agent_credential(username, git2::Cred::ssh_key_from_agent)
+            }
+            None => Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
+        }
+    }
+}
+
+fn ssh_agent_credential<T>(
+    username: Option<&str>,
+    create: impl FnOnce(&str) -> Result<T, git2::Error>,
+) -> Result<T, git2::Error> {
+    create(username.unwrap_or("git"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
-    use super::{CredentialKey, CredentialService, CredentialStore, CredentialStoreError};
+    use git_core::remote::{CredentialProvider, RemoteAuthMode};
+
+    use super::{
+        CredentialKey, CredentialService, CredentialStore, CredentialStoreError,
+        RemoteCredentialProvider, MISSING_CREDENTIAL_ERROR,
+    };
 
     #[derive(Default)]
     struct MemoryCredentialStore {
@@ -221,5 +273,64 @@ mod tests {
             CredentialKey::for_https("https://git.example.test:8443/org/repo.git", "rene").unwrap();
 
         assert_eq!(key.account, "https://git.example.test:8443/rene");
+    }
+
+    #[test]
+    fn https_provider_returns_a_plaintext_credential_only_when_the_store_has_a_token() {
+        // Removing the lookup or passing a token through any configuration must fail this test.
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        let profile = RemoteAuthMode::HttpsToken {
+            username: "rene".to_string(),
+        };
+        let mut provider = RemoteCredentialProvider::new(&service, Some(profile.clone()));
+
+        let missing = match provider.credential(
+            "https://git.example.test/owner/repo.git",
+            Some("ignored-callback-user"),
+            git2::CredentialType::USER_PASS_PLAINTEXT,
+        ) {
+            Ok(_) => panic!("missing token must reject authentication"),
+            Err(error) => error,
+        };
+        assert_eq!(missing.message(), MISSING_CREDENTIAL_ERROR);
+
+        service
+            .save_https(
+                "https://git.example.test/owner/repo.git",
+                "rene",
+                "token-123",
+            )
+            .unwrap();
+        let credential = provider
+            .credential(
+                "https://git.example.test/owner/repo.git",
+                Some("ignored-callback-user"),
+                git2::CredentialType::USER_PASS_PLAINTEXT,
+            )
+            .expect("stored token supplies a libgit2 credential");
+        assert!(credential.has_username());
+    }
+
+    #[test]
+    fn ssh_provider_uses_the_callback_username_or_git_without_querying_the_store() {
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        let profile = RemoteAuthMode::SshAgent;
+        let _provider = RemoteCredentialProvider::new(&service, Some(profile));
+
+        let mut used_usernames = Vec::new();
+        super::ssh_agent_credential(Some("alice"), |username| {
+            used_usernames.push(username.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        super::ssh_agent_credential(None, |username| {
+            used_usernames.push(username.to_owned());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(used_usernames, ["alice", "git"]);
     }
 }
