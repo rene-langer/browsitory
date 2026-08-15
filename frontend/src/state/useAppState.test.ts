@@ -40,6 +40,10 @@ const remoteManagementClient = {
     pushCurrentBranch: async () => unimplemented(),
     pushTags: async () => unimplemented(),
     subscribeTransferProgress: () => () => {},
+  listWorktrees: async () => [],
+  createWorktree: async () => unimplemented(),
+  removeWorktree: async () => unimplemented(),
+  pruneWorktrees: async () => unimplemented(),
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -61,6 +65,10 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     switchBranch: async () => unimplemented(),
     deleteBranch: async () => unimplemented(),
     renameBranch: async () => unimplemented(),
+    listWorktrees: async () => [],
+    createWorktree: async () => unimplemented(),
+    removeWorktree: async () => unimplemented(),
+    pruneWorktrees: async () => unimplemented(),
     listStashes: async () => [],
     saveStash: async () => unimplemented(),
     applyStash: async () => unimplemented(),
@@ -141,6 +149,29 @@ describe("useAppState", () => {
 
     await act(() => result.current.deleteTag("v1.0.0"));
     expect(result.current.state.tags).toEqual([]);
+  });
+
+  it("refreshes status, graph, branches, and worktrees after creating a worktree", async () => {
+    let statusCalls = 0;
+    let graphCalls = 0;
+    let branchCalls = 0;
+    let worktreeCalls = 0;
+    const client = transferClient({
+      getStatus: async () => { statusCalls += 1; return []; },
+      getCommitGraph: async () => { graphCalls += 1; return []; },
+      listBranches: async () => { branchCalls += 1; return []; },
+      listWorktrees: async () => { worktreeCalls += 1; return []; },
+      createWorktree: async () => {},
+    });
+    const { result } = renderHook(() => useAppState(client));
+
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.createWorktree("feature", "/repo-feature", "feature", "main"));
+
+    expect(statusCalls).toBe(2);
+    expect(graphCalls).toBe(2);
+    expect(branchCalls).toBe(2);
+    expect(worktreeCalls).toBe(2);
   });
 
   it("tracks a current-branch push using its transfer operation ID", async () => {
