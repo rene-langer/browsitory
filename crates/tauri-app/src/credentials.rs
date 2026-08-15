@@ -1,5 +1,7 @@
 use std::fmt;
 
+use url::Url;
+
 const SERVICE_NAME: &str = "com.browsitory.git";
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -10,20 +12,30 @@ pub struct CredentialKey {
 
 impl CredentialKey {
     pub fn for_https(url: &str, username: &str) -> Result<Self, CredentialStoreError> {
-        let authority = url
-            .strip_prefix("https://")
-            .and_then(|remainder| remainder.split('/').next())
-            .filter(|authority| !authority.is_empty() && !authority.contains('@'))
-            .ok_or(CredentialStoreError::InvalidHttpsUrl)?;
+        let parsed = Url::parse(url).map_err(|_| CredentialStoreError::InvalidHttpsUrl)?;
+        if parsed.scheme() != "https"
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(CredentialStoreError::InvalidHttpsUrl);
+        }
 
-        let authority = match authority.rsplit_once(':') {
-            Some((host, "443")) if !host.is_empty() && !host.contains(':') => host,
-            _ => authority,
+        let host = parsed
+            .host_str()
+            .ok_or(CredentialStoreError::InvalidHttpsUrl)?;
+        let host = if host.contains(':') {
+            format!("[{host}]")
+        } else {
+            host.to_owned()
+        };
+        let port = match parsed.port() {
+            Some(port) if port != 443 => format!(":{port}"),
+            _ => String::new(),
         };
 
         Ok(Self {
             service: SERVICE_NAME.to_owned(),
-            account: format!("https://{authority}/{username}"),
+            account: format!("https://{host}{port}/{username}"),
         })
     }
 }
@@ -178,7 +190,10 @@ mod tests {
         assert_eq!(credential.username, "rene");
         assert_eq!(credential.token, "token-123");
         service.forget_https(remote_url, "rene").unwrap();
-        assert!(service.lookup_https(remote_url, Some("rene")).is_none());
+        assert!(service
+            .lookup_https(remote_url, Some("rene"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -188,6 +203,13 @@ mod tests {
 
         assert_eq!(key.service, "com.browsitory.git");
         assert_eq!(key.account, "https://git.example.test/rene");
+    }
+
+    #[test]
+    fn derives_an_ipv6_key_without_the_default_https_port() {
+        let key = CredentialKey::for_https("https://[::1]:443/org/repo.git", "rene").unwrap();
+
+        assert_eq!(key.account, "https://[::1]/rene");
     }
 
     #[test]

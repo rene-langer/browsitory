@@ -27,6 +27,7 @@ git-core = { path = "../git-core" }
 config = { path = "../config" }
 git2 = "0.21"
 keyring = { version = "4.1.6", features = ["v1"] }
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3"
