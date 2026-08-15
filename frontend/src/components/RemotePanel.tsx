@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import type { PullOutcome, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 
 export function RemotePanel({
   remotes,
@@ -16,6 +16,7 @@ export function RemotePanel({
   onPull,
   pullDisabled,
   pendingPull,
+  pullOutcome,
   onMergePull,
   onRebasePull,
   onCancelPull,
@@ -34,6 +35,7 @@ export function RemotePanel({
   onPull: () => Promise<void>;
   pullDisabled: boolean;
   pendingPull: { upstreamRef: string } | null;
+  pullOutcome: PullOutcome | null;
   onMergePull: (upstreamRef: string) => Promise<void>;
   onRebasePull: (upstreamRef: string) => void;
   onCancelPull: () => void;
@@ -177,6 +179,7 @@ export function RemotePanel({
         <button type="button" disabled={pullDisabled || upstream === null || pendingPull !== null} onClick={() => void onPull()}>
           Pull
         </button>
+        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
         <form onSubmit={submitUpstream} aria-label="Set upstream">
           <label>
             Upstream remote
@@ -200,8 +203,8 @@ export function RemotePanel({
           }}
         >
           <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
-          <button type="button" onClick={() => void onMergePull(pendingPull.upstreamRef)}>Merge</button>
-          <button type="button" onClick={() => onRebasePull(pendingPull.upstreamRef)}>Rebase</button>
+          <button type="button" disabled={pullDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>Merge</button>
+          <button type="button" disabled={pullDisabled} onClick={() => onRebasePull(pendingPull.upstreamRef)}>Rebase</button>
           <button type="button" data-autofocus onClick={onCancelPull}>Cancel</button>
         </dialog>
       )}

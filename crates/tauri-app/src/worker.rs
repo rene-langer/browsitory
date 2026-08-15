@@ -575,7 +575,10 @@ impl Worker {
                                 &mut credentials,
                                 &mut reporter,
                             )
-                            .map_err(|e| e.to_string())?;
+                            // libgit2 transport errors may echo remote-controlled URLs or
+                            // messages. Pull has a synchronous reply in addition to its transfer
+                            // events, so sanitize that path just like Fetch's terminal event.
+                            .map_err(|_| "pull failed".to_string())?;
                             let upstream = git_core::remote::current_upstream(&repo)
                                 .map_err(|e| e.to_string())?
                                 .ok_or_else(|| "current branch has no upstream".to_string())?;
@@ -1503,6 +1506,37 @@ mod tests {
             Some(TransferEvent::Completed { operation_id: id, error: Some(error) })
                 if id == &operation_id && error == "fetch failed"
         ));
+    }
+
+    #[test]
+    fn pull_fetch_failure_returns_only_a_sanitized_error() {
+        let (local_dir, repo) = init_repo();
+        write_file(local_dir.path(), "README.md", "initial commit\n");
+        commit_all(&repo, "initial commit");
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let secret_path = local_dir.path().join("alice-secret").join("missing.git");
+        repo.remote("origin", secret_path.to_str().unwrap())
+            .unwrap();
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(&format!("branch.{branch}.merge"), "refs/heads/main")
+            .unwrap();
+        drop(config);
+        drop(repo);
+
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, _event_rx) = mpsc::channel();
+
+        let error = worker
+            .handle()
+            .pull_current_upstream(event_tx)
+            .expect_err("pull should fail while fetching");
+
+        assert_eq!(error, "pull failed");
+        assert!(!error.contains("alice-secret"));
     }
 
     #[test]

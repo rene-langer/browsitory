@@ -170,7 +170,7 @@ pub fn pull_after_fetch(
     let upstream_oid = upstream_commit.id();
     let local_oid = repo.head()?.peel_to_commit()?.id();
 
-    if local_oid == upstream_oid {
+    if local_oid == upstream_oid || repo.graph_descendant_of(local_oid, upstream_oid)? {
         return Ok(PullOutcome::UpToDate);
     }
     if !repo.graph_descendant_of(upstream_oid, local_oid)? {

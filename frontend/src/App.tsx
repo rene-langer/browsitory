@@ -11,6 +11,11 @@ import { useAppState } from "./state/useAppState";
 
 export default function App() {
   const appState = useAppState(tauriRepoClient);
+  const repositoryOperationDisabled =
+    appState.state.pending ||
+    appState.state.transfer !== null ||
+    appState.state.mergeMessage !== null ||
+    appState.state.rebaseProgress !== null;
 
   // E2E-only auto-open: `RepoPicker`'s native folder dialog can't be driven through WebDriver,
   // so the E2E build points at a fixture repo via this Vite env var instead. Statically absent
@@ -53,6 +58,7 @@ export default function App() {
         onMergeBranch={appState.mergeBranch}
         isMerging={appState.state.mergeMessage !== null}
         isRebasing={appState.state.rebaseProgress !== null}
+        operationDisabled={repositoryOperationDisabled}
       />
       <RemotePanel
         remotes={appState.state.remotes}
@@ -65,20 +71,11 @@ export default function App() {
         onSetUpstream={appState.setCurrentUpstream}
         onClearUpstream={appState.clearCurrentUpstream}
         onFetchRemote={appState.fetchRemote}
-        fetchDisabled={
-          appState.state.pending ||
-          appState.state.mergeMessage !== null ||
-          appState.state.rebaseProgress !== null ||
-          appState.state.transfer !== null
-        }
+        fetchDisabled={repositoryOperationDisabled}
         onPull={appState.pullCurrentUpstream}
-        pullDisabled={
-          appState.state.pending ||
-          appState.state.mergeMessage !== null ||
-          appState.state.rebaseProgress !== null ||
-          appState.state.transfer !== null
-        }
+        pullDisabled={repositoryOperationDisabled}
         pendingPull={appState.state.pendingPull}
+        pullOutcome={appState.state.pullOutcome}
         onMergePull={async (upstreamRef) => {
           appState.clearPendingPull();
           await appState.mergeBranch(upstreamRef);
@@ -96,7 +93,7 @@ export default function App() {
           commits={appState.state.commits}
           stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
-          pending={appState.state.pending}
+          pending={repositoryOperationDisabled}
           onSelectRow={appState.selectRow}
           onBranchFromCommit={appState.openCreateBranchDraft}
           onRebaseFromCommit={appState.openRebasePlanner}
@@ -127,6 +124,7 @@ export default function App() {
           onto={appState.state.rebaseOnto}
           onStartRebase={appState.startRebase}
           onCancel={appState.closeRebasePlanner}
+          operationDisabled={repositoryOperationDisabled}
         />
       )}
     </main>

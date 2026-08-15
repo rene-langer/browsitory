@@ -151,6 +151,7 @@ describe("useAppState", () => {
 
     expect(statusCalls).toBe(2);
     expect(result.current.state.pendingPull).toBeNull();
+    expect(result.current.state.pullOutcome).toEqual(outcome);
   });
 
   it("records a divergent pull without beginning reconciliation", async () => {
@@ -205,6 +206,30 @@ describe("useAppState", () => {
 
     expect(result.current.state.pendingPull).toBeNull();
     expect(result.current.state.error).toBe("Commit or stash your changes before pulling.");
+  });
+
+  it("disarms pull transfer tracking when the pull request rejects", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pullCurrentUpstream: async () => {
+        throw new Error("pull failed");
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    act(() => {
+      listener?.({ operationId: "rejected-pull", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+    });
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.pending).toBe(false);
   });
 
   it("handles a fast fetch that completes before its operation ID reply", async () => {

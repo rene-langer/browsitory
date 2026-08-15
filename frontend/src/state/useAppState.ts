@@ -34,6 +34,7 @@ export interface AppState {
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   pendingPull: { upstreamRef: string } | null;
+  pullOutcome: PullOutcome | null;
   transfer: TransferProgress | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
@@ -96,6 +97,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     rebaseProgress: null,
     rebaseOnto: null,
     pendingPull: null,
+    pullOutcome: null,
     transfer: null,
     error: null,
     pending: false,
@@ -315,20 +317,30 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     try {
       transferRequestPending.current = true;
       activeTransferId.current = null;
-      setState((prev) => ({ ...prev, pending: true, error: null, pendingPull: null }));
+      setState((prev) => ({
+        ...prev,
+        pending: true,
+        error: null,
+        pendingPull: null,
+        pullOutcome: null,
+      }));
       const outcome: PullOutcome = await client.pullCurrentUpstream();
       if (outcome.kind === "Diverged") {
         setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
         return;
       }
       await refresh();
-      setState((prev) => ({ ...prev, pending: false }));
+      setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
     } catch (err) {
+      transferRequestPending.current = false;
+      activeTransferId.current = null;
       const message = String(err);
       setState((prev) => ({
         ...prev,
+        transfer: null,
         pending: false,
         pendingPull: null,
+        pullOutcome: null,
         error: message.includes("cannot pull with a dirty worktree")
           ? "Commit or stash your changes before pulling."
           : message,

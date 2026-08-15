@@ -40,6 +40,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onPull={vi.fn()}
       pullDisabled={false}
       pendingPull={null}
+      pullOutcome={null}
       onMergePull={vi.fn()}
       onRebasePull={vi.fn()}
       onCancelPull={vi.fn()}
@@ -93,6 +94,25 @@ describe("RemotePanel", () => {
     await waitFor(() => {
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
     });
+  });
+
+  it("disables divergent pull choices while another repository operation is active", () => {
+    renderPanel({
+      upstream,
+      pullDisabled: true,
+      pendingPull: { upstreamRef: "refs/remotes/origin/main" },
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Pull has diverged" });
+    expect(within(dialog).getByRole("button", { name: "Merge" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Rebase" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
+  it("renders a successful up-to-date pull outcome", () => {
+    renderPanel({ upstream, pullOutcome: { kind: "UpToDate" } });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Already up to date.");
   });
 
   it("requires upstream discovery in both the client and panel contracts", () => {
