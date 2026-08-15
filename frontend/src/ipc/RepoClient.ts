@@ -47,6 +47,15 @@ export interface TransferProgress {
   message: string | null;
 }
 
+export interface TagInfo {
+  name: string;
+  targetId: string;
+  annotated: boolean;
+  message: string | null;
+  taggerName: string | null;
+  timestamp: number | null;
+}
+
 export interface StashEntry {
   index: number;
   message: string;
@@ -144,7 +153,12 @@ export interface RepoClient {
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
+  listTags(): Promise<TagInfo[]>;
+  createTag(name: string, message: string | null): Promise<void>;
+  deleteTag(name: string): Promise<void>;
   fetchRemote(remoteName: string): Promise<string>;
+  pushCurrentBranch(remoteName: string): Promise<string>;
+  pushTags(remoteName: string, names: string[]): Promise<string>;
   pullCurrentUpstream(): Promise<PullOutcome>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(): Promise<StashEntry[]>;
