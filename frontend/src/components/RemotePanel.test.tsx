@@ -39,7 +39,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onRemoveRemote={vi.fn().mockResolvedValue(undefined)}
       onSaveHttpsCredential={vi.fn().mockResolvedValue(undefined)}
       onForgetHttpsCredential={vi.fn().mockResolvedValue(undefined)}
-      onSetRemoteAuthMode={vi.fn().mockResolvedValue(undefined)}
+      onSetRemoteAuthMode={vi.fn().mockResolvedValue(true)}
       onSetUpstream={vi.fn()}
       onClearUpstream={vi.fn()}
       onFetchRemote={vi.fn()}
@@ -75,7 +75,7 @@ describe("RemotePanel", () => {
   });
 
   it("uses the SSH agent without rendering a token input", async () => {
-    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(undefined);
+    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(true);
     renderPanel({ onSetRemoteAuthMode });
 
     fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
@@ -102,6 +102,23 @@ describe("RemotePanel", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Access token")).toHaveValue("");
     });
+  });
+
+  it("does not save a token when HTTPS authentication setup fails", async () => {
+    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(false);
+    const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSetRemoteAuthMode, onSaveHttpsCredential });
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+    fireEvent.change(screen.getByLabelText("HTTPS username"), { target: { value: "rene" } });
+    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "token-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save HTTPS credential" }));
+
+    await waitFor(() => {
+      expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "HttpsToken", "rene");
+    });
+    expect(onSaveHttpsCredential).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Access token")).toHaveValue("");
   });
 
   it("pushes the current branch to a chosen remote and disables Push during an operation", () => {

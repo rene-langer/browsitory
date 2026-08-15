@@ -86,7 +86,7 @@ export interface UseAppStateResult {
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
   saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
   forgetHttpsCredential(remoteName: string): Promise<void>;
-  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<void>;
+  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<boolean>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<void>;
@@ -230,6 +230,22 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [refresh],
   );
 
+  const runMutationWithOutcome = useCallback(
+    async (mutate: () => Promise<void>): Promise<boolean> => {
+      try {
+        setState((prev) => ({ ...prev, pending: true }));
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return true;
+      } catch (err) {
+        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
+        return false;
+      }
+    },
+    [refresh],
+  );
+
   const openRepo = useCallback(
     (path: string) => {
       // Invalidate a former repository's transfer before opening the replacement. A completion
@@ -326,8 +342,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
   const setRemoteAuthMode = useCallback(
     (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
-      runMutation(() => client.setRemoteAuthMode(remoteName, mode, username)),
-    [client, runMutation],
+      runMutationWithOutcome(() => client.setRemoteAuthMode(remoteName, mode, username)),
+    [client, runMutationWithOutcome],
   );
   const setCurrentUpstream = useCallback(
     (remoteName: string, remoteBranch: string) =>
