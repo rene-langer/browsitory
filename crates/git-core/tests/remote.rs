@@ -134,12 +134,30 @@ fn pull_fast_forwards_a_clean_branch_after_fetch() {
 #[test]
 fn pull_rejects_a_dirty_worktree_before_changing_head() {
     let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
     fixture.write_local("dirty.txt", "dirty");
+    let local_head = fixture.local.head().unwrap().target();
 
     assert!(matches!(
         pull_after_fetch(&fixture.local, "origin", "main"),
         Err(RemoteError::DirtyWorktree)
     ));
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
+    assert_ne!(local_head, Some(fixture.remote_tip()));
+}
+
+#[test]
+fn pull_rejects_detached_head_without_creating_a_head_branch() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let local_head = fixture.local.head().unwrap().target().unwrap();
+    fixture.local.set_head_detached(local_head).unwrap();
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Err(RemoteError::DetachedHead)
+    ));
+    assert!(fixture.local.find_reference("refs/heads/HEAD").is_err());
 }
 
 #[test]
