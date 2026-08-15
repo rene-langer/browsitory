@@ -142,18 +142,56 @@ impl<S: CredentialStore> CredentialService<S> {
     }
 }
 
-pub(crate) struct RemoteCredentialProvider<'a, S: CredentialStore> {
-    service: &'a CredentialService<S>,
-    profile: Option<RemoteAuthMode>,
+pub(crate) trait SshAgent {
+    fn credential(&self, username: &str) -> Result<git2::Cred, git2::Error>;
 }
 
-impl<'a, S: CredentialStore> RemoteCredentialProvider<'a, S> {
-    pub(crate) fn new(service: &'a CredentialService<S>, profile: Option<RemoteAuthMode>) -> Self {
-        Self { service, profile }
+pub(crate) struct Libgit2SshAgent;
+
+impl SshAgent for Libgit2SshAgent {
+    fn credential(&self, username: &str) -> Result<git2::Cred, git2::Error> {
+        git2::Cred::ssh_key_from_agent(username)
     }
 }
 
-impl<S: CredentialStore> CredentialProvider for RemoteCredentialProvider<'_, S> {
+impl<T: SshAgent + ?Sized> SshAgent for &T {
+    fn credential(&self, username: &str) -> Result<git2::Cred, git2::Error> {
+        (*self).credential(username)
+    }
+}
+
+pub(crate) struct RemoteCredentialProvider<'a, S: CredentialStore, A = Libgit2SshAgent> {
+    service: &'a CredentialService<S>,
+    profile: Option<RemoteAuthMode>,
+    ssh_agent: A,
+}
+
+impl<'a, S: CredentialStore> RemoteCredentialProvider<'a, S, Libgit2SshAgent> {
+    pub(crate) fn new(service: &'a CredentialService<S>, profile: Option<RemoteAuthMode>) -> Self {
+        Self {
+            service,
+            profile,
+            ssh_agent: Libgit2SshAgent,
+        }
+    }
+}
+
+impl<'a, S: CredentialStore, A: SshAgent> RemoteCredentialProvider<'a, S, A> {
+    #[cfg(test)]
+    fn with_ssh_agent(
+        service: &'a CredentialService<S>,
+        profile: Option<RemoteAuthMode>,
+        ssh_agent: A,
+    ) -> Self {
+        Self {
+            service,
+            profile,
+            ssh_agent,
+        }
+    }
+}
+
+impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialProvider<'_, S, A> {
     fn credential(
         &mut self,
         url: &str,
@@ -169,22 +207,11 @@ impl<S: CredentialStore> CredentialProvider for RemoteCredentialProvider<'_, S> 
                     .ok_or_else(|| git2::Error::from_str(MISSING_CREDENTIAL_ERROR))?;
                 git2::Cred::userpass_plaintext(&credential.username, &credential.token)
             }
-            Some(RemoteAuthMode::SshAgent) => {
-                ssh_agent_credential(username, git2::Cred::ssh_key_from_agent)
-            }
-            None if _allowed.is_ssh_key() => {
-                ssh_agent_credential(username, git2::Cred::ssh_key_from_agent)
-            }
+            Some(RemoteAuthMode::SshAgent) => self.ssh_agent.credential(username.unwrap_or("git")),
+            None if _allowed.is_ssh_key() => self.ssh_agent.credential(username.unwrap_or("git")),
             None => Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
         }
     }
-}
-
-fn ssh_agent_credential<T>(
-    username: Option<&str>,
-    create: impl FnOnce(&str) -> Result<T, git2::Error>,
-) -> Result<T, git2::Error> {
-    create(username.unwrap_or("git"))
 }
 
 #[cfg(test)]
@@ -219,6 +246,35 @@ mod tests {
         fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
             self.tokens.borrow_mut().remove(key);
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct PanicOnGetStore;
+
+    impl CredentialStore for PanicOnGetStore {
+        fn get(&self, _key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+            panic!("SSH authentication must not query the credential store");
+        }
+
+        fn set(&self, _key: &CredentialKey, _token: &str) -> Result<(), CredentialStoreError> {
+            unreachable!("test store is read-only")
+        }
+
+        fn delete(&self, _key: &CredentialKey) -> Result<(), CredentialStoreError> {
+            unreachable!("test store is read-only")
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingSshAgent {
+        usernames: RefCell<Vec<String>>,
+    }
+
+    impl super::SshAgent for RecordingSshAgent {
+        fn credential(&self, username: &str) -> Result<git2::Cred, git2::Error> {
+            self.usernames.borrow_mut().push(username.to_owned());
+            Err(git2::Error::from_str("test SSH agent was invoked"))
         }
     }
 
@@ -314,23 +370,25 @@ mod tests {
 
     #[test]
     fn ssh_provider_uses_the_callback_username_or_git_without_querying_the_store() {
-        let store = MemoryCredentialStore::default();
+        let store = PanicOnGetStore;
         let service = CredentialService::new(store);
         let profile = RemoteAuthMode::SshAgent;
-        let _provider = RemoteCredentialProvider::new(&service, Some(profile));
+        let agent = RecordingSshAgent::default();
+        let mut provider =
+            RemoteCredentialProvider::with_ssh_agent(&service, Some(profile), &agent);
 
-        let mut used_usernames = Vec::new();
-        super::ssh_agent_credential(Some("alice"), |username| {
-            used_usernames.push(username.to_owned());
-            Ok(())
-        })
-        .unwrap();
-        super::ssh_agent_credential(None, |username| {
-            used_usernames.push(username.to_owned());
-            Ok(())
-        })
-        .unwrap();
+        for username in [Some("alice"), None] {
+            let error = match provider.credential(
+                "ssh://example.test/owner/repo.git",
+                username,
+                git2::CredentialType::SSH_KEY,
+            ) {
+                Ok(_) => panic!("test agent always rejects after recording the username"),
+                Err(error) => error,
+            };
+            assert_eq!(error.message(), "test SSH agent was invoked");
+        }
 
-        assert_eq!(used_usernames, ["alice", "git"]);
+        assert_eq!(agent.usernames.into_inner(), ["alice", "git"]);
     }
 }
