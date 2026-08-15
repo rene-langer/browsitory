@@ -56,6 +56,38 @@ describe("tauriRepoClient credentials", () => {
   });
 });
 
+describe("tauriRepoClient worktrees", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("maps worktree operations to their Tauri commands", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await tauriRepoClient.listWorktrees();
+    await tauriRepoClient.createWorktree(
+      "feature-tree",
+      "/repos/project-feature",
+      "feature",
+      null,
+    );
+    await tauriRepoClient.removeWorktree("feature-tree");
+    await tauriRepoClient.pruneWorktrees();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_worktrees");
+    expect(invoke).toHaveBeenNthCalledWith(2, "create_worktree", {
+      name: "feature-tree",
+      path: "/repos/project-feature",
+      branch: "feature",
+      startPoint: null,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "remove_worktree", {
+      name: "feature-tree",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(4, "prune_worktrees");
+  });
+});
+
 describe("tauriRepoClient transfer progress subscription", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();

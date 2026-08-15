@@ -20,6 +20,7 @@ import type {
   TagInfo,
   TransferProgress,
   UpstreamInfo,
+  WorktreeInfo,
 } from "./RepoClient";
 
 let transferListenersReady: Promise<void> = Promise.resolve();
@@ -48,6 +49,15 @@ export const tauriRepoClient: RepoClient = {
     invoke("delete_branch", { name, force }),
   renameBranch: (oldName: string, newName: string) =>
     invoke("rename_branch", { oldName, newName }),
+  listWorktrees: () => invoke<WorktreeInfo[]>("list_worktrees"),
+  createWorktree: (
+    name: string,
+    path: string,
+    branch: string,
+    startPoint: string | null,
+  ) => invoke("create_worktree", { name, path, branch, startPoint }),
+  removeWorktree: (name: string) => invoke("remove_worktree", { name }),
+  pruneWorktrees: () => invoke("prune_worktrees"),
   listRemotes: () => invoke<RemoteInfo[]>("list_remotes"),
   getCurrentUpstream: () => invoke<UpstreamInfo | null>("get_current_upstream"),
   getRemoteUpstreams: (name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { name }),

@@ -14,6 +14,7 @@ use git_core::remote::{
 };
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
+use git_core::worktree::WorktreeInfo;
 
 use crate::credentials::{CredentialService, KeyringCredentialStore, RemoteCredentialProvider};
 
@@ -108,6 +109,23 @@ pub(crate) enum Command {
     RenameBranch {
         old_name: String,
         new_name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ListWorktrees {
+        reply: Sender<Result<Vec<WorktreeInfo>, String>>,
+    },
+    CreateWorktree {
+        name: String,
+        path: PathBuf,
+        branch: String,
+        start_point: Option<String>,
+        reply: Sender<Result<(), String>>,
+    },
+    RemoveWorktree {
+        name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    PruneWorktrees {
         reply: Sender<Result<(), String>>,
     },
     ListRemotes {
@@ -384,6 +402,47 @@ impl Worker {
                     } => {
                         let result = git_core::branch::rename_branch(&repo, &old_name, &new_name)
                             .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListWorktrees { reply } => {
+                        let result =
+                            git_core::worktree::list_worktrees(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::CreateWorktree {
+                        name,
+                        path,
+                        branch,
+                        start_point,
+                        reply,
+                    } => {
+                        let result = git_core::worktree::create_worktree(
+                            &repo,
+                            &name,
+                            &path,
+                            &branch,
+                            start_point.as_deref(),
+                        )
+                        .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RemoveWorktree { name, reply } => {
+                        let result = git_core::worktree::list_worktrees(&repo)
+                            .and_then(|worktrees| {
+                                worktrees
+                                    .into_iter()
+                                    .find(|worktree| worktree.name == name)
+                                    .ok_or(git_core::worktree::WorktreeError::Git)
+                            })
+                            .and_then(|worktree| {
+                                git_core::worktree::remove_worktree(&repo, &worktree.path)
+                            })
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::PruneWorktrees { reply } => {
+                        let result =
+                            git_core::worktree::prune_worktrees(&repo).map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::ListRemotes { reply } => {
@@ -1119,6 +1178,61 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
+    pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListWorktrees { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn create_worktree(
+        &self,
+        name: String,
+        path: PathBuf,
+        branch: String,
+        start_point: Option<String>,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::CreateWorktree {
+                name,
+                path,
+                branch,
+                start_point,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn remove_worktree(&self, name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RemoveWorktree {
+                name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn prune_worktrees(&self) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::PruneWorktrees { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -1653,6 +1767,38 @@ mod tests {
 
         assert_eq!(branches.len(), 1);
         assert!(branches[0].is_current);
+    }
+
+    #[test]
+    fn create_then_remove_worktree_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+        let linked = dir.path().join("feature-tree");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .create_worktree(
+                "feature-tree".into(),
+                linked.clone(),
+                "feature".into(),
+                None,
+            )
+            .unwrap();
+
+        assert!(handle
+            .list_worktrees()
+            .unwrap()
+            .iter()
+            .any(|worktree| worktree.name == "feature-tree"));
+
+        handle.remove_worktree("feature-tree".into()).unwrap();
+
+        assert!(!linked.exists());
+        assert_eq!(handle.list_worktrees().unwrap().len(), 1);
     }
 
     #[test]
