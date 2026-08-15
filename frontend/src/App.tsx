@@ -7,6 +7,7 @@ import { RepoPicker } from "./components/RepoPicker";
 import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
 import { TransferPanel } from "./components/TransferPanel";
+import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
 
@@ -59,6 +60,15 @@ export default function App() {
         onMergeBranch={appState.mergeBranch}
         isMerging={appState.state.mergeMessage !== null}
         isRebasing={appState.state.rebaseProgress !== null}
+        operationDisabled={repositoryOperationDisabled}
+      />
+      <WorktreePanel
+        worktrees={appState.state.worktrees}
+        branches={appState.state.branches}
+        onOpenWorktree={appState.openRepo}
+        onCreateWorktree={appState.createWorktree}
+        onRemoveWorktree={appState.removeWorktree}
+        onPruneWorktrees={appState.pruneWorktrees}
         operationDisabled={repositoryOperationDisabled}
       />
       <RemotePanel

@@ -15,6 +15,7 @@ import type {
   TagInfo,
   TransferProgress,
   UpstreamInfo,
+  WorktreeInfo,
 } from "../ipc/RepoClient";
 
 function transferFailureMessage(progress: TransferProgress): string {
@@ -52,6 +53,7 @@ export interface AppState {
   status: StatusEntry[];
   commits: GraphCommit[];
   branches: BranchInfo[];
+  worktrees: WorktreeInfo[];
   remotes: RemoteInfo[];
   tags: TagInfo[];
   upstream: UpstreamInfo | null;
@@ -83,6 +85,9 @@ export interface UseAppStateResult {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
+  removeWorktree(name: string): Promise<void>;
+  pruneWorktrees(): Promise<void>;
   addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
@@ -122,6 +127,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     selectedRow: "uncommitted",
     status: [],
     commits: [],
+    worktrees: [],
     branches: [],
     remotes: [],
     tags: [],
@@ -141,11 +147,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, worktrees, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
+          client.listWorktrees(),
           client.listRemotes(),
           client.listTags(),
           client.getCurrentUpstream(),
@@ -163,6 +170,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         status,
         commits,
         branches,
+        worktrees,
         remotes,
         tags,
         upstream,
@@ -311,6 +319,20 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (oldName: string, newName: string) => runMutation(() => client.renameBranch(oldName, newName)),
     [client, runMutation],
   );
+  const createWorktree = useCallback(
+    (name: string, path: string, branch: string, startPoint: string | null) =>
+      runMutation(() => client.createWorktree(name, path, branch, startPoint)),
+    [client, runMutation],
+  );
+  const removeWorktree = useCallback(
+    (name: string) => runMutation(() => client.removeWorktree(name)),
+    [client, runMutation],
+  );
+  const pruneWorktrees = useCallback(
+    () => runMutation(() => client.pruneWorktrees()),
+    [client, runMutation],
+  );
+
   const addRemote = useCallback(
     (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(name, fetchUrl, pushUrl)),
     [client, runMutation],
@@ -555,6 +577,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     unstageFile,
     commit,
     createBranch,
+    createWorktree,
+    removeWorktree,
+    pruneWorktrees,
     switchBranch,
     deleteBranch,
     renameBranch,
