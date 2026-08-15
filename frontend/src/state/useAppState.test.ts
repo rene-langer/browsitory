@@ -151,28 +151,51 @@ describe("useAppState", () => {
     expect(result.current.state.tags).toEqual([]);
   });
 
-  it("refreshes status, graph, branches, and worktrees after creating a worktree", async () => {
-    let statusCalls = 0;
-    let graphCalls = 0;
-    let branchCalls = 0;
-    let worktreeCalls = 0;
-    const client = transferClient({
-      getStatus: async () => { statusCalls += 1; return []; },
-      getCommitGraph: async () => { graphCalls += 1; return []; },
-      listBranches: async () => { branchCalls += 1; return []; },
-      listWorktrees: async () => { worktreeCalls += 1; return []; },
-      createWorktree: async () => {},
-    });
-    const { result } = renderHook(() => useAppState(client));
+  it.each(["create", "remove", "prune"] as const)(
+    "refreshes status, graph, branches, and worktrees after the %s worktree operation",
+    async (operation) => {
+      let statusCalls = 0;
+      let graphCalls = 0;
+      let branchCalls = 0;
+      let worktreeCalls = 0;
+      const client = transferClient({
+        getStatus: async () => {
+          statusCalls += 1;
+          return [];
+        },
+        getCommitGraph: async () => {
+          graphCalls += 1;
+          return [];
+        },
+        listBranches: async () => {
+          branchCalls += 1;
+          return [];
+        },
+        listWorktrees: async () => {
+          worktreeCalls += 1;
+          return [];
+        },
+        createWorktree: async () => {},
+        removeWorktree: async () => {},
+        pruneWorktrees: async () => {},
+      });
+      const { result } = renderHook(() => useAppState(client));
 
-    await act(() => result.current.openRepo("/repo"));
-    await act(() => result.current.createWorktree("feature", "/repo-feature", "feature", "main"));
+      await act(() => result.current.openRepo("/repo"));
+      await act(() => {
+        if (operation === "create") {
+          return result.current.createWorktree("feature", "/repo-feature", "feature", "main");
+        }
+        if (operation === "remove") return result.current.removeWorktree("feature");
+        return result.current.pruneWorktrees();
+      });
 
-    expect(statusCalls).toBe(2);
-    expect(graphCalls).toBe(2);
-    expect(branchCalls).toBe(2);
-    expect(worktreeCalls).toBe(2);
-  });
+      expect(statusCalls).toBe(2);
+      expect(graphCalls).toBe(2);
+      expect(branchCalls).toBe(2);
+      expect(worktreeCalls).toBe(2);
+    },
+  );
 
   it("tracks a current-branch push using its transfer operation ID", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;

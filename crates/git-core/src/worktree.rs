@@ -148,7 +148,8 @@ pub fn prune_worktrees(repo: &Repository) -> Result<(), WorktreeError> {
 }
 
 fn main_worktree_path(repo: &Repository) -> Result<PathBuf, WorktreeError> {
-    let Some(path) = repo.commondir().parent() else {
+    let main_repo = Repository::open(repo.commondir())?;
+    let Some(path) = main_repo.workdir() else {
         return Err(WorktreeError::Git);
     };
     canonical_path(path)

@@ -30,6 +30,23 @@ fn creates_a_linked_worktree_for_an_existing_local_branch() {
 }
 
 #[test]
+fn lists_the_main_worktree_when_the_git_directory_is_separate() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let workdir = dir.path().join("working-copy");
+    let git_dir = dir.path().join("repository-metadata");
+    let mut options = git2::RepositoryInitOptions::new();
+    options.no_dotgit_dir(true).workdir_path(&workdir);
+    let repo = git2::Repository::init_opts(&git_dir, &options).unwrap();
+
+    let worktrees = list_worktrees(&repo).unwrap();
+
+    assert_eq!(worktrees.len(), 1);
+    let main = &worktrees[0];
+    assert!(main.is_main);
+    assert_eq!(main.path, workdir.canonicalize().unwrap());
+}
+
+#[test]
 fn creates_a_missing_branch_at_the_requested_start_point() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "initial");
