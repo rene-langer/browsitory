@@ -205,7 +205,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       setState((prev) => ({ ...prev, transfer: null }));
       return runMutation(async () => {
         await client.openRepo(path);
-        setState((prev) => ({ ...prev, repoPath: path, selectedRow: "uncommitted" }));
+        setState((prev) => ({
+          ...prev,
+          repoPath: path,
+          selectedRow: "uncommitted",
+          pullOutcome: null,
+        }));
       });
     },
     [client, runMutation],
@@ -240,7 +245,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (name: string) =>
       runMutation(async () => {
         await client.switchBranch(name);
-        setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
+        setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
       }),
     [client, runMutation],
   );
@@ -276,11 +281,19 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const setCurrentUpstream = useCallback(
-    (remoteName: string, remoteBranch: string) => runMutation(() => client.setCurrentUpstream(remoteName, remoteBranch)),
+    (remoteName: string, remoteBranch: string) =>
+      runMutation(async () => {
+        await client.setCurrentUpstream(remoteName, remoteBranch);
+        setState((prev) => ({ ...prev, pullOutcome: null }));
+      }),
     [client, runMutation],
   );
   const clearCurrentUpstream = useCallback(
-    () => runMutation(() => client.clearCurrentUpstream()),
+    () =>
+      runMutation(async () => {
+        await client.clearCurrentUpstream();
+        setState((prev) => ({ ...prev, pullOutcome: null }));
+      }),
     [client, runMutation],
   );
   const fetchRemote = useCallback(

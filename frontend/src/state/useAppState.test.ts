@@ -154,6 +154,61 @@ describe("useAppState", () => {
     expect(result.current.state.pullOutcome).toEqual(outcome);
   });
 
+  it("clears the last pull outcome when opening another repository", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    await act(() => result.current.openRepo("/other-repo"));
+
+    expect(result.current.state.pullOutcome).toBeNull();
+  });
+
+  it("clears the last pull outcome when switching branches", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
+      switchBranch: async () => {},
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    await act(() => result.current.switchBranch("feature"));
+
+    expect(result.current.state.pullOutcome).toBeNull();
+  });
+
+  it("clears the last pull outcome when setting a different upstream", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
+      setCurrentUpstream: async () => {},
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    await act(() => result.current.setCurrentUpstream("backup", "main"));
+
+    expect(result.current.state.pullOutcome).toBeNull();
+  });
+
+  it("clears the last pull outcome when clearing the current upstream", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
+      clearCurrentUpstream: async () => {},
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    await act(() => result.current.clearCurrentUpstream());
+
+    expect(result.current.state.pullOutcome).toBeNull();
+  });
+
   it("records a divergent pull without beginning reconciliation", async () => {
     let mergeCalls = 0;
     let rebaseCalls = 0;
