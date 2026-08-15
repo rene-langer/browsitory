@@ -26,6 +26,15 @@ export interface BranchInfo {
   isCurrent: boolean;
 }
 
+export interface WorktreeInfo {
+  name: string;
+  path: string;
+  head: string | null;
+  isMain: boolean;
+  isLocked: boolean;
+  isPrunable: boolean;
+}
+
 export interface RemoteInfo {
   name: string;
   fetchUrl: string;
@@ -153,6 +162,10 @@ export interface RepoClient {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  listWorktrees(): Promise<WorktreeInfo[]>;
+  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
+  removeWorktree(name: string): Promise<void>;
+  pruneWorktrees(): Promise<void>;
   listRemotes(): Promise<RemoteInfo[]>;
   getCurrentUpstream(): Promise<UpstreamInfo | null>;
   getRemoteUpstreams(name: string): Promise<UpstreamInfo[]>;

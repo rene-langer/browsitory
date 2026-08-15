@@ -109,6 +109,30 @@ pub struct BranchInfoDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorktreeInfoDto {
+    pub name: String,
+    pub path: String,
+    pub head: Option<String>,
+    pub is_main: bool,
+    pub is_locked: bool,
+    pub is_prunable: bool,
+}
+
+impl From<git_core::worktree::WorktreeInfo> for WorktreeInfoDto {
+    fn from(worktree: git_core::worktree::WorktreeInfo) -> Self {
+        Self {
+            name: worktree.name,
+            path: worktree.path.to_string_lossy().into_owned(),
+            head: (!worktree.head.is_empty()).then_some(worktree.head),
+            is_main: worktree.is_main,
+            is_locked: worktree.is_locked,
+            is_prunable: worktree.is_prunable,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteInfoDto {
     pub name: String,
     pub fetch_url: String,
@@ -617,6 +641,36 @@ pub async fn list_branches(state: State<'_, AppState>) -> Result<Vec<BranchInfoD
 }
 
 #[tauri::command]
+pub async fn list_worktrees(state: State<'_, AppState>) -> Result<Vec<WorktreeInfoDto>, String> {
+    Ok(worker_handle(&state)?
+        .list_worktrees()?
+        .into_iter()
+        .map(WorktreeInfoDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn create_worktree(
+    name: String,
+    path: String,
+    branch: String,
+    start_point: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.create_worktree(name, PathBuf::from(path), branch, start_point)
+}
+
+#[tauri::command]
+pub async fn remove_worktree(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.remove_worktree(name)
+}
+
+#[tauri::command]
+pub async fn prune_worktrees(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.prune_worktrees()
+}
+
+#[tauri::command]
 pub async fn create_branch(
     name: String,
     start_point: String,
@@ -957,13 +1011,40 @@ pub async fn get_rebase_progress(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use git_core::diff::DiffLineOrigin;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
+    use git_core::worktree::WorktreeInfo;
 
     use crate::worker::TransferEvent;
 
-    use super::{transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto};
+    use super::{transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto, WorktreeInfoDto};
+
+    #[test]
+    fn worktree_info_dto_serializes_camel_case_fields() {
+        let dto = WorktreeInfoDto::from(WorktreeInfo {
+            name: "feature-tree".into(),
+            path: PathBuf::from("/repos/project-feature"),
+            head: "refs/heads/feature".into(),
+            is_main: false,
+            is_locked: true,
+            is_prunable: false,
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "name": "feature-tree",
+                "path": "/repos/project-feature",
+                "head": "refs/heads/feature",
+                "isMain": false,
+                "isLocked": true,
+                "isPrunable": false,
+            })
+        );
+    }
 
     #[test]
     fn remote_auth_mode_wire_values_match_the_typescript_union() {
