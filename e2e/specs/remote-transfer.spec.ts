@@ -8,6 +8,7 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
 const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-source");
 const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
+const BRANCH_PUSH_FILE = "branch-push.txt";
 
 describe("Browsitory remote transfer", () => {
   before(() => {
@@ -17,7 +18,9 @@ describe("Browsitory remote transfer", () => {
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
     execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
-    execFileSync("git", ["push", BARE_REMOTE_PATH, "HEAD:main"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    const localBranch = execFileSync("git", ["branch", "--show-current"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    const initialRefspecs = localBranch === "main" ? ["HEAD:main"] : ["HEAD:main", `HEAD:${localBranch}`];
+    execFileSync("git", ["push", BARE_REMOTE_PATH, ...initialRefspecs], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["clone", "--branch", "main", BARE_REMOTE_PATH, REMOTE_SOURCE_PATH], { stdio: "inherit" });
     execFileSync("git", ["config", "user.name", "Test User"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
@@ -74,6 +77,20 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a local tag", async () => {
+    const currentBranch = execFileSync("git", ["branch", "--show-current"], {
+      cwd: E2E_REPO_PATH,
+      encoding: "utf8",
+    }).trim();
+    const remoteHeadBeforePush = execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], {
+      cwd: BARE_REMOTE_PATH,
+      encoding: "utf8",
+    }).trim();
+    fs.writeFileSync(path.join(E2E_REPO_PATH, BRANCH_PUSH_FILE), "branch push\n");
+    execFileSync("git", ["add", BRANCH_PUSH_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", "e2e: branch push change"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    const localHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    expect(localHead).not.toBe(remoteHeadBeforePush);
+
     const pushBranch = await $("button=Push branch to transfer-origin");
     await pushBranch.waitForEnabled({ timeout: 10000 });
     await pushBranch.click();
@@ -83,6 +100,10 @@ describe("Browsitory remote transfer", () => {
       timeout: 10000,
       timeoutMsg: "expected branch push to complete",
     });
+    await browser.waitUntil(
+      () => execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], { cwd: BARE_REMOTE_PATH, encoding: "utf8" }).trim() === localHead,
+      { timeout: 10000, timeoutMsg: "expected Push to advance the remote branch" },
+    );
 
     await (await $("form[aria-label='Create tag'] input")).setValue("e2e-transfer-tag");
     await (await $("button=Create tag")).click();

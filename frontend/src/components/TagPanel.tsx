@@ -21,7 +21,21 @@ export function TagPanel({
   const [message, setMessage] = useState("");
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>([]);
+  const [previousRemotes, setPreviousRemotes] = useState(remotes);
+  const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+
+  if (previousRemotes !== remotes) {
+    setPreviousRemotes(remotes);
+    if (!remotes.some((remote) => remote.name === remoteName)) {
+      setRemoteName(remotes[0]?.name ?? "");
+    }
+  }
+
+  if (previousTags !== tags) {
+    setPreviousTags(tags);
+    setSelected(selected.filter((name) => tags.some((tag) => tag.name === name)));
+  }
 
   const createTag = async (event: React.FormEvent) => {
     event.preventDefault();
