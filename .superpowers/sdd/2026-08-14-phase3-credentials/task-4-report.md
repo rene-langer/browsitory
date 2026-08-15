@@ -103,3 +103,11 @@
   tauri-app/custom-protocol`. The rebuilt frontend asset is timestamped 15:11 and the binary
   15:12. Run WebDriver only after this paired rebuild; plain builds do not embed the fixture
   frontend.
+
+## Direct-fetch terminal-event ordering follow-up
+
+- The rebuilt E2E still reached `Fetch failed`. A state regression reproduced the actual
+  ordering: a direct Fetch rejects with the sanitized `Fetch failed` before its matching typed
+  terminal event. `startTransfer` now retains that Fetch latch so the terminal event supplies
+  remediation; unrelated direct-fetch errors still render normally. Red: `Error: Fetch failed`.
+  Green: 40 focused state tests, frontend lint, and build pass.
