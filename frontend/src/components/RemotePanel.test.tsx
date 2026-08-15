@@ -9,12 +9,16 @@ const origin: RemoteInfo = {
   name: "origin",
   fetchUrl: "../origin.git",
   pushUrl: "../push-origin.git",
+  authMode: null,
+  authUsername: null,
 };
 
 const backup: RemoteInfo = {
   name: "backup",
   fetchUrl: "../backup.git",
   pushUrl: "../push-backup.git",
+  authMode: null,
+  authUsername: null,
 };
 
 const upstream: UpstreamInfo = {
@@ -33,6 +37,9 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onRenameRemote={vi.fn().mockResolvedValue(true)}
       onUpdateRemoteUrls={vi.fn()}
       onRemoveRemote={vi.fn().mockResolvedValue(undefined)}
+      onSaveHttpsCredential={vi.fn().mockResolvedValue(undefined)}
+      onForgetHttpsCredential={vi.fn().mockResolvedValue(undefined)}
+      onSetRemoteAuthMode={vi.fn().mockResolvedValue(undefined)}
       onSetUpstream={vi.fn()}
       onClearUpstream={vi.fn()}
       onFetchRemote={vi.fn()}
@@ -52,6 +59,51 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
 }
 
 describe("RemotePanel", () => {
+  it("submits the token only to the save callback and clears the input", async () => {
+    const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSaveHttpsCredential });
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+    fireEvent.change(screen.getByLabelText("HTTPS username"), { target: { value: "rene" } });
+    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "token-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save HTTPS credential" }));
+
+    await waitFor(() => {
+      expect(onSaveHttpsCredential).toHaveBeenCalledWith("origin", "rene", "token-123");
+    });
+    expect(screen.getByLabelText("Access token")).toHaveValue("");
+  });
+
+  it("uses the SSH agent without rendering a token input", async () => {
+    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSetRemoteAuthMode });
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+    fireEvent.change(screen.getByLabelText("Authentication for origin"), {
+      target: { value: "SshAgent" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use SSH agent" }));
+
+    await waitFor(() => {
+      expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "SshAgent", null);
+    });
+    expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
+  });
+
+  it("clears the token after a failed credential save", async () => {
+    const onSaveHttpsCredential = vi.fn().mockRejectedValue(new Error("keychain unavailable"));
+    renderPanel({ onSaveHttpsCredential });
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+    fireEvent.change(screen.getByLabelText("HTTPS username"), { target: { value: "rene" } });
+    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "token-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save HTTPS credential" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Access token")).toHaveValue("");
+    });
+  });
+
   it("pushes the current branch to a chosen remote and disables Push during an operation", () => {
     const onPushCurrentBranch = vi.fn();
     renderPanel({ onPushCurrentBranch, pushDisabled: true });

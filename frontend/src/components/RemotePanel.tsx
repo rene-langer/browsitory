@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PullOutcome, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 
 export function RemotePanel({
   remotes,
@@ -9,6 +9,9 @@ export function RemotePanel({
   onRenameRemote,
   onUpdateRemoteUrls,
   onRemoveRemote,
+  onSaveHttpsCredential,
+  onForgetHttpsCredential,
+  onSetRemoteAuthMode,
   onSetUpstream,
   onClearUpstream,
   onFetchRemote,
@@ -30,6 +33,9 @@ export function RemotePanel({
   onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
   onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
+  onSaveHttpsCredential: (remoteName: string, username: string, token: string) => Promise<void>;
+  onForgetHttpsCredential: (remoteName: string) => Promise<void>;
+  onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<void>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
   onFetchRemote: (remoteName: string) => Promise<void>;
@@ -45,6 +51,7 @@ export function RemotePanel({
   onCancelPull: () => void;
 }) {
   const pullDialogRef = useRef<HTMLDialogElement>(null);
+  const accessTokenRef = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
   const [newPushUrl, setNewPushUrl] = useState("");
@@ -55,6 +62,9 @@ export function RemotePanel({
   const [upstreamRemote, setUpstreamRemote] = useState("");
   const [upstreamBranch, setUpstreamBranch] = useState("");
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
+  const [credentialRemote, setCredentialRemote] = useState<string | null>(null);
+  const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
+  const [credentialUsername, setCredentialUsername] = useState("");
 
   const submitAdd = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -97,6 +107,32 @@ export function RemotePanel({
       setRemoveConfirmation(`clear:${remote.name}`);
     } else {
       setRemoveConfirmation(remote.name);
+    }
+  };
+
+  const beginCredentialEdit = (remote: RemoteInfo) => {
+    setCredentialRemote(remote.name);
+    setCredentialMode(remote.authMode ?? "HttpsToken");
+    setCredentialUsername(remote.authUsername ?? "");
+    if (accessTokenRef.current !== null) accessTokenRef.current.value = "";
+  };
+
+  const submitCredential = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (credentialRemote === null) return;
+    const username = credentialUsername.trim();
+    const token = accessTokenRef.current?.value ?? "";
+    try {
+      if (credentialMode === "SshAgent") {
+        await onSetRemoteAuthMode(credentialRemote, "SshAgent", null);
+      } else if (username !== "" && token !== "") {
+        await onSetRemoteAuthMode(credentialRemote, "HttpsToken", username);
+        await onSaveHttpsCredential(credentialRemote, username, token);
+      }
+    } catch {
+      // The application state owns remediation messages for failed credential operations.
+    } finally {
+      if (accessTokenRef.current !== null) accessTokenRef.current.value = "";
     }
   };
 
@@ -145,12 +181,40 @@ export function RemotePanel({
                   <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
                   <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
                   <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
+                  <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
                   <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
                 </>
               )}
             </li>
           ))}
         </ul>
+      )}
+
+      {credentialRemote !== null && (
+        <form onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
+          <h3>Credentials for {credentialRemote}</h3>
+          <label>
+            Authentication for {credentialRemote}
+            <select
+              value={credentialMode}
+              onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}
+            >
+              <option value="HttpsToken">HTTPS token</option>
+              <option value="SshAgent">SSH agent</option>
+            </select>
+          </label>
+          {credentialMode === "HttpsToken" ? (
+            <>
+              <label>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
+              <label>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
+              <button type="submit">Save HTTPS credential</button>
+              <button type="button" onClick={() => void onForgetHttpsCredential(credentialRemote)}>Forget HTTPS credential</button>
+            </>
+          ) : (
+            <button type="submit">Use SSH agent</button>
+          )}
+          <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
+        </form>
       )}
 
       {removeConfirmation !== null && (

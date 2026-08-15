@@ -16,12 +16,16 @@ const origin: RemoteInfo = {
   name: "origin",
   fetchUrl: "../origin.git",
   pushUrl: null,
+  authMode: null,
+  authUsername: null,
 };
 
 const backup: RemoteInfo = {
   name: "backup",
   fetchUrl: "../backup.git",
   pushUrl: null,
+  authMode: null,
+  authUsername: null,
 };
 
 function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {

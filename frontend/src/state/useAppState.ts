@@ -7,6 +7,7 @@ import type {
   PullOutcome,
   RebasePlanEntry,
   RebaseStepResult,
+  RemoteAuthMode,
   RemoteInfo,
   RepoClient,
   StashEntry,
@@ -28,6 +29,14 @@ function transferFailureMessage(progress: TransferProgress): string {
   if (progress.operation === "Pull") return "Pull failed";
   if (progress.operation === "Fetch") return "Fetch failed";
   return "Transfer failed";
+}
+
+function credentialFailureMessage(error: unknown): string {
+  const message = String(error);
+  if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
+  if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
+  if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";
+  return message;
 }
 
 const GRAPH_LIMIT = 300;
@@ -75,6 +84,9 @@ export interface UseAppStateResult {
   renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
+  saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
+  forgetHttpsCredential(remoteName: string): Promise<void>;
+  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<void>;
@@ -212,7 +224,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: String(err), pending: false }));
+        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
       }
     },
     [refresh],
@@ -301,6 +313,20 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
   const removeRemote = useCallback(
     (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(name, clearUpstreams)),
+    [client, runMutation],
+  );
+  const saveHttpsCredential = useCallback(
+    (remoteName: string, username: string, token: string) =>
+      runMutation(() => client.saveHttpsCredential(remoteName, username, token)),
+    [client, runMutation],
+  );
+  const forgetHttpsCredential = useCallback(
+    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(remoteName)),
+    [client, runMutation],
+  );
+  const setRemoteAuthMode = useCallback(
+    (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+      runMutation(() => client.setRemoteAuthMode(remoteName, mode, username)),
     [client, runMutation],
   );
   const setCurrentUpstream = useCallback(
@@ -514,6 +540,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     renameRemote,
     updateRemoteUrls,
     removeRemote,
+    saveHttpsCredential,
+    forgetHttpsCredential,
+    setRemoteAuthMode,
     setCurrentUpstream,
     clearCurrentUpstream,
     fetchRemote,
