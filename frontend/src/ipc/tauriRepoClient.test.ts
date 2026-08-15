@@ -86,7 +86,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
     progressListener?.({
       payload: {
         operationId: "fetch-42",
+        operation: "Fetch",
         phase: "Receiving",
+        errorKind: null,
         current: 2,
         total: 4,
         receivedBytes: 1024,
@@ -96,7 +98,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
     completedListener?.({
       payload: {
         operationId: "fetch-42",
+        operation: "Fetch",
         phase: "Completed",
+        errorKind: null,
         current: 4,
         total: 4,
         receivedBytes: 1024,
@@ -106,7 +110,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
 
     expect(received).toHaveBeenNthCalledWith(1, {
       operationId: "fetch-42",
+      operation: "Fetch",
       phase: "Receiving",
+      errorKind: null,
       current: 2,
       total: 4,
       receivedBytes: 1024,
@@ -114,7 +120,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
     expect(received).toHaveBeenNthCalledWith(2, {
       operationId: "fetch-42",
+      operation: "Fetch",
       phase: "Completed",
+      errorKind: null,
       current: 4,
       total: 4,
       receivedBytes: 1024,

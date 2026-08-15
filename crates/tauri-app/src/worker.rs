@@ -9,7 +9,9 @@ use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
-use git_core::remote::{PullOutcome, RemoteInfo, TagInfo, UpstreamInfo};
+use git_core::remote::{
+    PullOutcome, RemoteInfo, TagInfo, TransferErrorKind, TransferOperation, UpstreamInfo,
+};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -19,11 +21,13 @@ static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) enum TransferEvent {
     Started {
         operation_id: String,
+        operation: TransferOperation,
     },
     Progress(git_core::remote::TransferProgress),
     Completed {
         operation_id: String,
-        error: Option<String>,
+        operation: TransferOperation,
+        error: Option<TransferErrorKind>,
     },
 }
 
@@ -586,6 +590,7 @@ impl Worker {
                     } => {
                         let _ = events.send(TransferEvent::Started {
                             operation_id: operation_id.clone(),
+                            operation: TransferOperation::Fetch,
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
 
@@ -603,9 +608,8 @@ impl Worker {
                         );
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
-                            // libgit2 may include remote-provided text in an error. Keep events
-                            // secret-free and let a later credential workflow surface remediation.
-                            error: result.err().map(|_| "fetch failed".to_string()),
+                            operation: TransferOperation::Fetch,
+                            error: result.err().map(|error| error.transfer_error_kind()),
                         });
                     }
                     Command::PullCurrentUpstream {
@@ -615,6 +619,7 @@ impl Worker {
                     } => {
                         let _ = events.send(TransferEvent::Started {
                             operation_id: operation_id.clone(),
+                            operation: TransferOperation::Pull,
                         });
                         let result = (|| {
                             let upstream = git_core::remote::current_upstream(&repo)
@@ -646,11 +651,14 @@ impl Worker {
                             )
                             .map_err(|e| e.to_string())
                         })();
-                        let completed_error =
-                            result.as_ref().err().map(|_| "pull failed".to_string());
+                        let completed_error = result
+                            .as_ref()
+                            .err()
+                            .map(|_| TransferErrorKind::TransferFailed);
                         let _ = reply.send(result);
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
+                            operation: TransferOperation::Pull,
                             error: completed_error,
                         });
                     }
@@ -662,6 +670,7 @@ impl Worker {
                     } => {
                         let _ = events.send(TransferEvent::Started {
                             operation_id: operation_id.clone(),
+                            operation: TransferOperation::PushBranch,
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
                         let mut credentials = NoCredentials;
@@ -677,7 +686,8 @@ impl Worker {
                         );
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
-                            error: result.err().map(|_| "push failed".to_string()),
+                            operation: TransferOperation::PushBranch,
+                            error: result.err().map(|error| error.transfer_error_kind()),
                         });
                     }
                     Command::PushTags {
@@ -689,6 +699,7 @@ impl Worker {
                     } => {
                         let _ = events.send(TransferEvent::Started {
                             operation_id: operation_id.clone(),
+                            operation: TransferOperation::PushTags,
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
                         let mut credentials = NoCredentials;
@@ -705,7 +716,8 @@ impl Worker {
                         );
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
-                            error: result.err().map(|_| "push failed".to_string()),
+                            operation: TransferOperation::PushTags,
+                            error: result.err().map(|error| error.transfer_error_kind()),
                         });
                     }
                 }
@@ -1357,6 +1369,7 @@ mod tests {
     use std::sync::mpsc;
 
     use git2::Repository;
+    use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
     use super::{TransferEvent, Worker};
@@ -1667,7 +1680,10 @@ mod tests {
 
         assert!(matches!(
             events.first(),
-            Some(TransferEvent::Started { operation_id: id }) if id == &operation_id
+            Some(TransferEvent::Started {
+                operation_id: id,
+                operation: TransferOperation::Fetch,
+            }) if id == &operation_id
         ));
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1675,7 +1691,11 @@ mod tests {
         )));
         assert!(matches!(
             events.last(),
-            Some(TransferEvent::Completed { operation_id: id, error: None }) if id == &operation_id
+            Some(TransferEvent::Completed {
+                operation_id: id,
+                operation: TransferOperation::Fetch,
+                error: None,
+            }) if id == &operation_id
         ));
     }
 
@@ -1693,8 +1713,37 @@ mod tests {
 
         assert!(matches!(
             events.last(),
-            Some(TransferEvent::Completed { operation_id: id, error: Some(error) })
-                if id == &operation_id && error == "fetch failed"
+            Some(TransferEvent::Completed {
+                operation_id: id,
+                operation: TransferOperation::Fetch,
+                error: Some(TransferErrorKind::TransferFailed),
+            }) if id == &operation_id
+        ));
+    }
+
+    #[test]
+    fn non_fast_forward_branch_push_streams_a_safe_terminal_error_kind() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).expect("open local repo");
+        write_file(local_dir.path(), "README.md", "unrelated local history\n");
+        commit_all(&local, "unrelated local commit");
+        drop(local);
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let operation_id = worker
+            .handle()
+            .push_current_branch("origin".into(), event_tx)
+            .expect("start branch push");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(matches!(
+            events.last(),
+            Some(TransferEvent::Completed {
+                operation_id: id,
+                operation: TransferOperation::PushBranch,
+                error: Some(TransferErrorKind::NonFastForward),
+            }) if id == &operation_id
         ));
     }
 
@@ -1733,10 +1782,15 @@ mod tests {
 
         assert!(matches!(
             events.first(),
-            Some(TransferEvent::Started { operation_id: id }) if id == &operation_id
+            Some(TransferEvent::Started {
+                operation_id: id,
+                operation: TransferOperation::PushBranch,
+            }) if id == &operation_id
         ));
         assert!(events.iter().all(|event| match event {
-            TransferEvent::Started { operation_id: id }
+            TransferEvent::Started {
+                operation_id: id, ..
+            }
             | TransferEvent::Completed {
                 operation_id: id, ..
             } => id == &operation_id,

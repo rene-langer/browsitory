@@ -8,7 +8,9 @@ describe("TransferPanel", () => {
       <TransferPanel
         progress={{
           operationId: "op-1",
+          operation: "Fetch",
           phase: "Receiving",
+          errorKind: null,
           current: 2,
           total: 4,
           receivedBytes: 1024,
@@ -27,7 +29,9 @@ describe("TransferPanel", () => {
       <TransferPanel
         progress={{
           operationId: "op-1",
+          operation: "Fetch",
           phase: "Receiving",
+          errorKind: null,
           current: 2,
           total: 4,
           receivedBytes: 1024,

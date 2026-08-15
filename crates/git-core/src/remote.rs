@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use git2::{
     build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, PushOptions,
@@ -32,6 +32,13 @@ pub enum TransferOperation {
 pub enum TransferPhase {
     Receiving,
     Updating,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferErrorKind {
+    NonFastForward,
+    RejectedRemoteRef,
+    TransferFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +112,23 @@ pub enum RemoteError {
     DirtyWorktree,
     #[error("cannot pull while HEAD is detached")]
     DetachedHead,
+    #[error("push was rejected because it was not a fast-forward")]
+    NonFastForward,
+    #[error("the remote rejected a pushed reference")]
+    RejectedRemoteRef,
+}
+
+impl RemoteError {
+    pub fn transfer_error_kind(&self) -> TransferErrorKind {
+        match self {
+            Self::NonFastForward => TransferErrorKind::NonFastForward,
+            Self::RejectedRemoteRef => TransferErrorKind::RejectedRemoteRef,
+            Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
+                TransferErrorKind::NonFastForward
+            }
+            _ => TransferErrorKind::TransferFailed,
+        }
+    }
 }
 
 pub fn fetch_remote(
@@ -245,8 +269,22 @@ pub fn push_tags(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
 ) -> Result<(), RemoteError> {
-    let mut refspecs = Vec::with_capacity(names.len());
-    for name in names {
+    let tag_names = if names.is_empty() {
+        repo.tag_names(None)?
+            .iter()
+            .flatten()
+            .flatten()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        names.to_vec()
+    };
+    if tag_names.is_empty() {
+        return Ok(());
+    }
+
+    let mut refspecs = Vec::with_capacity(tag_names.len());
+    for name in &tag_names {
         validate_tag_name(name)?;
         refspecs.push(format!("refs/tags/{name}:refs/tags/{name}"));
     }
@@ -468,6 +506,7 @@ fn push_refs(
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
+    let rejection = Cell::new(None);
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(|url, username, allowed| {
@@ -486,7 +525,16 @@ fn push_refs(
     });
     callbacks.push_update_reference(|_reference, status| {
         if let Some(status) = status {
-            return Err(git2::Error::from_str(status));
+            let status = status.to_ascii_lowercase();
+            let kind = if status.contains("non-fast-forward") || status.contains("nonfastforward") {
+                TransferErrorKind::NonFastForward
+            } else {
+                TransferErrorKind::RejectedRemoteRef
+            };
+            if rejection.get() != Some(TransferErrorKind::NonFastForward) {
+                rejection.set(Some(kind));
+            }
+            return Ok(());
         }
         reporter.borrow_mut().report(TransferProgress {
             operation_id: String::new(),
@@ -502,8 +550,19 @@ fn push_refs(
 
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
-    remote.push(refspecs, Some(&mut options))?;
-    Ok(())
+    if let Err(error) = remote.push(refspecs, Some(&mut options)) {
+        return if error.code() == ErrorCode::NotFastForward {
+            Err(RemoteError::NonFastForward)
+        } else {
+            Err(error.into())
+        };
+    }
+    match rejection.get() {
+        Some(TransferErrorKind::NonFastForward) => Err(RemoteError::NonFastForward),
+        Some(TransferErrorKind::RejectedRemoteRef) => Err(RemoteError::RejectedRemoteRef),
+        Some(TransferErrorKind::TransferFailed) => unreachable!(),
+        None => Ok(()),
+    }
 }
 
 fn validate_tag_name(name: &str) -> Result<(), RemoteError> {

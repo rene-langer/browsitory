@@ -116,7 +116,7 @@ describe("useAppState", () => {
         return () => {};
       },
       pushCurrentBranch: async () => {
-        listener?.({ operationId: "push-42", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "push-42", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
         return "push-42";
       },
     });
@@ -139,8 +139,8 @@ describe("useAppState", () => {
       },
       pullCurrentUpstream: () => new Promise((resolve) => {
         resolvePull = resolve;
-        listener?.({ operationId: "pull-42", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "pull-42", phase: "Receiving", current: 1, total: 2, receivedBytes: 128, message: null });
+        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 128, message: null });
       }),
     });
 
@@ -155,7 +155,7 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(true);
 
     await act(async () => {
-      listener?.({ operationId: "pull-42", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "pull-42", operation: "Pull", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
       resolvePull?.({ kind: "UpToDate" });
       await pull;
     });
@@ -182,7 +182,7 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(false);
 
     act(() => {
-      listener?.({ operationId: "pull-late", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "pull-late", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
     });
 
     expect(result.current.state.transfer?.operationId).toBe("pull-late");
@@ -336,7 +336,7 @@ describe("useAppState", () => {
     await act(() => result.current.pullCurrentUpstream());
 
     act(() => {
-      listener?.({ operationId: "rejected-pull", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
     });
 
     expect(result.current.state.transfer).toBeNull();
@@ -356,8 +356,8 @@ describe("useAppState", () => {
         return () => {};
       },
       fetchRemote: async () => {
-        listener?.({ operationId: "fast-fetch", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "fast-fetch", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
         return "fast-fetch";
       },
     });
@@ -382,9 +382,9 @@ describe("useAppState", () => {
       fetchRemote: async () => {
         fetchCalls += 1;
         const operationId = `fetch-${fetchCalls}`;
-        listener?.({ operationId, phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId, operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
         if (fetchCalls === 1) {
-          listener?.({ operationId, phase: "Failed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
+          listener?.({ operationId, operation: "Fetch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
         }
         return operationId;
       },
@@ -404,6 +404,49 @@ describe("useAppState", () => {
     expect(result.current.state.transfer?.operationId).toBe("fetch-2");
     expect(result.current.state.pending).toBe(true);
     expect(result.current.state.error).toBeNull();
+  });
+
+  it("guides a non-fast-forward push toward pull or history reconciliation", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pushCurrentBranch: async () => {
+        const operationId = "push-42";
+        listener?.({
+          operationId,
+          operation: "PushBranch",
+          phase: "Starting",
+          errorKind: null,
+          current: 0,
+          total: 0,
+          receivedBytes: 0,
+          message: null,
+        });
+        listener?.({
+          operationId,
+          operation: "PushBranch",
+          phase: "Failed",
+          errorKind: "NonFastForward",
+          current: 0,
+          total: 0,
+          receivedBytes: 0,
+          message: null,
+        });
+        return operationId;
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pushCurrentBranch("origin"));
+
+    expect(result.current.state.error).toBe(
+      "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.",
+    );
+    expect(result.current.state.error).not.toBe("Fetch failed");
   });
 
   it("ignores a former repository's transfer completion after switching repositories", async () => {
@@ -467,7 +510,7 @@ describe("useAppState", () => {
     expect(statusCalls).toBe(2);
 
     await act(async () => {
-      listener?.({ operationId: "op-1", phase: "Completed", current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "op-1", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
     });
 
     expect(result.current.state.transfer).toBeNull();
