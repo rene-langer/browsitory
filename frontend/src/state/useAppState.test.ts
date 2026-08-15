@@ -441,6 +441,36 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBeNull();
   });
 
+  it("guides a fetch missing an HTTPS credential toward saving a token", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchRemote: async () => {
+        listener?.({ operationId: "credential-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({
+          operationId: "credential-fetch",
+          operation: "Fetch",
+          phase: "Failed",
+          errorKind: "TransferFailed",
+          current: 0,
+          total: 0,
+          receivedBytes: 0,
+          message: "missing credential for remote",
+        });
+        return "credential-fetch";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
+  });
+
   it("guides a non-fast-forward push toward pull or history reconciliation", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     const client = transferClient({

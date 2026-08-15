@@ -18,6 +18,13 @@ import type {
 } from "../ipc/RepoClient";
 
 function transferFailureMessage(progress: TransferProgress): string {
+  if (
+    progress.message?.includes("missing credential") ||
+    progress.message?.includes("credential keychain failure") ||
+    progress.message?.includes("SSH agent failure")
+  ) {
+    return credentialFailureMessage(progress.message);
+  }
   const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
   if (isPush && progress.errorKind === "NonFastForward") {
     return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
