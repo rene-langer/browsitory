@@ -5,6 +5,7 @@ import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
 import { RemotePanel } from "./components/RemotePanel";
+import { TagPanel } from "./components/TagPanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
@@ -72,6 +73,8 @@ export default function App() {
         onClearUpstream={appState.clearCurrentUpstream}
         onFetchRemote={appState.fetchRemote}
         fetchDisabled={repositoryOperationDisabled}
+        onPushCurrentBranch={appState.pushCurrentBranch}
+        pushDisabled={repositoryOperationDisabled}
         onPull={appState.pullCurrentUpstream}
         pullDisabled={repositoryOperationDisabled}
         pendingPull={appState.state.pendingPull}
@@ -85,6 +88,14 @@ export default function App() {
           appState.openRebasePlanner(upstreamRef);
         }}
         onCancelPull={appState.clearPendingPull}
+      />
+      <TagPanel
+        tags={appState.state.tags}
+        remotes={appState.state.remotes}
+        onCreate={appState.createTag}
+        onDelete={appState.deleteTag}
+        onPush={appState.pushTags}
+        pushDisabled={repositoryOperationDisabled}
       />
       <TransferPanel progress={appState.state.transfer} />
       <div className="app-layout">

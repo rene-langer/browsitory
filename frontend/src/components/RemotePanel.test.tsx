@@ -37,6 +37,8 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onClearUpstream={vi.fn()}
       onFetchRemote={vi.fn()}
       fetchDisabled={false}
+      onPushCurrentBranch={vi.fn()}
+      pushDisabled={false}
       onPull={vi.fn()}
       pullDisabled={false}
       pendingPull={null}
@@ -50,6 +52,18 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
 }
 
 describe("RemotePanel", () => {
+  it("pushes the current branch to a chosen remote and disables Push during an operation", () => {
+    const onPushCurrentBranch = vi.fn();
+    renderPanel({ onPushCurrentBranch, pushDisabled: true });
+
+    expect(screen.getByRole("button", { name: "Push branch to origin" })).toBeDisabled();
+
+    renderPanel({ onPushCurrentBranch, pushDisabled: false });
+    screen.getAllByRole("button", { name: "Push branch to origin" })[1].click();
+
+    expect(onPushCurrentBranch).toHaveBeenCalledWith("origin");
+  });
+
   it("fetches the selected remote and disables Fetch while an operation is active", () => {
     const onFetchRemote = vi.fn();
     renderPanel({ onFetchRemote, fetchDisabled: true });
