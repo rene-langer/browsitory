@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { WorktreePanel } from "./WorktreePanel";
@@ -83,26 +83,23 @@ describe("WorktreePanel", () => {
     );
   });
 
-  it("removes a linked worktree only after confirming the selected path", async () => {
+  it("requires an explicit dialog confirmation before removing the selected worktree", async () => {
     const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderPanel({ onRemoveWorktree });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Remove /repos/project-feature" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" });
 
-    expect(confirm).toHaveBeenCalledWith(
-      "Remove worktree at /repos/project-feature?",
-    );
+    expect(within(dialog).getByText("Remove worktree at /repos/project-feature?")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onRemoveWorktree).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Remove /repos/project-feature" }),
+      within(screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" })).getByRole("button", { name: "Remove worktree" }),
     );
 
     expect(onRemoveWorktree).toHaveBeenCalledWith("feature");
-    confirm.mockRestore();
   });
 });

@@ -27,6 +27,7 @@ export function WorktreePanel({
   const [path, setPath] = useState("");
   const [branch, setBranch] = useState("");
   const [startPoint, setStartPoint] = useState("");
+  const [removeConfirmation, setRemoveConfirmation] = useState<WorktreeInfo | null>(null);
 
   const createWorktree = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -45,9 +46,7 @@ export function WorktreePanel({
   };
 
   const removeWorktree = (worktree: WorktreeInfo) => {
-    if (window.confirm(`Remove worktree at ${worktree.path}?`)) {
-      void onRemoveWorktree(worktree.name);
-    }
+    setRemoveConfirmation(worktree);
   };
 
   return (
@@ -127,6 +126,21 @@ export function WorktreePanel({
       >
         Prune worktrees
       </button>
+      {removeConfirmation !== null && (
+        <dialog open aria-label={`Remove worktree ${removeConfirmation.path}`}>
+          <p>Remove worktree at {removeConfirmation.path}?</p>
+          <button
+            type="button"
+            disabled={operationDisabled}
+            onClick={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
+          >
+            Remove worktree
+          </button>
+          <button type="button" onClick={() => setRemoveConfirmation(null)}>
+            Cancel
+          </button>
+        </dialog>
+      )}
     </section>
   );
 }
