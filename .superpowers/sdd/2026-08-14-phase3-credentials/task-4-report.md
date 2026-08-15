@@ -93,3 +93,13 @@
   its terminal event to resolve, so typed credential remediation is not overwritten. State tests
   cover Pull ordering plus safe keychain Fetch and SSH-agent Push remediation without provider
   diagnostics. Focused frontend tests (39), lint, and build pass; tauri-app tests and fmt pass.
+
+## E2E stale-artifact investigation
+
+- The reported `Fetch failed` came from a stale embedded-app binary, not the current source
+  path: `target/debug/tauri-app` was timestamped 14:16 while the frontend assets and typed-error
+  changes were newer. Rebuilt in the required order: `frontend` with
+  `VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo`, then `cargo build --workspace --features
+  tauri-app/custom-protocol`. The rebuilt frontend asset is timestamped 15:11 and the binary
+  15:12. Run WebDriver only after this paired rebuild; plain builds do not embed the fixture
+  frontend.
