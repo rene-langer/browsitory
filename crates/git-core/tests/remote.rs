@@ -196,6 +196,71 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
 }
 
 #[test]
+fn pushes_all_local_tags_without_using_the_configured_push_refspec() {
+    // Passing no explicit refspecs lets libgit2 honor remote.origin.push instead of pushing tags.
+    let fixture = local_and_bare_remote();
+    create_tag(&fixture.local, "v1.0.0", None).unwrap();
+    create_tag(&fixture.local, "v2.0.0", Some("second release")).unwrap();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str(
+            "remote.origin.push",
+            "+refs/heads/main:refs/heads/configured-force",
+        )
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    push_tags(
+        &fixture.local,
+        "origin",
+        &[],
+        &mut NoCredentials,
+        &mut reporter,
+    )
+    .unwrap();
+
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert!(remote_repo.find_reference("refs/tags/v1.0.0").is_ok());
+    assert!(remote_repo.find_reference("refs/tags/v2.0.0").is_ok());
+    assert!(remote_repo
+        .find_reference("refs/heads/configured-force")
+        .is_err());
+}
+
+#[test]
+fn pushing_all_tags_is_a_no_op_when_there_are_no_local_tags() {
+    // Calling remote.push with an empty list would execute this configured force refspec.
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str(
+            "remote.origin.push",
+            "+refs/heads/main:refs/heads/configured-force",
+        )
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    push_tags(
+        &fixture.local,
+        "origin",
+        &[],
+        &mut NoCredentials,
+        &mut reporter,
+    )
+    .unwrap();
+
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert!(remote_repo
+        .find_reference("refs/heads/configured-force")
+        .is_err());
+    assert!(reporter.events.is_empty());
+}
+
+#[test]
 fn branch_push_rejects_non_fast_forward_updates() {
     // Enabling force on the generated refspec would make this unsafe push succeed.
     let fixture = local_and_bare_remote();
@@ -203,9 +268,10 @@ fn branch_push_rejects_non_fast_forward_updates() {
     fixture.local_commit("local change");
     let mut reporter = VecReporter::default();
 
-    assert!(
-        push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter).is_err()
-    );
+    assert!(matches!(
+        push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter),
+        Err(RemoteError::NonFastForward)
+    ));
     assert_eq!(
         fixture.remote_tip(),
         fixture.source.head().unwrap().target().unwrap()

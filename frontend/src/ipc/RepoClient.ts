@@ -38,9 +38,14 @@ export interface UpstreamInfo {
   remoteBranch: string;
 }
 
+export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "TransferFailed";
+
 export interface TransferProgress {
   operationId: string;
+  operation: TransferOperation;
   phase: "Starting" | "Receiving" | "Updating" | "Completed" | "Failed";
+  errorKind: TransferErrorKind | null;
   current: number;
   total: number;
   receivedBytes: number;

@@ -13,7 +13,9 @@ use crate::worker::{TransferEvent, Worker};
 #[serde(rename_all = "camelCase")]
 pub struct TransferProgressDto {
     pub operation_id: String,
+    pub operation: String,
     pub phase: String,
+    pub error_kind: Option<String>,
     pub current: usize,
     pub total: usize,
     pub received_bytes: usize,
@@ -24,7 +26,9 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
     fn from(progress: git_core::remote::TransferProgress) -> Self {
         Self {
             operation_id: progress.operation_id,
+            operation: format!("{:?}", progress.operation),
             phase: format!("{:?}", progress.phase),
+            error_kind: None,
             current: progress.current,
             total: progress.total,
             received_bytes: progress.received_bytes,
@@ -37,11 +41,16 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
 
 fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgressDto) {
     match event {
-        TransferEvent::Started { operation_id } => (
+        TransferEvent::Started {
+            operation_id,
+            operation,
+        } => (
             "transfer-progress",
             TransferProgressDto {
                 operation_id,
+                operation: format!("{operation:?}"),
                 phase: "Starting".to_string(),
+                error_kind: None,
                 current: 0,
                 total: 0,
                 received_bytes: 0,
@@ -53,6 +62,7 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
         }
         TransferEvent::Completed {
             operation_id,
+            operation,
             error,
         } => {
             let failed = error.is_some();
@@ -60,11 +70,13 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                 "transfer-complete",
                 TransferProgressDto {
                     operation_id,
+                    operation: format!("{operation:?}"),
                     phase: if failed { "Failed" } else { "Completed" }.to_string(),
+                    error_kind: error.map(|kind| format!("{kind:?}")),
                     current: 0,
                     total: 0,
                     received_bytes: 0,
-                    message: failed.then(|| "Fetch failed".to_string()),
+                    message: None,
                 },
             )
         }
@@ -874,7 +886,7 @@ pub async fn get_rebase_progress(
 #[cfg(test)]
 mod tests {
     use git_core::diff::DiffLineOrigin;
-    use git_core::remote::{TransferOperation, TransferPhase, TransferProgress};
+    use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
 
     use crate::worker::TransferEvent;
@@ -919,23 +931,41 @@ mod tests {
         }));
         let (_, completed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),
-            error: Some("fetch failed".into()),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
         });
 
         assert_eq!(progress.message, None);
-        assert_eq!(completed.message.as_deref(), Some("Fetch failed"));
+        assert_eq!(completed.message, None);
+        assert_eq!(completed.error_kind.as_deref(), Some("TransferFailed"));
     }
 
     #[test]
     fn transfer_failure_is_emitted_as_a_sanitized_failed_terminal_event() {
         let (event_name, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),
-            error: Some("https://alice:secret@example.test/repo.git".into()),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
         });
 
         assert_eq!(event_name, "transfer-complete");
         assert_eq!(failed.phase, "Failed");
-        assert_eq!(failed.message.as_deref(), Some("Fetch failed"));
+        assert_eq!(failed.operation, "Fetch");
+        assert_eq!(failed.error_kind.as_deref(), Some("TransferFailed"));
+        assert_eq!(failed.message, None);
+    }
+
+    #[test]
+    fn push_failure_payload_preserves_only_safe_operation_and_error_kinds() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "push-42".into(),
+            operation: TransferOperation::PushBranch,
+            error: Some(TransferErrorKind::NonFastForward),
+        });
+
+        assert_eq!(failed.operation, "PushBranch");
+        assert_eq!(failed.error_kind.as_deref(), Some("NonFastForward"));
+        assert_eq!(failed.message, None);
     }
 
     fn expected_transfer_phase_wire_value(phase: TransferPhase) -> &'static str {
@@ -963,14 +993,17 @@ mod tests {
 
         let (_, started) = transfer_event_payload(TransferEvent::Started {
             operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
         });
         let (_, completed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
             error: None,
         });
         let (_, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),
-            error: Some("raw remote error".into()),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
         });
         assert_eq!(
             [started.phase, completed.phase, failed.phase],

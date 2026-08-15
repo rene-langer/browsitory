@@ -16,6 +16,20 @@ import type {
   UpstreamInfo,
 } from "../ipc/RepoClient";
 
+function transferFailureMessage(progress: TransferProgress): string {
+  const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
+  if (isPush && progress.errorKind === "NonFastForward") {
+    return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
+  }
+  if (isPush && progress.errorKind === "RejectedRemoteRef") {
+    return "The remote rejected the pushed reference.";
+  }
+  if (isPush) return "Push failed";
+  if (progress.operation === "Pull") return "Pull failed";
+  if (progress.operation === "Fetch") return "Fetch failed";
+  return "Transfer failed";
+}
+
 const GRAPH_LIMIT = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
@@ -180,7 +194,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         setState((prev) => ({
           ...prev,
           transfer: null,
-          error: "Fetch failed",
+          error: transferFailureMessage(progress),
           pending: false,
         }));
         return;
@@ -306,7 +320,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const startTransfer = useCallback(
-    async (start: () => Promise<string>) => {
+    async (operation: TransferProgress["operation"], start: () => Promise<string>) => {
       try {
         transferRequestPending.current = true;
         activeTransferId.current = null;
@@ -318,7 +332,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
             ...prev,
             transfer: {
               operationId,
+              operation,
               phase: "Starting",
+              errorKind: null,
               current: 0,
               total: 0,
               receivedBytes: 0,
@@ -336,7 +352,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
 
   const fetchRemote = useCallback(
-    (remoteName: string) => startTransfer(() => client.fetchRemote(remoteName)),
+    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(remoteName)),
     [client, startTransfer],
   );
 
@@ -349,11 +365,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const pushCurrentBranch = useCallback(
-    (remoteName: string) => startTransfer(() => client.pushCurrentBranch(remoteName)),
+    (remoteName: string) =>
+      startTransfer("PushBranch", () => client.pushCurrentBranch(remoteName)),
     [client, startTransfer],
   );
   const pushTags = useCallback(
-    (remoteName: string, names: string[]) => startTransfer(() => client.pushTags(remoteName, names)),
+    (remoteName: string, names: string[]) =>
+      startTransfer("PushTags", () => client.pushTags(remoteName, names)),
     [client, startTransfer],
   );
 
