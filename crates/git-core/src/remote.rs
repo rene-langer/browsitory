@@ -93,6 +93,8 @@ pub enum RemoteError {
     RemoteInUse { name: String, branches: Vec<String> },
     #[error("cannot pull with a dirty worktree")]
     DirtyWorktree,
+    #[error("cannot pull while HEAD is detached")]
+    DetachedHead,
 }
 
 pub fn fetch_remote(
@@ -164,7 +166,8 @@ pub fn pull_after_fetch(
 
     let local_branch = current_local_branch_name(repo)?;
     let upstream_ref = format!("refs/remotes/{remote_name}/{remote_branch}");
-    let upstream_oid = repo.find_reference(&upstream_ref)?.peel_to_commit()?.id();
+    let upstream_commit = repo.find_reference(&upstream_ref)?.peel_to_commit()?;
+    let upstream_oid = upstream_commit.id();
     let local_oid = repo.head()?.peel_to_commit()?.id();
 
     if local_oid == upstream_oid {
@@ -175,10 +178,10 @@ pub fn pull_after_fetch(
     }
 
     let local_ref = format!("refs/heads/{local_branch}");
-    repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
     let mut checkout = CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_head(Some(&mut checkout))?;
+    repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))?;
+    repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
 
     Ok(PullOutcome::FastForwarded { upstream_ref })
 }
@@ -342,7 +345,11 @@ pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Resul
 }
 
 fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
-    Ok(repo.head()?.shorthand()?.to_string())
+    let head = repo.head()?;
+    if !head.is_branch() {
+        return Err(RemoteError::DetachedHead);
+    }
+    Ok(head.shorthand()?.to_string())
 }
 
 fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {
