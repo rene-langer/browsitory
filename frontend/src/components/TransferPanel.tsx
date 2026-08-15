@@ -9,8 +9,8 @@ export function TransferPanel({ progress }: { progress: TransferProgress | null 
   if (progress === null) return null;
 
   return (
-    <section className="transfer-panel" aria-live="polite" aria-label="Fetch progress">
-      <h2>Fetching</h2>
+    <section className="transfer-panel" aria-live="polite" aria-label="Transfer progress">
+      <h2>Transferring</h2>
       <p>{progress.phase}</p>
       <p>{progress.current} / {progress.total} objects</p>
       <p>{formatBytes(progress.receivedBytes)} received</p>

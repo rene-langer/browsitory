@@ -13,6 +13,8 @@ export function RemotePanel({
   onClearUpstream,
   onFetchRemote,
   fetchDisabled,
+  onPushCurrentBranch,
+  pushDisabled,
   onPull,
   pullDisabled,
   pendingPull,
@@ -32,6 +34,8 @@ export function RemotePanel({
   onClearUpstream: () => Promise<void>;
   onFetchRemote: (remoteName: string) => Promise<void>;
   fetchDisabled: boolean;
+  onPushCurrentBranch: (remoteName: string) => Promise<void>;
+  pushDisabled: boolean;
   onPull: () => Promise<void>;
   pullDisabled: boolean;
   pendingPull: { upstreamRef: string } | null;
@@ -139,6 +143,7 @@ export function RemotePanel({
                   <span>Fetch: {remote.fetchUrl}</span>
                   {remote.pushUrl !== null && <span>Push: {remote.pushUrl}</span>}
                   <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
+                  <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
                   <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
                   <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
                 </>

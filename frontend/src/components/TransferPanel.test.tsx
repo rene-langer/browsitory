@@ -19,6 +19,7 @@ describe("TransferPanel", () => {
 
     expect(screen.getByText("2 / 4 objects")).toBeInTheDocument();
     expect(screen.getByText("1.0 KB received")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Transfer progress" })).toBeInTheDocument();
   });
 
   it("does not render a transfer message from the event payload", () => {

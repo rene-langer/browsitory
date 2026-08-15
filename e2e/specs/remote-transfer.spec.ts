@@ -43,7 +43,7 @@ describe("Browsitory remote transfer", () => {
     await fetchButton.waitForExist({ timeout: 10000 });
     await fetchButton.click();
 
-    const transferPanel = await $("section[aria-label='Fetch progress']");
+    const transferPanel = await $("section[aria-label='Transfer progress']");
     await transferPanel.waitForExist({ timeout: 10000 });
     await browser.waitUntil(async () => !(await transferPanel.isExisting()), {
       timeout: 10000,
@@ -70,6 +70,36 @@ describe("Browsitory remote transfer", () => {
     await browser.waitUntil(
       () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() === remoteHead,
       { timeout: 10000, timeoutMsg: "expected Pull to fast-forward the local branch" },
+    );
+  });
+
+  it("pushes the current branch and a local tag", async () => {
+    const pushBranch = await $("button=Push branch to transfer-origin");
+    await pushBranch.waitForEnabled({ timeout: 10000 });
+    await pushBranch.click();
+    const transferPanel = await $("section[aria-label='Transfer progress']");
+    await transferPanel.waitForExist({ timeout: 10000 });
+    await browser.waitUntil(async () => !(await transferPanel.isExisting()), {
+      timeout: 10000,
+      timeoutMsg: "expected branch push to complete",
+    });
+
+    await (await $("form[aria-label='Create tag'] input")).setValue("e2e-transfer-tag");
+    await (await $("button=Create tag")).click();
+    const pushTags = await $("button=Push all tags");
+    await pushTags.waitForEnabled({ timeout: 10000 });
+    await pushTags.click();
+
+    await browser.waitUntil(
+      () => {
+        try {
+          execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { cwd: BARE_REMOTE_PATH, stdio: "ignore" });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 10000, timeoutMsg: "expected tag push to complete" },
     );
   });
 });
