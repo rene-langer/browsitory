@@ -111,3 +111,10 @@
   terminal event. `startTransfer` now retains that Fetch latch so the terminal event supplies
   remediation; unrelated direct-fetch errors still render normally. Red: `Error: Fetch failed`.
   Green: 40 focused state tests, frontend lint, and build pass.
+
+## Frontend build-gate fixture follow-up
+
+- The Phase 3 `RepoClient` expansion left the same three required credential methods absent
+  from four component-test fakes. Added explicit unused implementations, preserving the required
+  interface rather than weakening it. `corepack pnpm build`, `corepack pnpm lint`, and the four
+  focused component suites passed (56 tests).
