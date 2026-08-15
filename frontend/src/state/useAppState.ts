@@ -439,9 +439,10 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       await refresh();
       setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
     } catch (err) {
+      const message = String(err);
+      if (message === "pull failed" || message.endsWith(": pull failed")) return;
       transferRequestPending.current = false;
       activeTransferId.current = null;
-      const message = String(err);
       setState((prev) => ({
         ...prev,
         transfer: null,
