@@ -9,9 +9,9 @@ use commands::{
     get_commit_diff, get_commit_files, get_commit_graph, get_conflict_hunks, get_current_upstream,
     get_merge_message, get_rebase_progress, get_remote_upstreams, get_status, get_working_diff,
     list_branches, list_recent_repos, list_remotes, list_stashes, open_repo, pick_repo_folder,
-    rebase_continue, remove_remote, rename_branch, rename_remote, resolve_add_delete_conflict,
-    resolve_conflict, save_stash, set_current_upstream, stage_file, start_merge, start_rebase,
-    switch_branch, unstage_file, update_remote_urls, AppState,
+    pull_current_upstream, rebase_continue, remove_remote, rename_branch, rename_remote,
+    resolve_add_delete_conflict, resolve_conflict, save_stash, set_current_upstream, stage_file,
+    start_merge, start_rebase, switch_branch, unstage_file, update_remote_urls, AppState,
 };
 
 fn main() {
@@ -45,6 +45,7 @@ fn main() {
             set_current_upstream,
             clear_current_upstream,
             fetch_remote,
+            pull_current_upstream,
             list_stashes,
             save_stash,
             apply_stash,

@@ -4,6 +4,7 @@ import type {
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  PullOutcome,
   RebasePlanEntry,
   RebaseStepResult,
   RemoteInfo,
@@ -32,6 +33,7 @@ export interface AppState {
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
+  pendingPull: { upstreamRef: string } | null;
   transfer: TransferProgress | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
@@ -59,6 +61,7 @@ export interface UseAppStateResult {
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<void>;
+  pullCurrentUpstream(): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -91,6 +94,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     mergeMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
+    pendingPull: null,
     transfer: null,
     error: null,
     pending: false,
@@ -306,6 +310,29 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client],
   );
 
+  const pullCurrentUpstream = useCallback(async () => {
+    try {
+      setState((prev) => ({ ...prev, pending: true, error: null, pendingPull: null }));
+      const outcome: PullOutcome = await client.pullCurrentUpstream();
+      if (outcome.kind === "Diverged") {
+        setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
+        return;
+      }
+      await refresh();
+      setState((prev) => ({ ...prev, pending: false }));
+    } catch (err) {
+      const message = String(err);
+      setState((prev) => ({
+        ...prev,
+        pending: false,
+        pendingPull: null,
+        error: message.includes("cannot pull with a dirty worktree")
+          ? "Commit or stash your changes before pulling."
+          : message,
+      }));
+    }
+  }, [client, refresh]);
+
   const openCreateBranchDraft = useCallback((startPoint: string) => {
     setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
   }, []);
@@ -410,6 +437,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     setCurrentUpstream,
     clearCurrentUpstream,
     fetchRemote,
+    pullCurrentUpstream,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

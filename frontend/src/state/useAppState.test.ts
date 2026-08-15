@@ -29,6 +29,7 @@ const remoteManagementClient = {
   setCurrentUpstream: async () => unimplemented(),
   clearCurrentUpstream: async () => unimplemented(),
   fetchRemote: async () => unimplemented(),
+  pullCurrentUpstream: async () => unimplemented(),
   subscribeTransferProgress: () => () => {},
 };
 
@@ -72,6 +73,67 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
 }
 
 describe("useAppState", () => {
+  it.each([
+    { kind: "UpToDate" } as const,
+    { kind: "FastForwarded", upstreamRef: "refs/remotes/origin/main" } as const,
+  ])("refreshes immediately after a $kind pull", async (outcome) => {
+    let statusCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        statusCalls += 1;
+        return [];
+      },
+      pullCurrentUpstream: async () => outcome,
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(statusCalls).toBe(2);
+    expect(result.current.state.pendingPull).toBeNull();
+  });
+
+  it("records a divergent pull without beginning reconciliation", async () => {
+    let mergeCalls = 0;
+    let rebaseCalls = 0;
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "Diverged", upstreamRef: "refs/remotes/origin/main" }),
+      mergeBranch: async () => {
+        mergeCalls += 1;
+        return unimplemented();
+      },
+      startRebase: async () => {
+        rebaseCalls += 1;
+        return unimplemented();
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.pendingPull).toEqual({ upstreamRef: "refs/remotes/origin/main" });
+    expect(result.current.state.rebaseOnto).toBeNull();
+    expect(mergeCalls).toBe(0);
+    expect(rebaseCalls).toBe(0);
+  });
+
+  it("reports a dirty pull without leaving reconciliation pending", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => {
+        throw new Error("cannot pull with a dirty worktree");
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.pendingPull).toBeNull();
+    expect(result.current.state.error).toBe("Commit or stash your changes before pulling.");
+  });
+
   it("handles a fast fetch that completes before its operation ID reply", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     let statusCalls = 0;
