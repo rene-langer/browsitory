@@ -22,6 +22,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       onMergeBranch={vi.fn()}
       isMerging={false}
       isRebasing={false}
+      operationDisabled={false}
       {...overrides}
     />,
   );
@@ -178,6 +179,14 @@ describe("BranchSwitcher", () => {
 
   it("disables the merge action while a merge is already in progress", () => {
     renderSwitcher({ isMerging: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByText("Merge into current branch")).toBeDisabled();
+  });
+
+  it("disables the merge action while another repository operation is pending", () => {
+    renderSwitcher({ operationDisabled: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
 

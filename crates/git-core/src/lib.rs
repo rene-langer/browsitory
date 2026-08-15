@@ -5,6 +5,7 @@ pub mod diff;
 pub mod graph;
 pub mod merge;
 pub mod rebase;
+pub mod remote;
 pub mod repo;
 pub mod stage;
 pub mod stash;

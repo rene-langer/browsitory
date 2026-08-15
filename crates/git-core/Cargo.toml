@@ -5,8 +5,9 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-git2 = "0.21"
+git2 = { version = "0.21", features = ["https", "ssh", "vendored-openssl"] }
 thiserror = "1.0"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3"

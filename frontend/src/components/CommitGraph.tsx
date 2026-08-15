@@ -150,6 +150,7 @@ export function CommitGraph({
           </li>
           <li>
             <button
+              disabled={pending}
               onClick={() => {
                 onRebaseFromCommit(contextMenu.commitId);
                 setContextMenu(null);

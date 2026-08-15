@@ -4,11 +4,19 @@ import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
+import { RemotePanel } from "./components/RemotePanel";
+import { TagPanel } from "./components/TagPanel";
+import { TransferPanel } from "./components/TransferPanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { useAppState } from "./state/useAppState";
 
 export default function App() {
   const appState = useAppState(tauriRepoClient);
+  const repositoryOperationDisabled =
+    appState.state.pending ||
+    appState.state.transfer !== null ||
+    appState.state.mergeMessage !== null ||
+    appState.state.rebaseProgress !== null;
 
   // E2E-only auto-open: `RepoPicker`'s native folder dialog can't be driven through WebDriver,
   // so the E2E build points at a fixture repo via this Vite env var instead. Statically absent
@@ -51,14 +59,55 @@ export default function App() {
         onMergeBranch={appState.mergeBranch}
         isMerging={appState.state.mergeMessage !== null}
         isRebasing={appState.state.rebaseProgress !== null}
+        operationDisabled={repositoryOperationDisabled}
       />
+      <RemotePanel
+        remotes={appState.state.remotes}
+        upstream={appState.state.upstream}
+        remoteUpstreams={appState.state.remoteUpstreams}
+        onAddRemote={appState.addRemote}
+        onRenameRemote={appState.renameRemote}
+        onUpdateRemoteUrls={appState.updateRemoteUrls}
+        onRemoveRemote={appState.removeRemote}
+        onSaveHttpsCredential={appState.saveHttpsCredential}
+        onForgetHttpsCredential={appState.forgetHttpsCredential}
+        onSetRemoteAuthMode={appState.setRemoteAuthMode}
+        onSetUpstream={appState.setCurrentUpstream}
+        onClearUpstream={appState.clearCurrentUpstream}
+        onFetchRemote={appState.fetchRemote}
+        fetchDisabled={repositoryOperationDisabled}
+        onPushCurrentBranch={appState.pushCurrentBranch}
+        pushDisabled={repositoryOperationDisabled}
+        onPull={appState.pullCurrentUpstream}
+        pullDisabled={repositoryOperationDisabled}
+        pendingPull={appState.state.pendingPull}
+        pullOutcome={appState.state.pullOutcome}
+        onMergePull={async (upstreamRef) => {
+          appState.clearPendingPull();
+          await appState.mergeBranch(upstreamRef);
+        }}
+        onRebasePull={(upstreamRef) => {
+          appState.clearPendingPull();
+          appState.openRebasePlanner(upstreamRef);
+        }}
+        onCancelPull={appState.clearPendingPull}
+      />
+      <TagPanel
+        tags={appState.state.tags}
+        remotes={appState.state.remotes}
+        onCreate={appState.createTag}
+        onDelete={appState.deleteTag}
+        onPush={appState.pushTags}
+        pushDisabled={repositoryOperationDisabled}
+      />
+      <TransferPanel progress={appState.state.transfer} />
       <div className="app-layout">
         <CommitGraph
           status={appState.state.status}
           commits={appState.state.commits}
           stashes={appState.state.stashes}
           selectedRow={appState.state.selectedRow}
-          pending={appState.state.pending}
+          pending={repositoryOperationDisabled}
           onSelectRow={appState.selectRow}
           onBranchFromCommit={appState.openCreateBranchDraft}
           onRebaseFromCommit={appState.openRebasePlanner}
@@ -89,6 +138,7 @@ export default function App() {
           onto={appState.state.rebaseOnto}
           onStartRebase={appState.startRebase}
           onCancel={appState.closeRebasePlanner}
+          operationDisabled={repositoryOperationDisabled}
         />
       )}
     </main>

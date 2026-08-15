@@ -26,6 +26,45 @@ export interface BranchInfo {
   isCurrent: boolean;
 }
 
+export interface RemoteInfo {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string | null;
+  authMode: RemoteAuthMode | null;
+  authUsername: string | null;
+}
+
+export type RemoteAuthMode = "HttpsToken" | "SshAgent";
+
+export interface UpstreamInfo {
+  localBranch: string;
+  remoteName: string;
+  remoteBranch: string;
+}
+
+export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed";
+
+export interface TransferProgress {
+  operationId: string;
+  operation: TransferOperation;
+  phase: "Starting" | "Receiving" | "Updating" | "Completed" | "Failed";
+  errorKind: TransferErrorKind | null;
+  current: number;
+  total: number;
+  receivedBytes: number;
+  message: string | null;
+}
+
+export interface TagInfo {
+  name: string;
+  targetId: string;
+  annotated: boolean;
+  message: string | null;
+  taggerName: string | null;
+  timestamp: number | null;
+}
+
 export interface StashEntry {
   index: number;
   message: string;
@@ -57,6 +96,11 @@ export type MergeOutcome =
   | { kind: "FastForwarded" }
   | { kind: "Merged" }
   | { kind: "Conflicted"; files: string[] };
+
+export type PullOutcome =
+  | { kind: "UpToDate" }
+  | { kind: "FastForwarded"; upstreamRef: string }
+  | { kind: "Diverged"; upstreamRef: string };
 
 export type ConflictSegment =
   | { kind: "Clean"; content: string }
@@ -109,6 +153,26 @@ export interface RepoClient {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  listRemotes(): Promise<RemoteInfo[]>;
+  getCurrentUpstream(): Promise<UpstreamInfo | null>;
+  getRemoteUpstreams(name: string): Promise<UpstreamInfo[]>;
+  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  renameRemote(oldName: string, newName: string): Promise<void>;
+  updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
+  saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
+  forgetHttpsCredential(remoteName: string): Promise<void>;
+  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<void>;
+  setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
+  clearCurrentUpstream(): Promise<void>;
+  listTags(): Promise<TagInfo[]>;
+  createTag(name: string, message: string | null): Promise<void>;
+  deleteTag(name: string): Promise<void>;
+  fetchRemote(remoteName: string): Promise<string>;
+  pushCurrentBranch(remoteName: string): Promise<string>;
+  pushTags(remoteName: string, names: string[]): Promise<string>;
+  pullCurrentUpstream(): Promise<PullOutcome>;
+  subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(): Promise<StashEntry[]>;
   saveStash(): Promise<void>;
   applyStash(index: number): Promise<void>;

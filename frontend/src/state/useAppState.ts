@@ -1,15 +1,46 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BranchInfo,
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  PullOutcome,
   RebasePlanEntry,
   RebaseStepResult,
+  RemoteAuthMode,
+  RemoteInfo,
   RepoClient,
   StashEntry,
   StatusEntry,
+  TagInfo,
+  TransferProgress,
+  UpstreamInfo,
 } from "../ipc/RepoClient";
+
+function transferFailureMessage(progress: TransferProgress): string {
+  if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
+  if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
+  if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
+  const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
+  if (isPush && progress.errorKind === "NonFastForward") {
+    return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
+  }
+  if (isPush && progress.errorKind === "RejectedRemoteRef") {
+    return "The remote rejected the pushed reference.";
+  }
+  if (isPush) return "Push failed";
+  if (progress.operation === "Pull") return "Pull failed";
+  if (progress.operation === "Fetch") return "Fetch failed";
+  return "Transfer failed";
+}
+
+function credentialFailureMessage(error: unknown): string {
+  const message = String(error);
+  if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
+  if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
+  if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";
+  return message;
+}
 
 const GRAPH_LIMIT = 300;
 
@@ -21,11 +52,18 @@ export interface AppState {
   status: StatusEntry[];
   commits: GraphCommit[];
   branches: BranchInfo[];
+  remotes: RemoteInfo[];
+  tags: TagInfo[];
+  upstream: UpstreamInfo | null;
+  remoteUpstreams: Record<string, UpstreamInfo[]>;
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
+  pendingPull: { upstreamRef: string } | null;
+  pullOutcome: PullOutcome | null;
+  transfer: TransferProgress | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
@@ -45,6 +83,22 @@ export interface UseAppStateResult {
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
+  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  renameRemote(oldName: string, newName: string): Promise<boolean>;
+  updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
+  saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
+  forgetHttpsCredential(remoteName: string): Promise<void>;
+  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<boolean>;
+  setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
+  clearCurrentUpstream(): Promise<void>;
+  fetchRemote(remoteName: string): Promise<void>;
+  createTag(name: string, message: string | null): Promise<void>;
+  deleteTag(name: string): Promise<void>;
+  pushCurrentBranch(remoteName: string): Promise<void>;
+  pushTags(remoteName: string, names: string[]): Promise<void>;
+  pullCurrentUpstream(): Promise<void>;
+  clearPendingPull(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -69,31 +123,50 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     status: [],
     commits: [],
     branches: [],
+    remotes: [],
+    tags: [],
+    upstream: null,
+    remoteUpstreams: {},
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
+    pendingPull: null,
+    pullOutcome: null,
+    transfer: null,
     error: null,
     pending: false,
   });
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
+          client.listRemotes(),
+          client.listTags(),
+          client.getCurrentUpstream(),
           client.listStashes(),
           client.getMergeMessage(),
           client.getRebaseProgress(),
         ]);
+      const remoteUpstreams = Object.fromEntries(
+        await Promise.all(
+          remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(remote.name)]),
+        ),
+      );
       setState((prev) => ({
         ...prev,
         status,
         commits,
         branches,
+        remotes,
+        tags,
+        upstream,
+        remoteUpstreams,
         stashes,
         mergeMessage,
         rebaseProgress,
@@ -104,6 +177,48 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     }
   }, [client]);
 
+  const activeTransferId = useRef<string | null>(null);
+  const transferRequestPending = useRef(false);
+
+  useEffect(() => {
+    if (state.repoPath === null) return;
+
+    return client.subscribeTransferProgress((progress) => {
+      if (progress.phase === "Starting") {
+        if (!transferRequestPending.current || activeTransferId.current !== null) return;
+        activeTransferId.current = progress.operationId;
+        setState((prev) => ({ ...prev, transfer: progress }));
+        return;
+      }
+
+      if (progress.operationId !== activeTransferId.current) return;
+
+      if (progress.phase === "Completed") {
+        transferRequestPending.current = false;
+        void refresh().finally(() => {
+          if (activeTransferId.current !== progress.operationId) return;
+          activeTransferId.current = null;
+          setState((prev) => ({ ...prev, transfer: null, pending: false }));
+        });
+        return;
+      }
+
+      if (progress.phase === "Failed") {
+        transferRequestPending.current = false;
+        activeTransferId.current = null;
+        setState((prev) => ({
+          ...prev,
+          transfer: null,
+          error: transferFailureMessage(progress),
+          pending: false,
+        }));
+        return;
+      }
+
+      setState((prev) => ({ ...prev, transfer: progress }));
+    });
+  }, [client, refresh, state.repoPath]);
+
   const runMutation = useCallback(
     async (mutate: () => Promise<void>) => {
       try {
@@ -112,18 +227,46 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: String(err), pending: false }));
+        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
+      }
+    },
+    [refresh],
+  );
+
+  const runMutationWithOutcome = useCallback(
+    async (mutate: () => Promise<void>): Promise<boolean> => {
+      try {
+        setState((prev) => ({ ...prev, pending: true }));
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return true;
+      } catch (err) {
+        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
+        return false;
       }
     },
     [refresh],
   );
 
   const openRepo = useCallback(
-    (path: string) =>
-      runMutation(async () => {
+    (path: string) => {
+      // Invalidate a former repository's transfer before opening the replacement. A completion
+      // event can arrive while the worker is changing repositories; it must never refresh or
+      // clear pending state for the newly opened repository.
+      activeTransferId.current = null;
+      transferRequestPending.current = false;
+      setState((prev) => ({ ...prev, transfer: null }));
+      return runMutation(async () => {
         await client.openRepo(path);
-        setState((prev) => ({ ...prev, repoPath: path, selectedRow: "uncommitted" }));
-      }),
+        setState((prev) => ({
+          ...prev,
+          repoPath: path,
+          selectedRow: "uncommitted",
+          pullOutcome: null,
+        }));
+      });
+    },
     [client, runMutation],
   );
 
@@ -156,7 +299,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (name: string) =>
       runMutation(async () => {
         await client.switchBranch(name);
-        setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
+        setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
       }),
     [client, runMutation],
   );
@@ -168,6 +311,155 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (oldName: string, newName: string) => runMutation(() => client.renameBranch(oldName, newName)),
     [client, runMutation],
   );
+  const addRemote = useCallback(
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(name, fetchUrl, pushUrl)),
+    [client, runMutation],
+  );
+  const renameRemote = useCallback(
+    async (oldName: string, newName: string) => {
+      let renamed = false;
+      await runMutation(async () => {
+        await client.renameRemote(oldName, newName);
+        renamed = true;
+      });
+      return renamed;
+    },
+    [client, runMutation],
+  );
+  const updateRemoteUrls = useCallback(
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(name, fetchUrl, pushUrl)),
+    [client, runMutation],
+  );
+  const removeRemote = useCallback(
+    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(name, clearUpstreams)),
+    [client, runMutation],
+  );
+  const saveHttpsCredential = useCallback(
+    (remoteName: string, username: string, token: string) =>
+      runMutation(() => client.saveHttpsCredential(remoteName, username, token)),
+    [client, runMutation],
+  );
+  const forgetHttpsCredential = useCallback(
+    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(remoteName)),
+    [client, runMutation],
+  );
+  const setRemoteAuthMode = useCallback(
+    (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+      runMutationWithOutcome(() => client.setRemoteAuthMode(remoteName, mode, username)),
+    [client, runMutationWithOutcome],
+  );
+  const setCurrentUpstream = useCallback(
+    (remoteName: string, remoteBranch: string) =>
+      runMutation(async () => {
+        await client.setCurrentUpstream(remoteName, remoteBranch);
+        setState((prev) => ({ ...prev, pullOutcome: null }));
+      }),
+    [client, runMutation],
+  );
+  const clearCurrentUpstream = useCallback(
+    () =>
+      runMutation(async () => {
+        await client.clearCurrentUpstream();
+        setState((prev) => ({ ...prev, pullOutcome: null }));
+      }),
+    [client, runMutation],
+  );
+  const startTransfer = useCallback(
+    async (operation: TransferProgress["operation"], start: () => Promise<string>) => {
+      try {
+        transferRequestPending.current = true;
+        activeTransferId.current = null;
+        setState((prev) => ({ ...prev, pending: true, error: null }));
+        const operationId = await start();
+        if (transferRequestPending.current && activeTransferId.current === null) {
+          activeTransferId.current = operationId;
+          setState((prev) => ({
+            ...prev,
+            transfer: {
+              operationId,
+              operation,
+              phase: "Starting",
+              errorKind: null,
+              current: 0,
+              total: 0,
+              receivedBytes: 0,
+              message: null,
+            },
+          }));
+        }
+      } catch (err) {
+        const message = String(err);
+        if (operation === "Fetch" && (message === "Fetch failed" || message.endsWith(": Fetch failed"))) return;
+        transferRequestPending.current = false;
+        activeTransferId.current = null;
+        setState((prev) => ({ ...prev, error: message, pending: false }));
+      }
+    },
+    [],
+  );
+
+  const fetchRemote = useCallback(
+    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(remoteName)),
+    [client, startTransfer],
+  );
+
+  const createTag = useCallback(
+    (name: string, message: string | null) => runMutation(() => client.createTag(name, message)),
+    [client, runMutation],
+  );
+  const deleteTag = useCallback(
+    (name: string) => runMutation(() => client.deleteTag(name)),
+    [client, runMutation],
+  );
+  const pushCurrentBranch = useCallback(
+    (remoteName: string) =>
+      startTransfer("PushBranch", () => client.pushCurrentBranch(remoteName)),
+    [client, startTransfer],
+  );
+  const pushTags = useCallback(
+    (remoteName: string, names: string[]) =>
+      startTransfer("PushTags", () => client.pushTags(remoteName, names)),
+    [client, startTransfer],
+  );
+
+  const pullCurrentUpstream = useCallback(async () => {
+    try {
+      transferRequestPending.current = true;
+      activeTransferId.current = null;
+      setState((prev) => ({
+        ...prev,
+        pending: true,
+        error: null,
+        pendingPull: null,
+        pullOutcome: null,
+      }));
+      const outcome: PullOutcome = await client.pullCurrentUpstream();
+      if (outcome.kind === "Diverged") {
+        setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
+        return;
+      }
+      await refresh();
+      setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
+    } catch (err) {
+      const message = String(err);
+      if (message === "pull failed" || message.endsWith(": pull failed")) return;
+      transferRequestPending.current = false;
+      activeTransferId.current = null;
+      setState((prev) => ({
+        ...prev,
+        transfer: null,
+        pending: false,
+        pendingPull: null,
+        pullOutcome: null,
+        error: message.includes("cannot pull with a dirty worktree")
+          ? "Commit or stash your changes before pulling."
+          : message,
+      }));
+    }
+  }, [client, refresh]);
+  const clearPendingPull = useCallback(() => {
+    setState((prev) => ({ ...prev, pendingPull: null }));
+  }, []);
 
   const openCreateBranchDraft = useCallback((startPoint: string) => {
     setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
@@ -266,6 +558,22 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     switchBranch,
     deleteBranch,
     renameBranch,
+    addRemote,
+    renameRemote,
+    updateRemoteUrls,
+    removeRemote,
+    saveHttpsCredential,
+    forgetHttpsCredential,
+    setRemoteAuthMode,
+    setCurrentUpstream,
+    clearCurrentUpstream,
+    fetchRemote,
+    createTag,
+    deleteTag,
+    pushCurrentBranch,
+    pushTags,
+    pullCurrentUpstream,
+    clearPendingPull,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

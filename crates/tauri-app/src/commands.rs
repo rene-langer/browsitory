@@ -1,12 +1,97 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::thread;
 
 use git_core::diff::DiffHunk;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::worker::Worker;
+use crate::worker::{TransferEvent, Worker};
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgressDto {
+    pub operation_id: String,
+    pub operation: String,
+    pub phase: String,
+    pub error_kind: Option<String>,
+    pub current: usize,
+    pub total: usize,
+    pub received_bytes: usize,
+    pub message: Option<String>,
+}
+
+impl From<git_core::remote::TransferProgress> for TransferProgressDto {
+    fn from(progress: git_core::remote::TransferProgress) -> Self {
+        Self {
+            operation_id: progress.operation_id,
+            operation: format!("{:?}", progress.operation),
+            phase: format!("{:?}", progress.phase),
+            error_kind: None,
+            current: progress.current,
+            total: progress.total,
+            received_bytes: progress.received_bytes,
+            // Sideband and reference-update text comes from the remote. It is not safe to
+            // expose over IPC, even when it looks like ordinary progress output.
+            message: None,
+        }
+    }
+}
+
+fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgressDto) {
+    match event {
+        TransferEvent::Started {
+            operation_id,
+            operation,
+        } => (
+            "transfer-progress",
+            TransferProgressDto {
+                operation_id,
+                operation: format!("{operation:?}"),
+                phase: "Starting".to_string(),
+                error_kind: None,
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            },
+        ),
+        TransferEvent::Progress(progress) => {
+            ("transfer-progress", TransferProgressDto::from(progress))
+        }
+        TransferEvent::Completed {
+            operation_id,
+            operation,
+            error,
+        } => {
+            let failed = error.is_some();
+            (
+                "transfer-complete",
+                TransferProgressDto {
+                    operation_id,
+                    operation: format!("{operation:?}"),
+                    phase: if failed { "Failed" } else { "Completed" }.to_string(),
+                    error_kind: error.map(|kind| format!("{kind:?}")),
+                    current: 0,
+                    total: 0,
+                    received_bytes: 0,
+                    message: None,
+                },
+            )
+        }
+    }
+}
+
+fn emit_transfer_events(app: AppHandle, events: mpsc::Receiver<TransferEvent>) {
+    thread::spawn(move || {
+        for event in events {
+            let (name, payload) = transfer_event_payload(event);
+            let result = app.emit(name, payload);
+            let _ = result;
+        }
+    });
+}
 
 #[derive(Serialize)]
 pub struct StatusEntryDto {
@@ -20,6 +105,117 @@ pub struct StatusEntryDto {
 pub struct BranchInfoDto {
     pub name: String,
     pub is_current: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInfoDto {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: Option<String>,
+    pub auth_mode: Option<RemoteAuthModeDto>,
+    pub auth_username: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RemoteAuthModeDto {
+    HttpsToken,
+    SshAgent,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfoDto {
+    pub name: String,
+    pub target_id: String,
+    pub annotated: bool,
+    pub message: Option<String>,
+    pub tagger_name: Option<String>,
+    pub timestamp: Option<i64>,
+}
+
+impl From<git_core::remote::TagInfo> for TagInfoDto {
+    fn from(tag: git_core::remote::TagInfo) -> Self {
+        Self {
+            name: tag.name,
+            target_id: tag.target_id,
+            annotated: tag.annotated,
+            message: tag.message,
+            tagger_name: tag.tagger_name,
+            timestamp: tag.timestamp,
+        }
+    }
+}
+
+impl
+    From<(
+        git_core::remote::RemoteInfo,
+        Option<git_core::remote::RemoteAuthMode>,
+    )> for RemoteInfoDto
+{
+    fn from(
+        (remote, profile): (
+            git_core::remote::RemoteInfo,
+            Option<git_core::remote::RemoteAuthMode>,
+        ),
+    ) -> Self {
+        let (auth_mode, auth_username) = match profile {
+            Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) => {
+                (Some(RemoteAuthModeDto::HttpsToken), Some(username))
+            }
+            Some(git_core::remote::RemoteAuthMode::SshAgent) => {
+                (Some(RemoteAuthModeDto::SshAgent), None)
+            }
+            None => (None, None),
+        };
+        Self {
+            name: remote.name,
+            fetch_url: remote.fetch_url,
+            push_url: remote.push_url,
+            auth_mode,
+            auth_username,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpstreamInfoDto {
+    pub local_branch: String,
+    pub remote_name: String,
+    pub remote_branch: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+pub enum PullOutcomeDto {
+    UpToDate,
+    FastForwarded { upstream_ref: String },
+    Diverged { upstream_ref: String },
+}
+
+impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
+    fn from(outcome: git_core::remote::PullOutcome) -> Self {
+        match outcome {
+            git_core::remote::PullOutcome::UpToDate => PullOutcomeDto::UpToDate,
+            git_core::remote::PullOutcome::FastForwarded { upstream_ref } => {
+                PullOutcomeDto::FastForwarded { upstream_ref }
+            }
+            git_core::remote::PullOutcome::Diverged { upstream_ref } => {
+                PullOutcomeDto::Diverged { upstream_ref }
+            }
+        }
+    }
+}
+
+impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
+    fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
+        Self {
+            local_branch: upstream.local_branch,
+            remote_name: upstream.remote_name,
+            remote_branch: upstream.remote_branch,
+        }
+    }
 }
 
 impl From<git_core::branch::BranchInfo> for BranchInfoDto {
@@ -453,6 +649,202 @@ pub async fn rename_branch(
 }
 
 #[tauri::command]
+pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteInfoDto>, String> {
+    let worker = worker_handle(&state)?;
+    worker
+        .list_remotes()?
+        .into_iter()
+        .map(|remote| {
+            let profile = worker.get_remote_auth_mode(remote.name.clone())?;
+            Ok(RemoteInfoDto::from((remote, profile)))
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn get_current_upstream(
+    state: State<'_, AppState>,
+) -> Result<Option<UpstreamInfoDto>, String> {
+    let upstream = worker_handle(&state)?.get_current_upstream()?;
+    Ok(upstream.map(UpstreamInfoDto::from))
+}
+#[tauri::command]
+pub async fn get_remote_upstreams(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<UpstreamInfoDto>, String> {
+    Ok(worker_handle(&state)?
+        .get_remote_upstreams(name)?
+        .into_iter()
+        .map(UpstreamInfoDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn add_remote(
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.add_remote(name, fetch_url, push_url)
+}
+
+#[tauri::command]
+pub async fn rename_remote(
+    old_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.rename_remote(old_name, new_name)
+}
+
+#[tauri::command]
+pub async fn update_remote_urls(
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.update_remote_urls(name, fetch_url, push_url)
+}
+
+#[tauri::command]
+pub async fn remove_remote(
+    name: String,
+    clear_upstreams: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.remove_remote(name, clear_upstreams)
+}
+
+#[tauri::command]
+pub async fn save_https_credential(
+    remote_name: String,
+    username: String,
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.save_https_credential(remote_name, username, token)
+}
+
+#[tauri::command]
+pub async fn forget_https_credential(
+    remote_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.forget_https_credential(remote_name)
+}
+
+#[tauri::command]
+pub async fn set_remote_auth_mode(
+    remote_name: String,
+    mode: RemoteAuthModeDto,
+    username: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mode = match mode {
+        RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
+            username: username
+                .filter(|username| !username.trim().is_empty())
+                .ok_or_else(|| "HTTPS username is required".to_string())?,
+        },
+        RemoteAuthModeDto::SshAgent => git_core::remote::RemoteAuthMode::SshAgent,
+    };
+    worker_handle(&state)?.set_remote_auth_mode(remote_name, mode)
+}
+
+#[tauri::command]
+pub async fn set_current_upstream(
+    remote_name: String,
+    remote_branch: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.set_current_upstream(remote_name, remote_branch)
+}
+
+#[tauri::command]
+pub async fn clear_current_upstream(state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.clear_current_upstream()
+}
+
+#[tauri::command]
+pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagInfoDto>, String> {
+    Ok(worker_handle(&state)?
+        .list_tags()?
+        .into_iter()
+        .map(TagInfoDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn create_tag(
+    name: String,
+    message: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.create_tag(name, message)
+}
+
+#[tauri::command]
+pub async fn delete_tag(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.delete_tag(name)
+}
+
+#[tauri::command]
+pub async fn fetch_remote(
+    remote_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.fetch_remote(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn push_current_branch(
+    remote_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.push_current_branch(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn push_tags(
+    remote_name: String,
+    names: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.push_tags(remote_name, names, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn pull_current_upstream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PullOutcomeDto, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    emit_transfer_events(app, event_rx);
+    let handle = worker_handle(&state)?;
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || handle.pull_current_upstream(event_tx))
+            .await
+            .map_err(|_| "pull worker task stopped".to_string())??
+            .into(),
+    )
+}
+
+#[tauri::command]
 pub async fn list_stashes(state: State<'_, AppState>) -> Result<Vec<StashEntryDto>, String> {
     let stashes = worker_handle(&state)?.list_stashes()?;
     Ok(stashes.into_iter().map(StashEntryDto::from).collect())
@@ -566,7 +958,154 @@ pub async fn get_rebase_progress(
 #[cfg(test)]
 mod tests {
     use git_core::diff::DiffLineOrigin;
+    use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
+
+    use crate::worker::TransferEvent;
+
+    use super::{transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto};
+
+    #[test]
+    fn remote_auth_mode_wire_values_match_the_typescript_union() {
+        assert_eq!(
+            serde_json::to_value(RemoteAuthModeDto::HttpsToken).unwrap(),
+            serde_json::json!("HttpsToken")
+        );
+        assert_eq!(
+            serde_json::to_value(RemoteAuthModeDto::SshAgent).unwrap(),
+            serde_json::json!("SshAgent")
+        );
+    }
+
+    #[test]
+    fn pull_outcome_wire_values_match_the_typescript_union() {
+        let fast_forwarded = serde_json::to_value(PullOutcomeDto::FastForwarded {
+            upstream_ref: "refs/remotes/origin/main".into(),
+        })
+        .expect("serialize pull outcome");
+        let diverged = serde_json::to_value(PullOutcomeDto::Diverged {
+            upstream_ref: "refs/remotes/origin/main".into(),
+        })
+        .expect("serialize pull outcome");
+
+        assert_eq!(
+            serde_json::json!({ "kind": "UpToDate" }),
+            serde_json::to_value(PullOutcomeDto::UpToDate).unwrap()
+        );
+        assert_eq!(
+            serde_json::json!({ "kind": "FastForwarded", "upstreamRef": "refs/remotes/origin/main" }),
+            fast_forwarded
+        );
+        assert_eq!(
+            serde_json::json!({ "kind": "Diverged", "upstreamRef": "refs/remotes/origin/main" }),
+            diverged
+        );
+    }
+
+    #[test]
+    fn transfer_event_bridge_redacts_sideband_and_failure_messages() {
+        let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            phase: TransferPhase::Receiving,
+            current: 2,
+            total: 4,
+            received_bytes: 1024,
+            message: Some("Authorization: Bearer secret-token".into()),
+        }));
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
+        });
+
+        assert_eq!(progress.message, None);
+        assert_eq!(completed.message, None);
+        assert_eq!(completed.error_kind.as_deref(), Some("TransferFailed"));
+    }
+
+    #[test]
+    fn transfer_failure_is_emitted_as_a_sanitized_failed_terminal_event() {
+        let (event_name, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
+        });
+
+        assert_eq!(event_name, "transfer-complete");
+        assert_eq!(failed.phase, "Failed");
+        assert_eq!(failed.operation, "Fetch");
+        assert_eq!(failed.error_kind.as_deref(), Some("TransferFailed"));
+        assert_eq!(failed.message, None);
+    }
+
+    #[test]
+    fn missing_credential_failure_is_emitted_as_a_safe_terminal_kind() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::MissingCredential),
+        });
+
+        assert_eq!(failed.error_kind.as_deref(), Some("MissingCredential"));
+        assert_eq!(failed.message, None);
+    }
+
+    #[test]
+    fn push_failure_payload_preserves_only_safe_operation_and_error_kinds() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "push-42".into(),
+            operation: TransferOperation::PushBranch,
+            error: Some(TransferErrorKind::NonFastForward),
+        });
+
+        assert_eq!(failed.operation, "PushBranch");
+        assert_eq!(failed.error_kind.as_deref(), Some("NonFastForward"));
+        assert_eq!(failed.message, None);
+    }
+
+    fn expected_transfer_phase_wire_value(phase: TransferPhase) -> &'static str {
+        match phase {
+            TransferPhase::Receiving => "Receiving",
+            TransferPhase::Updating => "Updating",
+        }
+    }
+
+    #[test]
+    fn transfer_phase_wire_values_match_the_typescript_union() {
+        for phase in [TransferPhase::Receiving, TransferPhase::Updating] {
+            let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
+                operation_id: "fetch-42".into(),
+                operation: TransferOperation::Fetch,
+                phase,
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            }));
+
+            assert_eq!(progress.phase, expected_transfer_phase_wire_value(phase));
+        }
+
+        let (_, started) = transfer_event_payload(TransferEvent::Started {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+        });
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: None,
+        });
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::TransferFailed),
+        });
+        assert_eq!(
+            [started.phase, completed.phase, failed.phase],
+            ["Starting", "Completed", "Failed"]
+        );
+    }
 
     /// The `kind` field of `StatusEntryDto` is produced by `format!("{:?}", kind)`, so the
     /// `Debug` output *is* the wire format. Its counterpart contract is the `StatusKind`
