@@ -15,6 +15,8 @@ use git_core::remote::{
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
+use crate::credentials::{CredentialService, KeyringCredentialStore, RemoteCredentialProvider};
+
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,21 +46,6 @@ impl git_core::remote::TransferReporter for ChannelReporter {
                 ..progress
             },
         ));
-    }
-}
-
-struct NoCredentials;
-
-impl git_core::remote::CredentialProvider for NoCredentials {
-    fn credential(
-        &mut self,
-        _url: &str,
-        _username: Option<&str>,
-        _allowed: git2::CredentialType,
-    ) -> Result<git2::Cred, git2::Error> {
-        Err(git2::Error::from_str(
-            "authentication is not configured for this remote",
-        ))
     }
 }
 
@@ -288,6 +275,7 @@ impl Worker {
         thread::spawn(move || {
             let mut repo = repo;
             let mut rebase_state: Option<RebaseState> = None;
+            let credential_service = CredentialService::new(KeyringCredentialStore);
             for command in rx {
                 match command {
                     Command::GetStatus { reply } => {
@@ -594,18 +582,22 @@ impl Worker {
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
 
-                        let mut credentials = NoCredentials;
+                        let profile = git_core::remote::remote_auth_profile(&repo, &remote_name);
                         let mut reporter = ChannelReporter {
                             events: events.clone(),
                             operation_id: operation_id.clone(),
                         };
-                        let result = git_core::remote::fetch_remote(
-                            &repo,
-                            &remote_name,
-                            operation_id.clone(),
-                            &mut credentials,
-                            &mut reporter,
-                        );
+                        let result = profile.and_then(|profile| {
+                            let mut credentials =
+                                RemoteCredentialProvider::new(&credential_service, profile);
+                            git_core::remote::fetch_remote(
+                                &repo,
+                                &remote_name,
+                                operation_id.clone(),
+                                &mut credentials,
+                                &mut reporter,
+                            )
+                        });
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
                             operation: TransferOperation::Fetch,
@@ -625,11 +617,15 @@ impl Worker {
                             let upstream = git_core::remote::current_upstream(&repo)
                                 .map_err(|e| e.to_string())?
                                 .ok_or_else(|| "current branch has no upstream".to_string())?;
-                            let mut credentials = NoCredentials;
                             let mut reporter = ChannelReporter {
                                 events: events.clone(),
                                 operation_id: operation_id.clone(),
                             };
+                            let profile =
+                                git_core::remote::remote_auth_profile(&repo, &upstream.remote_name)
+                                    .map_err(|e| e.to_string())?;
+                            let mut credentials =
+                                RemoteCredentialProvider::new(&credential_service, profile);
                             git_core::remote::fetch_remote(
                                 &repo,
                                 &upstream.remote_name,
@@ -673,17 +669,21 @@ impl Worker {
                             operation: TransferOperation::PushBranch,
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
-                        let mut credentials = NoCredentials;
                         let mut reporter = ChannelReporter {
                             events: events.clone(),
                             operation_id: operation_id.clone(),
                         };
-                        let result = git_core::remote::push_current_branch(
-                            &repo,
-                            &remote_name,
-                            &mut credentials,
-                            &mut reporter,
-                        );
+                        let result = git_core::remote::remote_auth_profile(&repo, &remote_name)
+                            .and_then(|profile| {
+                                let mut credentials =
+                                    RemoteCredentialProvider::new(&credential_service, profile);
+                                git_core::remote::push_current_branch(
+                                    &repo,
+                                    &remote_name,
+                                    &mut credentials,
+                                    &mut reporter,
+                                )
+                            });
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
                             operation: TransferOperation::PushBranch,
@@ -702,18 +702,22 @@ impl Worker {
                             operation: TransferOperation::PushTags,
                         });
                         let _ = reply.send(Ok(operation_id.clone()));
-                        let mut credentials = NoCredentials;
                         let mut reporter = ChannelReporter {
                             events: events.clone(),
                             operation_id: operation_id.clone(),
                         };
-                        let result = git_core::remote::push_tags(
-                            &repo,
-                            &remote_name,
-                            &names,
-                            &mut credentials,
-                            &mut reporter,
-                        );
+                        let result = git_core::remote::remote_auth_profile(&repo, &remote_name)
+                            .and_then(|profile| {
+                                let mut credentials =
+                                    RemoteCredentialProvider::new(&credential_service, profile);
+                                git_core::remote::push_tags(
+                                    &repo,
+                                    &remote_name,
+                                    &names,
+                                    &mut credentials,
+                                    &mut reporter,
+                                )
+                            });
                         let _ = events.send(TransferEvent::Completed {
                             operation_id,
                             operation: TransferOperation::PushTags,

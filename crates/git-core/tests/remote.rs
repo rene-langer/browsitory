@@ -1,11 +1,12 @@
 mod common;
 
 use git_core::remote::{
-    add_remote, clear_current_upstream, create_tag, current_upstream, delete_tag, fetch_remote,
-    list_remotes, list_tags, pull_after_fetch, push_current_branch, push_tags, remote_upstreams,
-    remove_remote, remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
-    update_remote_urls, CredentialProvider, PullOutcome, RemoteError, TransferOperation,
-    TransferPhase, TransferProgress, TransferReporter,
+    add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
+    delete_tag, fetch_remote, list_remotes, list_tags, pull_after_fetch, push_current_branch,
+    push_tags, remote_upstreams, remove_remote, remove_remote_and_clear_upstreams, rename_remote,
+    set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
+    PullOutcome, RemoteAuthMode, RemoteError, TransferOperation, TransferPhase, TransferProgress,
+    TransferReporter,
 };
 
 #[derive(Default)]
@@ -424,6 +425,77 @@ fn remote_crud_and_upstream_round_trip() {
 
     clear_current_upstream(&repo).unwrap();
     remove_remote(&repo, "origin").unwrap();
+}
+
+#[test]
+fn remote_auth_metadata_is_local_non_secret_and_follows_remote_lifecycle() {
+    // Removing profile persistence or failing to move/remove it with the remote must fail this.
+    let (_dir, repo) = common::init_repo();
+    add_remote(&repo, "origin", "https://example.com/owner/repo.git", None).unwrap();
+
+    set_remote_auth_profile(
+        &repo,
+        "origin",
+        RemoteAuthMode::HttpsToken {
+            username: "rene".to_string(),
+        },
+    )
+    .unwrap();
+    let config = repo.config().unwrap();
+    assert_eq!(
+        config
+            .get_string("browsitory.remote.origin.auth-mode")
+            .unwrap(),
+        "https-token"
+    );
+    assert_eq!(
+        config
+            .get_string("browsitory.remote.origin.username")
+            .unwrap(),
+        "rene"
+    );
+    assert!(config.get_string("browsitory.remote.origin.token").is_err());
+    drop(config);
+
+    rename_remote(&repo, "origin", "upstream").unwrap();
+    let config = repo.config().unwrap();
+    assert!(config
+        .get_string("browsitory.remote.origin.auth-mode")
+        .is_err());
+    assert_eq!(
+        config
+            .get_string("browsitory.remote.upstream.auth-mode")
+            .unwrap(),
+        "https-token"
+    );
+    assert_eq!(
+        config
+            .get_string("browsitory.remote.upstream.username")
+            .unwrap(),
+        "rene"
+    );
+    drop(config);
+
+    remove_remote(&repo, "upstream").unwrap();
+    let config = repo.config().unwrap();
+    assert!(config
+        .get_string("browsitory.remote.upstream.auth-mode")
+        .is_err());
+    assert!(config
+        .get_string("browsitory.remote.upstream.username")
+        .is_err());
+    drop(config);
+
+    add_remote(&repo, "origin", "https://example.com/owner/repo.git", None).unwrap();
+    set_remote_auth_profile(&repo, "origin", RemoteAuthMode::SshAgent).unwrap();
+    clear_remote_auth_profile(&repo, "origin").unwrap();
+    let config = repo.config().unwrap();
+    assert!(config
+        .get_string("browsitory.remote.origin.auth-mode")
+        .is_err());
+    assert!(config
+        .get_string("browsitory.remote.origin.username")
+        .is_err());
 }
 
 #[test]

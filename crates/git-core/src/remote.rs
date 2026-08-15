@@ -65,6 +65,12 @@ pub trait CredentialProvider {
     ) -> Result<Cred, git2::Error>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteAuthMode {
+    HttpsToken { username: String },
+    SshAgent,
+}
+
 fn sanitize_remote_message(_message: &[u8]) -> Option<String> {
     None
 }
@@ -364,7 +370,39 @@ pub fn add_remote(
 }
 
 pub fn rename_remote(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), RemoteError> {
+    let auth_profile = remote_auth_profile(repo, old_name)?;
     repo.remote_rename(old_name, new_name)?;
+    if let Some(profile) = auth_profile {
+        set_remote_auth_profile(repo, new_name, profile)?;
+        clear_remote_auth_profile(repo, old_name)?;
+    }
+    Ok(())
+}
+
+pub fn set_remote_auth_profile(
+    repo: &Repository,
+    remote: &str,
+    profile: RemoteAuthMode,
+) -> Result<(), RemoteError> {
+    repo.find_remote(remote)?;
+    let mut config = repo.config()?;
+    match profile {
+        RemoteAuthMode::HttpsToken { username } => {
+            config.set_str(&remote_auth_key(remote, "auth-mode"), "https-token")?;
+            config.set_str(&remote_auth_key(remote, "username"), &username)?;
+        }
+        RemoteAuthMode::SshAgent => {
+            config.set_str(&remote_auth_key(remote, "auth-mode"), "ssh-agent")?;
+            remove_config_key(&mut config, &remote_auth_key(remote, "username"))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn clear_remote_auth_profile(repo: &Repository, remote: &str) -> Result<(), RemoteError> {
+    let mut config = repo.config()?;
+    remove_config_key(&mut config, &remote_auth_key(remote, "auth-mode"))?;
+    remove_config_key(&mut config, &remote_auth_key(remote, "username"))?;
     Ok(())
 }
 
@@ -447,6 +485,7 @@ pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
         });
     }
     repo.remote_delete(name)?;
+    clear_remote_auth_profile(repo, name)?;
     Ok(())
 }
 
@@ -484,6 +523,7 @@ pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Resul
             .set_upstream(None)?;
     }
     repo.remote_delete(name)?;
+    clear_remote_auth_profile(repo, name)?;
     Ok(())
 }
 
@@ -595,6 +635,37 @@ fn contains_embedded_credentials(url: &str) -> bool {
         return false;
     }
     !parsed.username().is_empty() || parsed.password().is_some()
+}
+
+pub fn remote_auth_profile(
+    repo: &Repository,
+    remote: &str,
+) -> Result<Option<RemoteAuthMode>, RemoteError> {
+    let config = repo.config()?;
+    let auth_mode = match config.get_string(&remote_auth_key(remote, "auth-mode")) {
+        Ok(auth_mode) => auth_mode,
+        Err(error) if error.code() == ErrorCode::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    match auth_mode.as_str() {
+        "https-token" => Ok(Some(RemoteAuthMode::HttpsToken {
+            username: config.get_string(&remote_auth_key(remote, "username"))?,
+        })),
+        "ssh-agent" => Ok(Some(RemoteAuthMode::SshAgent)),
+        _ => Ok(None),
+    }
+}
+
+fn remote_auth_key(remote: &str, field: &str) -> String {
+    format!("browsitory.remote.{remote}.{field}")
+}
+
+fn remove_config_key(config: &mut git2::Config, key: &str) -> Result<(), RemoteError> {
+    match config.remove(key) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn local_branches_using_remote(
