@@ -31,14 +31,31 @@
   blocked waiting on the shared Cargo target-directory lock in this environment. It also needs
   the existing `tauri-driver` and display prerequisites.
 
-## Manual acceptance and HTTPS E2E limitation
+## Follow-up: safe terminal credential-failure kind
+
+- Added `MissingCredential` as a terminal transfer error kind. `git-core` classifies only its
+  own stable missing-credential callback marker; the worker carries that enum value unchanged,
+  the Tauri event DTO exposes only `MissingCredential` (never a diagnostic), and `RepoClient` /
+  `useAppState` turn it into the HTTPS-token remediation message.
+- Added a loopback-only E2E fixture that returns an HTTP authentication challenge. It configures
+  only non-secret local Git metadata, stores no test token, and asserts the rendered remediation
+  does not contain the fixture URL.
+- Red: the focused git-core test initially failed because `TransferErrorKind::MissingCredential`
+  did not exist. Green: `cargo test -p git-core --test remote` passed (22 tests),
+  `cargo test -p tauri-app commands::tests::missing_credential_failure_is_emitted_as_a_safe_terminal_kind`
+  passed, and `frontend/node_modules/.bin/vitest run src/state/useAppState.test.ts` passed
+  (38 tests).
+- Follow-up full verification: `cargo test --workspace` passed, `cargo clippy --workspace
+  --all-targets -- -D warnings` passed, `cargo fmt --all -- --check` passed after formatting,
+  and frontend ESLint/Vite build passed.
+- The rebuilt targeted E2E command reached WebdriverIO but could not start its driver because
+  the pre-existing harness ports were occupied (`127.0.0.1:4444` and `4445`). The unrelated
+  TypeScript errors in `e2e/specs/merge.spec.ts` remain unchanged.
+
+## Manual acceptance
 
 - Manual HTTPS-token and SSH-agent acceptance was not performed: this environment has no
   authorized disposable HTTPS account/token or disposable SSH host/key loaded in an agent. The
   exact procedure and required secret-safety inspection are documented in `docs/ARCHITECTURE.md`.
-- A live missing-HTTPS-credential E2E assertion remains blocked by the existing IPC contract:
-  `git-core` sanitizes transport messages and `Worker` emits only the generic `TransferFailed`
-  terminal kind, with no safe missing-credential discriminator. Consequently a real async fetch
-  currently reaches the UI as generic `Fetch failed`; the focused state test proves remediation
-  whenever a future safe event supplies `missing credential`, but does not change the IPC error
-  protocol. Expanding that protocol was explicitly out of Task 4 scope.
+- The loopback-only E2E assertion is implemented but has not completed in this environment due
+  to the occupied existing WebDriver ports described above.

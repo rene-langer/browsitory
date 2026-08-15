@@ -454,11 +454,11 @@ describe("useAppState", () => {
           operationId: "credential-fetch",
           operation: "Fetch",
           phase: "Failed",
-          errorKind: "TransferFailed",
+          errorKind: "MissingCredential",
           current: 0,
           total: 0,
           receivedBytes: 0,
-          message: "missing credential for remote",
+          message: null,
         });
         return "credential-fetch";
       },
