@@ -118,11 +118,13 @@ export function RebasePlanner({
   onto,
   onStartRebase,
   onCancel,
+  operationDisabled = false,
 }: {
   client: RepoClient;
   onto: string;
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
   onCancel: () => void;
+  operationDisabled?: boolean;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
 
@@ -250,7 +252,7 @@ export function RebasePlanner({
           </li>
         ))}
       </ul>
-      <button onClick={start}>Start Rebase</button>
+      <button onClick={start} disabled={operationDisabled}>Start Rebase</button>
       <button onClick={onCancel}>Cancel</button>
     </div>
   );

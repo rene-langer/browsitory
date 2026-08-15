@@ -76,6 +76,23 @@ const fourCommits: RebasePlanCommit[] = [
 ];
 
 describe("RebasePlanner", () => {
+  it("disables Start Rebase while another repository operation is active", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(
+      <RebasePlanner
+        client={client}
+        onto="base"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+        operationDisabled={true}
+      />,
+    );
+    await screen.findByText(/add a/);
+
+    expect(screen.getByText("Start Rebase")).toBeDisabled();
+  });
+
   it("lists commits oldest-first with a default Pick action each", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 

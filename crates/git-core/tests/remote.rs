@@ -171,6 +171,19 @@ fn pull_reports_up_to_date_when_local_matches_tracking_ref() {
 }
 
 #[test]
+fn pull_reports_up_to_date_when_local_is_ahead_of_tracking_ref() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    let local_head = fixture.local.head().unwrap().target();
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Ok(PullOutcome::UpToDate)
+    ));
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
+}
+
+#[test]
 fn pull_reports_diverged_without_moving_head() {
     let fixture = diverged_local_and_bare_remote();
     fixture.remote_commit("remote change");

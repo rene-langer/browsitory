@@ -485,4 +485,25 @@ describe("CommitGraph", () => {
 
     expect(onRebaseFromCommit).toHaveBeenCalledWith("aaa111...");
   });
+
+  it("disables Rebase onto here while a repository operation is pending", () => {
+    render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={true}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+
+    expect(screen.getByText("Rebase onto here")).toBeDisabled();
+  });
 });

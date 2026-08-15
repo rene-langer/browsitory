@@ -13,6 +13,7 @@ export function BranchSwitcher({
   onMergeBranch,
   isMerging,
   isRebasing,
+  operationDisabled,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -30,6 +31,7 @@ export function BranchSwitcher({
   // unrelated branch. `git-core::rebase::rebase_continue` also refuses outright once HEAD has
   // drifted — this just stops the user from getting there.
   isRebasing: boolean;
+  operationDisabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -125,7 +127,7 @@ export function BranchSwitcher({
                 </button>
                 {!b.isCurrent && (
                   <button
-                    disabled={isMerging || isRebasing}
+                    disabled={isMerging || isRebasing || operationDisabled}
                     onClick={() => {
                       onMergeBranch(b.name);
                       closePopoverState();
