@@ -16,7 +16,7 @@ function unimplemented(): never {
   throw new Error("not implemented in this fake");
 }
 
-const remote: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null };
+const remote: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null, authMode: null, authUsername: null };
 const upstream: UpstreamInfo = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
 
 const remoteManagementClient = {
@@ -27,6 +27,9 @@ const remoteManagementClient = {
   renameRemote: async () => unimplemented(),
   updateRemoteUrls: async () => unimplemented(),
   removeRemote: async () => unimplemented(),
+  saveHttpsCredential: async () => unimplemented(),
+  forgetHttpsCredential: async () => unimplemented(),
+  setRemoteAuthMode: async () => unimplemented(),
   setCurrentUpstream: async () => unimplemented(),
   clearCurrentUpstream: async () => unimplemented(),
     fetchRemote: async () => unimplemented(),
@@ -79,6 +82,21 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
 }
 
 describe("useAppState", () => {
+  it("forwards a credential token directly to the client without placing it in state", async () => {
+    let saved: [string, string, string] | null = null;
+    const client = transferClient({
+      saveHttpsCredential: async (remoteName, username, token) => {
+        saved = [remoteName, username, token];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client));
+
+    await act(() => result.current.saveHttpsCredential("origin", "rene", "token-123"));
+
+    expect(saved).toEqual(["origin", "rene", "token-123"]);
+    expect(JSON.stringify(result.current.state)).not.toContain("token-123");
+  });
+
   it("refreshes tags after creating and deleting a tag", async () => {
     const release: TagInfo = {
       name: "v1.0.0",

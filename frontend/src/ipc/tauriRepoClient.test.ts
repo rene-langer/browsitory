@@ -38,6 +38,24 @@ describe("tauriRepoClient remote URL validation", () => {
   });
 });
 
+describe("tauriRepoClient credentials", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("sends a token only as the direct save command argument", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await tauriRepoClient.saveHttpsCredential("origin", "rene", "token-123");
+
+    expect(invoke).toHaveBeenCalledWith("save_https_credential", {
+      remoteName: "origin",
+      username: "rene",
+      token: "token-123",
+    });
+  });
+});
+
 describe("tauriRepoClient transfer progress subscription", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();

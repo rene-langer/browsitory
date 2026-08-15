@@ -13,6 +13,7 @@ import type {
   RebasePlanEntry,
   RebaseStepResult,
   RemoteInfo,
+  RemoteAuthMode,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -61,6 +62,11 @@ export const tauriRepoClient: RepoClient = {
     return invoke("update_remote_urls", { name, fetchUrl, pushUrl });
   },
   removeRemote: (name: string, clearUpstreams: boolean) => invoke("remove_remote", { name, clearUpstreams }),
+  saveHttpsCredential: (remoteName: string, username: string, token: string) =>
+    invoke("save_https_credential", { remoteName, username, token }),
+  forgetHttpsCredential: (remoteName: string) => invoke("forget_https_credential", { remoteName }),
+  setRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+    invoke("set_remote_auth_mode", { remoteName, mode, username }),
   setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
     invoke("set_current_upstream", { remoteName, remoteBranch }),
   clearCurrentUpstream: () => invoke("clear_current_upstream"),

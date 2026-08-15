@@ -30,7 +30,11 @@ export interface RemoteInfo {
   name: string;
   fetchUrl: string;
   pushUrl: string | null;
+  authMode: RemoteAuthMode | null;
+  authUsername: string | null;
 }
+
+export type RemoteAuthMode = "HttpsToken" | "SshAgent";
 
 export interface UpstreamInfo {
   localBranch: string;
@@ -156,6 +160,9 @@ export interface RepoClient {
   renameRemote(oldName: string, newName: string): Promise<void>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
+  saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
+  forgetHttpsCredential(remoteName: string): Promise<void>;
+  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<void>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   listTags(): Promise<TagInfo[]>;

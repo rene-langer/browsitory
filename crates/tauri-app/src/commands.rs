@@ -113,6 +113,14 @@ pub struct RemoteInfoDto {
     pub name: String,
     pub fetch_url: String,
     pub push_url: Option<String>,
+    pub auth_mode: Option<RemoteAuthModeDto>,
+    pub auth_username: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RemoteAuthModeDto {
+    HttpsToken,
+    SshAgent,
 }
 
 #[derive(Serialize)]
@@ -139,12 +147,33 @@ impl From<git_core::remote::TagInfo> for TagInfoDto {
     }
 }
 
-impl From<git_core::remote::RemoteInfo> for RemoteInfoDto {
-    fn from(remote: git_core::remote::RemoteInfo) -> Self {
+impl
+    From<(
+        git_core::remote::RemoteInfo,
+        Option<git_core::remote::RemoteAuthMode>,
+    )> for RemoteInfoDto
+{
+    fn from(
+        (remote, profile): (
+            git_core::remote::RemoteInfo,
+            Option<git_core::remote::RemoteAuthMode>,
+        ),
+    ) -> Self {
+        let (auth_mode, auth_username) = match profile {
+            Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) => {
+                (Some(RemoteAuthModeDto::HttpsToken), Some(username))
+            }
+            Some(git_core::remote::RemoteAuthMode::SshAgent) => {
+                (Some(RemoteAuthModeDto::SshAgent), None)
+            }
+            None => (None, None),
+        };
         Self {
             name: remote.name,
             fetch_url: remote.fetch_url,
             push_url: remote.push_url,
+            auth_mode,
+            auth_username,
         }
     }
 }
@@ -621,8 +650,15 @@ pub async fn rename_branch(
 
 #[tauri::command]
 pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteInfoDto>, String> {
-    let remotes = worker_handle(&state)?.list_remotes()?;
-    Ok(remotes.into_iter().map(RemoteInfoDto::from).collect())
+    let worker = worker_handle(&state)?;
+    worker
+        .list_remotes()?
+        .into_iter()
+        .map(|remote| {
+            let profile = worker.get_remote_auth_mode(remote.name.clone())?;
+            Ok(RemoteInfoDto::from((remote, profile)))
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -680,6 +716,42 @@ pub async fn remove_remote(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state)?.remove_remote(name, clear_upstreams)
+}
+
+#[tauri::command]
+pub async fn save_https_credential(
+    remote_name: String,
+    username: String,
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.save_https_credential(remote_name, username, token)
+}
+
+#[tauri::command]
+pub async fn forget_https_credential(
+    remote_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.forget_https_credential(remote_name)
+}
+
+#[tauri::command]
+pub async fn set_remote_auth_mode(
+    remote_name: String,
+    mode: RemoteAuthModeDto,
+    username: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mode = match mode {
+        RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
+            username: username
+                .filter(|username| !username.trim().is_empty())
+                .ok_or_else(|| "HTTPS username is required".to_string())?,
+        },
+        RemoteAuthModeDto::SshAgent => git_core::remote::RemoteAuthMode::SshAgent,
+    };
+    worker_handle(&state)?.set_remote_auth_mode(remote_name, mode)
 }
 
 #[tauri::command]
@@ -891,7 +963,19 @@ mod tests {
 
     use crate::worker::TransferEvent;
 
-    use super::{transfer_event_payload, PullOutcomeDto};
+    use super::{transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto};
+
+    #[test]
+    fn remote_auth_mode_wire_values_match_the_typescript_union() {
+        assert_eq!(
+            serde_json::to_value(RemoteAuthModeDto::HttpsToken).unwrap(),
+            serde_json::json!("HttpsToken")
+        );
+        assert_eq!(
+            serde_json::to_value(RemoteAuthModeDto::SshAgent).unwrap(),
+            serde_json::json!("SshAgent")
+        );
+    }
 
     #[test]
     fn pull_outcome_wire_values_match_the_typescript_union() {

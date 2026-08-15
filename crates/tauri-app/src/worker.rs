@@ -120,6 +120,25 @@ pub(crate) enum Command {
         name: String,
         reply: Sender<Result<Vec<UpstreamInfo>, String>>,
     },
+    GetRemoteAuthMode {
+        name: String,
+        reply: Sender<Result<Option<git_core::remote::RemoteAuthMode>, String>>,
+    },
+    SaveHttpsCredential {
+        remote_name: String,
+        username: String,
+        token: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ForgetHttpsCredential {
+        remote_name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    SetRemoteAuthMode {
+        remote_name: String,
+        mode: git_core::remote::RemoteAuthMode,
+        reply: Sender<Result<(), String>>,
+    },
     AddRemote {
         name: String,
         fetch_url: String,
@@ -419,6 +438,69 @@ impl Worker {
                     Command::GetRemoteUpstreams { name, reply } => {
                         let result = git_core::remote::remote_upstreams(&repo, &name)
                             .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetRemoteAuthMode { name, reply } => {
+                        let result =
+                            git_core::remote::remote_auth_profile(&repo, &name).map_err(|_| {
+                                "could not read remote authentication settings".to_string()
+                            });
+                        let _ = reply.send(result);
+                    }
+                    Command::SaveHttpsCredential {
+                        remote_name,
+                        username,
+                        token,
+                        reply,
+                    } => {
+                        let result = git_core::remote::list_remotes(&repo)
+                            .map_err(|_| "could not find remote".to_string())
+                            .and_then(|remotes| {
+                                remotes
+                                    .into_iter()
+                                    .find(|remote| remote.name == remote_name)
+                                    .ok_or_else(|| "could not find remote".to_string())
+                            })
+                            .and_then(|remote| {
+                                credential_service
+                                    .save_https(&remote.fetch_url, &username, &token)
+                                    .map_err(|_| "credential keychain failure".to_string())
+                            });
+                        let _ = reply.send(result);
+                    }
+                    Command::ForgetHttpsCredential { remote_name, reply } => {
+                        let result = (|| {
+                            let profile =
+                                git_core::remote::remote_auth_profile(&repo, &remote_name)
+                                    .map_err(|_| {
+                                        "could not read remote authentication settings".to_string()
+                                    })?;
+                            let Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) =
+                                profile
+                            else {
+                                return Ok(());
+                            };
+                            let remote = git_core::remote::list_remotes(&repo)
+                                .map_err(|_| "could not find remote".to_string())?
+                                .into_iter()
+                                .find(|remote| remote.name == remote_name)
+                                .ok_or_else(|| "could not find remote".to_string())?;
+                            credential_service
+                                .forget_https(&remote.fetch_url, &username)
+                                .map_err(|_| "credential keychain failure".to_string())
+                        })();
+                        let _ = reply.send(result);
+                    }
+                    Command::SetRemoteAuthMode {
+                        remote_name,
+                        mode,
+                        reply,
+                    } => {
+                        let result =
+                            git_core::remote::set_remote_auth_profile(&repo, &remote_name, mode)
+                                .map_err(|_| {
+                                    "could not configure remote authentication".to_string()
+                                });
                         let _ = reply.send(result);
                     }
                     Command::RemoveRemote {
@@ -1067,6 +1149,73 @@ impl WorkerHandle {
         self.tx
             .send(Command::GetRemoteUpstreams {
                 name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_remote_auth_mode(
+        &self,
+        name: String,
+    ) -> Result<Option<git_core::remote::RemoteAuthMode>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetRemoteAuthMode {
+                name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn save_https_credential(
+        &self,
+        remote_name: String,
+        username: String,
+        token: String,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SaveHttpsCredential {
+                remote_name,
+                username,
+                token,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn forget_https_credential(&self, remote_name: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ForgetHttpsCredential {
+                remote_name,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn set_remote_auth_mode(
+        &self,
+        remote_name: String,
+        mode: git_core::remote::RemoteAuthMode,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SetRemoteAuthMode {
+                remote_name,
+                mode,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

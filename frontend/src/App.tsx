@@ -69,6 +69,9 @@ export default function App() {
         onRenameRemote={appState.renameRemote}
         onUpdateRemoteUrls={appState.updateRemoteUrls}
         onRemoveRemote={appState.removeRemote}
+        onSaveHttpsCredential={appState.saveHttpsCredential}
+        onForgetHttpsCredential={appState.forgetHttpsCredential}
+        onSetRemoteAuthMode={appState.setRemoteAuthMode}
         onSetUpstream={appState.setCurrentUpstream}
         onClearUpstream={appState.clearCurrentUpstream}
         onFetchRemote={appState.fetchRemote}
