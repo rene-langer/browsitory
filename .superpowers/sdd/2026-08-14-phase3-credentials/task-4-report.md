@@ -166,3 +166,28 @@
   `cargo fmt --all -- --check` and
   `cargo build --workspace --features tauri-app/custom-protocol`. A fresh live WebDriver run is
   required to verify the now-isolated credential request probe and Pull fast-forward result.
+
+## Live E2E HTTPS transport and Pull precondition follow-up
+
+- The live request-count probe remained zero after the remote was visibly added, proving that
+  the credential provider was not involved. The exact cause is trust initialization: this build
+  uses vendored libgit2/OpenSSL, which obtains its CA location at process initialization rather
+  than from repository-local `http.sslCAInfo`. TLS therefore rejected the per-test self-signed
+  server before its HTTP 401 challenge or the credential callback.
+- The WebDriver prepare hook now creates the short-lived localhost certificate before
+  `tauri-driver` starts, sets `SSL_CERT_FILE` for the driver/app process tree, and supplies the
+  corresponding key/certificate paths only to the E2E server fixture. The test server still
+  binds loopback, the certificate still has a localhost SAN, and no TLS verification is disabled.
+  The server directory is removed after the session. The credential case additionally asserts
+  the stored remote URL before Fetching, so a missing fixture request cannot be misattributed to
+  a different remote configuration.
+- Pull's unchanged HEAD was a fixture precondition failure, not a fast-forward implementation
+  defect: `setupFixtureRepo` created an untracked `README.md`, while the transfer suite committed
+  only its seed file. `pull_after_fetch` correctly rejects dirty worktrees. The suite now commits
+  both files in its initial baseline and asserts a clean porcelain status immediately before
+  configuring/Pulling the upstream.
+- Verification: `git diff --check`, `cargo fmt --all -- --check`, and
+  `cargo build --workspace --features tauri-app/custom-protocol` passed. Rebuilt the embedded
+  frontend with `VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo corepack pnpm build`. E2E
+  `tsc --noEmit` continues to stop only at the existing four `merge.spec.ts` errors. A live
+  WebDriver rerun is required to exercise the inherited process trust chain.

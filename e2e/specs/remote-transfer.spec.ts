@@ -10,22 +10,19 @@ const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.
 const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-source");
 const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
 const BRANCH_PUSH_FILE = "branch-push.txt";
+const CREDENTIAL_KEY_PATH = process.env.BROWSITORY_E2E_CREDENTIAL_KEY;
+const CREDENTIAL_CERT_PATH = process.env.BROWSITORY_E2E_CREDENTIAL_CERT;
 
 async function startCredentialChallengeServer(): Promise<{
   url: string;
-  certificatePath: string;
   requests: () => number;
   close: () => Promise<void>;
 }> {
-  const certificateDir = fs.mkdtempSync(path.join(os.tmpdir(), "browsitory-e2e-credential-cert-"));
-  const keyPath = path.join(certificateDir, "key.pem");
-  const certificatePath = path.join(certificateDir, "cert.pem");
-  execFileSync("openssl", [
-    "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath, "-out", certificatePath,
-    "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
-  ], { stdio: "ignore" });
+  if (CREDENTIAL_KEY_PATH === undefined || CREDENTIAL_CERT_PATH === undefined) {
+    throw new Error("credential fixture certificate was not prepared before the Tauri session");
+  }
   let requests = 0;
-  const server = createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certificatePath) }, (_request, response) => {
+  const server = createServer({ key: fs.readFileSync(CREDENTIAL_KEY_PATH), cert: fs.readFileSync(CREDENTIAL_CERT_PATH) }, (_request, response) => {
     requests += 1;
     response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Browsitory E2E"' });
     response.end();
@@ -39,10 +36,8 @@ async function startCredentialChallengeServer(): Promise<{
 
   return {
     url: `https://localhost:${address.port}/credential.git`,
-    certificatePath,
     requests: () => requests,
     close: () => new Promise((resolve, reject) => server.close((error) => {
-      fs.rmSync(certificateDir, { recursive: true, force: true });
       error === undefined ? resolve() : reject(error);
     })),
   };
@@ -51,7 +46,7 @@ async function startCredentialChallengeServer(): Promise<{
 describe("Browsitory remote transfer", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, TRANSFER_SEED_FILE), "transfer seed\n");
-    execFileSync("git", ["add", TRANSFER_SEED_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["add", "README.md", TRANSFER_SEED_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["commit", "-m", "e2e: seed transfer base"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
@@ -117,7 +112,12 @@ describe("Browsitory remote transfer", () => {
       // token is saved, so the loopback server invokes the real missing-credential callback.
       execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.auth-mode", "https-token"], { cwd: E2E_REPO_PATH });
       execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.username", "e2e-user"], { cwd: E2E_REPO_PATH });
-      execFileSync("git", ["config", "--local", "http.sslCAInfo", challenge.certificatePath], { cwd: E2E_REPO_PATH });
+      expect(
+        execFileSync("git", ["remote", "get-url", "credential-origin"], {
+          cwd: E2E_REPO_PATH,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe(challenge.url);
 
       await (await $("button=Fetch credential-origin")).click();
       await browser.waitUntil(() => challenge.requests() > 0, {
@@ -134,6 +134,7 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("fast-forwards a clean tracked upstream", async () => {
+    expect(execFileSync("git", ["status", "--porcelain"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe("");
     const upstreamRemote = await $("form[aria-label='Set upstream'] select");
     await upstreamRemote.selectByAttribute("value", "transfer-origin");
     const upstreamBranch = await $("form[aria-label='Set upstream'] input");
