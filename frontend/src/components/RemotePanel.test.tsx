@@ -138,9 +138,11 @@ describe("RemotePanel", () => {
     renderPanel({ onFetchRemote, fetchDisabled: true });
 
     expect(screen.getByRole("button", { name: "Fetch origin" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
 
     renderPanel({ onFetchRemote, fetchDisabled: false });
     screen.getAllByRole("button", { name: "Fetch origin" })[1].click();
+    expect(screen.getAllByRole("button", { name: "Add remote" })[1]).toBeEnabled();
 
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
   });

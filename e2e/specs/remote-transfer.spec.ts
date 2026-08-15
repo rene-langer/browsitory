@@ -104,37 +104,6 @@ describe("Browsitory remote transfer", () => {
     await expect(fetchButton).toBeEnabled();
   });
 
-  it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {
-    await (await $("button=Credentials for transfer-origin")).click();
-    const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
-    await credentialsForm.waitForExist({ timeout: 10000 });
-    await credentialsForm.$("select").selectByAttribute("value", "SshAgent");
-
-    expect(await credentialsForm.$("input[type='password']").isExisting()).toBe(false);
-
-    await (await $("button=Use SSH agent")).click();
-    await browser.waitUntil(
-      () => {
-        try {
-          return execFileSync(
-            "git",
-            ["config", "--get", "browsitory.remote.transfer-origin.auth-mode"],
-            { cwd: E2E_REPO_PATH, encoding: "utf8" },
-          ).trim() === "ssh-agent";
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 10000, timeoutMsg: "expected SSH-agent mode to be stored without an HTTPS credential" },
-    );
-    expect(
-      execFileSync("git", ["config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."], {
-        cwd: E2E_REPO_PATH,
-        encoding: "utf8",
-      }).trim(),
-    ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
-  });
-
   it("remediates a missing HTTPS credential without exposing the callback diagnostic", async () => {
     const challenge = await startCredentialChallengeServer();
     try {
@@ -203,12 +172,6 @@ describe("Browsitory remote transfer", () => {
     const pushBranch = await $("button=Push branch to transfer-origin");
     await pushBranch.waitForEnabled({ timeout: 10000 });
     await pushBranch.click();
-    const transferPanel = await $("section[aria-label='Transfer progress']");
-    await transferPanel.waitForExist({ timeout: 10000 });
-    await browser.waitUntil(async () => !(await transferPanel.isExisting()), {
-      timeout: 10000,
-      timeoutMsg: "expected branch push to complete",
-    });
     await browser.waitUntil(
       () => execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], { cwd: BARE_REMOTE_PATH, encoding: "utf8" }).trim() === localHead,
       { timeout: 10000, timeoutMsg: "expected Push to advance the remote branch" },
@@ -231,5 +194,36 @@ describe("Browsitory remote transfer", () => {
       },
       { timeout: 10000, timeoutMsg: "expected tag push to complete" },
     );
+  });
+
+  it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {
+    await (await $("button=Credentials for transfer-origin")).click();
+    const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
+    await credentialsForm.waitForExist({ timeout: 10000 });
+    await credentialsForm.$("select").selectByAttribute("value", "SshAgent");
+
+    expect(await credentialsForm.$("input[type='password']").isExisting()).toBe(false);
+
+    await (await $("button=Use SSH agent")).click();
+    await browser.waitUntil(
+      () => {
+        try {
+          return execFileSync(
+            "git",
+            ["config", "--get", "browsitory.remote.transfer-origin.auth-mode"],
+            { cwd: E2E_REPO_PATH, encoding: "utf8" },
+          ).trim() === "ssh-agent";
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 10000, timeoutMsg: "expected SSH-agent mode to be stored without an HTTPS credential" },
+    );
+    expect(
+      execFileSync("git", ["config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."], {
+        cwd: E2E_REPO_PATH,
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
   });
 });

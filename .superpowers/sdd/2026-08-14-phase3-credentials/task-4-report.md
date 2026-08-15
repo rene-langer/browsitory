@@ -138,3 +138,31 @@
   `cargo fmt --all -- --check` and
   `cargo build --workspace --features tauri-app/custom-protocol`; all three passed. A live
   WebDriver rerun remains required outside this sandbox/display/port-constrained environment.
+
+## Live E2E cross-test ordering follow-up
+
+- The stabilized configured Fetch now reaches its durable tracking-ref assertion. The next
+  failure occurred before any credential transfer: `Fetch credential-origin` did not render
+  after adding the remote. This is a test ordering race, not a credential-provider result. The
+  immediately preceding SSH-agent test waited only for the backend Git config write; its
+  `runMutation` refresh was still asynchronous. A later add-remote refresh could therefore be
+  overwritten by that earlier, stale remote list.
+- Moved the independent SSH UI acceptance case to the end of the transfer sequence, after the
+  credential, Pull, and Push cases. This preserves the same real UI/config assertion while
+  removing the stale-refresh overlap from dependent E2E setup. The credential test can now
+  establish and observe `credential-origin` before it configures and Fetches it; Pull follows
+  the terminal credential failure rather than a concurrent remote refresh.
+- This also identified a narrow product race: Add remote was actionable while the existing
+  repository-operation latch was set by a credential mutation. A fast second mutation could
+  race its refresh against the first and retain an old remote list. The Add remote submit control
+  now uses that same latch. Red: the focused `RemotePanel` test found it enabled during an active
+  operation. Green: the focused suite passes with 16 tests, and no interface was weakened.
+- Replaced the remaining transient branch-Push progress-panel assertion with the existing
+  durable bare-remote branch-ref assertion. Local transfers may complete between React renders;
+  the remote ref is the user-visible operation outcome and avoids another timing-only failure.
+- Verification: `git diff --check`, frontend lint, and the focused `RemotePanel` suite passed.
+  E2E `tsc --noEmit` still reaches only the known four `merge.spec.ts` errors. Rebuilt with
+  `VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo corepack pnpm build`, then passed
+  `cargo fmt --all -- --check` and
+  `cargo build --workspace --features tauri-app/custom-protocol`. A fresh live WebDriver run is
+  required to verify the now-isolated credential request probe and Pull fast-forward result.
