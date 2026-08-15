@@ -82,6 +82,23 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
 }
 
 describe("useAppState", () => {
+  it("reports a failed remote-auth mutation to dependent callers", async () => {
+    const client = transferClient({
+      setRemoteAuthMode: async () => {
+        throw new Error("credential keychain failure");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client));
+
+    let configured = true;
+    await act(async () => {
+      configured = await result.current.setRemoteAuthMode("origin", "HttpsToken", "rene");
+    });
+
+    expect(configured).toBe(false);
+    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+  });
+
   it("forwards a credential token directly to the client without placing it in state", async () => {
     let saved: [string, string, string] | null = null;
     const client = transferClient({

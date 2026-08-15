@@ -35,7 +35,7 @@ export function RemotePanel({
   onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
   onSaveHttpsCredential: (remoteName: string, username: string, token: string) => Promise<void>;
   onForgetHttpsCredential: (remoteName: string) => Promise<void>;
-  onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<void>;
+  onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<boolean>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
   onFetchRemote: (remoteName: string) => Promise<void>;
@@ -126,8 +126,8 @@ export function RemotePanel({
       if (credentialMode === "SshAgent") {
         await onSetRemoteAuthMode(credentialRemote, "SshAgent", null);
       } else if (username !== "" && token !== "") {
-        await onSetRemoteAuthMode(credentialRemote, "HttpsToken", username);
-        await onSaveHttpsCredential(credentialRemote, username, token);
+        const configured = await onSetRemoteAuthMode(credentialRemote, "HttpsToken", username);
+        if (configured) await onSaveHttpsCredential(credentialRemote, username, token);
       }
     } catch {
       // The application state owns remediation messages for failed credential operations.

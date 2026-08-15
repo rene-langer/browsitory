@@ -17,3 +17,10 @@
 - `cargo fmt --all -- --check` — passed.
 - `cargo test -p tauri-app` — 38 passed.
 - `git diff --check` — passed.
+
+## Reviewer follow-up
+
+- Fixed the dependent HTTPS credential sequence: `setRemoteAuthMode` now returns whether its mutation succeeded, and `RemotePanel` calls `saveHttpsCredential` only after a successful HTTPS-mode result.
+- Red: the new regression test initially showed that a failed mode setup still called the token-save callback.
+- Green: `frontend/node_modules/.bin/vitest run src/components/RemotePanel.test.tsx src/state/useAppState.test.ts src/ipc/tauriRepoClient.test.ts` — 58 passed.
+- `frontend/node_modules/.bin/eslint .`, `frontend/node_modules/.bin/vite build`, and `git diff --check` — passed.
