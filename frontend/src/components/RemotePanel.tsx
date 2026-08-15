@@ -239,7 +239,7 @@ export function RemotePanel({
         <label>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
         <label>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
         <label>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
-        <button type="submit">Add remote</button>
+        <button type="submit" disabled={fetchDisabled}>Add remote</button>
       </form>
 
       <section aria-labelledby="upstream-heading">
