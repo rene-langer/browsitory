@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-git2 = { version = "0.21", features = ["https", "ssh"] }
+git2 = { version = "0.21", features = ["https", "ssh", "vendored-openssl"] }
 thiserror = "1.0"
 url = "2.5"
 
