@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
@@ -9,6 +10,24 @@ const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.
 const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-source");
 const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
 const BRANCH_PUSH_FILE = "branch-push.txt";
+
+async function startCredentialChallengeServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createServer((_request, response) => {
+    response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Browsitory E2E"' });
+    response.end();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("credential challenge server has no TCP address");
+
+  return {
+    url: `http://127.0.0.1:${address.port}/credential.git`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))),
+  };
+}
 
 describe("Browsitory remote transfer", () => {
   before(() => {
@@ -84,6 +103,30 @@ describe("Browsitory remote transfer", () => {
         encoding: "utf8",
       }).trim(),
     ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
+  });
+
+  it("remediates a missing HTTPS credential without exposing the callback diagnostic", async () => {
+    const challenge = await startCredentialChallengeServer();
+    try {
+      const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+      await remoteNameInput.setValue("credential-origin");
+      await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
+      await (await $("button=Add remote")).click();
+      await (await $("button=Fetch credential-origin")).waitForExist({ timeout: 10000 });
+
+      // This is the non-secret metadata the UI normally persists before saving a token. No
+      // token is saved, so the loopback server invokes the real missing-credential callback.
+      execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.auth-mode", "https-token"], { cwd: E2E_REPO_PATH });
+      execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.username", "e2e-user"], { cwd: E2E_REPO_PATH });
+
+      await (await $("button=Fetch credential-origin")).click();
+      const alert = await $("p[role='alert']");
+      await alert.waitForExist({ timeout: 10000 });
+      await expect(alert).toHaveText("Save an HTTPS token for this remote before retrying.");
+      expect(await alert.getText()).not.toContain(challenge.url);
+    } finally {
+      await challenge.close();
+    }
   });
 
   it("fast-forwards a clean tracked upstream", async () => {

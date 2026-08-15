@@ -5,8 +5,8 @@ use git_core::remote::{
     delete_tag, fetch_remote, list_remotes, list_tags, pull_after_fetch, push_current_branch,
     push_tags, remote_upstreams, remove_remote, remove_remote_and_clear_upstreams, rename_remote,
     set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
-    PullOutcome, RemoteAuthMode, RemoteError, TransferOperation, TransferPhase, TransferProgress,
-    TransferReporter,
+    PullOutcome, RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
+    TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -33,6 +33,16 @@ impl CredentialProvider for NoCredentials {
             "credentials were not expected for a local remote",
         ))
     }
+}
+
+#[test]
+fn classifies_the_known_missing_credential_callback_error_without_exposing_it() {
+    let error = RemoteError::from(git2::Error::from_str("missing credential for remote"));
+
+    assert_eq!(
+        error.transfer_error_kind(),
+        TransferErrorKind::MissingCredential
+    );
 }
 
 struct RemoteFixture {

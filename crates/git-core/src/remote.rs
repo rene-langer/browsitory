@@ -38,8 +38,13 @@ pub enum TransferPhase {
 pub enum TransferErrorKind {
     NonFastForward,
     RejectedRemoteRef,
+    MissingCredential,
     TransferFailed,
 }
+
+/// Stable callback marker used internally to classify a missing keychain token without sending
+/// the callback or transport diagnostic across the UI boundary.
+pub const MISSING_CREDENTIAL_ERROR: &str = "missing credential for remote";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferProgress {
@@ -131,6 +136,9 @@ impl RemoteError {
             Self::RejectedRemoteRef => TransferErrorKind::RejectedRemoteRef,
             Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
                 TransferErrorKind::NonFastForward
+            }
+            Self::Git(error) if error.message().contains(MISSING_CREDENTIAL_ERROR) => {
+                TransferErrorKind::MissingCredential
             }
             _ => TransferErrorKind::TransferFailed,
         }
@@ -600,6 +608,7 @@ fn push_refs(
     match rejection.get() {
         Some(TransferErrorKind::NonFastForward) => Err(RemoteError::NonFastForward),
         Some(TransferErrorKind::RejectedRemoteRef) => Err(RemoteError::RejectedRemoteRef),
+        Some(TransferErrorKind::MissingCredential) => unreachable!(),
         Some(TransferErrorKind::TransferFailed) => unreachable!(),
         None => Ok(()),
     }

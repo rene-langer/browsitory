@@ -1,11 +1,9 @@
 use std::fmt;
 
-use git_core::remote::{CredentialProvider, RemoteAuthMode};
+use git_core::remote::{CredentialProvider, RemoteAuthMode, MISSING_CREDENTIAL_ERROR};
 use url::Url;
 
 const SERVICE_NAME: &str = "com.browsitory.git";
-pub(crate) const MISSING_CREDENTIAL_ERROR: &str = "missing credential for remote";
-
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub service: String,

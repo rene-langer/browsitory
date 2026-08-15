@@ -1040,6 +1040,18 @@ mod tests {
     }
 
     #[test]
+    fn missing_credential_failure_is_emitted_as_a_safe_terminal_kind() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::MissingCredential),
+        });
+
+        assert_eq!(failed.error_kind.as_deref(), Some("MissingCredential"));
+        assert_eq!(failed.message, None);
+    }
+
+    #[test]
     fn push_failure_payload_preserves_only_safe_operation_and_error_kinds() {
         let (_, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "push-42".into(),
