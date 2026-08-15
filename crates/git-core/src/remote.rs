@@ -137,7 +137,7 @@ impl RemoteError {
             Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
                 TransferErrorKind::NonFastForward
             }
-            Self::Git(error) if error.message().contains(MISSING_CREDENTIAL_ERROR) => {
+            Self::Git(error) if error.message() == MISSING_CREDENTIAL_ERROR => {
                 TransferErrorKind::MissingCredential
             }
             _ => TransferErrorKind::TransferFailed,

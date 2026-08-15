@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import { createServer } from "node:http";
+import { createServer } from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
@@ -11,8 +11,15 @@ const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-sourc
 const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
 const BRANCH_PUSH_FILE = "branch-push.txt";
 
-async function startCredentialChallengeServer(): Promise<{ url: string; close: () => Promise<void> }> {
-  const server = createServer((_request, response) => {
+async function startCredentialChallengeServer(): Promise<{ url: string; certificatePath: string; close: () => Promise<void> }> {
+  const certificateDir = fs.mkdtempSync(path.join(os.tmpdir(), "browsitory-e2e-credential-cert-"));
+  const keyPath = path.join(certificateDir, "key.pem");
+  const certificatePath = path.join(certificateDir, "cert.pem");
+  execFileSync("openssl", [
+    "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath, "-out", certificatePath,
+    "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+  ], { stdio: "ignore" });
+  const server = createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certificatePath) }, (_request, response) => {
     response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Browsitory E2E"' });
     response.end();
   });
@@ -24,8 +31,12 @@ async function startCredentialChallengeServer(): Promise<{ url: string; close: (
   if (address === null || typeof address === "string") throw new Error("credential challenge server has no TCP address");
 
   return {
-    url: `http://127.0.0.1:${address.port}/credential.git`,
-    close: () => new Promise((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))),
+    url: `https://localhost:${address.port}/credential.git`,
+    certificatePath,
+    close: () => new Promise((resolve, reject) => server.close((error) => {
+      fs.rmSync(certificateDir, { recursive: true, force: true });
+      error === undefined ? resolve() : reject(error);
+    })),
   };
 }
 
@@ -118,6 +129,7 @@ describe("Browsitory remote transfer", () => {
       // token is saved, so the loopback server invokes the real missing-credential callback.
       execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.auth-mode", "https-token"], { cwd: E2E_REPO_PATH });
       execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.username", "e2e-user"], { cwd: E2E_REPO_PATH });
+      execFileSync("git", ["config", "--local", "http.sslCAInfo", challenge.certificatePath], { cwd: E2E_REPO_PATH });
 
       await (await $("button=Fetch credential-origin")).click();
       const alert = await $("p[role='alert']");
