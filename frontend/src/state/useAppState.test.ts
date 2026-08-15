@@ -7,6 +7,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  TagInfo,
   UpstreamInfo,
 } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
@@ -28,9 +29,14 @@ const remoteManagementClient = {
   removeRemote: async () => unimplemented(),
   setCurrentUpstream: async () => unimplemented(),
   clearCurrentUpstream: async () => unimplemented(),
-  fetchRemote: async () => unimplemented(),
-  pullCurrentUpstream: async () => unimplemented(),
-  subscribeTransferProgress: () => () => {},
+    fetchRemote: async () => unimplemented(),
+    pullCurrentUpstream: async () => unimplemented(),
+    listTags: async () => [],
+    createTag: async () => unimplemented(),
+    deleteTag: async () => unimplemented(),
+    pushCurrentBranch: async () => unimplemented(),
+    pushTags: async () => unimplemented(),
+    subscribeTransferProgress: () => () => {},
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -73,6 +79,56 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
 }
 
 describe("useAppState", () => {
+  it("refreshes tags after creating and deleting a tag", async () => {
+    const release: TagInfo = {
+      name: "v1.0.0",
+      targetId: "abc123",
+      annotated: true,
+      message: "first release",
+      taggerName: "Test User",
+      timestamp: 0,
+    };
+    let tags: TagInfo[] = [];
+    const client = transferClient({
+      listTags: async () => tags,
+      createTag: async () => {
+        tags = [release];
+      },
+      deleteTag: async () => {
+        tags = [];
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.createTag("v1.0.0", "first release"));
+    expect(result.current.state.tags).toEqual([release]);
+
+    await act(() => result.current.deleteTag("v1.0.0"));
+    expect(result.current.state.tags).toEqual([]);
+  });
+
+  it("tracks a current-branch push using its transfer operation ID", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pushCurrentBranch: async () => {
+        listener?.({ operationId: "push-42", phase: "Starting", current: 0, total: 0, receivedBytes: 0, message: null });
+        return "push-42";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pushCurrentBranch("origin"));
+
+    expect(result.current.state.transfer).toMatchObject({ operationId: "push-42", phase: "Starting" });
+    expect(result.current.state.pending).toBe(true);
+  });
+
   it("tracks synchronous pull progress and cleans up after completion", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     let resolvePull: ((outcome: import("../ipc/RepoClient").PullOutcome) => void) | null = null;

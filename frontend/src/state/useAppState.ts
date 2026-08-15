@@ -11,6 +11,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  TagInfo,
   TransferProgress,
   UpstreamInfo,
 } from "../ipc/RepoClient";
@@ -26,6 +27,7 @@ export interface AppState {
   commits: GraphCommit[];
   branches: BranchInfo[];
   remotes: RemoteInfo[];
+  tags: TagInfo[];
   upstream: UpstreamInfo | null;
   remoteUpstreams: Record<string, UpstreamInfo[]>;
   createBranchDraft: { startPoint: string } | null;
@@ -62,6 +64,10 @@ export interface UseAppStateResult {
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<void>;
+  createTag(name: string, message: string | null): Promise<void>;
+  deleteTag(name: string): Promise<void>;
+  pushCurrentBranch(remoteName: string): Promise<void>;
+  pushTags(remoteName: string, names: string[]): Promise<void>;
   pullCurrentUpstream(): Promise<void>;
   clearPendingPull(): void;
   openCreateBranchDraft(startPoint: string): void;
@@ -89,6 +95,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     commits: [],
     branches: [],
     remotes: [],
+    tags: [],
     upstream: null,
     remoteUpstreams: {},
     createBranchDraft: null,
@@ -105,12 +112,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, remotes, upstream, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
           client.listRemotes(),
+          client.listTags(),
           client.getCurrentUpstream(),
           client.listStashes(),
           client.getMergeMessage(),
@@ -127,6 +135,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         commits,
         branches,
         remotes,
+        tags,
         upstream,
         remoteUpstreams,
         stashes,
@@ -296,13 +305,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       }),
     [client, runMutation],
   );
-  const fetchRemote = useCallback(
-    async (remoteName: string) => {
+  const startTransfer = useCallback(
+    async (start: () => Promise<string>) => {
       try {
         transferRequestPending.current = true;
         activeTransferId.current = null;
         setState((prev) => ({ ...prev, pending: true, error: null }));
-        const operationId = await client.fetchRemote(remoteName);
+        const operationId = await start();
         if (transferRequestPending.current && activeTransferId.current === null) {
           activeTransferId.current = operationId;
           setState((prev) => ({
@@ -323,7 +332,29 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         setState((prev) => ({ ...prev, error: String(err), pending: false }));
       }
     },
-    [client],
+    [],
+  );
+
+  const fetchRemote = useCallback(
+    (remoteName: string) => startTransfer(() => client.fetchRemote(remoteName)),
+    [client, startTransfer],
+  );
+
+  const createTag = useCallback(
+    (name: string, message: string | null) => runMutation(() => client.createTag(name, message)),
+    [client, runMutation],
+  );
+  const deleteTag = useCallback(
+    (name: string) => runMutation(() => client.deleteTag(name)),
+    [client, runMutation],
+  );
+  const pushCurrentBranch = useCallback(
+    (remoteName: string) => startTransfer(() => client.pushCurrentBranch(remoteName)),
+    [client, startTransfer],
+  );
+  const pushTags = useCallback(
+    (remoteName: string, names: string[]) => startTransfer(() => client.pushTags(remoteName, names)),
+    [client, startTransfer],
   );
 
   const pullCurrentUpstream = useCallback(async () => {
@@ -468,6 +499,10 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     setCurrentUpstream,
     clearCurrentUpstream,
     fetchRemote,
+    createTag,
+    deleteTag,
+    pushCurrentBranch,
+    pushTags,
     pullCurrentUpstream,
     clearPendingPull,
     openCreateBranchDraft,

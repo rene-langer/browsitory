@@ -103,6 +103,30 @@ pub struct RemoteInfoDto {
     pub push_url: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfoDto {
+    pub name: String,
+    pub target_id: String,
+    pub annotated: bool,
+    pub message: Option<String>,
+    pub tagger_name: Option<String>,
+    pub timestamp: Option<i64>,
+}
+
+impl From<git_core::remote::TagInfo> for TagInfoDto {
+    fn from(tag: git_core::remote::TagInfo) -> Self {
+        Self {
+            name: tag.name,
+            target_id: tag.target_id,
+            annotated: tag.annotated,
+            message: tag.message,
+            tagger_name: tag.tagger_name,
+            timestamp: tag.timestamp,
+        }
+    }
+}
+
 impl From<git_core::remote::RemoteInfo> for RemoteInfoDto {
     fn from(remote: git_core::remote::RemoteInfo) -> Self {
         Self {
@@ -661,6 +685,29 @@ pub async fn clear_current_upstream(state: State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command]
+pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagInfoDto>, String> {
+    Ok(worker_handle(&state)?
+        .list_tags()?
+        .into_iter()
+        .map(TagInfoDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn create_tag(
+    name: String,
+    message: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.create_tag(name, message)
+}
+
+#[tauri::command]
+pub async fn delete_tag(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.delete_tag(name)
+}
+
+#[tauri::command]
 pub async fn fetch_remote(
     remote_name: String,
     app: AppHandle,
@@ -668,6 +715,31 @@ pub async fn fetch_remote(
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = worker_handle(&state)?.fetch_remote(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn push_current_branch(
+    remote_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.push_current_branch(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn push_tags(
+    remote_name: String,
+    names: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state)?.push_tags(remote_name, names, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }

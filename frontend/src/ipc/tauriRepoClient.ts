@@ -16,6 +16,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  TagInfo,
   TransferProgress,
   UpstreamInfo,
 } from "./RepoClient";
@@ -63,9 +64,20 @@ export const tauriRepoClient: RepoClient = {
   setCurrentUpstream: (remoteName: string, remoteBranch: string) =>
     invoke("set_current_upstream", { remoteName, remoteBranch }),
   clearCurrentUpstream: () => invoke("clear_current_upstream"),
+  listTags: () => invoke<TagInfo[]>("list_tags"),
+  createTag: (name: string, message: string | null) => invoke("create_tag", { name, message }),
+  deleteTag: (name: string) => invoke("delete_tag", { name }),
   fetchRemote: async (remoteName: string) => {
     await transferListenersReady;
     return invoke<string>("fetch_remote", { remoteName });
+  },
+  pushCurrentBranch: async (remoteName: string) => {
+    await transferListenersReady;
+    return invoke<string>("push_current_branch", { remoteName });
+  },
+  pushTags: async (remoteName: string, names: string[]) => {
+    await transferListenersReady;
+    return invoke<string>("push_tags", { remoteName, names });
   },
   pullCurrentUpstream: async () => {
     await transferListenersReady;
