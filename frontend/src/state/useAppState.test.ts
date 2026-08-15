@@ -473,6 +473,23 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
   });
 
+  it("uses the terminal missing-credential event after a direct fetch request rejects", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => { listener = next; return () => {}; },
+      fetchRemote: async () => {
+        listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        throw new Error("Fetch failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.fetchRemote("origin"));
+    act(() => listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null }));
+
+    expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
+  });
+
   it("renders safe keychain and SSH-agent transfer remediation without provider diagnostics", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     const client = transferClient({

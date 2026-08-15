@@ -388,9 +388,11 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           }));
         }
       } catch (err) {
+        const message = String(err);
+        if (operation === "Fetch" && (message === "Fetch failed" || message.endsWith(": Fetch failed"))) return;
         transferRequestPending.current = false;
         activeTransferId.current = null;
-        setState((prev) => ({ ...prev, error: String(err), pending: false }));
+        setState((prev) => ({ ...prev, error: message, pending: false }));
       }
     },
     [],
