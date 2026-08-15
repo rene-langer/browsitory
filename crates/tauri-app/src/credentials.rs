@@ -23,11 +23,6 @@ impl CredentialKey {
         let host = parsed
             .host_str()
             .ok_or(CredentialStoreError::InvalidHttpsUrl)?;
-        let host = if host.contains(':') {
-            format!("[{host}]")
-        } else {
-            host.to_owned()
-        };
         let port = match parsed.port() {
             Some(port) if port != 443 => format!(":{port}"),
             _ => String::new(),
@@ -210,6 +205,14 @@ mod tests {
         let key = CredentialKey::for_https("https://[::1]:443/org/repo.git", "rene").unwrap();
 
         assert_eq!(key.account, "https://[::1]/rene");
+    }
+
+    #[test]
+    fn retains_brackets_once_for_an_ipv6_key_with_a_non_default_port() {
+        let key =
+            CredentialKey::for_https("https://[2001:db8::1]:8443/org/repo.git", "rene").unwrap();
+
+        assert_eq!(key.account, "https://[2001:db8::1]:8443/rene");
     }
 
     #[test]
