@@ -77,3 +77,12 @@
   failure regression initially reused the missing-token marker. Green focused checks passed for
   both. `cargo test --workspace` passed (23 remote tests and 40 tauri-app tests), as did clippy
   and fmt. E2E typecheck still reports only the pre-existing `merge.spec.ts` errors.
+
+## Final typed-error follow-up
+
+- Fresh HTTPS challenges with no auth metadata now use the same safe `MissingCredential` kind.
+  Keychain lookup and SSH-agent failures have distinct safe terminal kinds; no callback detail is
+  emitted. Pull now retains its typed fetch/provider error until the terminal event, while its
+  synchronous reply remains `pull failed`.
+- `cargo test --workspace`, clippy, and fmt passed (41 tauri-app tests). Manual/E2E environment
+  blockers remain unchanged.

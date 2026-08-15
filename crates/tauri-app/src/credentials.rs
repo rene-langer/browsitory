@@ -1,11 +1,13 @@
 use std::fmt;
 
-use git_core::remote::{CredentialProvider, RemoteAuthMode, MISSING_CREDENTIAL_ERROR};
+use git_core::remote::{
+    CredentialProvider, RemoteAuthMode, CREDENTIAL_STORE_FAILURE_ERROR, MISSING_CREDENTIAL_ERROR,
+    SSH_AGENT_FAILURE_ERROR,
+};
 use url::Url;
 
 const SERVICE_NAME: &str = "com.browsitory.git";
 const CREDENTIAL_LOOKUP_FAILURE_ERROR: &str = "credential lookup failed";
-const CREDENTIAL_PROFILE_MISSING_ERROR: &str = "credential profile missing";
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub service: String,
@@ -203,13 +205,22 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
                 let credential = match self.service.lookup_https(url, Some(username)) {
                     Ok(Some(credential)) => credential,
                     Ok(None) => return Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
+                    Err(CredentialStoreError::Keychain) => {
+                        return Err(git2::Error::from_str(CREDENTIAL_STORE_FAILURE_ERROR))
+                    }
                     Err(_) => return Err(git2::Error::from_str(CREDENTIAL_LOOKUP_FAILURE_ERROR)),
                 };
                 git2::Cred::userpass_plaintext(&credential.username, &credential.token)
             }
-            Some(RemoteAuthMode::SshAgent) => self.ssh_agent.credential(username.unwrap_or("git")),
-            None if _allowed.is_ssh_key() => self.ssh_agent.credential(username.unwrap_or("git")),
-            None => Err(git2::Error::from_str(CREDENTIAL_PROFILE_MISSING_ERROR)),
+            Some(RemoteAuthMode::SshAgent) => self
+                .ssh_agent
+                .credential(username.unwrap_or("git"))
+                .map_err(|_| git2::Error::from_str(SSH_AGENT_FAILURE_ERROR)),
+            None if _allowed.is_ssh_key() => self
+                .ssh_agent
+                .credential(username.unwrap_or("git"))
+                .map_err(|_| git2::Error::from_str(SSH_AGENT_FAILURE_ERROR)),
+            None => Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
         }
     }
 }
@@ -223,7 +234,8 @@ mod tests {
 
     use super::{
         CredentialKey, CredentialService, CredentialStore, CredentialStoreError,
-        RemoteCredentialProvider, CREDENTIAL_LOOKUP_FAILURE_ERROR, MISSING_CREDENTIAL_ERROR,
+        RemoteCredentialProvider, CREDENTIAL_LOOKUP_FAILURE_ERROR, CREDENTIAL_STORE_FAILURE_ERROR,
+        MISSING_CREDENTIAL_ERROR, SSH_AGENT_FAILURE_ERROR,
     };
 
     #[derive(Default)]
@@ -404,7 +416,7 @@ mod tests {
             Ok(_) => panic!("keychain failure must reject authentication"),
             Err(error) => error,
         };
-        assert_eq!(store_error.message(), CREDENTIAL_LOOKUP_FAILURE_ERROR);
+        assert_eq!(store_error.message(), CREDENTIAL_STORE_FAILURE_ERROR);
 
         let invalid_url_error = match invalid_url_provider.credential(
             "http://git.example.test/owner/repo.git",
@@ -415,6 +427,22 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(invalid_url_error.message(), CREDENTIAL_LOOKUP_FAILURE_ERROR);
+    }
+
+    #[test]
+    fn provider_without_auth_metadata_marks_an_https_challenge_as_missing_credential() {
+        let service = CredentialService::new(MemoryCredentialStore::default());
+        let mut provider = RemoteCredentialProvider::new(&service, None);
+
+        let error = match provider.credential(
+            "https://git.example.test/owner/repo.git",
+            Some("rene"),
+            git2::CredentialType::USER_PASS_PLAINTEXT,
+        ) {
+            Ok(_) => panic!("fresh HTTPS remotes need credentials"),
+            Err(error) => error,
+        };
+        assert_eq!(error.message(), MISSING_CREDENTIAL_ERROR);
     }
 
     #[test]
@@ -435,7 +463,7 @@ mod tests {
                 Ok(_) => panic!("test agent always rejects after recording the username"),
                 Err(error) => error,
             };
-            assert_eq!(error.message(), "test SSH agent was invoked");
+            assert_eq!(error.message(), SSH_AGENT_FAILURE_ERROR);
         }
 
         assert_eq!(agent.usernames.into_inner(), ["alice", "git"]);

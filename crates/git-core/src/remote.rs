@@ -39,12 +39,16 @@ pub enum TransferErrorKind {
     NonFastForward,
     RejectedRemoteRef,
     MissingCredential,
+    CredentialStoreFailure,
+    SshAgentFailure,
     TransferFailed,
 }
 
 /// Stable callback marker used internally to classify a missing keychain token without sending
 /// the callback or transport diagnostic across the UI boundary.
 pub const MISSING_CREDENTIAL_ERROR: &str = "missing credential for remote";
+pub const CREDENTIAL_STORE_FAILURE_ERROR: &str = "credential keychain failure";
+pub const SSH_AGENT_FAILURE_ERROR: &str = "SSH agent failure";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferProgress {
@@ -123,6 +127,8 @@ pub enum RemoteError {
     DirtyWorktree,
     #[error("cannot pull while HEAD is detached")]
     DetachedHead,
+    #[error("current branch has no upstream")]
+    NoUpstream,
     #[error("push was rejected because it was not a fast-forward")]
     NonFastForward,
     #[error("the remote rejected a pushed reference")]
@@ -139,6 +145,12 @@ impl RemoteError {
             }
             Self::Git(error) if error.message() == MISSING_CREDENTIAL_ERROR => {
                 TransferErrorKind::MissingCredential
+            }
+            Self::Git(error) if error.message() == CREDENTIAL_STORE_FAILURE_ERROR => {
+                TransferErrorKind::CredentialStoreFailure
+            }
+            Self::Git(error) if error.message() == SSH_AGENT_FAILURE_ERROR => {
+                TransferErrorKind::SshAgentFailure
             }
             _ => TransferErrorKind::TransferFailed,
         }
@@ -609,6 +621,8 @@ fn push_refs(
         Some(TransferErrorKind::NonFastForward) => Err(RemoteError::NonFastForward),
         Some(TransferErrorKind::RejectedRemoteRef) => Err(RemoteError::RejectedRemoteRef),
         Some(TransferErrorKind::MissingCredential) => unreachable!(),
+        Some(TransferErrorKind::CredentialStoreFailure) => unreachable!(),
+        Some(TransferErrorKind::SshAgentFailure) => unreachable!(),
         Some(TransferErrorKind::TransferFailed) => unreachable!(),
         None => Ok(()),
     }

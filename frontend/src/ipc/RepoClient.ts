@@ -43,7 +43,7 @@ export interface UpstreamInfo {
 }
 
 export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "TransferFailed";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed";
 
 export interface TransferProgress {
   operationId: string;
