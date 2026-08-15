@@ -6,15 +6,28 @@ import { expect } from "@wdio/globals";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
+const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-source");
 
 describe("Browsitory remote transfer", () => {
   before(() => {
+    execFileSync("git", ["add", "README.md"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", "e2e: seed transfer base"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
+    fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
     execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
+    execFileSync("git", ["push", BARE_REMOTE_PATH, "HEAD:main"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["clone", "--branch", "main", BARE_REMOTE_PATH, REMOTE_SOURCE_PATH], { stdio: "inherit" });
+    execFileSync("git", ["config", "user.name", "Test User"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    fs.writeFileSync(path.join(REMOTE_SOURCE_PATH, "remote-change.txt"), "remote change\n");
+    execFileSync("git", ["add", "remote-change.txt"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", "e2e: remote change"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    execFileSync("git", ["push", "origin", "main"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
   });
 
   after(() => {
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
+    fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
   });
 
   it("fetches a configured remote", async () => {
@@ -35,5 +48,26 @@ describe("Browsitory remote transfer", () => {
       timeoutMsg: "expected fetch transfer to complete",
     });
     await expect(fetchButton).toBeEnabled();
+  });
+
+  it("fast-forwards a clean tracked upstream", async () => {
+    const upstreamRemote = await $("form[aria-label='Set upstream'] select");
+    await upstreamRemote.selectByAttribute("value", "transfer-origin");
+    const upstreamBranch = await $("form[aria-label='Set upstream'] input");
+    await upstreamBranch.setValue("main");
+    await (await $("button=Set upstream")).click();
+
+    const pullButton = await $("button=Pull");
+    await pullButton.waitForEnabled({ timeout: 10000 });
+    await pullButton.click();
+
+    const remoteHead = execFileSync("git", ["rev-parse", "refs/heads/main"], {
+      cwd: REMOTE_SOURCE_PATH,
+      encoding: "utf8",
+    }).trim();
+    await browser.waitUntil(
+      () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() === remoteHead,
+      { timeout: 10000, timeoutMsg: "expected Pull to fast-forward the local branch" },
+    );
   });
 });

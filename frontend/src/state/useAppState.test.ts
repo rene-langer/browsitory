@@ -178,6 +178,20 @@ describe("useAppState", () => {
     expect(rebaseCalls).toBe(0);
   });
 
+  it("dismisses a divergent pull without changing the chosen reconciliation flow", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "Diverged", upstreamRef: "refs/remotes/origin/main" }),
+    });
+
+    const { result } = renderHook(() => useAppState(client));
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.pullCurrentUpstream());
+    act(() => result.current.clearPendingPull());
+
+    expect(result.current.state.pendingPull).toBeNull();
+    expect(result.current.state.rebaseOnto).toBeNull();
+  });
+
   it("reports a dirty pull without leaving reconciliation pending", async () => {
     const client = transferClient({
       pullCurrentUpstream: async () => {

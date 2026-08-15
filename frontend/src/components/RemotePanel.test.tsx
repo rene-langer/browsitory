@@ -37,6 +37,12 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
       onClearUpstream={vi.fn()}
       onFetchRemote={vi.fn()}
       fetchDisabled={false}
+      onPull={vi.fn()}
+      pullDisabled={false}
+      pendingPull={null}
+      onMergePull={vi.fn()}
+      onRebasePull={vi.fn()}
+      onCancelPull={vi.fn()}
       {...overrides}
     />,
   );
@@ -53,6 +59,27 @@ describe("RemotePanel", () => {
     screen.getAllByRole("button", { name: "Fetch origin" })[1].click();
 
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
+  });
+
+  it("offers merge or rebase only after a divergent pull", () => {
+    const onMergePull = vi.fn();
+    const onRebasePull = vi.fn();
+    const onCancelPull = vi.fn();
+    renderPanel({
+      pendingPull: { upstreamRef: "refs/remotes/origin/main" },
+      onMergePull,
+      onRebasePull,
+      onCancelPull,
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Pull has diverged" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Merge" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rebase" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(onMergePull).toHaveBeenCalledWith("refs/remotes/origin/main");
+    expect(onRebasePull).toHaveBeenCalledWith("refs/remotes/origin/main");
+    expect(onCancelPull).toHaveBeenCalledOnce();
   });
 
   it("requires upstream discovery in both the client and panel contracts", () => {

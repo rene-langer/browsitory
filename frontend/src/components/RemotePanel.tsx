@@ -13,6 +13,12 @@ export function RemotePanel({
   onClearUpstream,
   onFetchRemote,
   fetchDisabled,
+  onPull,
+  pullDisabled,
+  pendingPull,
+  onMergePull,
+  onRebasePull,
+  onCancelPull,
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
@@ -25,6 +31,12 @@ export function RemotePanel({
   onClearUpstream: () => Promise<void>;
   onFetchRemote: (remoteName: string) => Promise<void>;
   fetchDisabled: boolean;
+  onPull: () => Promise<void>;
+  pullDisabled: boolean;
+  pendingPull: { upstreamRef: string } | null;
+  onMergePull: (upstreamRef: string) => Promise<void>;
+  onRebasePull: (upstreamRef: string) => void;
+  onCancelPull: () => void;
 }) {
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
@@ -150,6 +162,9 @@ export function RemotePanel({
       <section aria-labelledby="upstream-heading">
         <h3 id="upstream-heading">Upstream</h3>
         {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
+        <button type="button" disabled={pullDisabled || upstream === null} onClick={() => void onPull()}>
+          Pull
+        </button>
         <form onSubmit={submitUpstream} aria-label="Set upstream">
           <label>
             Upstream remote
@@ -163,6 +178,14 @@ export function RemotePanel({
         </form>
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
       </section>
+      {pendingPull !== null && (
+        <div role="dialog" aria-label="Pull has diverged">
+          <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
+          <button type="button" onClick={() => void onMergePull(pendingPull.upstreamRef)}>Merge</button>
+          <button type="button" onClick={() => onRebasePull(pendingPull.upstreamRef)}>Rebase</button>
+          <button type="button" onClick={onCancelPull}>Cancel</button>
+        </div>
+      )}
     </section>
   );
 }
