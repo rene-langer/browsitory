@@ -9,7 +9,7 @@ use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
-use git_core::remote::{RemoteInfo, UpstreamInfo};
+use git_core::remote::{PullOutcome, RemoteInfo, UpstreamInfo};
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 
@@ -222,6 +222,11 @@ pub(crate) enum Command {
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
+    },
+    PullCurrentUpstream {
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<PullOutcome, String>>,
     },
 }
 
@@ -549,6 +554,46 @@ impl Worker {
                             error: result.err().map(|_| "fetch failed".to_string()),
                         });
                     }
+                    Command::PullCurrentUpstream {
+                        operation_id,
+                        events,
+                        reply,
+                    } => {
+                        let _ = events.send(TransferEvent::Started {
+                            operation_id: operation_id.clone(),
+                        });
+                        let result = (|| {
+                            let upstream = git_core::remote::current_upstream(&repo)
+                                .map_err(|e| e.to_string())?
+                                .ok_or_else(|| "current branch has no upstream".to_string())?;
+                            let mut credentials = NoCredentials;
+                            let mut reporter = ChannelReporter(events.clone());
+                            git_core::remote::fetch_remote(
+                                &repo,
+                                &upstream.remote_name,
+                                operation_id.clone(),
+                                &mut credentials,
+                                &mut reporter,
+                            )
+                            .map_err(|e| e.to_string())?;
+                            let upstream = git_core::remote::current_upstream(&repo)
+                                .map_err(|e| e.to_string())?
+                                .ok_or_else(|| "current branch has no upstream".to_string())?;
+                            git_core::remote::pull_after_fetch(
+                                &repo,
+                                &upstream.remote_name,
+                                &upstream.remote_branch,
+                            )
+                            .map_err(|e| e.to_string())
+                        })();
+                        let completed_error =
+                            result.as_ref().err().map(|_| "pull failed".to_string());
+                        let _ = reply.send(result);
+                        let _ = events.send(TransferEvent::Completed {
+                            operation_id,
+                            error: completed_error,
+                        });
+                    }
                 }
             }
         });
@@ -575,6 +620,24 @@ impl WorkerHandle {
         self.tx
             .send(Command::FetchRemote {
                 remote_name,
+                operation_id,
+                events,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub(crate) fn pull_current_upstream(
+        &self,
+        events: Sender<TransferEvent>,
+    ) -> Result<PullOutcome, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let operation_id = format!("pull-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        self.tx
+            .send(Command::PullCurrentUpstream {
                 operation_id,
                 events,
                 reply: reply_tx,

@@ -79,6 +79,11 @@ export type MergeOutcome =
   | { kind: "Merged" }
   | { kind: "Conflicted"; files: string[] };
 
+export type PullOutcome =
+  | { kind: "UpToDate" }
+  | { kind: "FastForwarded"; upstreamRef: string }
+  | { kind: "Diverged"; upstreamRef: string };
+
 export type ConflictSegment =
   | { kind: "Clean"; content: string }
   | { kind: "Conflict"; ours: string; theirs: string };
@@ -140,6 +145,7 @@ export interface RepoClient {
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<string>;
+  pullCurrentUpstream(): Promise<PullOutcome>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(): Promise<StashEntry[]>;
   saveStash(): Promise<void>;

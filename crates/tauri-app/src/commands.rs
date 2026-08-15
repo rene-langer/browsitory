@@ -121,6 +121,28 @@ pub struct UpstreamInfoDto {
     pub remote_branch: String,
 }
 
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+pub enum PullOutcomeDto {
+    UpToDate,
+    FastForwarded { upstream_ref: String },
+    Diverged { upstream_ref: String },
+}
+
+impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
+    fn from(outcome: git_core::remote::PullOutcome) -> Self {
+        match outcome {
+            git_core::remote::PullOutcome::UpToDate => PullOutcomeDto::UpToDate,
+            git_core::remote::PullOutcome::FastForwarded { upstream_ref } => {
+                PullOutcomeDto::FastForwarded { upstream_ref }
+            }
+            git_core::remote::PullOutcome::Diverged { upstream_ref } => {
+                PullOutcomeDto::Diverged { upstream_ref }
+            }
+        }
+    }
+}
+
 impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
     fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
         Self {
@@ -651,6 +673,22 @@ pub async fn fetch_remote(
 }
 
 #[tauri::command]
+pub async fn pull_current_upstream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PullOutcomeDto, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    emit_transfer_events(app, event_rx);
+    let handle = worker_handle(&state)?;
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || handle.pull_current_upstream(event_tx))
+            .await
+            .map_err(|_| "pull worker task stopped".to_string())??
+            .into(),
+    )
+}
+
+#[tauri::command]
 pub async fn list_stashes(state: State<'_, AppState>) -> Result<Vec<StashEntryDto>, String> {
     let stashes = worker_handle(&state)?.list_stashes()?;
     Ok(stashes.into_iter().map(StashEntryDto::from).collect())
@@ -769,7 +807,32 @@ mod tests {
 
     use crate::worker::TransferEvent;
 
-    use super::transfer_event_payload;
+    use super::{transfer_event_payload, PullOutcomeDto};
+
+    #[test]
+    fn pull_outcome_wire_values_match_the_typescript_union() {
+        let fast_forwarded = serde_json::to_value(PullOutcomeDto::FastForwarded {
+            upstream_ref: "refs/remotes/origin/main".into(),
+        })
+        .expect("serialize pull outcome");
+        let diverged = serde_json::to_value(PullOutcomeDto::Diverged {
+            upstream_ref: "refs/remotes/origin/main".into(),
+        })
+        .expect("serialize pull outcome");
+
+        assert_eq!(
+            serde_json::json!({ "kind": "UpToDate" }),
+            serde_json::to_value(PullOutcomeDto::UpToDate).unwrap()
+        );
+        assert_eq!(
+            serde_json::json!({ "kind": "FastForwarded", "upstreamRef": "refs/remotes/origin/main" }),
+            fast_forwarded
+        );
+        assert_eq!(
+            serde_json::json!({ "kind": "Diverged", "upstreamRef": "refs/remotes/origin/main" }),
+            diverged
+        );
+    }
 
     #[test]
     fn transfer_event_bridge_redacts_sideband_and_failure_messages() {

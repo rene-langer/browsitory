@@ -8,6 +8,7 @@ import type {
   FileConflictChoice,
   GraphCommit,
   MergeOutcome,
+  PullOutcome,
   RebasePlanCommit,
   RebasePlanEntry,
   RebaseStepResult,
@@ -65,6 +66,10 @@ export const tauriRepoClient: RepoClient = {
   fetchRemote: async (remoteName: string) => {
     await transferListenersReady;
     return invoke<string>("fetch_remote", { remoteName });
+  },
+  pullCurrentUpstream: async () => {
+    await transferListenersReady;
+    return invoke<PullOutcome>("pull_current_upstream");
   },
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     let disposed = false;
