@@ -306,7 +306,8 @@ pub struct WorkerHandle {
 
 impl Worker {
     pub fn spawn(path: PathBuf) -> Result<Self, String> {
-        let repo = git_core::repo::open(&path).map_err(|e| e.to_string())?;
+        let repo_path = path;
+        let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::channel::<Command>();
 
         thread::spawn(move || {
@@ -416,7 +417,7 @@ impl Worker {
                         start_point,
                         reply,
                     } => {
-                        let result = git_core::worktree::create_worktree(
+                        let mut result = git_core::worktree::create_worktree(
                             &repo,
                             &name,
                             &path,
@@ -424,10 +425,15 @@ impl Worker {
                             start_point.as_deref(),
                         )
                         .map_err(|e| e.to_string());
+                        if result.is_ok() {
+                            result = git_core::repo::open(&repo_path)
+                                .map(|reopened| repo = reopened)
+                                .map_err(|e| e.to_string());
+                        }
                         let _ = reply.send(result);
                     }
                     Command::RemoveWorktree { name, reply } => {
-                        let result = git_core::worktree::list_worktrees(&repo)
+                        let mut result = git_core::worktree::list_worktrees(&repo)
                             .and_then(|worktrees| {
                                 worktrees
                                     .into_iter()
@@ -438,11 +444,21 @@ impl Worker {
                                 git_core::worktree::remove_worktree(&repo, &worktree.path)
                             })
                             .map_err(|e| e.to_string());
+                        if result.is_ok() {
+                            result = git_core::repo::open(&repo_path)
+                                .map(|reopened| repo = reopened)
+                                .map_err(|e| e.to_string());
+                        }
                         let _ = reply.send(result);
                     }
                     Command::PruneWorktrees { reply } => {
-                        let result =
+                        let mut result =
                             git_core::worktree::prune_worktrees(&repo).map_err(|e| e.to_string());
+                        if result.is_ok() {
+                            result = git_core::repo::open(&repo_path)
+                                .map(|reopened| repo = reopened)
+                                .map_err(|e| e.to_string());
+                        }
                         let _ = reply.send(result);
                     }
                     Command::ListRemotes { reply } => {
@@ -1773,19 +1789,18 @@ mod tests {
     fn create_then_remove_worktree_round_trips_through_the_worker() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "file.txt", "v1");
-        commit_all(&repo, "initial commit");
-        let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.branch("feature", &head, false).unwrap();
         let linked = dir.path().join("feature-tree");
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
+        assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+        commit_all(&repo, "initial commit");
         handle
             .create_worktree(
                 "feature-tree".into(),
                 linked.clone(),
                 "feature".into(),
-                None,
+                Some("HEAD".into()),
             )
             .unwrap();
 
