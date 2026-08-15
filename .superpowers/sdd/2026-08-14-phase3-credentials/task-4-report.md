@@ -118,3 +118,23 @@
   from four component-test fakes. Added explicit unused implementations, preserving the required
   interface rather than weakening it. `corepack pnpm build`, `corepack pnpm lint`, and the four
   focused component suites passed (56 tests).
+
+## Live E2E timing investigation follow-up
+
+- The configured local fetch assertion was testing a transient implementation detail: a local
+  bare-repository fetch can complete between React renders, so `Transfer progress` may never be
+  observable even when the operation succeeded. The E2E now waits for
+  `refs/remotes/transfer-origin/main` to equal the known source `main` commit, then verifies the
+  Fetch button is enabled. This proves the durable fetch outcome without imposing artificial
+  delay on production transfer UX.
+- The HTTPS credential fixture now counts received requests and the test requires at least one
+  loopback HTTPS request before evaluating the terminal alert. The next live run therefore has a
+  decisive boundary result: failure at that wait means TLS/fixture setup prevented the provider
+  path; a received request followed by `Fetch failed` proves a live worker/event propagation
+  defect. The counter and assertion contain neither credentials nor provider diagnostics.
+- Verification: E2E `tsc --noEmit` reaches only the pre-existing four `merge.spec.ts` errors;
+  the changed spec contributes none. Rebuilt the embedded app in required order with
+  `VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo corepack pnpm build`, then
+  `cargo fmt --all -- --check` and
+  `cargo build --workspace --features tauri-app/custom-protocol`; all three passed. A live
+  WebDriver rerun remains required outside this sandbox/display/port-constrained environment.
