@@ -19,8 +19,7 @@ reviewing a merge or an interactive rebase is far easier with branch topology al
   that are a branch's current tip.
 - Show commits reachable from **every local branch**, not just the current one — this is the
   point of "multi-branch."
-- Full swimlane visual quality (like dedicated Git-client), not a simplified flat-list-with-badges
-  fallback — matches this project's stated dedicated Git client inspiration (see `CLAUDE.local.md`).
+- Full swimlane visual quality, not a simplified flat-list-with-badges fallback.
 - Everything `HistoryList` already does today carries over unchanged: the synthetic "Uncommitted
   Changes" row, stash rows (with their inline Apply/Drop buttons), keyboard navigation, and the
   right-click "Branch from here" context menu on commit rows. Only the *commit* rows themselves
