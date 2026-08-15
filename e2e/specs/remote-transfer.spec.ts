@@ -11,7 +11,12 @@ const REMOTE_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-sourc
 const TRANSFER_SEED_FILE = "remote-transfer-seed.txt";
 const BRANCH_PUSH_FILE = "branch-push.txt";
 
-async function startCredentialChallengeServer(): Promise<{ url: string; certificatePath: string; close: () => Promise<void> }> {
+async function startCredentialChallengeServer(): Promise<{
+  url: string;
+  certificatePath: string;
+  requests: () => number;
+  close: () => Promise<void>;
+}> {
   const certificateDir = fs.mkdtempSync(path.join(os.tmpdir(), "browsitory-e2e-credential-cert-"));
   const keyPath = path.join(certificateDir, "key.pem");
   const certificatePath = path.join(certificateDir, "cert.pem");
@@ -19,7 +24,9 @@ async function startCredentialChallengeServer(): Promise<{ url: string; certific
     "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath, "-out", certificatePath,
     "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
   ], { stdio: "ignore" });
+  let requests = 0;
   const server = createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certificatePath) }, (_request, response) => {
+    requests += 1;
     response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Browsitory E2E"' });
     response.end();
   });
@@ -33,6 +40,7 @@ async function startCredentialChallengeServer(): Promise<{ url: string; certific
   return {
     url: `https://localhost:${address.port}/credential.git`,
     certificatePath,
+    requests: () => requests,
     close: () => new Promise((resolve, reject) => server.close((error) => {
       fs.rmSync(certificateDir, { recursive: true, force: true });
       error === undefined ? resolve() : reject(error);
@@ -76,11 +84,22 @@ describe("Browsitory remote transfer", () => {
     await fetchButton.waitForExist({ timeout: 10000 });
     await fetchButton.click();
 
-    const transferPanel = await $("section[aria-label='Transfer progress']");
-    await transferPanel.waitForExist({ timeout: 10000 });
-    await browser.waitUntil(async () => !(await transferPanel.isExisting()), {
+    const remoteHead = execFileSync("git", ["rev-parse", "refs/heads/main"], {
+      cwd: REMOTE_SOURCE_PATH,
+      encoding: "utf8",
+    }).trim();
+    await browser.waitUntil(() => {
+      try {
+        return execFileSync("git", ["rev-parse", "refs/remotes/transfer-origin/main"], {
+          cwd: E2E_REPO_PATH,
+          encoding: "utf8",
+        }).trim() === remoteHead;
+      } catch {
+        return false;
+      }
+    }, {
       timeout: 10000,
-      timeoutMsg: "expected fetch transfer to complete",
+      timeoutMsg: "expected Fetch to update the transfer-origin tracking ref",
     });
     await expect(fetchButton).toBeEnabled();
   });
@@ -132,6 +151,10 @@ describe("Browsitory remote transfer", () => {
       execFileSync("git", ["config", "--local", "http.sslCAInfo", challenge.certificatePath], { cwd: E2E_REPO_PATH });
 
       await (await $("button=Fetch credential-origin")).click();
+      await browser.waitUntil(() => challenge.requests() > 0, {
+        timeout: 10000,
+        timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
+      });
       const alert = await $("p[role='alert']");
       await alert.waitForExist({ timeout: 10000 });
       await expect(alert).toHaveText("Save an HTTPS token for this remote before retrying.");
