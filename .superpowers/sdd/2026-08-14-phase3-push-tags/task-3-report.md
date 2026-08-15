@@ -26,3 +26,16 @@ Baseline: `01caa28`
 - `git diff --check` — passed.
 - Focused `remote-transfer.spec.ts` E2E could not run: a pre-existing Tauri/WebDriver process held port 4444, so the runner's spawned `tauri-driver` exited before the spec body began. The full E2E attempt had the same port conflict. This is environment infrastructure, not a test assertion failure.
 - `corepack pnpm typecheck` in `e2e/` remains blocked by pre-existing WebdriverIO typing errors in `e2e/specs/merge.spec.ts` (unrelated to this task).
+
+## Round 1 fixes
+
+- Reconciled TagPanel's selected remote against refreshed remotes so a newly added remote becomes pushable and a removed remote falls back safely.
+- Pruned selected tag names when the refreshed tag list no longer includes them, preventing a stale tag name from being pushed.
+- Strengthened the branch-push E2E flow: it now creates a local commit and asserts that the matching bare-remote branch ref advances to that commit, rather than merely waiting for a no-op push to finish.
+
+### Round 1 verification
+
+- `corepack pnpm test -- --run` — 17 files, 180 tests passed.
+- `corepack pnpm lint` — passed.
+- `VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo corepack pnpm build` — passed.
+- `git diff --check` — passed.

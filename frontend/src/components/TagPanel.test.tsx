@@ -18,6 +18,12 @@ const origin: RemoteInfo = {
   pushUrl: null,
 };
 
+const backup: RemoteInfo = {
+  name: "backup",
+  fetchUrl: "../backup.git",
+  pushUrl: null,
+};
+
 function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {
   return render(
     <TagPanel
@@ -70,6 +76,44 @@ describe("TagPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Push all tags" }));
 
     expect(onPush).toHaveBeenCalledWith("origin", []);
+  });
+
+  it("selects a newly available remote after the remotes refresh", () => {
+    const onPush = vi.fn();
+    const { rerender } = renderPanel({ remotes: [], onPush });
+
+    rerender(
+      <TagPanel
+        tags={[tag]}
+        remotes={[origin, backup]}
+        onCreate={vi.fn()}
+        onDelete={vi.fn()}
+        onPush={onPush}
+        pushDisabled={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Push all tags" }));
+
+    expect(onPush).toHaveBeenCalledWith("origin", []);
+  });
+
+  it("prunes selections for tags removed by a refresh", () => {
+    const onPush = vi.fn();
+    const { rerender } = renderPanel({ onPush });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    rerender(
+      <TagPanel
+        tags={[]}
+        remotes={[origin]}
+        onCreate={vi.fn()}
+        onDelete={vi.fn()}
+        onPush={onPush}
+        pushDisabled={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Push selected tags" })).toBeDisabled();
   });
 
   it("disables tag push controls while a repository operation is active", () => {
