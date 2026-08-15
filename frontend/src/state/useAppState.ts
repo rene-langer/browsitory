@@ -62,6 +62,7 @@ export interface UseAppStateResult {
   clearCurrentUpstream(): Promise<void>;
   fetchRemote(remoteName: string): Promise<void>;
   pullCurrentUpstream(): Promise<void>;
+  clearPendingPull(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -334,6 +335,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       }));
     }
   }, [client, refresh]);
+  const clearPendingPull = useCallback(() => {
+    setState((prev) => ({ ...prev, pendingPull: null }));
+  }, []);
 
   const openCreateBranchDraft = useCallback((startPoint: string) => {
     setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
@@ -440,6 +444,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     clearCurrentUpstream,
     fetchRemote,
     pullCurrentUpstream,
+    clearPendingPull,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

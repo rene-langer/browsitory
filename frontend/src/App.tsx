@@ -71,6 +71,23 @@ export default function App() {
           appState.state.rebaseProgress !== null ||
           appState.state.transfer !== null
         }
+        onPull={appState.pullCurrentUpstream}
+        pullDisabled={
+          appState.state.pending ||
+          appState.state.mergeMessage !== null ||
+          appState.state.rebaseProgress !== null ||
+          appState.state.transfer !== null
+        }
+        pendingPull={appState.state.pendingPull}
+        onMergePull={async (upstreamRef) => {
+          appState.clearPendingPull();
+          await appState.mergeBranch(upstreamRef);
+        }}
+        onRebasePull={(upstreamRef) => {
+          appState.clearPendingPull();
+          appState.openRebasePlanner(upstreamRef);
+        }}
+        onCancelPull={appState.clearPendingPull}
       />
       <TransferPanel progress={appState.state.transfer} />
       <div className="app-layout">
