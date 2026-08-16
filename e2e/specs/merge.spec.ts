@@ -54,9 +54,10 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const conflictedRow = await $("button*=shared.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
-    await conflictedRow.click();
+    await conflictedRow.scrollIntoView({ block: "center" });
 
     const acceptTheirs = await $("button=Accept Theirs");
+    await conflictedRow.click();
     await acceptTheirs.waitForExist({ timeout: 10000 });
     await acceptTheirs.click();
     const saveResolution = await $("button=Save resolution");
