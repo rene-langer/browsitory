@@ -293,6 +293,62 @@ describe("useAppState", () => {
     expect(result.current.state.reflog).toEqual([entry]);
   });
 
+  it("keeps the newer reflog selection when an older request rejects late", async () => {
+    const headEntry: ReflogEntry = {
+      reference: "HEAD",
+      oldId: "1111111",
+      newId: "2222222",
+      committerName: "Test User",
+      committerEmail: "test@example.com",
+      timestamp: 1_725_000_000,
+      message: "commit: head",
+      summary: "head",
+    };
+    const featureEntry: ReflogEntry = {
+      reference: "refs/heads/feature",
+      oldId: "3333333",
+      newId: "4444444",
+      committerName: "Test User",
+      committerEmail: "test@example.com",
+      timestamp: 1_725_000_001,
+      message: "commit: feature",
+      summary: "feature",
+    };
+    let resolveFeature!: (entries: ReflogEntry[]) => void;
+    let rejectHead!: (error: Error) => void;
+    const client = transferClient({
+      getReflog: (reference) => new Promise<ReflogEntry[]>((resolve, reject) => {
+        if (reference === "HEAD") {
+          rejectHead = reject;
+        } else {
+          resolveFeature = resolve;
+        }
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client));
+
+    let selectHead!: Promise<void>;
+    let selectFeature!: Promise<void>;
+    act(() => {
+      selectHead = result.current.selectReflogReference("HEAD");
+      selectFeature = result.current.selectReflogReference("refs/heads/feature");
+    });
+
+    await act(async () => {
+      resolveFeature([featureEntry]);
+      await selectFeature;
+    });
+    await act(async () => {
+      rejectHead(new Error("stale HEAD request"));
+      await selectHead;
+    });
+
+    expect(result.current.state.selectedReflogReference).toBe("refs/heads/feature");
+    expect(result.current.state.reflog).toEqual([featureEntry]);
+    expect(result.current.state.error).toBeNull();
+    expect(headEntry).not.toEqual(featureEntry);
+  });
+
   it("tracks a current-branch push using its transfer operation ID", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     const client = transferClient({
