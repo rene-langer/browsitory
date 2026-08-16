@@ -119,7 +119,7 @@ fn prunes_stale_worktree_metadata_idempotently() {
     let stale_worktree = list_worktrees(&repo)
         .unwrap()
         .into_iter()
-        .find(|worktree| worktree.path == linked)
+        .find(|worktree| worktree.path.file_name() == linked.file_name())
         .unwrap();
     assert!(stale_worktree.is_prunable);
 

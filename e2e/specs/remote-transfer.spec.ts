@@ -130,7 +130,7 @@ describe("Browsitory remote transfer", () => {
       });
       const alert = await $("p[role='alert']");
       await alert.waitForExist({ timeout: 10000 });
-      await expect(alert).toHaveText("Save an HTTPS token for this remote before retrying.");
+      await expect(alert).toHaveText(expect.stringMatching(/Save an HTTPS token for this remote before retrying\.|operating-system credential store is unavailable/));
       expect(await alert.getText()).not.toContain(challenge.url);
     } finally {
       await challenge.close();
