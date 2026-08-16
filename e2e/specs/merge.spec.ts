@@ -61,7 +61,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await acceptTheirs.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
     const saveResolution = await $("button=Save resolution");
-    await saveResolution.click();
+    await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
     await commitMessageInput.waitForExist({ timeout: 10000 });
@@ -69,7 +69,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const commitButton = await $("button=Commit");
     await commitButton.waitForEnabled({ timeout: 10000 });
-    await commitButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const mergeCommitEntry = await $("li*=e2e-merge-feature");
     await mergeCommitEntry.waitForExist({ timeout: 10000 });
@@ -144,7 +144,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const commitButton = await $("button=Commit");
     await commitButton.waitForEnabled({ timeout: 10000 });
-    await commitButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const mergeCommitEntry = await $("li*=e2e-merge-adddelete-feature");
     await mergeCommitEntry.waitForExist({ timeout: 10000 });

@@ -202,7 +202,7 @@ describe("Browsitory remote transfer", () => {
     );
     const pushTags = await $("button=Push all tags");
     await pushTags.waitForEnabled({ timeout: 10000 });
-    await pushTags.click();
+    await browser.execute((el) => (el as HTMLElement).click(), pushTags);
 
     await browser.waitUntil(
       () => {
