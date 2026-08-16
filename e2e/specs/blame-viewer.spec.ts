@@ -34,6 +34,7 @@ describe("Browsitory blame", () => {
     // Stage+commit the throwaway prime file through the real UI — the only way to make
     // useAppState refetch, which is what makes the two git-CLI commits above show up below.
     const stageButton = await $("button=Stage");
+    await stageButton.scrollIntoView({ block: "center" });
     await stageButton.click();
     await commitMessageInput.setValue("e2e: prime the refresh");
     const commitButton = await $("button=Commit");

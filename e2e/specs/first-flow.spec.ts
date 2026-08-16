@@ -29,8 +29,9 @@ describe("Browsitory first flow", () => {
 
     // Stage the uncommitted file this spec's own `before` hook created.
     const stageButton = await $("button=Stage");
-    await stageButton.click();
+    await stageButton.scrollIntoView({ block: "center" });
 
+    await stageButton.click();
     await commitMessageInput.setValue("e2e: first commit");
     const commitButton = await $("button=Commit");
     await commitButton.click();
