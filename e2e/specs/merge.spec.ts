@@ -59,7 +59,7 @@ describe("Browsitory merge with conflict resolution", () => {
     const acceptTheirs = await $("button=Accept Theirs");
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
     await acceptTheirs.waitForExist({ timeout: 10000 });
-    await acceptTheirs.click();
+    await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
     const saveResolution = await $("button=Save resolution");
     await saveResolution.click();
 
@@ -140,7 +140,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const keepTheirs = await $("button=Keep Their Version");
     await keepTheirs.waitForExist({ timeout: 10000 });
-    await keepTheirs.click();
+    await browser.execute((el) => (el as HTMLElement).click(), keepTheirs);
 
     const commitButton = await $("button=Commit");
     await commitButton.waitForEnabled({ timeout: 10000 });

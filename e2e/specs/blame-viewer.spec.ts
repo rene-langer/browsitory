@@ -36,7 +36,7 @@ describe("Browsitory blame", () => {
     const stageButton = await $("button=Stage");
     await stageButton.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
-    await commitMessageInput.setValue("e2e: prime the refresh");
+    await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");
     await commitButton.click();
 
