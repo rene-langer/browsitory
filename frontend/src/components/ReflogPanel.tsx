@@ -39,10 +39,10 @@ export function ReflogPanel({
         </select>
       </label>
       <ul className="reflog-list">
-        {entries.map((entry) => (
-          <li key={`${entry.reference}:${entry.oldId}:${entry.newId}:${entry.timestamp}`}>
-            <span>{entry.oldId}</span>
-            <span>{entry.newId}</span>
+        {entries.map((entry, ordinal) => (
+          <li key={`${entry.reference}:${ordinal}`}>
+            <span>Old ID: {entry.oldId}</span>
+            <span>New ID: {entry.newId}</span>
             <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
             <time dateTime={new Date(entry.timestamp * 1000).toISOString()}>
               {new Date(entry.timestamp * 1000).toLocaleString()}
@@ -52,6 +52,7 @@ export function ReflogPanel({
             <button
               type="button"
               disabled={operationDisabled}
+              aria-label={`Restore ${entry.reference} to ${entry.newId}`}
               onClick={() => setRestoreConfirmation(entry)}
             >
               Restore {entry.reference}

@@ -38,20 +38,20 @@ describe("ReflogPanel", () => {
     expect(within(selector).getByRole("option", { name: "HEAD" })).toBeInTheDocument();
     expect(within(selector).getByRole("option", { name: "refs/heads/main" })).toBeInTheDocument();
     expect(within(selector).queryByRole("option", { name: "refs/remotes/origin/main" })).not.toBeInTheDocument();
-    expect(screen.getByText(entry.oldId)).toBeInTheDocument();
-    expect(screen.getByText(entry.newId)).toBeInTheDocument();
+    expect(screen.getByText(`Old ID: ${entry.oldId}`)).toBeInTheDocument();
+    expect(screen.getByText(`New ID: ${entry.newId}`)).toBeInTheDocument();
     expect(screen.getByText("Ada Lovelace <ada@example.com>")).toBeInTheDocument();
     expect(screen.getByText(new Date(entry.timestamp * 1000).toLocaleString())).toBeInTheDocument();
     expect(screen.getByText(entry.message)).toBeInTheDocument();
     expect(screen.getByText(entry.summary!)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Restore refs/heads/main" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeEnabled();
   });
 
   it("requires a named dialog confirmation that identifies the target before restoring", () => {
     const onRestore = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onRestore });
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore refs/heads/main" }));
+    fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` }));
 
     expect(onRestore).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog", { name: "Restore refs/heads/main" });
@@ -59,7 +59,7 @@ describe("ReflogPanel", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onRestore).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Restore refs/heads/main" }));
+    fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Restore refs/heads/main" })).getByRole("button", { name: "Restore reflog entry" }));
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
@@ -67,6 +67,23 @@ describe("ReflogPanel", () => {
   it("disables restore controls while a repository mutation is pending", () => {
     renderPanel({ operationDisabled: true });
 
-    expect(screen.getByRole("button", { name: "Restore refs/heads/main" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeDisabled();
+  });
+
+  it("keeps repeated local-ref transitions distinct with labeled targets and unique restore controls", () => {
+    const olderEntry: ReflogEntry = {
+      ...entry,
+      oldId: "3333333333333333333333333333333333333333",
+      newId: "4444444444444444444444444444444444444444",
+      timestamp: entry.timestamp - 60,
+      message: "commit: older recovery",
+      summary: "older recovery",
+    };
+    renderPanel({ entries: [entry, olderEntry] });
+
+    expect(screen.getByText(`Old ID: ${entry.oldId}`)).toBeInTheDocument();
+    expect(screen.getByText(`Old ID: ${olderEntry.oldId}`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${olderEntry.newId}` })).toBeInTheDocument();
   });
 });
