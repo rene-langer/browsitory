@@ -43,7 +43,7 @@ describe("Browsitory commit graph", () => {
 
     const stageButton = await $("button=Stage");
     await stageButton.scrollIntoView({ block: "center" });
-    await stageButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await commitMessageInput.setValue("e2e: prime the refresh");
     const commitButton = await $("button=Commit");
     await commitButton.click();

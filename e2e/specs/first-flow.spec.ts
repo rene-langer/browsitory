@@ -31,7 +31,7 @@ describe("Browsitory first flow", () => {
     const stageButton = await $("button=Stage");
     await stageButton.scrollIntoView({ block: "center" });
 
-    await stageButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await commitMessageInput.setValue("e2e: first commit");
     const commitButton = await $("button=Commit");
     await commitButton.click();
