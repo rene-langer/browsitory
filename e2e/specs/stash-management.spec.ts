@@ -24,16 +24,22 @@ describe("Browsitory stash", () => {
   // dirty content) behind would corrupt the fixture for any spec sorting after "stash-".
   after(() => {
     const filePath = path.join(E2E_REPO_PATH, STASH_FIXTURE_FILE);
-    execFileSync("git", ["stash", "drop", "0"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    try {
+      execFileSync("git", ["rev-parse", "--verify", "refs/stash"], { cwd: E2E_REPO_PATH, stdio: "ignore" });
+      execFileSync("git", ["stash", "drop", "0"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    } catch {
+      // If the interaction failed before creating a stash, there is nothing to clean up.
+    }
     fs.writeFileSync(filePath, "committed content\n");
   });
 
   it("saves a stash, sees it listed, applies it, and restores the file's dirty content", async () => {
     const uncommittedRow = await $("li*=Uncommitted Changes");
     await uncommittedRow.waitForExist({ timeout: 10000 });
-    await uncommittedRow.click();
-
     const stashButton = await $("button=Stash");
+    await stashButton.waitForEnabled({ timeout: 10000 });
+    await stashButton.scrollIntoView({ block: "center" });
+
     await stashButton.click();
 
     const stashRow = await $("li*=WIP on");

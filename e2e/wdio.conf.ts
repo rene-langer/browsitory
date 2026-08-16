@@ -220,6 +220,9 @@ export const config: WebdriverIO.Config = {
 
   afterSession: () => {
     closeTauriDriver();
+  },
+
+  onComplete: () => {
     fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
   },
 };

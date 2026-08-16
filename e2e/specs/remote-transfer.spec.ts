@@ -71,9 +71,11 @@ describe("Browsitory remote transfer", () => {
   it("fetches a configured remote", async () => {
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
+    const addRemoteButton = await $("button=Add remote");
+    await addRemoteButton.waitForEnabled({ timeout: 10000 });
     await remoteNameInput.setValue("transfer-origin");
     await (await $("[data-testid='add-remote-fetch-url']")).setValue(BARE_REMOTE_PATH);
-    await (await $("button=Add remote")).click();
+    await addRemoteButton.click();
 
     const fetchButton = await $("button=Fetch transfer-origin");
     await fetchButton.waitForExist({ timeout: 10000 });
@@ -103,9 +105,11 @@ describe("Browsitory remote transfer", () => {
     const challenge = await startCredentialChallengeServer();
     try {
       const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+      const addRemoteButton = await $("button=Add remote");
+      await addRemoteButton.waitForEnabled({ timeout: 10000 });
       await remoteNameInput.setValue("credential-origin");
       await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
-      await (await $("button=Add remote")).click();
+      await addRemoteButton.click();
       await (await $("button=Fetch credential-origin")).waitForExist({ timeout: 10000 });
 
       // This is the non-secret metadata the UI normally persists before saving a token. No
@@ -178,8 +182,24 @@ describe("Browsitory remote transfer", () => {
       { timeout: 10000, timeoutMsg: "expected Push to advance the remote branch" },
     );
 
+    const createTagButton = await $("button=Create tag");
+    await createTagButton.waitForEnabled({ timeout: 10000 });
     await (await $("form[aria-label='Create tag'] input")).setValue("e2e-transfer-tag");
-    await (await $("button=Create tag")).click();
+    await createTagButton.click();
+    await browser.waitUntil(
+      () => {
+        try {
+          execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], {
+            cwd: E2E_REPO_PATH,
+            stdio: "ignore",
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 10000, timeoutMsg: "expected local tag creation to complete" },
+    );
     const pushTags = await $("button=Push all tags");
     await pushTags.waitForEnabled({ timeout: 10000 });
     await pushTags.click();
