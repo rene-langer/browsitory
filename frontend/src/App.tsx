@@ -3,6 +3,7 @@ import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
+import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
@@ -76,6 +77,14 @@ export default function App() {
         submodules={appState.state.submodules}
         onInit={appState.initSubmodule}
         onUpdate={appState.updateSubmodule}
+        operationDisabled={repositoryOperationDisabled}
+      />
+      <ReflogPanel
+        references={appState.state.reflogRefs}
+        selectedReference={appState.state.selectedReflogReference}
+        entries={appState.state.reflog}
+        onSelectReference={appState.selectReflogReference}
+        onRestore={appState.restoreReflogEntry}
         operationDisabled={repositoryOperationDisabled}
       />
       <RemotePanel
