@@ -10,12 +10,12 @@ use commands::{
     drop_stash, fetch_remote, forget_https_credential, get_blame, get_commit_diff,
     get_commit_files, get_commit_graph, get_conflict_hunks, get_current_upstream,
     get_merge_message, get_rebase_progress, get_remote_upstreams, get_status, get_working_diff,
-    list_branches, list_recent_repos, list_remotes, list_stashes, list_tags, list_worktrees,
-    open_repo, pick_repo_folder, prune_worktrees, pull_current_upstream, push_current_branch,
-    push_tags, rebase_continue, remove_remote, remove_worktree, rename_branch, rename_remote,
-    resolve_add_delete_conflict, resolve_conflict, save_https_credential, save_stash,
-    set_current_upstream, set_remote_auth_mode, stage_file, start_merge, start_rebase,
-    switch_branch, unstage_file, update_remote_urls, AppState,
+    init_submodule, list_branches, list_recent_repos, list_remotes, list_stashes, list_submodules,
+    list_tags, list_worktrees, open_repo, pick_repo_folder, prune_worktrees, pull_current_upstream,
+    push_current_branch, push_tags, rebase_continue, remove_remote, remove_worktree, rename_branch,
+    rename_remote, resolve_add_delete_conflict, resolve_conflict, save_https_credential,
+    save_stash, set_current_upstream, set_remote_auth_mode, stage_file, start_merge, start_rebase,
+    switch_branch, unstage_file, update_remote_urls, update_submodule, AppState,
 };
 
 fn main() {
@@ -43,6 +43,9 @@ fn main() {
             create_worktree,
             remove_worktree,
             prune_worktrees,
+            list_submodules,
+            init_submodule,
+            update_submodule,
             list_remotes,
             get_current_upstream,
             get_remote_upstreams,

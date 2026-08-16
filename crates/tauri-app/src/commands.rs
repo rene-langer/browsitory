@@ -133,6 +133,28 @@ impl From<git_core::worktree::WorktreeInfo> for WorktreeInfoDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubmoduleInfoDto {
+    pub path: String,
+    pub url: Option<String>,
+    pub gitlink_id: Option<String>,
+    pub initialized: bool,
+    pub head_id: Option<String>,
+}
+
+impl From<git_core::submodule::SubmoduleInfo> for SubmoduleInfoDto {
+    fn from(submodule: git_core::submodule::SubmoduleInfo) -> Self {
+        Self {
+            path: submodule.path,
+            url: submodule.url,
+            gitlink_id: submodule.gitlink_id,
+            initialized: submodule.initialized,
+            head_id: submodule.head_id,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteInfoDto {
     pub name: String,
     pub fetch_url: String,
@@ -671,6 +693,29 @@ pub async fn prune_worktrees(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn list_submodules(state: State<'_, AppState>) -> Result<Vec<SubmoduleInfoDto>, String> {
+    Ok(worker_handle(&state)?
+        .list_submodules()?
+        .into_iter()
+        .map(SubmoduleInfoDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn init_submodule(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state)?.init_submodule(path)
+}
+
+#[tauri::command]
+pub async fn update_submodule(
+    path: String,
+    recursive: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.update_submodule(path, recursive)
+}
+
+#[tauri::command]
 pub async fn create_branch(
     name: String,
     start_point: String,
@@ -1016,11 +1061,15 @@ mod tests {
     use git_core::diff::DiffLineOrigin;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
+    use git_core::submodule::SubmoduleInfo;
     use git_core::worktree::WorktreeInfo;
 
     use crate::worker::TransferEvent;
 
-    use super::{transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto, WorktreeInfoDto};
+    use super::{
+        transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto, SubmoduleInfoDto,
+        WorktreeInfoDto,
+    };
 
     #[test]
     fn worktree_info_dto_serializes_camel_case_fields() {
@@ -1066,6 +1115,28 @@ mod tests {
                 "isMain": false,
                 "isLocked": false,
                 "isPrunable": true,
+            })
+        );
+    }
+
+    #[test]
+    fn submodule_info_dto_serializes_camel_case_fields() {
+        let dto = SubmoduleInfoDto::from(SubmoduleInfo {
+            path: "deps/child".into(),
+            url: Some("https://example.com/child.git".into()),
+            gitlink_id: Some("0123456789abcdef".into()),
+            initialized: true,
+            head_id: Some("fedcba9876543210".into()),
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "path": "deps/child",
+                "url": "https://example.com/child.git",
+                "gitlinkId": "0123456789abcdef",
+                "initialized": true,
+                "headId": "fedcba9876543210",
             })
         );
     }
