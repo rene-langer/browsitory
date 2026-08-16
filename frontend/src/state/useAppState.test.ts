@@ -8,6 +8,7 @@ import type {
   StashEntry,
   StatusEntry,
   TagInfo,
+  ReflogEntry,
   UpstreamInfo,
 } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
@@ -47,6 +48,9 @@ const remoteManagementClient = {
   listSubmodules: async () => [],
   initSubmodule: async () => unimplemented(),
   updateSubmodule: async () => unimplemented(),
+  listReflogRefs: async () => [],
+  getReflog: async () => [],
+  restoreReflogEntry: async () => unimplemented(),
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -88,6 +92,9 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     rebaseContinue: async () => unimplemented(),
     abortRebase: async () => unimplemented(),
     getRebaseProgress: async () => null,
+    listReflogRefs: async () => [],
+    getReflog: async () => [],
+    restoreReflogEntry: async () => unimplemented(),
     ...overrides,
   };
 }
@@ -238,6 +245,53 @@ describe("useAppState", () => {
       expect(result.current.state.submodules).toEqual([submodule]);
     },
   );
+
+  it("refreshes status, graph, branches, and reflog after restoring a reflog entry", async () => {
+    let statusCalls = 0;
+    let graphCalls = 0;
+    let branchCalls = 0;
+    let reflogCalls = 0;
+    const entry: ReflogEntry = {
+      reference: "HEAD",
+      oldId: "1111111",
+      newId: "2222222",
+      committerName: "Test User",
+      committerEmail: "test@example.com",
+      timestamp: 1_725_000_000,
+      message: "commit: second commit",
+      summary: "second commit",
+    };
+    const client = transferClient({
+      getStatus: async () => {
+        statusCalls += 1;
+        return [];
+      },
+      getCommitGraph: async () => {
+        graphCalls += 1;
+        return [];
+      },
+      listBranches: async () => {
+        branchCalls += 1;
+        return [];
+      },
+      listReflogRefs: async () => ["HEAD"],
+      getReflog: async () => {
+        reflogCalls += 1;
+        return [entry];
+      },
+      restoreReflogEntry: async () => {},
+    });
+    const { result } = renderHook(() => useAppState(client));
+
+    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.restoreReflogEntry("HEAD", entry.newId));
+
+    expect(statusCalls).toBe(2);
+    expect(graphCalls).toBe(2);
+    expect(branchCalls).toBe(2);
+    expect(reflogCalls).toBe(1);
+    expect(result.current.state.reflog).toEqual([entry]);
+  });
 
   it("tracks a current-branch push using its transfer operation ID", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;

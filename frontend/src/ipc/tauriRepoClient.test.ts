@@ -109,6 +109,27 @@ describe("tauriRepoClient submodules", () => {
   });
 });
 
+describe("tauriRepoClient reflog", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("maps reflog operations to their Tauri commands", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await tauriRepoClient.listReflogRefs();
+    await tauriRepoClient.getReflog("HEAD");
+    await tauriRepoClient.restoreReflogEntry("HEAD", "0123456789abcdef");
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_reflog_refs");
+    expect(invoke).toHaveBeenNthCalledWith(2, "get_reflog", { reference: "HEAD" });
+    expect(invoke).toHaveBeenNthCalledWith(3, "restore_reflog_entry", {
+      reference: "HEAD",
+      newId: "0123456789abcdef",
+    });
+  });
+});
+
 describe("tauriRepoClient transfer progress subscription", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
