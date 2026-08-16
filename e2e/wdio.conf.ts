@@ -165,13 +165,9 @@ export const config: WebdriverIO.Config = {
   maxInstances: 1,
   capabilities: [
     {
-      // @ts-expect-error — tauri:options isn't in WebdriverIO's built-in capability types.
-      // NOTE: the brief's draft also included a per-capability `maxInstances: 1` and
-      // `browserName: "wry"` here; the live guide's current example capability object has
-      // neither (just `maxInstances`+`tauri:options` at this same nesting, without
-      // `browserName`), and per-capability `maxInstances` doesn't type-check against
-      // WebdriverIO v9's `RequestedStandaloneCapabilities`, so both are dropped — the
-      // top-level `maxInstances: 1` above already caps this to one instance (see task report).
+      // @ts-expect-error — WebdriverIO applies capability-level maxInstances at runtime.
+      maxInstances: 1,
+      // Capability-level maxInstances is required because this suite shares one fixture path.
       "tauri:options": {
         application: tauriAppBinary,
       },
