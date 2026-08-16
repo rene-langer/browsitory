@@ -31,6 +31,24 @@ fn lists_configured_metadata_then_initializes_and_updates_a_submodule() {
     drop(dir);
 }
 
+#[test]
+fn refuses_to_update_an_uninitialized_submodule_without_creating_config() {
+    let (_dir, parent, _, _) = configured_submodule_checkout();
+    let key = "submodule.deps/child.url";
+
+    assert!(parent.config().unwrap().get_string(key).is_err());
+
+    let result = update_submodule(&parent, "deps/child", false);
+
+    let Err(SubmoduleError::Git(error)) = result else {
+        panic!("uninitialized update unexpectedly succeeded");
+    };
+    assert_eq!(error.message(), "submodule is not initialized");
+    assert!(parent.config().unwrap().get_string(key).is_err());
+    assert!(!list_submodules(&parent).unwrap()[0].initialized);
+    assert_eq!(list_submodules(&parent).unwrap()[0].head_id, None);
+}
+
 fn configured_submodule_checkout() -> (tempfile::TempDir, Repository, String, String) {
     let dir = tempfile::TempDir::new().unwrap();
     let child_path = dir.path().join("child-source");
@@ -113,6 +131,7 @@ fn initializes_an_already_initialized_submodule_without_overwriting_it() {
 fn updates_only_the_requested_submodule_when_recursion_is_disabled() {
     let (_dir, parent) = configured_nested_submodule_checkout();
 
+    init_submodule(&parent, "deps/child").unwrap();
     update_submodule(&parent, "deps/child", false).unwrap();
 
     assert!(list_submodules(&parent).unwrap()[0].head_id.is_some());
