@@ -160,6 +160,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   });
 
   const selectedReflogReference = useRef<string | null>(null);
+  const reflogRequestGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -376,9 +377,16 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const selectReflogReference = useCallback(
     async (reference: string) => {
+      const requestGeneration = ++reflogRequestGeneration.current;
       try {
         selectedReflogReference.current = reference;
         const reflog = await client.getReflog(reference);
+        if (
+          requestGeneration !== reflogRequestGeneration.current ||
+          selectedReflogReference.current !== reference
+        ) {
+          return;
+        }
         setState((prev) => ({
           ...prev,
           selectedReflogReference: reference,
@@ -386,7 +394,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           error: null,
         }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: String(err) }));
+        if (
+          requestGeneration === reflogRequestGeneration.current &&
+          selectedReflogReference.current === reference
+        ) {
+          setState((prev) => ({ ...prev, error: String(err) }));
+        }
       }
     },
     [client],
@@ -394,6 +407,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const restoreReflogEntry = useCallback(
     (reference: string, newId: string) => {
       selectedReflogReference.current = reference;
+      reflogRequestGeneration.current += 1;
       setState((prev) => ({ ...prev, selectedReflogReference: reference }));
       return runMutation(() => client.restoreReflogEntry(reference, newId));
     },
