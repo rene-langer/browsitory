@@ -6,6 +6,7 @@ import { RebasePlanner } from "./components/RebasePlanner";
 import { RepoPicker } from "./components/RepoPicker";
 import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
+import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
@@ -69,6 +70,12 @@ export default function App() {
         onCreateWorktree={appState.createWorktree}
         onRemoveWorktree={appState.removeWorktree}
         onPruneWorktrees={appState.pruneWorktrees}
+        operationDisabled={repositoryOperationDisabled}
+      />
+      <SubmodulePanel
+        submodules={appState.state.submodules}
+        onInit={appState.initSubmodule}
+        onUpdate={appState.updateSubmodule}
         operationDisabled={repositoryOperationDisabled}
       />
       <RemotePanel
