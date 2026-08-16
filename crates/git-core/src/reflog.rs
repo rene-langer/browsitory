@@ -47,6 +47,10 @@ pub fn list_reflog_refs(repo: &Repository) -> Result<Vec<String>, ReflogError> {
 pub fn read_reflog(repo: &Repository, reference: &str) -> Result<Vec<ReflogEntry>, ReflogError> {
     validate_reference(reference)?;
 
+    if !repo.reference_has_log(reference)? {
+        return Ok(Vec::new());
+    }
+
     repo.reflog(reference)?
         .iter()
         .map(|entry| {
@@ -78,6 +82,10 @@ pub fn restore_reflog_entry(
     let target = Oid::from_str(new_id).map_err(|_| ReflogError::TargetNotFound)?;
     repo.find_object(target, None)
         .map_err(|_| ReflogError::TargetNotFound)?;
+
+    if !repo.reference_has_log(reference)? {
+        return Err(ReflogError::TargetNotInReflog);
+    }
 
     if !repo
         .reflog(reference)?

@@ -1,25 +1,18 @@
-#[allow(dead_code)]
-mod common;
-
-use common::{commit_all, init_repo, write_file};
-use git_core::reflog::{read_reflog, restore_reflog_entry, ReflogError};
 use git2::{Oid, Repository};
+use git_core::reflog::{read_reflog, restore_reflog_entry, ReflogError};
+use tempfile::TempDir;
 
 #[test]
 fn reading_or_restoring_a_local_ref_without_a_reflog_does_not_create_one() {
-    let (dir, repo) = init_repo();
-    write_file(dir.path(), "history.txt", "first");
-    commit_all(&repo, "first commit");
-    let first = repo.head().unwrap().target().unwrap();
-
-    write_file(dir.path(), "history.txt", "second");
-    commit_all(&repo, "second commit");
-    let second = repo.head().unwrap().target().unwrap();
-    repo.reference("refs/heads/no-log", first, false, "create no-log branch")
-        .unwrap();
-    if repo.reference_has_log("refs/heads/no-log").unwrap() {
+    let (_dir, repo) = init_bare_repo();
+    let first = create_orphan_commit(&repo, "first commit");
+    let second = create_orphan_commit(&repo, "second commit");
+    write_direct_reference(&repo, "refs/heads/no-log", first);
+    let log_path = repo.path().join("logs/refs/heads/no-log");
+    if log_path.exists() {
         repo.reflog_delete("refs/heads/no-log").unwrap();
     }
+    assert!(!log_path.exists());
     assert!(!repo.reference_has_log("refs/heads/no-log").unwrap());
 
     assert!(read_reflog(&repo, "refs/heads/no-log").unwrap().is_empty());
@@ -38,8 +31,9 @@ fn reading_or_restoring_a_local_ref_without_a_reflog_does_not_create_one() {
 
 #[test]
 fn restoring_an_unborn_head_to_an_orphan_commit_does_not_create_a_ref_or_reflog() {
-    let (dir, repo) = init_repo();
-    let orphan = create_orphan_commit(&repo, dir.path());
+    let (_dir, repo) = init_bare_repo();
+    remove_reflog_file(&repo, "HEAD");
+    let orphan = create_orphan_commit(&repo, "orphan commit");
     let head_target = repo
         .find_reference("HEAD")
         .unwrap()
@@ -62,16 +56,38 @@ fn restoring_an_unborn_head_to_an_orphan_commit_does_not_create_a_ref_or_reflog(
     assert!(repo.head().is_err());
 }
 
-fn create_orphan_commit(repo: &Repository, dir: &std::path::Path) -> Oid {
-    write_file(dir, "orphan.txt", "orphan");
-    let mut index = repo.index().unwrap();
-    index
-        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+fn init_bare_repo() -> (TempDir, Repository) {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().to_path_buf();
+    let repo = Repository::init_bare(&path).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+    config.set_bool("core.logallrefupdates", false).unwrap();
+    drop(config);
+
+    (dir, Repository::open_bare(path).unwrap())
+}
+
+fn create_orphan_commit(repo: &Repository, message: &str) -> Oid {
+    let tree = repo
+        .find_tree(repo.treebuilder(None).unwrap().write().unwrap())
         .unwrap();
-    index.write().unwrap();
-    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
     let signature = repo.signature().unwrap();
 
-    repo.commit(None, &signature, &signature, "orphan commit", &tree, &[])
+    repo.commit(None, &signature, &signature, message, &tree, &[])
         .unwrap()
+}
+
+fn write_direct_reference(repo: &Repository, name: &str, target: Oid) {
+    let path = repo.path().join(name);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, format!("{target}\n")).unwrap();
+}
+
+fn remove_reflog_file(repo: &Repository, name: &str) {
+    let path = repo.path().join("logs").join(name);
+    if path.exists() {
+        std::fs::remove_file(path).unwrap();
+    }
 }
