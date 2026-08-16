@@ -46,7 +46,7 @@ describe("Browsitory stash", () => {
     await stashRow.waitForExist({ timeout: 10000 });
 
     const applyButton = await $("button=Apply");
-    await applyButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), applyButton);
 
     await browser.waitUntil(
       async () => {
