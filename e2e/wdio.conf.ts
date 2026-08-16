@@ -57,6 +57,14 @@ function setupFixtureRepo(repoPath: string) {
   fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
 }
 
+function resetFixtureRepo() {
+  fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
+  execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], { cwd: os.tmpdir(), stdio: "inherit" });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+}
+
 function setupSubmoduleFixture(repoPath: string) {
   fs.rmSync(E2E_SUBMODULE_REPO_PATH, { recursive: true, force: true });
   fs.mkdirSync(E2E_SUBMODULE_REPO_PATH, { recursive: true });
@@ -186,17 +194,7 @@ export const config: WebdriverIO.Config = {
     }
     setupFixtureRepo(E2E_PARENT_SOURCE_PATH);
     setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
-    fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
-    execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], {
-      cwd: os.tmpdir(),
-      stdio: "inherit",
-    });
-    fs.writeFileSync(path.join(E2E_REPO_PATH, "README.md"), "e2e fixture repo working tree\n");
-    execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["config", "user.email", "test@example.com"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    resetFixtureRepo();
     setupCredentialCertificate();
   },
 
@@ -205,6 +203,7 @@ export const config: WebdriverIO.Config = {
   beforeSession: async () => {
     const driverPath = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
     tauriDriver = spawn(driverPath, [], { stdio: [null, process.stdout, process.stderr] });
+    resetFixtureRepo();
     tauriDriver.on("error", (error) => {
       console.error("tauri-driver error:", error);
       process.exit(1);
