@@ -38,7 +38,7 @@ describe("Browsitory blame", () => {
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");
-    await commitButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const secondCommitEntry = await $("li*=e2e: blame fixture second commit");
     await secondCommitEntry.waitForExist({ timeout: 10000 });
