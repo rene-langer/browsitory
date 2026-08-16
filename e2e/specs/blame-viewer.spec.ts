@@ -48,7 +48,7 @@ describe("Browsitory blame", () => {
     await fileEntry.waitForExist({ timeout: 10000 });
 
     const blameButton = await $("button=Blame");
-    await blameButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), blameButton);
 
     // Click a `<td>` inside the row, not the `<tr>` itself: WebKitGTK's WebDriver
     // implementation (what `tauri-driver` proxies to on Linux) reports bare `display:table-row`

@@ -100,8 +100,8 @@ describe("Browsitory interactive rebase", () => {
     const startButton = await $("button=Start Rebase");
     await startButton.click();
 
+    await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting(), { timeout: 10000 });
     const commitGraphAfter = await $("li*=e2e: combined rebase commit");
-    await commitGraphAfter.waitForExist({ timeout: 10000 });
     const droppedEntry = await $("li*=rebase commit b (to drop)");
     await expect(droppedEntry).not.toBeExisting();
   });

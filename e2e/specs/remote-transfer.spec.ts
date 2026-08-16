@@ -160,7 +160,7 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a local tag", async () => {
-    execFileSync("git", ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], { cwd: E2E_REPO_PATH, stdio: "ignore" });
+    try { execFileSync("git", ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], { cwd: E2E_REPO_PATH, stdio: "ignore" }); } catch { // Auth mode may be absent in a fresh fixture. }
     const currentBranch = execFileSync("git", ["branch", "--show-current"], {
       cwd: E2E_REPO_PATH,
       encoding: "utf8",
