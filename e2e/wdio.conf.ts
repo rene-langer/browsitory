@@ -218,6 +218,13 @@ export const config: WebdriverIO.Config = {
     await waitForPort(4444, "127.0.0.1", 10_000);
   },
 
+  // Each spec prepares its fixture with direct git CLI calls in a Mocha `before` hook, but
+  // the Tauri app opens the shared repo before that hook runs. Reload after fixture setup so
+  // the app refetches status/history from disk before the test interacts with it.
+  beforeTest: async () => {
+    await browser.refresh();
+  },
+
   afterSession: () => {
     closeTauriDriver();
   },

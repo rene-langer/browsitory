@@ -19,6 +19,7 @@ fn creates_a_linked_worktree_for_an_existing_local_branch() {
     assert_eq!(worktrees.len(), 1);
     let main = worktrees.iter().find(|worktree| worktree.is_main).unwrap();
     create_worktree(&repo, "feature-tree", &linked, "feature", None).unwrap();
+    let linked = linked.canonicalize().unwrap();
     assert!(list_worktrees(&repo)
         .unwrap()
         .iter()
@@ -113,6 +114,7 @@ fn prunes_stale_worktree_metadata_idempotently() {
     repo.branch("feature", &head, false).unwrap();
     let linked = dir.path().join("stale-feature-tree");
     create_worktree(&repo, "stale-feature-tree", &linked, "feature", None).unwrap();
+    let linked = linked.canonicalize().unwrap();
     std::fs::remove_dir_all(&linked).unwrap();
     let stale_worktree = list_worktrees(&repo)
         .unwrap()
