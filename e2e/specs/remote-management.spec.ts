@@ -9,6 +9,11 @@ const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-remote.git");
 
 describe("Browsitory remote management", () => {
   before(() => {
+    execFileSync("git", ["add", "README.md"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "e2e: seed remote management branch"], {
+      cwd: E2E_REPO_PATH,
+      stdio: "inherit",
+    });
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
   });
@@ -17,13 +22,15 @@ describe("Browsitory remote management", () => {
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
   });
 
-  it("blocks removing an upstream remote until the upstream is cleared", async () => {
+  it("clears affected upstreams when removing a remote", async () => {
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
+    const addRemoteButton = await $("button=Add remote");
+    await addRemoteButton.waitForEnabled({ timeout: 10000 });
     await remoteNameInput.setValue("origin");
     const fetchUrlInput = await $("[data-testid='add-remote-fetch-url']");
     await fetchUrlInput.setValue(BARE_REMOTE_PATH);
-    await (await $("button=Add remote")).click();
+    await addRemoteButton.click();
 
     await browser.waitUntil(async () => await $("button=Remove origin").isExisting(), {
       timeout: 10000,
@@ -39,20 +46,12 @@ describe("Browsitory remote management", () => {
     await (await $("button=Remove origin")).click();
     const blockingDialog = await $("div[role='alertdialog']");
     await blockingDialog.waitForExist({ timeout: 10000 });
-    expect(await blockingDialog.getText()).toContain("Clear");
-
-    await (await $("div[role='alertdialog'] button=Clear upstream")).click();
+    expect(await blockingDialog.getText()).toContain("clear upstreams for");
+    await (await blockingDialog.$("button=Confirm remove")).click();
     await browser.waitUntil(
       async () => (await (await $("section[aria-labelledby='upstream-heading']")).getText()).includes("No upstream"),
-      { timeout: 10000, timeoutMsg: "expected the refreshed upstream state to be cleared" },
+      { timeout: 10000, timeoutMsg: "expected removing the remote to clear its upstream" },
     );
-    await browser.waitUntil(async () => !(await $("div[role='alertdialog']")).isExisting(), {
-      timeout: 10000,
-      timeoutMsg: "expected the upstream-clear confirmation to close",
-    });
-
-    await (await $("button=Remove origin")).click();
-    await (await $("div[role='alertdialog'] button=Confirm remove")).click();
 
     await browser.waitUntil(
       () => !execFileSync("git", ["remote"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).includes("origin"),
