@@ -20,9 +20,20 @@ describe("Browsitory submodules", () => {
     await updateButton.click();
     const childPath = path.join(E2E_REPO_PATH, E2E_SUBMODULE_PATH);
     await browser.waitUntil(
-      () => fs.existsSync(childPath),
-      { timeout: 10000, timeoutMsg: "expected the submodule update to populate its checkout" },
+      () => {
+        try {
+          execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+            cwd: childPath,
+            stdio: "ignore",
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 10000, timeoutMsg: "expected the submodule update to check out a valid HEAD" },
     );
+    await updateButton.waitForEnabled({ timeout: 10000 });
 
     execFileSync("git", ["config", "user.name", "Test User"], { cwd: childPath });
     fs.writeFileSync(path.join(childPath, "advanced.txt"), "advanced child commit\n");

@@ -142,6 +142,90 @@ fn updates_only_the_requested_submodule_when_recursion_is_disabled() {
 }
 
 #[test]
+fn recursively_updates_an_initialized_nested_submodule() {
+    let (_dir, parent) = configured_nested_submodule_checkout();
+
+    init_submodule(&parent, "deps/child").unwrap();
+    update_submodule(&parent, "deps/child", false).unwrap();
+    let child_path = parent.workdir().unwrap().join("deps/child");
+    let child = Repository::open(&child_path).unwrap();
+    init_submodule(&child, "deps/grandchild").unwrap();
+
+    update_submodule(&parent, "deps/child", true).unwrap();
+
+    let child = Repository::open(child_path).unwrap();
+    let nested = child.submodules().unwrap().pop().unwrap();
+    assert_eq!(nested.workdir_id(), nested.head_id());
+    assert!(nested.workdir_id().is_some());
+}
+
+#[test]
+fn recursive_update_preserves_the_selected_head_when_a_nested_submodule_is_uninitialized() {
+    let (dir, parent, _, _) = configured_submodule_checkout();
+    init_submodule(&parent, "deps/child").unwrap();
+    update_submodule(&parent, "deps/child", false).unwrap();
+
+    let selected_path = parent.workdir().unwrap().join("deps/child");
+    let selected = Repository::open(&selected_path).unwrap();
+    let original_head = selected.head().unwrap().target().unwrap();
+    drop(selected);
+
+    let child_source_path = dir.path().join("child-source");
+    let child_source = Repository::open(&child_source_path).unwrap();
+    let grandchild_path = dir.path().join("grandchild-source");
+    let grandchild = Repository::init(&grandchild_path).unwrap();
+    configure_identity(&grandchild);
+    write_file(&grandchild_path, "grandchild.txt", "grandchild commit");
+    commit_all(&grandchild, "grandchild commit");
+    add_submodule(
+        &child_source,
+        &grandchild_path.to_string_lossy(),
+        "deps/grandchild",
+    );
+    commit_all(&child_source, "add grandchild submodule");
+    let advanced_head = child_source.head().unwrap().target().unwrap();
+    assert_ne!(original_head, advanced_head);
+    commit_gitlink(
+        &parent,
+        "deps/child",
+        advanced_head,
+        "advance child gitlink",
+    );
+
+    let result = update_submodule(&parent, "deps/child", true);
+
+    let Err(SubmoduleError::Git(error)) = result else {
+        panic!("recursive update unexpectedly accepted an uninitialized nested submodule");
+    };
+    assert_eq!(
+        error.message(),
+        "nested submodule is not initialized: deps/grandchild"
+    );
+    let selected = Repository::open(selected_path).unwrap();
+    assert_eq!(selected.head().unwrap().target(), Some(original_head));
+    assert!(selected.submodules().unwrap().is_empty());
+}
+
+#[test]
+fn recursive_update_does_not_checkout_a_selected_submodule_with_uninitialized_descendants() {
+    let (_dir, parent) = configured_nested_submodule_checkout();
+    init_submodule(&parent, "deps/child").unwrap();
+
+    let result = update_submodule(&parent, "deps/child", true);
+
+    let Err(SubmoduleError::Git(error)) = result else {
+        panic!("recursive update unexpectedly accepted an uninitialized nested submodule");
+    };
+    assert_eq!(
+        error.message(),
+        "nested submodule is not initialized: deps/grandchild"
+    );
+    let selected = list_submodules(&parent).unwrap().pop().unwrap();
+    assert!(selected.initialized);
+    assert_eq!(selected.head_id, None);
+}
+
+#[test]
 fn reports_a_changed_checked_out_child_head_as_a_parent_gitlink_change() {
     let (_dir, parent, _, _) = configured_submodule_checkout();
     init_submodule(&parent, "deps/child").unwrap();
@@ -198,4 +282,26 @@ fn add_submodule(parent: &Repository, url: &str, path: &str) {
     submodule.clone(None).unwrap();
     submodule.add_to_index(true).unwrap();
     submodule.add_finalize().unwrap();
+}
+
+fn commit_gitlink(repo: &Repository, path: &str, id: git2::Oid, message: &str) {
+    let mut index = repo.index().unwrap();
+    let mut entry = index.get_path(Path::new(path), 0).unwrap();
+    entry.id = id;
+    index.add(&entry).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let signature = repo.signature().unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
 }
