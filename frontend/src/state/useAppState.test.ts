@@ -44,6 +44,9 @@ const remoteManagementClient = {
   createWorktree: async () => unimplemented(),
   removeWorktree: async () => unimplemented(),
   pruneWorktrees: async () => unimplemented(),
+  listSubmodules: async () => [],
+  initSubmodule: async () => unimplemented(),
+  updateSubmodule: async () => unimplemented(),
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -194,6 +197,45 @@ describe("useAppState", () => {
       expect(graphCalls).toBe(2);
       expect(branchCalls).toBe(2);
       expect(worktreeCalls).toBe(2);
+    },
+  );
+
+  it.each(["init", "update"] as const)(
+    "refreshes status and submodules after the %s submodule operation",
+    async (operation) => {
+      let statusCalls = 0;
+      let submoduleCalls = 0;
+      const submodule = {
+        path: "deps/child",
+        url: "https://example.com/child.git",
+        gitlinkId: "0123456789abcdef",
+        initialized: true,
+        headId: "fedcba9876543210",
+      };
+      const client = transferClient({
+        getStatus: async () => {
+          statusCalls += 1;
+          return [];
+        },
+        listSubmodules: async () => {
+          submoduleCalls += 1;
+          return [submodule];
+        },
+        initSubmodule: async () => {},
+        updateSubmodule: async () => {},
+      });
+      const { result } = renderHook(() => useAppState(client));
+
+      await act(() => result.current.openRepo("/repo"));
+      await act(() =>
+        operation === "init"
+          ? result.current.initSubmodule("deps/child")
+          : result.current.updateSubmodule("deps/child", true),
+      );
+
+      expect(statusCalls).toBe(2);
+      expect(submoduleCalls).toBe(2);
+      expect(result.current.state.submodules).toEqual([submodule]);
     },
   );
 

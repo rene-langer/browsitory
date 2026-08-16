@@ -12,6 +12,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  SubmoduleInfo,
   TagInfo,
   TransferProgress,
   UpstreamInfo,
@@ -54,6 +55,7 @@ export interface AppState {
   commits: GraphCommit[];
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
+  submodules: SubmoduleInfo[];
   remotes: RemoteInfo[];
   tags: TagInfo[];
   upstream: UpstreamInfo | null;
@@ -88,6 +90,8 @@ export interface UseAppStateResult {
   createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
   removeWorktree(name: string): Promise<void>;
   pruneWorktrees(): Promise<void>;
+  initSubmodule(path: string): Promise<void>;
+  updateSubmodule(path: string, recursive: boolean): Promise<void>;
   addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
@@ -128,6 +132,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     status: [],
     commits: [],
     worktrees: [],
+    submodules: [],
     branches: [],
     remotes: [],
     tags: [],
@@ -147,12 +152,13 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, worktrees, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, worktrees, submodules, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
           client.listWorktrees(),
+          client.listSubmodules(),
           client.listRemotes(),
           client.listTags(),
           client.getCurrentUpstream(),
@@ -171,6 +177,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         commits,
         branches,
         worktrees,
+        submodules,
         remotes,
         tags,
         upstream,
@@ -330,6 +337,16 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
   const pruneWorktrees = useCallback(
     () => runMutation(() => client.pruneWorktrees()),
+    [client, runMutation],
+  );
+
+  const initSubmodule = useCallback(
+    (path: string) => runMutation(() => client.initSubmodule(path)),
+    [client, runMutation],
+  );
+  const updateSubmodule = useCallback(
+    (path: string, recursive: boolean) =>
+      runMutation(() => client.updateSubmodule(path, recursive)),
     [client, runMutation],
   );
 
@@ -580,6 +597,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     createWorktree,
     removeWorktree,
     pruneWorktrees,
+    initSubmodule,
+    updateSubmodule,
     switchBranch,
     deleteBranch,
     renameBranch,

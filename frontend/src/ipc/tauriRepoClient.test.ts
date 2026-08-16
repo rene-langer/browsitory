@@ -88,6 +88,27 @@ describe("tauriRepoClient worktrees", () => {
   });
 });
 
+describe("tauriRepoClient submodules", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("maps submodule operations to their Tauri commands", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await tauriRepoClient.listSubmodules();
+    await tauriRepoClient.initSubmodule("deps/child");
+    await tauriRepoClient.updateSubmodule("deps/child", true);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_submodules");
+    expect(invoke).toHaveBeenNthCalledWith(2, "init_submodule", { path: "deps/child" });
+    expect(invoke).toHaveBeenNthCalledWith(3, "update_submodule", {
+      path: "deps/child",
+      recursive: true,
+    });
+  });
+});
+
 describe("tauriRepoClient transfer progress subscription", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();

@@ -17,6 +17,7 @@ import type {
   RepoClient,
   StashEntry,
   StatusEntry,
+  SubmoduleInfo,
   TagInfo,
   TransferProgress,
   UpstreamInfo,
@@ -58,6 +59,10 @@ export const tauriRepoClient: RepoClient = {
   ) => invoke("create_worktree", { name, path, branch, startPoint }),
   removeWorktree: (name: string) => invoke("remove_worktree", { name }),
   pruneWorktrees: () => invoke("prune_worktrees"),
+  listSubmodules: () => invoke<SubmoduleInfo[]>("list_submodules"),
+  initSubmodule: (path: string) => invoke("init_submodule", { path }),
+  updateSubmodule: (path: string, recursive: boolean) =>
+    invoke("update_submodule", { path, recursive }),
   listRemotes: () => invoke<RemoteInfo[]>("list_remotes"),
   getCurrentUpstream: () => invoke<UpstreamInfo | null>("get_current_upstream"),
   getRemoteUpstreams: (name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { name }),

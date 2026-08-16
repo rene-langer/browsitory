@@ -35,6 +35,14 @@ export interface WorktreeInfo {
   isPrunable: boolean;
 }
 
+export interface SubmoduleInfo {
+  path: string;
+  url: string | null;
+  gitlinkId: string | null;
+  initialized: boolean;
+  headId: string | null;
+}
+
 export interface RemoteInfo {
   name: string;
   fetchUrl: string;
@@ -166,6 +174,9 @@ export interface RepoClient {
   createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
   removeWorktree(name: string): Promise<void>;
   pruneWorktrees(): Promise<void>;
+  listSubmodules(): Promise<SubmoduleInfo[]>;
+  initSubmodule(path: string): Promise<void>;
+  updateSubmodule(path: string, recursive: boolean): Promise<void>;
   listRemotes(): Promise<RemoteInfo[]>;
   getCurrentUpstream(): Promise<UpstreamInfo | null>;
   getRemoteUpstreams(name: string): Promise<UpstreamInfo[]>;

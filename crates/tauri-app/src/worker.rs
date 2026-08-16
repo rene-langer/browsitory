@@ -14,6 +14,7 @@ use git_core::remote::{
 };
 use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
+use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
 
 use crate::credentials::{CredentialService, KeyringCredentialStore, RemoteCredentialProvider};
@@ -126,6 +127,18 @@ pub(crate) enum Command {
         reply: Sender<Result<(), String>>,
     },
     PruneWorktrees {
+        reply: Sender<Result<(), String>>,
+    },
+    ListSubmodules {
+        reply: Sender<Result<Vec<SubmoduleInfo>, String>>,
+    },
+    InitSubmodule {
+        path: String,
+        reply: Sender<Result<(), String>>,
+    },
+    UpdateSubmodule {
+        path: String,
+        recursive: bool,
         reply: Sender<Result<(), String>>,
     },
     ListRemotes {
@@ -471,6 +484,25 @@ impl Worker {
                                 .map(|reopened| repo = reopened)
                                 .map_err(|e| e.to_string());
                         }
+                        let _ = reply.send(result);
+                    }
+                    Command::ListSubmodules { reply } => {
+                        let result =
+                            git_core::submodule::list_submodules(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::InitSubmodule { path, reply } => {
+                        let result = git_core::submodule::init_submodule(&repo, &path)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::UpdateSubmodule {
+                        path,
+                        recursive,
+                        reply,
+                    } => {
+                        let result = git_core::submodule::update_submodule(&repo, &path, recursive)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::ListRemotes { reply } => {
@@ -1261,6 +1293,43 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
+    pub fn list_submodules(&self) -> Result<Vec<SubmoduleInfo>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListSubmodules { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn init_submodule(&self, path: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::InitSubmodule {
+                path,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn update_submodule(&self, path: String, recursive: bool) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::UpdateSubmodule {
+                path,
+                recursive,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -1826,6 +1895,64 @@ mod tests {
 
         assert!(!linked.exists());
         assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn initializes_and_updates_a_submodule_through_the_worker() {
+        let dir = TempDir::new().expect("create parent directory");
+        let child_path = dir.path().join("child-source");
+        let child = Repository::init(&child_path).expect("init child repository");
+        {
+            let mut config = child.config().expect("child config");
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+        write_file(&child_path, "child.txt", "initial child commit");
+        commit_all(&child, "child commit");
+
+        let parent_path = dir.path().join("parent-source");
+        let parent = Repository::init(&parent_path).expect("init parent repository");
+        {
+            let mut config = parent.config().expect("parent config");
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+        let mut submodule = parent
+            .submodule(
+                child_path.to_str().expect("child path"),
+                Path::new("deps/child"),
+                true,
+            )
+            .expect("configure submodule");
+        submodule.clone(None).expect("clone submodule");
+        submodule.add_to_index(true).expect("stage submodule");
+        submodule.add_finalize().expect("finalize submodule");
+        drop(submodule);
+        commit_all(&parent, "add child submodule");
+
+        let checkout_path = dir.path().join("checkout");
+        Repository::clone(parent_path.to_str().expect("parent path"), &checkout_path)
+            .expect("clone parent checkout");
+        let worker = Worker::spawn(checkout_path).expect("start worker");
+        let handle = worker.handle();
+
+        let before = handle.list_submodules().expect("list submodules");
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].path, "deps/child");
+        assert!(!before[0].initialized);
+
+        handle
+            .init_submodule("deps/child".into())
+            .expect("initialize submodule");
+        handle
+            .update_submodule("deps/child".into(), false)
+            .expect("update submodule");
+
+        let after = handle
+            .list_submodules()
+            .expect("list initialized submodule");
+        assert!(after[0].initialized);
+        assert!(after[0].head_id.is_some());
     }
 
     #[test]
