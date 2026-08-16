@@ -42,7 +42,7 @@ describe("Browsitory blame", () => {
 
     const secondCommitEntry = await $("li*=e2e: blame fixture second commit");
     await secondCommitEntry.waitForExist({ timeout: 10000 });
-    await secondCommitEntry.click();
+    await browser.execute((el) => (el as HTMLElement).click(), secondCommitEntry);
 
     const fileEntry = await $(`button=${BLAME_FIXTURE_FILE}`);
     await fileEntry.waitForExist({ timeout: 10000 });
