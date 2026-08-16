@@ -27,6 +27,9 @@ const tauriAppBinary = path.resolve(__dirname, "../target/debug/tauri-app");
 // `frontend/dist` (see the CI `e2e` job, and this file's `onPrepare` below).
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const CREDENTIAL_CERT_DIR = path.join(os.tmpdir(), "browsitory-e2e-credential-cert");
+const E2E_PARENT_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-parent-source");
+const E2E_SUBMODULE_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-submodule");
+const E2E_SUBMODULE_PATH = "deps/e2e-child";
 const CREDENTIAL_KEY_PATH = path.join(CREDENTIAL_CERT_DIR, "key.pem");
 const CREDENTIAL_CERT_PATH = path.join(CREDENTIAL_CERT_DIR, "cert.pem");
 
@@ -52,6 +55,29 @@ function setupFixtureRepo(repoPath: string) {
     stdio: "inherit",
   });
   fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
+}
+
+function setupSubmoduleFixture(repoPath: string) {
+  fs.rmSync(E2E_SUBMODULE_REPO_PATH, { recursive: true, force: true });
+  fs.mkdirSync(E2E_SUBMODULE_REPO_PATH, { recursive: true });
+  execFileSync("git", ["init"], { cwd: E2E_SUBMODULE_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["config", "user.name", "Test User"], {
+    cwd: E2E_SUBMODULE_REPO_PATH,
+    stdio: "inherit",
+  });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: E2E_SUBMODULE_REPO_PATH,
+    stdio: "inherit",
+  });
+  fs.writeFileSync(path.join(E2E_SUBMODULE_REPO_PATH, "README.md"), "e2e submodule\n");
+  execFileSync("git", ["add", "."], { cwd: E2E_SUBMODULE_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["commit", "-m", "e2e: seed submodule"], {
+    cwd: E2E_SUBMODULE_REPO_PATH,
+    stdio: "inherit",
+  });
+  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", E2E_SUBMODULE_REPO_PATH, E2E_SUBMODULE_PATH], { cwd: repoPath, stdio: "inherit" });
+  execFileSync("git", ["add", "."], { cwd: repoPath, stdio: "inherit" });
+  execFileSync("git", ["commit", "-m", "e2e: add submodule"], { cwd: repoPath, stdio: "inherit" });
 }
 
 function setupCredentialCertificate() {
@@ -158,7 +184,19 @@ export const config: WebdriverIO.Config = {
           `VITE_E2E_REPO_PATH=${E2E_REPO_PATH} baked in).`,
       );
     }
-    setupFixtureRepo(E2E_REPO_PATH);
+    setupFixtureRepo(E2E_PARENT_SOURCE_PATH);
+    setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
+    fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
+    execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], {
+      cwd: os.tmpdir(),
+      stdio: "inherit",
+    });
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "README.md"), "e2e fixture repo working tree\n");
+    execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: E2E_REPO_PATH,
+      stdio: "inherit",
+    });
     setupCredentialCertificate();
   },
 
