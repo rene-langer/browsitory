@@ -9,14 +9,8 @@ pub enum SubmoduleError {
     NotFound,
     #[error("submodule path is invalid")]
     InvalidPath,
-    #[error("git operation failed")]
-    Git,
-}
-
-impl From<git2::Error> for SubmoduleError {
-    fn from(_: git2::Error) -> Self {
-        Self::Git
-    }
+    #[error("git operation failed: {0}")]
+    Git(#[from] git2::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +50,7 @@ pub fn update_submodule(
     recursive: bool,
 ) -> Result<(), SubmoduleError> {
     let mut submodule = find_submodule(repo, path)?;
-    submodule.update(true, None)?;
+    submodule.update(false, None)?;
 
     if recursive {
         update_nested_submodules(&submodule.open()?)?;
@@ -78,7 +72,7 @@ fn find_submodule<'repo>(
 
 fn update_nested_submodules(repo: &Repository) -> Result<(), SubmoduleError> {
     for mut submodule in repo.submodules()? {
-        submodule.update(true, None)?;
+        submodule.update(false, None)?;
         update_nested_submodules(&submodule.open()?)?;
     }
     Ok(())
