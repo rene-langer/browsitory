@@ -135,6 +135,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const conflictedRow = await $("button*=adddelete.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.scrollIntoView({ block: "center" });
     await conflictedRow.click();
 
     const keepTheirs = await $("button=Keep Their Version");
