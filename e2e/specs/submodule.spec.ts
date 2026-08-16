@@ -19,10 +19,18 @@ describe("Browsitory submodules", () => {
     const updateButton = await $("button=Update " + E2E_SUBMODULE_PATH);
     await updateButton.click();
     const childPath = path.join(E2E_REPO_PATH, E2E_SUBMODULE_PATH);
+    await updateButton.waitForEnabled({ timeout: 10000 });
     await browser.waitUntil(
       () => {
         try {
-          execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+          const topLevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+            cwd: childPath,
+            encoding: "utf8",
+          }).trim();
+          if (path.resolve(topLevel) !== path.resolve(childPath)) {
+            return false;
+          }
+          execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
             cwd: childPath,
             stdio: "ignore",
           });
@@ -31,9 +39,8 @@ describe("Browsitory submodules", () => {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected the submodule update to check out a valid HEAD" },
+      { timeout: 10000, timeoutMsg: "expected the child checkout to have its own valid HEAD" },
     );
-    await updateButton.waitForEnabled({ timeout: 10000 });
 
     execFileSync("git", ["config", "user.name", "Test User"], { cwd: childPath });
     fs.writeFileSync(path.join(childPath, "advanced.txt"), "advanced child commit\n");
