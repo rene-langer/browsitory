@@ -87,13 +87,26 @@ pub fn restore_reflog_entry(
         return Err(ReflogError::TargetNotInReflog);
     }
 
-    let mut selected = if reference == "HEAD" {
-        repo.head()?
-    } else {
-        repo.find_reference(reference)?
-    };
+    let mut selected = selected_reference(repo, reference)?;
     selected.set_target(target, RESTORE_REFLOG_MESSAGE)?;
     Ok(())
+}
+
+fn selected_reference<'repo>(
+    repo: &'repo Repository,
+    reference: &str,
+) -> Result<Reference<'repo>, ReflogError> {
+    if reference != "HEAD" {
+        return Ok(repo.find_reference(reference)?);
+    }
+
+    let head = repo.find_reference("HEAD")?;
+    let symbolic_target = head.symbolic_target()?.map(str::to_string);
+    match symbolic_target {
+        Some(target) if is_local_reference(&target) => Ok(repo.find_reference(&target)?),
+        Some(_) => Err(ReflogError::InvalidReference),
+        None => Ok(head),
+    }
 }
 
 fn validate_reference(reference: &str) -> Result<(), ReflogError> {
