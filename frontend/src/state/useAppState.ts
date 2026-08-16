@@ -9,6 +9,7 @@ import type {
   RebaseStepResult,
   RemoteAuthMode,
   RemoteInfo,
+  ReflogEntry,
   RepoClient,
   StashEntry,
   StatusEntry,
@@ -56,6 +57,9 @@ export interface AppState {
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
   submodules: SubmoduleInfo[];
+  reflogRefs: string[];
+  selectedReflogReference: string | null;
+  reflog: ReflogEntry[];
   remotes: RemoteInfo[];
   tags: TagInfo[];
   upstream: UpstreamInfo | null;
@@ -92,6 +96,8 @@ export interface UseAppStateResult {
   pruneWorktrees(): Promise<void>;
   initSubmodule(path: string): Promise<void>;
   updateSubmodule(path: string, recursive: boolean): Promise<void>;
+  selectReflogReference(reference: string): Promise<void>;
+  restoreReflogEntry(reference: string, newId: string): Promise<void>;
   addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
@@ -133,6 +139,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     commits: [],
     worktrees: [],
     submodules: [],
+    reflogRefs: [],
+    selectedReflogReference: null,
+    reflog: [],
     branches: [],
     remotes: [],
     tags: [],
@@ -150,15 +159,18 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     pending: false,
   });
 
+  const selectedReflogReference = useRef<string | null>(null);
+
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, worktrees, submodules, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
           client.listBranches(),
           client.listWorktrees(),
           client.listSubmodules(),
+          client.listReflogRefs(),
           client.listRemotes(),
           client.listTags(),
           client.getCurrentUpstream(),
@@ -171,6 +183,14 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(remote.name)]),
         ),
       );
+      const reference = selectedReflogReference.current;
+      const selectedReference = reference !== null && reflogRefs.includes(reference)
+        ? reference
+        : null;
+      selectedReflogReference.current = selectedReference;
+      const reflog = selectedReference === null
+        ? []
+        : await client.getReflog(selectedReference);
       setState((prev) => ({
         ...prev,
         status,
@@ -178,6 +198,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         branches,
         worktrees,
         submodules,
+        reflogRefs,
+        selectedReflogReference: selectedReference,
+        reflog,
         remotes,
         tags,
         upstream,
@@ -271,6 +294,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       // clear pending state for the newly opened repository.
       activeTransferId.current = null;
       transferRequestPending.current = false;
+      selectedReflogReference.current = null;
       setState((prev) => ({ ...prev, transfer: null }));
       return runMutation(async () => {
         await client.openRepo(path);
@@ -347,6 +371,32 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const updateSubmodule = useCallback(
     (path: string, recursive: boolean) =>
       runMutation(() => client.updateSubmodule(path, recursive)),
+    [client, runMutation],
+  );
+
+  const selectReflogReference = useCallback(
+    async (reference: string) => {
+      try {
+        selectedReflogReference.current = reference;
+        const reflog = await client.getReflog(reference);
+        setState((prev) => ({
+          ...prev,
+          selectedReflogReference: reference,
+          reflog,
+          error: null,
+        }));
+      } catch (err) {
+        setState((prev) => ({ ...prev, error: String(err) }));
+      }
+    },
+    [client],
+  );
+  const restoreReflogEntry = useCallback(
+    (reference: string, newId: string) => {
+      selectedReflogReference.current = reference;
+      setState((prev) => ({ ...prev, selectedReflogReference: reference }));
+      return runMutation(() => client.restoreReflogEntry(reference, newId));
+    },
     [client, runMutation],
   );
 
@@ -599,6 +649,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     pruneWorktrees,
     initSubmodule,
     updateSubmodule,
+    selectReflogReference,
+    restoreReflogEntry,
     switchBranch,
     deleteBranch,
     renameBranch,

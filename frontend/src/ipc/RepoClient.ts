@@ -43,6 +43,17 @@ export interface SubmoduleInfo {
   headId: string | null;
 }
 
+export interface ReflogEntry {
+  reference: string;
+  oldId: string;
+  newId: string;
+  committerName: string;
+  committerEmail: string;
+  timestamp: number;
+  message: string;
+  summary: string | null;
+}
+
 export interface RemoteInfo {
   name: string;
   fetchUrl: string;
@@ -177,6 +188,9 @@ export interface RepoClient {
   listSubmodules(): Promise<SubmoduleInfo[]>;
   initSubmodule(path: string): Promise<void>;
   updateSubmodule(path: string, recursive: boolean): Promise<void>;
+  listReflogRefs(): Promise<string[]>;
+  getReflog(reference: string): Promise<ReflogEntry[]>;
+  restoreReflogEntry(reference: string, newId: string): Promise<void>;
   listRemotes(): Promise<RemoteInfo[]>;
   getCurrentUpstream(): Promise<UpstreamInfo | null>;
   getRemoteUpstreams(name: string): Promise<UpstreamInfo[]>;

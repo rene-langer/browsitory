@@ -11,6 +11,7 @@ import type {
   PullOutcome,
   RebasePlanCommit,
   RebasePlanEntry,
+  ReflogEntry,
   RebaseStepResult,
   RemoteInfo,
   RemoteAuthMode,
@@ -63,6 +64,10 @@ export const tauriRepoClient: RepoClient = {
   initSubmodule: (path: string) => invoke("init_submodule", { path }),
   updateSubmodule: (path: string, recursive: boolean) =>
     invoke("update_submodule", { path, recursive }),
+  listReflogRefs: () => invoke<string[]>("list_reflog_refs"),
+  getReflog: (reference: string) => invoke<ReflogEntry[]>("get_reflog", { reference }),
+  restoreReflogEntry: (reference: string, newId: string) =>
+    invoke("restore_reflog_entry", { reference, newId }),
   listRemotes: () => invoke<RemoteInfo[]>("list_remotes"),
   getCurrentUpstream: () => invoke<UpstreamInfo | null>("get_current_upstream"),
   getRemoteUpstreams: (name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { name }),

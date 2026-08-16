@@ -9,6 +9,7 @@ use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
+use git_core::reflog::ReflogEntry;
 use git_core::remote::{
     PullOutcome, RemoteInfo, TagInfo, TransferErrorKind, TransferOperation, UpstreamInfo,
 };
@@ -139,6 +140,18 @@ pub(crate) enum Command {
     UpdateSubmodule {
         path: String,
         recursive: bool,
+        reply: Sender<Result<(), String>>,
+    },
+    ListReflogRefs {
+        reply: Sender<Result<Vec<String>, String>>,
+    },
+    GetReflog {
+        reference: String,
+        reply: Sender<Result<Vec<ReflogEntry>, String>>,
+    },
+    RestoreReflogEntry {
+        reference: String,
+        new_id: String,
         reply: Sender<Result<(), String>>,
     },
     ListRemotes {
@@ -503,6 +516,26 @@ impl Worker {
                     } => {
                         let result = git_core::submodule::update_submodule(&repo, &path, recursive)
                             .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListReflogRefs { reply } => {
+                        let result =
+                            git_core::reflog::list_reflog_refs(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::GetReflog { reference, reply } => {
+                        let result = git_core::reflog::read_reflog(&repo, &reference)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::RestoreReflogEntry {
+                        reference,
+                        new_id,
+                        reply,
+                    } => {
+                        let result =
+                            git_core::reflog::restore_reflog_entry(&repo, &reference, &new_id)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::ListRemotes { reply } => {
@@ -1330,6 +1363,43 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
+    pub fn list_reflog_refs(&self) -> Result<Vec<String>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListReflogRefs { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_reflog(&self, reference: String) -> Result<Vec<ReflogEntry>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::GetReflog {
+                reference,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn restore_reflog_entry(&self, reference: String, new_id: String) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::RestoreReflogEntry {
+                reference,
+                new_id,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -1953,6 +2023,40 @@ mod tests {
             .expect("list initialized submodule");
         assert!(after[0].initialized);
         assert!(after[0].head_id.is_some());
+    }
+
+    #[test]
+    fn lists_and_restores_head_reflog_entries_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "first commit");
+        write_file(dir.path(), "file.txt", "v2");
+        commit_all(&repo, "second commit");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).expect("start worker");
+        let handle = worker.handle();
+
+        assert!(handle
+            .list_reflog_refs()
+            .expect("list reflog references")
+            .iter()
+            .any(|reference| reference == "HEAD"));
+        let entries = handle.get_reflog("HEAD".into()).expect("read HEAD reflog");
+        assert_eq!(entries[0].summary.as_deref(), Some("second commit"));
+        let first_commit = entries[1].new_id.clone();
+
+        handle
+            .restore_reflog_entry("HEAD".into(), first_commit.clone())
+            .expect("restore prior HEAD reflog entry");
+
+        assert_eq!(
+            repo.head()
+                .expect("read HEAD")
+                .target()
+                .expect("HEAD target")
+                .to_string(),
+            first_commit
+        );
     }
 
     #[test]

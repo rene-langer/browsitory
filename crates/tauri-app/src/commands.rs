@@ -155,6 +155,34 @@ impl From<git_core::submodule::SubmoduleInfo> for SubmoduleInfoDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReflogEntryDto {
+    pub reference: String,
+    pub old_id: String,
+    pub new_id: String,
+    pub committer_name: String,
+    pub committer_email: String,
+    pub timestamp: i64,
+    pub message: String,
+    pub summary: Option<String>,
+}
+
+impl From<git_core::reflog::ReflogEntry> for ReflogEntryDto {
+    fn from(entry: git_core::reflog::ReflogEntry) -> Self {
+        Self {
+            reference: entry.reference,
+            old_id: entry.old_id,
+            new_id: entry.new_id,
+            committer_name: entry.committer_name,
+            committer_email: entry.committer_email,
+            timestamp: entry.timestamp,
+            message: entry.message,
+            summary: entry.summary,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteInfoDto {
     pub name: String,
     pub fetch_url: String,
@@ -716,6 +744,32 @@ pub async fn update_submodule(
 }
 
 #[tauri::command]
+pub async fn list_reflog_refs(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    worker_handle(&state)?.list_reflog_refs()
+}
+
+#[tauri::command]
+pub async fn get_reflog(
+    reference: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ReflogEntryDto>, String> {
+    Ok(worker_handle(&state)?
+        .get_reflog(reference)?
+        .into_iter()
+        .map(ReflogEntryDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn restore_reflog_entry(
+    reference: String,
+    new_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.restore_reflog_entry(reference, new_id)
+}
+
+#[tauri::command]
 pub async fn create_branch(
     name: String,
     start_point: String,
@@ -1059,6 +1113,7 @@ mod tests {
     use std::path::PathBuf;
 
     use git_core::diff::DiffLineOrigin;
+    use git_core::reflog::ReflogEntry;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::status::StatusKind;
     use git_core::submodule::SubmoduleInfo;
@@ -1067,8 +1122,8 @@ mod tests {
     use crate::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, PullOutcomeDto, RemoteAuthModeDto, SubmoduleInfoDto,
-        WorktreeInfoDto,
+        transfer_event_payload, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
+        SubmoduleInfoDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1138,6 +1193,48 @@ mod tests {
                 "initialized": true,
                 "headId": "fedcba9876543210",
             })
+        );
+    }
+
+    #[test]
+    fn reflog_entry_dto_serializes_camel_case_fields_and_optional_summary() {
+        let with_summary = ReflogEntryDto::from(ReflogEntry {
+            reference: "HEAD".into(),
+            old_id: "1111111".into(),
+            new_id: "2222222".into(),
+            committer_name: "Test User".into(),
+            committer_email: "test@example.com".into(),
+            timestamp: 1_725_000_000,
+            message: "commit: second commit".into(),
+            summary: Some("second commit".into()),
+        });
+        let without_summary = ReflogEntryDto::from(ReflogEntry {
+            reference: "refs/heads/main".into(),
+            old_id: "2222222".into(),
+            new_id: "3333333".into(),
+            committer_name: "Test User".into(),
+            committer_email: "test@example.com".into(),
+            timestamp: 1_725_000_001,
+            message: "branch: reset".into(),
+            summary: None,
+        });
+
+        assert_eq!(
+            serde_json::to_value(with_summary).unwrap(),
+            serde_json::json!({
+                "reference": "HEAD",
+                "oldId": "1111111",
+                "newId": "2222222",
+                "committerName": "Test User",
+                "committerEmail": "test@example.com",
+                "timestamp": 1_725_000_000,
+                "message": "commit: second commit",
+                "summary": "second commit",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(without_summary).unwrap()["summary"],
+            serde_json::Value::Null
         );
     }
 
