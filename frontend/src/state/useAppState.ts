@@ -8,7 +8,7 @@ import type {
   GraphCommit,
   MergeOutcome,
   PullOutcome,
-  PullRequest,
+  PullRequestList,
   RebasePlanEntry,
   RebaseStepResult,
   RemoteAuthMode,
@@ -69,7 +69,12 @@ export interface AppState {
   upstream: UpstreamInfo | null;
   remoteUpstreams: Record<string, UpstreamInfo[]>;
   forgeRepositories: ForgeRepository[];
-  pullRequests: PullRequest[];
+  // Keyed by `remoteName` (see `PullRequestPanel.tsx`'s `ForgeRepositorySection`, one per
+  // remote) rather than a single flat list shared by every remote — otherwise, listing/creating
+  // against one remote clobbers or hides another remote's already-listed rows. A remote absent
+  // from this record simply hasn't been listed yet (or its listing failed — see
+  // `listPullRequests` below, which removes the key on failure rather than leaving stale rows).
+  pullRequests: Record<string, PullRequestList>;
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
@@ -143,6 +148,7 @@ export interface UseAppStateResult {
   // the only success/failure signal available to the caller. Matches `renameRemote`/
   // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern below.
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
+  openExternalUrl(url: string): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -163,7 +169,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     upstream: null,
     remoteUpstreams: {},
     forgeRepositories: [],
-    pullRequests: [],
+    pullRequests: {},
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
@@ -323,6 +329,9 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           repoPath: path,
           selectedRow: "uncommitted",
           pullOutcome: null,
+          // A different repository can have a remote with the same name (e.g. "origin") — its
+          // pull-request lists must not linger under that name for the newly opened repository.
+          pullRequests: {},
         }));
       });
     },
@@ -672,10 +681,22 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const listPullRequests = useCallback(
     async (remoteName: string, account: string) => {
       try {
-        const pullRequests = await client.listPullRequests(remoteName, account);
-        setState((prev) => ({ ...prev, pullRequests, error: null }));
+        const result = await client.listPullRequests(remoteName, account);
+        setState((prev) => ({
+          ...prev,
+          pullRequests: { ...prev.pullRequests, [remoteName]: result },
+          error: null,
+        }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: String(err) }));
+        // Drop this remote's entry (rather than leaving whatever was there before) so a failed
+        // re-list can't leave stale, possibly-successful-looking rows on screen under this
+        // remote's heading. Other remotes' entries are untouched — a failure listing remote B
+        // must never affect what's shown for remote A.
+        setState((prev) => {
+          const rest = { ...prev.pullRequests };
+          delete rest[remoteName];
+          return { ...prev, pullRequests: rest, error: String(err) };
+        });
       }
     },
     [client],
@@ -694,9 +715,23 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
       runMutationWithOutcome(async () => {
         const created = await client.createPullRequest(remoteName, account, pullRequest);
-        setState((prev) => ({ ...prev, pullRequests: [created, ...prev.pullRequests] }));
+        setState((prev) => {
+          const existing = prev.pullRequests[remoteName];
+          const updated: PullRequestList = {
+            pullRequests: [created, ...(existing?.pullRequests ?? [])],
+            truncated: existing?.truncated ?? false,
+          };
+          return {
+            ...prev,
+            pullRequests: { ...prev.pullRequests, [remoteName]: updated },
+          };
+        });
       }),
     [client, runMutationWithOutcome],
+  );
+  const openExternalUrl = useCallback(
+    (url: string) => client.openExternalUrl(url),
+    [client],
   );
 
   return {
@@ -751,6 +786,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     saveForgeToken,
     forgetForgeToken,
     createPullRequest,
+    openExternalUrl,
     refresh,
   };
 }

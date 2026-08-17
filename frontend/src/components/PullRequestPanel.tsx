@@ -3,16 +3,15 @@ import type {
   CreatePullRequest,
   ForgeProvider,
   ForgeRepository,
-  PullRequest,
+  PullRequestList,
 } from "../ipc/RepoClient";
 
 interface ForgeRepositorySectionProps {
   repository: ForgeRepository;
-  // `null` means "not the currently active listing" — the section renders no rows even if the
-  // shared `pullRequests` array in app state happens to still hold data from a previous listing
-  // (a different remote, or this remote before its token was forgotten). See `PullRequestPanel`
-  // below for how `activeRemote` decides this.
-  pullRequests: PullRequest[] | null;
+  // `undefined` means "never listed for this remote yet". A per-remote entry — see
+  // `useAppState.ts`'s `AppState.pullRequests`, keyed by `remoteName` so listing/creating
+  // against one remote can never clobber or hide another remote's rows.
+  pullRequests: PullRequestList | undefined;
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
   onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
@@ -20,6 +19,7 @@ interface ForgeRepositorySectionProps {
   // `createPullRequest` doc comment) — `submitCreate` below uses this to decide whether the
   // form is safe to clear, per the brief's "clears only the non-secret form fields on success".
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
+  onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
 }
 
@@ -30,6 +30,7 @@ function ForgeRepositorySection({
   onSaveForgeToken,
   onForgetForgeToken,
   onCreatePullRequest,
+  onOpenExternalUrl,
   operationDisabled,
 }: ForgeRepositorySectionProps) {
   const tokenRef = useRef<HTMLInputElement>(null);
@@ -40,6 +41,11 @@ function ForgeRepositorySection({
   const [description, setDescription] = useState("");
   const [sourceBranch, setSourceBranch] = useState("");
   const [targetBranch, setTargetBranch] = useState("");
+  // Hides this section's rows immediately after its token is forgotten, even though
+  // `state.pullRequests[repository.remoteName]` itself isn't cleared until the next list call —
+  // showing rows fetched with a token the user just forgot would be misleading. Cleared again by
+  // the next successful/attempted listing.
+  const [tokenForgotten, setTokenForgotten] = useState(false);
 
   const clearToken = () => {
     if (tokenRef.current !== null) tokenRef.current.value = "";
@@ -65,6 +71,7 @@ function ForgeRepositorySection({
     }
     try {
       await onForgetForgeToken(repository.provider, acct);
+      setTokenForgotten(true);
     } finally {
       clearToken();
     }
@@ -80,6 +87,7 @@ function ForgeRepositorySection({
     setListing(true);
     try {
       await onListPullRequests(repository.remoteName, acct);
+      setTokenForgotten(false);
     } finally {
       setListing(false);
     }
@@ -119,6 +127,7 @@ function ForgeRepositorySection({
   };
 
   const headingId = `pull-request-section-${repository.remoteName}`;
+  const visibleRows = tokenForgotten ? null : (pullRequests?.pullRequests ?? null);
 
   return (
     <section aria-labelledby={headingId}>
@@ -150,16 +159,25 @@ function ForgeRepositorySection({
       <button type="button" disabled={listing} onClick={() => void listPullRequests()}>
         List pull requests
       </button>
-      {pullRequests !== null && (
-        <ul aria-label={`Pull requests for ${repository.remoteName}`}>
-          {pullRequests.map((pullRequest) => (
-            <li key={pullRequest.id}>
-              #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
-              {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}{" "}
-              <a href={pullRequest.url}>{pullRequest.url}</a>
-            </li>
-          ))}
-        </ul>
+      {visibleRows !== null && (
+        <>
+          {!tokenForgotten && pullRequests?.truncated === true && (
+            <p role="status">
+              Showing the first {visibleRows.length} pull requests — more may be available on the provider.
+            </p>
+          )}
+          <ul aria-label={`Pull requests for ${repository.remoteName}`}>
+            {visibleRows.map((pullRequest) => (
+              <li key={pullRequest.id}>
+                #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
+                {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}{" "}
+                <button type="button" onClick={() => void onOpenExternalUrl(pullRequest.url)}>
+                  {pullRequest.url}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <form onSubmit={submitCreate} aria-label={`Create pull request for ${repository.remoteName}`}>
@@ -192,10 +210,11 @@ export function PullRequestPanel({
   onSaveForgeToken,
   onForgetForgeToken,
   onCreatePullRequest,
+  onOpenExternalUrl,
   operationDisabled,
 }: {
   forgeRepositories: ForgeRepository[];
-  pullRequests: PullRequest[];
+  pullRequests: Record<string, PullRequestList>;
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
   onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
@@ -204,15 +223,9 @@ export function PullRequestPanel({
   // `submitCreate` uses it to decide whether the form is safe to clear, per the brief's
   // "clears only the non-secret form fields on success".
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
+  onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
 }) {
-  // Which forge repository's `pullRequests` prop is currently valid to show. `state.pullRequests`
-  // in app state is a single flat list shared by every remote (see useAppState.ts's
-  // `listPullRequests`/`createPullRequest`), so switching which remote's list was last requested,
-  // or forgetting the token backing the currently-shown list, has to be tracked here to avoid
-  // displaying another remote's stale pull requests under this one's heading.
-  const [activeRemote, setActiveRemote] = useState<string | null>(null);
-
   if (forgeRepositories.length === 0) {
     return (
       <section aria-labelledby="pull-request-panel-heading">
@@ -229,17 +242,12 @@ export function PullRequestPanel({
         <ForgeRepositorySection
           key={repository.remoteName}
           repository={repository}
-          pullRequests={activeRemote === repository.remoteName ? pullRequests : null}
-          onListPullRequests={async (remoteName, account) => {
-            setActiveRemote(remoteName);
-            await onListPullRequests(remoteName, account);
-          }}
-          onForgetForgeToken={async (provider, account) => {
-            await onForgetForgeToken(provider, account);
-            setActiveRemote((current) => (current === repository.remoteName ? null : current));
-          }}
+          pullRequests={pullRequests[repository.remoteName]}
+          onListPullRequests={onListPullRequests}
+          onForgetForgeToken={onForgetForgeToken}
           onSaveForgeToken={onSaveForgeToken}
           onCreatePullRequest={onCreatePullRequest}
+          onOpenExternalUrl={onOpenExternalUrl}
           operationDisabled={operationDisabled}
         />
       ))}

@@ -70,6 +70,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     forgetForgeToken: async () => unimplemented(),
     listPullRequests: async () => unimplemented(),
     createPullRequest: async () => unimplemented(),
+    openExternalUrl: async () => unimplemented(),
     getWorkingDiff: async () => unimplemented(),
     getCommitDiff: async () => unimplemented(),
     getCommitFiles: async () => unimplemented(),

@@ -34,11 +34,12 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
   return render(
     <PullRequestPanel
       forgeRepositories={[githubRepo]}
-      pullRequests={[]}
+      pullRequests={{}}
       onListPullRequests={vi.fn().mockResolvedValue(undefined)}
       onSaveForgeToken={vi.fn().mockResolvedValue(undefined)}
       onForgetForgeToken={vi.fn().mockResolvedValue(undefined)}
       onCreatePullRequest={vi.fn().mockResolvedValue(true)}
+      onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
       {...overrides}
     />,
@@ -137,7 +138,10 @@ describe("PullRequestPanel", () => {
 
   it("lists pull requests for the account and renders provider-neutral rows", async () => {
     const onListPullRequests = vi.fn().mockResolvedValue(undefined);
-    renderPanel({ onListPullRequests, pullRequests: [openPullRequest] });
+    renderPanel({
+      onListPullRequests,
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
 
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
     fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
@@ -150,6 +154,75 @@ describe("PullRequestPanel", () => {
     expect(row.closest("li")).toHaveTextContent("#7");
     expect(row.closest("li")).toHaveTextContent("feature/pr");
     expect(row.closest("li")).toHaveTextContent("main");
+  });
+
+  it("shows a 'more available' notice when the listing was truncated", async () => {
+    renderPanel({
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: true } },
+    });
+
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
+    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/more may be available/i);
+  });
+
+  it("shows no 'more available' notice when the listing was not truncated", async () => {
+    renderPanel({
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
+
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
+    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
+
+    await screen.findByText(/Add pull request support/);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("opens a pull request's URL in the external browser instead of navigating the app", async () => {
+    const onOpenExternalUrl = vi.fn().mockResolvedValue(undefined);
+    renderPanel({
+      onOpenExternalUrl,
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
+
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
+    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
+
+    const link = await screen.findByRole("button", { name: openPullRequest.url });
+    expect(link.tagName).toBe("BUTTON");
+    fireEvent.click(link);
+
+    await waitFor(() => {
+      expect(onOpenExternalUrl).toHaveBeenCalledWith(openPullRequest.url);
+    });
+  });
+
+  it("shows each repository's own pull requests independently, keyed by remote", () => {
+    const bitbucketPullRequest: PullRequest = {
+      id: "12",
+      number: 12,
+      title: "Add Bitbucket support",
+      url: "https://bitbucket.org/acme/widget/pull-requests/12",
+      author: "rene",
+      sourceBranch: "feature/bb",
+      targetBranch: "main",
+      state: "open",
+    };
+    renderPanel({
+      forgeRepositories: [githubRepo, bitbucketRepo],
+      pullRequests: {
+        origin: { pullRequests: [openPullRequest], truncated: false },
+        "bb-origin": { pullRequests: [bitbucketPullRequest], truncated: false },
+      },
+    });
+
+    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
+    expect(within(githubSection).getByText(/Add pull request support/)).toBeInTheDocument();
+    expect(within(githubSection).queryByText(/Add Bitbucket support/)).not.toBeInTheDocument();
+    expect(within(bitbucketSection).getByText(/Add Bitbucket support/)).toBeInTheDocument();
+    expect(within(bitbucketSection).queryByText(/Add pull request support/)).not.toBeInTheDocument();
   });
 
   it("disables List pull requests while a listing request is in flight", async () => {
@@ -174,7 +247,11 @@ describe("PullRequestPanel", () => {
   it("stops showing pull requests for a repository once its token is forgotten", async () => {
     const onListPullRequests = vi.fn().mockResolvedValue(undefined);
     const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
-    renderPanel({ onListPullRequests, onForgetForgeToken, pullRequests: [openPullRequest] });
+    renderPanel({
+      onListPullRequests,
+      onForgetForgeToken,
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
 
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
     fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));

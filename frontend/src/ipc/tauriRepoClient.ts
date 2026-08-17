@@ -13,6 +13,7 @@ import type {
   MergeOutcome,
   PullOutcome,
   PullRequest,
+  PullRequestList,
   RebasePlanCommit,
   RebasePlanEntry,
   ReflogEntry,
@@ -163,9 +164,10 @@ export const tauriRepoClient: RepoClient = {
   forgetForgeToken: (provider: ForgeProvider, account: string) =>
     invoke("forget_forge_token", { provider, account }),
   listPullRequests: (remoteName: string, account: string) =>
-    invoke<PullRequest[]>("list_pull_requests", { remoteName, account }),
+    invoke<PullRequestList>("list_pull_requests", { remoteName, account }),
   createPullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) =>
     invoke<PullRequest>("create_pull_request", { remoteName, account, pullRequest }),
+  openExternalUrl: (url: string) => invoke("open_external_url", { url }),
 };
 
 export function validateRemoteUrls(fetchUrl: string, pushUrl: string | null) {
