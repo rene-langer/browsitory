@@ -2,6 +2,13 @@
 
 mod commands;
 mod credentials;
+// Not yet wired into `commands.rs`/`worker.rs`/the invoke handler below — that's a later task
+// in this plan (Tauri command + worker `Command` variants for PR listing/creation). The
+// `#[allow(dead_code)]` only suppresses "never constructed"/"never used" lints for this bin
+// crate's non-test build in the meantime; `pull_requests.rs`'s own inline tests already
+// exercise every item.
+#[allow(dead_code)]
+mod pull_requests;
 mod worker;
 
 use commands::{

@@ -1,5 +1,6 @@
 use std::fmt;
 
+use git_core::forge::ForgeProvider;
 use git_core::remote::{
     CredentialProvider, RemoteAuthMode, CREDENTIAL_STORE_FAILURE_ERROR, MISSING_CREDENTIAL_ERROR,
     SSH_AGENT_FAILURE_ERROR,
@@ -7,7 +8,24 @@ use git_core::remote::{
 use url::Url;
 
 const SERVICE_NAME: &str = "com.browsitory.git";
+// Deliberately a different service name than `SERVICE_NAME` above, and the account is further
+// namespaced with a `forge:<provider>:` prefix: a saved Git HTTPS transport credential must
+// never collide with, or be mistaken for, a forge (GitHub/Bitbucket) API token. See
+// `docs/superpowers/specs/2026-08-15-browsitory-phase4-design.md`'s "Pull requests" section.
+// `#[allow(dead_code)]` below: not yet called from `commands.rs` (Tauri commands for saving/
+// looking up/forgetting a forge token are a later task in this plan) — only this module's own
+// tests exercise the forge-token key/service methods for now.
+#[allow(dead_code)]
+const FORGE_SERVICE_NAME: &str = "com.browsitory.forge";
 const CREDENTIAL_LOOKUP_FAILURE_ERROR: &str = "credential lookup failed";
+
+#[allow(dead_code)]
+fn forge_provider_slug(provider: ForgeProvider) -> &'static str {
+    match provider {
+        ForgeProvider::GitHub => "github",
+        ForgeProvider::Bitbucket => "bitbucket",
+    }
+}
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub service: String,
@@ -36,6 +54,14 @@ impl CredentialKey {
             service: SERVICE_NAME.to_owned(),
             account: format!("https://{host}{port}/{username}"),
         })
+    }
+
+    #[allow(dead_code)]
+    pub fn for_forge(provider: ForgeProvider, account: &str) -> Self {
+        Self {
+            service: FORGE_SERVICE_NAME.to_owned(),
+            account: format!("forge:{}:{account}", forge_provider_slug(provider)),
+        }
     }
 }
 
@@ -142,6 +168,43 @@ impl<S: CredentialStore> CredentialService<S> {
         let key = CredentialKey::for_https(url, username)?;
         self.store.delete(&key)
     }
+
+    /// Saves a forge (GitHub/Bitbucket) API token under its own keychain namespace, separate
+    /// from any Git HTTPS transport credential. Never reads or reuses an HTTPS token: the user
+    /// must explicitly save a provider token for PR operations.
+    // `#[allow(dead_code)]` on these three: not yet called from `commands.rs`/`worker.rs` (a
+    // later task in this plan wires PR/token Tauri commands) — only this module's own tests
+    // exercise them for now.
+    #[allow(dead_code)]
+    pub fn save_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+        token: &str,
+    ) -> Result<(), CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
+        self.store.set(&key, token)
+    }
+
+    #[allow(dead_code)]
+    pub fn lookup_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+    ) -> Result<Option<String>, CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
+        self.store.get(&key)
+    }
+
+    #[allow(dead_code)]
+    pub fn forget_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+    ) -> Result<(), CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
+        self.store.delete(&key)
+    }
 }
 
 pub(crate) trait SshAgent {
@@ -233,6 +296,7 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
+    use git_core::forge::ForgeProvider;
     use git_core::remote::{CredentialProvider, RemoteAuthMode};
 
     use super::{
@@ -326,6 +390,67 @@ mod tests {
         service.forget_https(remote_url, "rene").unwrap();
         assert!(service
             .lookup_https(remote_url, Some("rene"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn forge_token_key_uses_a_service_and_account_distinct_from_the_https_git_key() {
+        let forge_key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+        let https_key =
+            CredentialKey::for_https("https://github.com/acme/widget.git", "rene").unwrap();
+
+        assert_ne!(forge_key.service, https_key.service);
+        assert_ne!(forge_key.account, https_key.account);
+        assert_eq!(forge_key.service, "com.browsitory.forge");
+        assert_eq!(forge_key.account, "forge:github:rene");
+    }
+
+    #[test]
+    fn forge_token_keys_are_scoped_per_provider() {
+        let github_key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+        let bitbucket_key = CredentialKey::for_forge(ForgeProvider::Bitbucket, "rene");
+
+        assert_ne!(github_key.account, bitbucket_key.account);
+        assert_eq!(bitbucket_key.account, "forge:bitbucket:rene");
+    }
+
+    #[test]
+    fn saves_reads_and_forgets_a_forge_token_using_the_dedicated_namespace() {
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+
+        service
+            .save_forge_token(ForgeProvider::GitHub, "rene", "gh-token-123")
+            .unwrap();
+        assert_eq!(
+            service
+                .lookup_forge_token(ForgeProvider::GitHub, "rene")
+                .unwrap(),
+            Some("gh-token-123".to_string())
+        );
+
+        service
+            .forget_forge_token(ForgeProvider::GitHub, "rene")
+            .unwrap();
+        assert!(service
+            .lookup_forge_token(ForgeProvider::GitHub, "rene")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_saved_https_credential_is_never_returned_by_the_forge_token_lookup() {
+        // A saved Git HTTPS token must never be implicitly reused for PR APIs — the two
+        // keychain namespaces must stay fully separate even for the same account string.
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        service
+            .save_https("https://github.com/acme/widget.git", "rene", "https-token")
+            .unwrap();
+
+        assert!(service
+            .lookup_forge_token(ForgeProvider::GitHub, "rene")
             .unwrap()
             .is_none());
     }
