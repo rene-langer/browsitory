@@ -272,23 +272,58 @@ fn extract_validation_message(body: &str) -> String {
 // instead, precisely so they never need a mock HTTP server). Black-box E2E coverage
 // (`e2e/specs/pull-requests.spec.ts`) drives the actual built binary through WebDriver and has
 // no seam inside the process to substitute a fake `ForgeApi`, so it needs the HTTP destination
-// itself to be redirectable to a loopback fixture server. These env vars are that redirect,
-// read fresh on every request (no caching) and consulted nowhere else in the app. Unset (the
-// production default), behavior is byte-identical to the hardcoded hosts below. Mirrors the
-// existing `BROWSITORY_E2E_CREDENTIAL_KEY`/`_CERT` pattern `e2e/wdio.conf.ts` uses for the Git
-// HTTPS credential E2E flow.
-fn github_api_base() -> String {
-    std::env::var("BROWSITORY_FORGE_GITHUB_API_BASE_URL")
-        .ok()
+// itself to be redirectable to a loopback fixture server.
+//
+// SECURITY: the env-var override below is gated behind the `forge-fixture-override` Cargo
+// feature, which is NOT enabled by default and must never be enabled for a release build — it
+// is only turned on by the E2E build invocation (`cargo build --workspace --features
+// tauri-app/custom-protocol,tauri-app/forge-fixture-override`, mirroring how `custom-protocol`
+// is already an opt-in flag in this crate; see `Cargo.toml`). Without the feature, these
+// functions are the plain hardcoded hosts below and never call `std::env::var` at all — the env
+// vars have *no effect* and no code path reads them, so nobody who can set process environment
+// variables before the shipped app launches can silently redirect a user's real GitHub/Bitbucket
+// traffic (and their saved forge token, sent as `Authorization: Bearer <token>`) to another
+// host. `cargo build --workspace --release` (no `--features`) was used to confirm this.
+// Pure, env-free precedence rule shared by both accessors below: a present, non-empty override
+// wins, otherwise fall back to `default`. Split out so the override-precedence logic (including
+// the "empty string doesn't count as set" rule) can be unit-tested with plain values — never by
+// mutating the real process environment, which `std::env::set_var`/`remove_var` calls would race
+// against every other test in this binary that (under the `forge-fixture-override` feature) also
+// calls `github_api_base`/`bitbucket_api_base` concurrently on another test thread. See
+// `crates/tauri-app/src/pull_requests.rs`'s test module for that unit coverage, and
+// `e2e/specs/pull-requests.spec.ts` for genuine end-to-end coverage of the real env var actually
+// being read by a running process.
+#[cfg(feature = "forge-fixture-override")]
+fn resolve_api_base(env_override: Option<String>, default: &str) -> String {
+    env_override
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "https://api.github.com".to_string())
+        .unwrap_or_else(|| default.to_string())
 }
 
+#[cfg(feature = "forge-fixture-override")]
+fn github_api_base() -> String {
+    resolve_api_base(
+        std::env::var("BROWSITORY_FORGE_GITHUB_API_BASE_URL").ok(),
+        "https://api.github.com",
+    )
+}
+
+#[cfg(not(feature = "forge-fixture-override"))]
+fn github_api_base() -> String {
+    "https://api.github.com".to_string()
+}
+
+#[cfg(feature = "forge-fixture-override")]
 fn bitbucket_api_base() -> String {
-    std::env::var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "https://api.bitbucket.org/2.0".to_string())
+    resolve_api_base(
+        std::env::var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL").ok(),
+        "https://api.bitbucket.org/2.0",
+    )
+}
+
+#[cfg(not(feature = "forge-fixture-override"))]
+fn bitbucket_api_base() -> String {
+    "https://api.bitbucket.org/2.0".to_string()
 }
 
 fn build_list_request(repository: &ForgeRepository, token: &str) -> ForgeHttpRequest {
@@ -594,42 +629,85 @@ mod tests {
         ]
     }"#;
 
+    // Only compiled (and only meaningful) with the `forge-fixture-override` feature enabled —
+    // without it, `github_api_base`/`bitbucket_api_base` are the plain hardcoded-host functions
+    // and don't reference an env var at all, and `resolve_api_base` doesn't exist. Deliberately
+    // tests the pure `resolve_api_base` helper with plain values rather than mutating the real
+    // process environment: this test module runs with the default multi-threaded test harness,
+    // and every other test that calls `list_pull_requests`/`create_pull_request` under this same
+    // feature also calls `github_api_base`/`bitbucket_api_base` — a `std::env::set_var` here
+    // would be visible, mid-test, to those other tests running concurrently on other threads,
+    // making them flaky. `e2e/specs/pull-requests.spec.ts` is what actually exercises the real
+    // env var being read by a running process end-to-end. Run with `cargo test -p tauri-app
+    // --features forge-fixture-override pull_requests::`.
+    #[cfg(feature = "forge-fixture-override")]
     #[test]
-    fn the_api_base_url_env_overrides_default_to_the_real_forge_hosts() {
-        // SAFETY / hygiene: no other test in this module reads either env var, so this doesn't
-        // race with them; both are cleared again before returning so a later test run (or a
-        // parallel test elsewhere in this binary that happened to read them) never observes a
-        // value this test set. See this module's `github_api_base`/`bitbucket_api_base` doc
-        // comment for why this seam exists at all.
-        assert!(std::env::var("BROWSITORY_FORGE_GITHUB_API_BASE_URL").is_err());
-        assert!(std::env::var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL").is_err());
+    fn resolve_api_base_prefers_a_present_non_empty_override_over_the_default() {
+        assert_eq!(
+            resolve_api_base(
+                Some("http://127.0.0.1:9".to_string()),
+                "https://api.github.com"
+            ),
+            "http://127.0.0.1:9"
+        );
+    }
+
+    #[cfg(feature = "forge-fixture-override")]
+    #[test]
+    fn resolve_api_base_falls_back_to_the_default_when_unset_or_empty() {
+        assert_eq!(
+            resolve_api_base(None, "https://api.github.com"),
+            "https://api.github.com"
+        );
+        assert_eq!(
+            resolve_api_base(Some(String::new()), "https://api.github.com"),
+            "https://api.github.com"
+        );
+    }
+
+    #[cfg(feature = "forge-fixture-override")]
+    #[test]
+    fn github_and_bitbucket_api_base_default_to_the_real_hosts_when_unset() {
+        // Guards the actual env var *names* `github_api_base`/`bitbucket_api_base` read — the
+        // above two tests cover the override-precedence logic in isolation, but not that these
+        // two functions are wired to the right names. Reads only (never sets/removes), so this
+        // is race-free regardless of what any other concurrently-running test does to the real
+        // environment: as long as nothing else in this test binary ever sets
+        // `BROWSITORY_FORGE_{GITHUB,BITBUCKET}_API_BASE_URL` (true — this is the only place in
+        // the crate that reads them, and no test sets them), both resolve to their defaults.
         assert_eq!(github_api_base(), "https://api.github.com");
         assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
+    }
 
-        // SAFETY: `pull_requests` tests never spawn threads, so no other test observes this
-        // process's environment mutating concurrently with this one.
+    // The security-relevant half of the above: without the feature (the only way this crate is
+    // ever built for release — see `Cargo.toml`'s `forge-fixture-override` doc comment), setting
+    // either env var has *zero effect*. Guards against a future edit accidentally moving the
+    // `#[cfg]` gate or the env lookup back to always-on.
+    #[cfg(not(feature = "forge-fixture-override"))]
+    #[test]
+    fn the_api_base_url_env_var_has_no_effect_without_the_fixture_override_feature() {
+        // SAFETY: `pull_requests` tests never spawn threads.
         unsafe {
-            std::env::set_var("BROWSITORY_FORGE_GITHUB_API_BASE_URL", "http://127.0.0.1:9");
+            std::env::set_var(
+                "BROWSITORY_FORGE_GITHUB_API_BASE_URL",
+                "http://attacker.example",
+            );
             std::env::set_var(
                 "BROWSITORY_FORGE_BITBUCKET_API_BASE_URL",
-                "http://127.0.0.1:9",
+                "http://attacker.example",
             );
         }
-        assert_eq!(github_api_base(), "http://127.0.0.1:9");
-        assert_eq!(bitbucket_api_base(), "http://127.0.0.1:9");
-
+        assert_eq!(github_api_base(), "https://api.github.com");
+        assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
         let request = build_list_request(&github_repo(), "token");
         assert_eq!(
             request.url,
-            "http://127.0.0.1:9/repos/acme/widget/pulls?state=open"
+            "https://api.github.com/repos/acme/widget/pulls?state=open"
         );
-
         unsafe {
             std::env::remove_var("BROWSITORY_FORGE_GITHUB_API_BASE_URL");
             std::env::remove_var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL");
         }
-        assert_eq!(github_api_base(), "https://api.github.com");
-        assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
     }
 
     #[test]

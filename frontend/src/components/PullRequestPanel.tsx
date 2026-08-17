@@ -16,7 +16,10 @@ interface ForgeRepositorySectionProps {
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
   onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
-  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<void>;
+  // Resolves `true` only when the create actually succeeded (see `useAppState.ts`'s
+  // `createPullRequest` doc comment) — `submitCreate` below uses this to decide whether the
+  // form is safe to clear, per the brief's "clears only the non-secret form fields on success".
+  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
   operationDisabled: boolean;
 }
 
@@ -93,16 +96,23 @@ function ForgeRepositorySection({
     }
     setCreating(true);
     try {
-      await onCreatePullRequest(repository.remoteName, acct, {
+      const succeeded = await onCreatePullRequest(repository.remoteName, acct, {
         title: trimmedTitle,
         description: description.trim() === "" ? null : description.trim(),
         sourceBranch: trimmedSource,
         targetBranch: trimmedTarget,
       });
-      setTitle("");
-      setDescription("");
-      setSourceBranch("");
-      setTargetBranch("");
+      // Only clear the form when the create actually went through — `useAppState.ts`'s
+      // `createPullRequest` swallows a failed request into `state.error` rather than
+      // rejecting, so `succeeded` is the only way to tell a failure from a success here. A
+      // failed submission must leave the user's typed title/description/branches in place
+      // rather than silently discarding them.
+      if (succeeded) {
+        setTitle("");
+        setDescription("");
+        setSourceBranch("");
+        setTargetBranch("");
+      }
     } finally {
       setCreating(false);
     }
@@ -189,7 +199,11 @@ export function PullRequestPanel({
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
   onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
-  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<void>;
+  // Resolves `true` only when the create actually succeeded (see `useAppState.ts`'s
+  // `createPullRequest` doc comment); forwarded to each `ForgeRepositorySection`, whose
+  // `submitCreate` uses it to decide whether the form is safe to clear, per the brief's
+  // "clears only the non-secret form fields on success".
+  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
   operationDisabled: boolean;
 }) {
   // Which forge repository's `pullRequests` prop is currently valid to show. `state.pullRequests`

@@ -17,6 +17,17 @@ tauri-build = { version = "2", features = [] }
 # orchestration layer; a bare `cargo build` needs it passed explicitly, e.g.
 # `cargo build --workspace --features tauri-app/custom-protocol`.
 custom-protocol = ["tauri/custom-protocol"]
+# Lets `crates/tauri-app/src/pull_requests.rs`'s GitHub/Bitbucket API base URLs be redirected via
+# `BROWSITORY_FORGE_GITHUB_API_BASE_URL`/`BROWSITORY_FORGE_BITBUCKET_API_BASE_URL`, so
+# `e2e/specs/pull-requests.spec.ts` can point the real built binary at a local loopback fixture
+# server instead of the real GitHub/Bitbucket Cloud APIs. NOT enabled by default and must never
+# ship in a release build: without it, the env vars are never even read (see that module's
+# `github_api_base`/`bitbucket_api_base`), so nobody who can set process environment variables
+# before a shipped binary launches can redirect a user's real forge traffic (and their saved
+# token, sent as `Authorization: Bearer <token>`) to another host. Only the E2E build passes
+# this, e.g. `cargo build --workspace --features
+# tauri-app/custom-protocol,tauri-app/forge-fixture-override`.
+forge-fixture-override = []
 
 [dependencies]
 tauri = { version = "2", features = [] }

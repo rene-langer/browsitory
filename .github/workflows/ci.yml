@@ -92,7 +92,11 @@ jobs:
         # `custom-protocol` feature comment), which would make the binary load the Vite dev
         # server instead of the just-built frontend/dist above — fatal here, since no dev
         # server is running. `--features tauri-app/custom-protocol` embeds frontend/dist instead.
-        run: cargo build --workspace --features tauri-app/custom-protocol
+        # `tauri-app/forge-fixture-override` (also opt-in, also documented on its Cargo.toml
+        # feature entry) lets `e2e/specs/pull-requests.spec.ts` redirect the GitHub/Bitbucket API
+        # calls to a local fixture server instead of the real hosts — never enabled outside this
+        # E2E build.
+        run: cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
       - name: Install e2e dependencies
         working-directory: e2e
         run: pnpm install --frozen-lockfile
