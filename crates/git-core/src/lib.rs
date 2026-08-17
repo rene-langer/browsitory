@@ -2,6 +2,7 @@ pub mod blame;
 pub mod branch;
 pub mod commit;
 pub mod diff;
+pub mod forge;
 pub mod graph;
 pub mod merge;
 pub mod rebase;
