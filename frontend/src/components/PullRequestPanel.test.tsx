@@ -38,7 +38,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       onListPullRequests={vi.fn().mockResolvedValue(undefined)}
       onSaveForgeToken={vi.fn().mockResolvedValue(undefined)}
       onForgetForgeToken={vi.fn().mockResolvedValue(undefined)}
-      onCreatePullRequest={vi.fn().mockResolvedValue(undefined)}
+      onCreatePullRequest={vi.fn().mockResolvedValue(true)}
       operationDisabled={false}
       {...overrides}
     />,
@@ -188,7 +188,7 @@ describe("PullRequestPanel", () => {
   });
 
   it("submits a new pull request with the exact fields and clears only the non-secret fields", async () => {
-    const onCreatePullRequest = vi.fn().mockResolvedValue(undefined);
+    const onCreatePullRequest = vi.fn().mockResolvedValue(true);
     renderPanel({ onCreatePullRequest });
 
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
@@ -218,7 +218,7 @@ describe("PullRequestPanel", () => {
   });
 
   it("sends a null description when the description field is left blank", async () => {
-    const onCreatePullRequest = vi.fn().mockResolvedValue(undefined);
+    const onCreatePullRequest = vi.fn().mockResolvedValue(true);
     renderPanel({ onCreatePullRequest });
 
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
@@ -235,6 +235,34 @@ describe("PullRequestPanel", () => {
         targetBranch: "main",
       });
     });
+  });
+
+  it("does not clear the creation form when the create call fails", async () => {
+    // `useAppState.ts`'s `createPullRequest` swallows a failed request into `state.error`
+    // rather than rejecting, resolving `false` instead — this is what a failed submission looks
+    // like to the component in practice, not a rejected promise.
+    const onCreatePullRequest = vi.fn().mockResolvedValue(false);
+    renderPanel({ onCreatePullRequest });
+
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Add feature" } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Implements the thing" } });
+    fireEvent.change(screen.getByLabelText("Source branch"), { target: { value: "feature/pr" } });
+    fireEvent.change(screen.getByLabelText("Target branch"), { target: { value: "main" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+
+    await waitFor(() => {
+      expect(onCreatePullRequest).toHaveBeenCalledWith("origin", "rene", {
+        title: "Add feature",
+        description: "Implements the thing",
+        sourceBranch: "feature/pr",
+        targetBranch: "main",
+      });
+    });
+    expect(screen.getByLabelText("Title")).toHaveValue("Add feature");
+    expect(screen.getByLabelText("Description")).toHaveValue("Implements the thing");
+    expect(screen.getByLabelText("Source branch")).toHaveValue("feature/pr");
+    expect(screen.getByLabelText("Target branch")).toHaveValue("main");
   });
 
   it("disables Save/Forget/Create controls while another repository operation is active", () => {

@@ -137,7 +137,12 @@ export interface UseAppStateResult {
   listPullRequests(remoteName: string, account: string): Promise<void>;
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
-  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<void>;
+  // `Promise<boolean>` (unlike the other forge actions above) so `PullRequestPanel` can tell a
+  // failed creation from a successful one and only clear its form on success — `runMutation`
+  // swallows the underlying error into `state.error` rather than rejecting, so the boolean is
+  // the only success/failure signal available to the caller. Matches `renameRemote`/
+  // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern below.
+  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   refresh(): Promise<void>;
 }
 
@@ -686,12 +691,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
   const createPullRequest = useCallback(
-    (remoteName: string, account: string, pullRequest: CreatePullRequest) =>
-      runMutation(async () => {
+    (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
+      runMutationWithOutcome(async () => {
         const created = await client.createPullRequest(remoteName, account, pullRequest);
         setState((prev) => ({ ...prev, pullRequests: [created, ...prev.pullRequests] }));
       }),
-    [client, runMutation],
+    [client, runMutationWithOutcome],
   );
 
   return {

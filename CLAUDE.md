@@ -28,7 +28,7 @@ Run a single Rust test: `cargo test -p git-core --test status` or
 # E2E (tauri-driver + WebdriverIO), from the repo root:
 cargo install tauri-driver --locked               # once, if not already installed
 cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
-cargo build --workspace --features tauri-app/custom-protocol
+cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
 cd e2e
 pnpm install
 pnpm test                                          # spawns/reaps tauri-driver itself; needs a display (xvfb-run on headless CI)
