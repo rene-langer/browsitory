@@ -28,6 +28,7 @@ config = { path = "../config" }
 git2 = "0.21"
 keyring = { version = "4.1.6", features = ["v1"] }
 url = "2.5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 
 [dev-dependencies]
 tempfile = "3"
