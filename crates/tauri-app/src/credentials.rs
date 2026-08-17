@@ -89,14 +89,24 @@ pub trait CredentialStore {
     fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError>;
 }
 
+// Cfg-gated out (rather than merely unused) under `forge-fixture-override`: `Worker::spawn`
+// never constructs this type in that build (see `worker.rs` and `InMemoryCredentialStore`'s doc
+// comment below), so removing it from compilation entirely under the feature is a stronger,
+// structural guarantee that the E2E binary can't touch the real OS keychain — not just "nothing
+// currently calls it," but "the type doesn't exist in this binary" — and it also avoids an
+// unused-code warning (which `-D warnings` in CI would turn into a hard failure) for a type that
+// really is dead code in that build by design.
+#[cfg(not(feature = "forge-fixture-override"))]
 pub struct KeyringCredentialStore;
 
+#[cfg(not(feature = "forge-fixture-override"))]
 impl KeyringCredentialStore {
     fn entry(&self, key: &CredentialKey) -> Result<keyring::Entry, CredentialStoreError> {
         keyring::Entry::new(&key.service, &key.account).map_err(|_| CredentialStoreError::Keychain)
     }
 }
 
+#[cfg(not(feature = "forge-fixture-override"))]
 impl CredentialStore for KeyringCredentialStore {
     fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
         match self.entry(key)?.get_password() {
@@ -117,6 +127,55 @@ impl CredentialStore for KeyringCredentialStore {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(CredentialStoreError::Keychain),
         }
+    }
+}
+
+/// An in-memory `CredentialStore`, used only when this crate is built with the
+/// `forge-fixture-override` Cargo feature (see `Cargo.toml`'s doc comment on that feature, and
+/// `pull_requests.rs`'s API-base-URL override — this credential-store swap is the same
+/// pattern's counterpart for the OS-keychain seam). `e2e/specs/pull-requests.spec.ts` drives
+/// the real built binary through WebDriver, including clicking "Save token", and CI's `e2e` job
+/// has no session D-Bus secrets service for the real `KeyringCredentialStore` to talk to (the
+/// pre-existing `e2e/specs/remote-transfer.spec.ts` already has to tolerate this by asserting
+/// an alternation between "credential store unavailable" and success). Swapping this store in
+/// for the E2E build means the E2E binary never touches the real OS keychain at all: no CI
+/// dependency on a live secrets service, and no risk of an E2E run writing a real token into a
+/// developer's actual login keyring.
+///
+/// NOT enabled by default and must never ship in a release build — `Worker::spawn` (see
+/// `worker.rs`) unconditionally constructs a real `KeyringCredentialStore` without this
+/// feature, and without the feature this type doesn't exist in the compiled binary at all.
+#[cfg(feature = "forge-fixture-override")]
+#[derive(Default)]
+pub struct InMemoryCredentialStore {
+    tokens: std::sync::Mutex<std::collections::HashMap<CredentialKey, String>>,
+}
+
+#[cfg(feature = "forge-fixture-override")]
+impl CredentialStore for InMemoryCredentialStore {
+    fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+        Ok(self
+            .tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .get(key)
+            .cloned())
+    }
+
+    fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
+        self.tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .insert(key.clone(), token.to_owned());
+        Ok(())
+    }
+
+    fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
+        self.tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .remove(key);
+        Ok(())
     }
 }
 
@@ -359,6 +418,24 @@ mod tests {
             self.usernames.borrow_mut().push(username.to_owned());
             Err(git2::Error::from_str("test SSH agent was invoked"))
         }
+    }
+
+    // Only compiled with the `forge-fixture-override` feature — without it, `InMemoryCredentialStore`
+    // doesn't exist in the crate at all (see its doc comment). Proves the fixture store itself
+    // implements the `CredentialStore` contract correctly (get/set/delete, and forge-token
+    // namespacing is unaffected by which store backs it) — `Worker::spawn`'s choice of *which*
+    // store to construct under this feature is covered separately in `worker.rs`.
+    #[cfg(feature = "forge-fixture-override")]
+    #[test]
+    fn in_memory_credential_store_saves_reads_and_forgets_a_forge_token() {
+        let store = super::InMemoryCredentialStore::default();
+        let key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+
+        assert!(store.get(&key).unwrap().is_none());
+        store.set(&key, "gh-token-123").unwrap();
+        assert_eq!(store.get(&key).unwrap().as_deref(), Some("gh-token-123"));
+        store.delete(&key).unwrap();
+        assert!(store.get(&key).unwrap().is_none());
     }
 
     #[test]

@@ -634,6 +634,29 @@ impl From<crate::pull_requests::PullRequest> for PullRequestDto {
     }
 }
 
+/// A page of listed pull requests, plus whether the provider indicated more exist beyond this
+/// page (see `crate::pull_requests::PullRequestList`) — the frontend uses `truncated` to show
+/// an explicit "more available" notice instead of silently displaying a partial list.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestListDto {
+    pub pull_requests: Vec<PullRequestDto>,
+    pub truncated: bool,
+}
+
+impl From<crate::pull_requests::PullRequestList> for PullRequestListDto {
+    fn from(list: crate::pull_requests::PullRequestList) -> Self {
+        Self {
+            pull_requests: list
+                .pull_requests
+                .into_iter()
+                .map(PullRequestDto::from)
+                .collect(),
+            truncated: list.truncated,
+        }
+    }
+}
+
 /// The fields a caller supplies to open a new pull request. Never carries a token — see
 /// `crate::pull_requests::CreatePullRequest`'s doc comment, which this DTO mirrors field-for-
 /// field.
@@ -1240,12 +1263,10 @@ pub async fn list_pull_requests(
     remote_name: String,
     account: String,
     state: State<'_, AppState>,
-) -> Result<Vec<PullRequestDto>, String> {
-    Ok(worker_handle(&state)?
-        .list_pull_requests(remote_name, account)?
-        .into_iter()
-        .map(PullRequestDto::from)
-        .collect())
+) -> Result<PullRequestListDto, String> {
+    Ok(PullRequestListDto::from(
+        worker_handle(&state)?.list_pull_requests(remote_name, account)?,
+    ))
 }
 
 #[tauri::command]
@@ -1258,6 +1279,16 @@ pub async fn create_pull_request(
     let created =
         worker_handle(&state)?.create_pull_request(remote_name, account, pull_request.into())?;
     Ok(PullRequestDto::from(created))
+}
+
+/// Opens `url` in the user's default external browser/handler, never inside this app's own
+/// webview. Used for a pull request's provider URL (github.com/bitbucket.org) — the only place
+/// this crate ever needed to open an external link — so a click can't navigate the whole app
+/// window away with no way back short of restarting it. Does not touch `AppState`/the worker:
+/// this is a plain OS-level operation, not a git one.
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), String> {
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

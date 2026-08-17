@@ -29,6 +29,23 @@ pub struct PullRequest {
     pub state: String,
 }
 
+/// Displayed for `PullRequest::author` when a provider's response has no usable author (GitHub
+/// returns `user: null` for a deleted account; some Bitbucket responses omit
+/// `author.display_name`). Keeps the row visible instead of failing the whole list — see
+/// `parse_list_body`/`parse_single_body`.
+const UNKNOWN_AUTHOR: &str = "unknown";
+
+/// A page of listed pull requests, plus whether the provider's response indicates more pages
+/// exist beyond this one (GitHub: a `Link: rel="next"` response header; Bitbucket: a non-null
+/// `next` field in the response body). Both providers cap a single page well below what an
+/// active repository can have open, so this is surfaced explicitly rather than silently
+/// dropping the rest — see `build_list_request`'s `per_page`/`pagelen` and `detect_truncation`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestList {
+    pub pull_requests: Vec<PullRequest>,
+    pub truncated: bool,
+}
+
 /// The fields a caller supplies to open a new pull request. Never includes a token or any
 /// provider-specific field.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,12 +102,40 @@ impl std::error::Error for PullRequestError {}
 
 /// A provider-neutral HTTP request. Built by this module's GitHub/Bitbucket adapters, sent
 /// through `ForgeApi`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is hand-rolled rather than derived: `headers` carries the `Authorization: Bearer
+/// <token>` header, and a derived `Debug` would print the token verbatim into any log/panic
+/// message/test failure output that happens to `{:?}`-format a request. Every other field
+/// derives normally.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ForgeHttpRequest {
     pub method: ForgeHttpMethod,
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub json_body: Option<serde_json::Value>,
+}
+
+impl std::fmt::Debug for ForgeHttpRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted_headers: Vec<(&str, &str)> = self
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                if name.eq_ignore_ascii_case("authorization") {
+                    (name.as_str(), "<redacted>")
+                } else {
+                    (name.as_str(), value.as_str())
+                }
+            })
+            .collect();
+        formatter
+            .debug_struct("ForgeHttpRequest")
+            .field("method", &self.method)
+            .field("url", &self.url)
+            .field("headers", &redacted_headers)
+            .field("json_body", &self.json_body)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +148,10 @@ pub enum ForgeHttpMethod {
 pub struct ForgeHttpResponse {
     pub status: u16,
     pub body: String,
+    /// Response headers, `(name, value)`, used only to detect pagination truncation today (a
+    /// GitHub `Link` header) — see `detect_truncation`. Case is whatever the transport gave us;
+    /// always compare names case-insensitively (HTTP header names are case-insensitive).
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +188,7 @@ impl<T: ForgeApi + ?Sized> ForgeApi for &T {
 /// to first `send()` moves it onto the worker OS thread instead (the only place `send()` is ever
 /// called), which has no tokio runtime at all, matching this struct's doc comment above.
 pub struct ReqwestForgeApi {
-    client: std::sync::OnceLock<reqwest::blocking::Client>,
+    client: std::sync::OnceLock<Result<reqwest::blocking::Client, ()>>,
 }
 
 impl ReqwestForgeApi {
@@ -149,13 +198,16 @@ impl ReqwestForgeApi {
         }
     }
 
-    fn client(&self) -> &reqwest::blocking::Client {
-        self.client.get_or_init(|| {
-            reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("the bundled rustls TLS backend must build a reqwest client")
-        })
+    fn client(&self) -> Result<&reqwest::blocking::Client, ForgeApiError> {
+        self.client
+            .get_or_init(|| {
+                reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .map_err(|_| ())
+            })
+            .as_ref()
+            .map_err(|()| ForgeApiError::Transport)
     }
 }
 
@@ -167,9 +219,10 @@ impl Default for ReqwestForgeApi {
 
 impl ForgeApi for ReqwestForgeApi {
     fn send(&self, request: ForgeHttpRequest) -> Result<ForgeHttpResponse, ForgeApiError> {
+        let client = self.client()?;
         let mut builder = match request.method {
-            ForgeHttpMethod::Get => self.client().get(&request.url),
-            ForgeHttpMethod::Post => self.client().post(&request.url),
+            ForgeHttpMethod::Get => client.get(&request.url),
+            ForgeHttpMethod::Post => client.post(&request.url),
         };
         for (name, value) in &request.headers {
             builder = builder.header(name, value);
@@ -185,8 +238,22 @@ impl ForgeApi for ReqwestForgeApi {
             }
         })?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_string(), value.to_string()))
+            })
+            .collect();
         let body = response.text().map_err(|_| ForgeApiError::Transport)?;
-        Ok(ForgeHttpResponse { status, body })
+        Ok(ForgeHttpResponse {
+            status,
+            body,
+            headers,
+        })
     }
 }
 
@@ -208,11 +275,16 @@ impl<A: ForgeApi> PullRequestService<A> {
         &self,
         repository: &ForgeRepository,
         token: Option<&str>,
-    ) -> Result<Vec<PullRequest>, PullRequestError> {
+    ) -> Result<PullRequestList, PullRequestError> {
         let token = token.ok_or(PullRequestError::MissingToken)?;
         let request = build_list_request(repository, token);
-        let body = self.execute(request)?;
-        parse_list_body(repository.provider, &body)
+        let response = self.execute(request)?;
+        let pull_requests = parse_list_body(repository.provider, &response.body)?;
+        let truncated = detect_truncation(repository.provider, &response);
+        Ok(PullRequestList {
+            pull_requests,
+            truncated,
+        })
     }
 
     /// Creates a pull request on `repository`. Same token-injection contract as
@@ -225,23 +297,40 @@ impl<A: ForgeApi> PullRequestService<A> {
     ) -> Result<PullRequest, PullRequestError> {
         let token = token.ok_or(PullRequestError::MissingToken)?;
         let request = build_create_request(repository, token, create);
-        let body = self.execute(request)?;
-        parse_single_body(repository.provider, &body)
+        let response = self.execute(request)?;
+        parse_single_body(repository.provider, &response.body)
     }
 
-    fn execute(&self, request: ForgeHttpRequest) -> Result<String, PullRequestError> {
+    fn execute(&self, request: ForgeHttpRequest) -> Result<ForgeHttpResponse, PullRequestError> {
         let response = self.api.send(request).map_err(|error| match error {
             ForgeApiError::Timeout => PullRequestError::Timeout,
             ForgeApiError::Transport => PullRequestError::Transport,
         })?;
         match response.status {
-            200..=299 => Ok(response.body),
+            200..=299 => Ok(response),
             401 | 403 => Err(PullRequestError::Unauthorized),
             400 | 422 => Err(PullRequestError::Validation(extract_validation_message(
                 &response.body,
             ))),
             _ => Err(PullRequestError::UnexpectedResponse),
         }
+    }
+}
+
+/// Detects whether `response` (a successful list response) indicates more results exist beyond
+/// this page: GitHub signals this via a `Link` response header containing `rel="next"`;
+/// Bitbucket signals it via a non-null top-level `next` field in the JSON body. Never fails —
+/// an unparseable/absent signal is simply treated as "not truncated" (the plain, already-tested
+/// `parse_list_body` call is what surfaces a genuinely malformed body as an error).
+fn detect_truncation(provider: ForgeProvider, response: &ForgeHttpResponse) -> bool {
+    match provider {
+        ForgeProvider::GitHub => response.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("link") && value.contains("rel=\"next\"")
+        }),
+        ForgeProvider::Bitbucket => serde_json::from_str::<serde_json::Value>(&response.body)
+            .ok()
+            .and_then(|value| value.get("next").cloned())
+            .is_some_and(|next| !next.is_null()),
     }
 }
 
@@ -328,10 +417,14 @@ fn bitbucket_api_base() -> String {
 
 fn build_list_request(repository: &ForgeRepository, token: &str) -> ForgeHttpRequest {
     match repository.provider {
+        // `per_page`/`pagelen` are each provider's maximum allowed page size (GitHub defaults
+        // to 30, Bitbucket to 10 — both silently truncate without this). A repository can still
+        // have more open PRs than even this larger page; `detect_truncation` catches that case
+        // rather than silently hiding it, since full cursor-following isn't implemented here.
         ForgeProvider::GitHub => ForgeHttpRequest {
             method: ForgeHttpMethod::Get,
             url: format!(
-                "{}/repos/{}/{}/pulls?state=open",
+                "{}/repos/{}/{}/pulls?state=open&per_page=100",
                 github_api_base(),
                 repository.owner,
                 repository.name
@@ -342,7 +435,7 @@ fn build_list_request(repository: &ForgeRepository, token: &str) -> ForgeHttpReq
         ForgeProvider::Bitbucket => ForgeHttpRequest {
             method: ForgeHttpMethod::Get,
             url: format!(
-                "{}/repositories/{}/{}/pullrequests?state=OPEN",
+                "{}/repositories/{}/{}/pullrequests?state=OPEN&pagelen=100",
                 bitbucket_api_base(),
                 repository.owner,
                 repository.name
@@ -466,7 +559,10 @@ struct GitHubPullRequest {
     number: u64,
     title: String,
     html_url: String,
-    user: GitHubUser,
+    // `null` for a pull request opened by a since-deleted GitHub account. `Option` here (rather
+    // than requiring the field) means one such row degrades to `UNKNOWN_AUTHOR` instead of
+    // failing `serde_json::from_str` for the entire list/response — see `From<GitHubPullRequest>`.
+    user: Option<GitHubUser>,
     head: GitHubBranchRef,
     base: GitHubBranchRef,
     state: String,
@@ -479,7 +575,10 @@ impl From<GitHubPullRequest> for PullRequest {
             number: pull_request.number,
             title: pull_request.title,
             url: pull_request.html_url,
-            author: pull_request.user.login,
+            author: pull_request
+                .user
+                .map(|user| user.login)
+                .unwrap_or_else(|| UNKNOWN_AUTHOR.to_string()),
             source_branch: pull_request.head.name,
             target_branch: pull_request.base.name,
             state: pull_request.state.to_lowercase(),
@@ -489,7 +588,11 @@ impl From<GitHubPullRequest> for PullRequest {
 
 #[derive(Deserialize)]
 struct BitbucketAuthor {
-    display_name: String,
+    // Some Bitbucket responses (e.g. for a deactivated/removed workspace member) omit this
+    // field entirely rather than sending an empty string. `Option` here means one such row
+    // degrades to `UNKNOWN_AUTHOR` instead of failing the entire list/response — see
+    // `From<BitbucketPullRequest>`.
+    display_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -535,7 +638,10 @@ impl From<BitbucketPullRequest> for PullRequest {
             number: pull_request.id,
             title: pull_request.title,
             url: pull_request.links.html.href,
-            author: pull_request.author.display_name,
+            author: pull_request
+                .author
+                .display_name
+                .unwrap_or_else(|| UNKNOWN_AUTHOR.to_string()),
             source_branch: pull_request.source.branch.name,
             target_branch: pull_request.destination.branch.name,
             state: pull_request.state.to_lowercase(),
@@ -579,6 +685,19 @@ mod tests {
         Ok(ForgeHttpResponse {
             status,
             body: body.to_string(),
+            headers: Vec::new(),
+        })
+    }
+
+    fn ok_with_headers(
+        status: u16,
+        body: &str,
+        headers: Vec<(String, String)>,
+    ) -> Result<ForgeHttpResponse, ForgeApiError> {
+        Ok(ForgeHttpResponse {
+            status,
+            body: body.to_string(),
+            headers,
         })
     }
 
@@ -680,34 +799,26 @@ mod tests {
     }
 
     // The security-relevant half of the above: without the feature (the only way this crate is
-    // ever built for release — see `Cargo.toml`'s `forge-fixture-override` doc comment), setting
-    // either env var has *zero effect*. Guards against a future edit accidentally moving the
-    // `#[cfg]` gate or the env lookup back to always-on.
+    // ever built for release — see `Cargo.toml`'s `forge-fixture-override` doc comment), the env
+    // vars have *zero effect*, because these two functions are the plain hardcoded-host bodies
+    // below and never call `std::env::var` at all in this cfg branch — there is no code path in
+    // this binary that could read them. That's provable statically, with no env var manipulation
+    // needed (and `worker.rs`'s tests, in this same `tauri-app` test binary, DO spawn real OS
+    // threads that read process environment via libgit2 — mutating the environment here would
+    // race against those under cargo's default parallel test harness). Guards against a future
+    // edit accidentally moving the `#[cfg]` gate or the env lookup back to always-on: if either
+    // function starts reading the environment in this branch, this constant assertion is the
+    // only thing that would still catch it.
     #[cfg(not(feature = "forge-fixture-override"))]
     #[test]
     fn the_api_base_url_env_var_has_no_effect_without_the_fixture_override_feature() {
-        // SAFETY: `pull_requests` tests never spawn threads.
-        unsafe {
-            std::env::set_var(
-                "BROWSITORY_FORGE_GITHUB_API_BASE_URL",
-                "http://attacker.example",
-            );
-            std::env::set_var(
-                "BROWSITORY_FORGE_BITBUCKET_API_BASE_URL",
-                "http://attacker.example",
-            );
-        }
         assert_eq!(github_api_base(), "https://api.github.com");
         assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
         let request = build_list_request(&github_repo(), "token");
         assert_eq!(
             request.url,
-            "https://api.github.com/repos/acme/widget/pulls?state=open"
+            "https://api.github.com/repos/acme/widget/pulls?state=open&per_page=100"
         );
-        unsafe {
-            std::env::remove_var("BROWSITORY_FORGE_GITHUB_API_BASE_URL");
-            std::env::remove_var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL");
-        }
     }
 
     #[test]
@@ -747,12 +858,12 @@ mod tests {
         let api = FakeForgeApi::queue(vec![ok(200, GITHUB_LIST_FIXTURE)]);
         let service = PullRequestService::new(&api);
 
-        let pull_requests = service
+        let result = service
             .list_pull_requests(&github_repo(), Some("gh-token-123"))
             .unwrap();
 
         assert_eq!(
-            pull_requests,
+            result.pull_requests,
             vec![PullRequest {
                 id: "101".to_string(),
                 number: 7,
@@ -764,13 +875,14 @@ mod tests {
                 state: "open".to_string(),
             }]
         );
+        assert!(!result.truncated);
 
         let requests = api.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, ForgeHttpMethod::Get);
         assert_eq!(
             requests[0].url,
-            "https://api.github.com/repos/acme/widget/pulls?state=open"
+            "https://api.github.com/repos/acme/widget/pulls?state=open&per_page=100"
         );
         assert!(requests[0].headers.contains(&(
             "Authorization".to_string(),
@@ -783,12 +895,12 @@ mod tests {
         let api = FakeForgeApi::queue(vec![ok(200, BITBUCKET_LIST_FIXTURE)]);
         let service = PullRequestService::new(&api);
 
-        let pull_requests = service
+        let result = service
             .list_pull_requests(&bitbucket_repo(), Some("bb-token-456"))
             .unwrap();
 
         assert_eq!(
-            pull_requests,
+            result.pull_requests,
             vec![PullRequest {
                 id: "12".to_string(),
                 number: 12,
@@ -800,13 +912,14 @@ mod tests {
                 state: "open".to_string(),
             }]
         );
+        assert!(!result.truncated);
 
         let requests = api.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, ForgeHttpMethod::Get);
         assert_eq!(
             requests[0].url,
-            "https://api.bitbucket.org/2.0/repositories/acme/widget/pullrequests?state=OPEN"
+            "https://api.bitbucket.org/2.0/repositories/acme/widget/pullrequests?state=OPEN&pagelen=100"
         );
         assert!(requests[0].headers.contains(&(
             "Authorization".to_string(),
@@ -1002,5 +1115,153 @@ mod tests {
             .expect_err("an unmapped status must not be treated as success");
 
         assert_eq!(error, PullRequestError::UnexpectedResponse);
+    }
+
+    // --- Finding 4: pagination / truncation detection ---
+
+    #[test]
+    fn detects_truncation_from_a_github_link_header() {
+        let api = FakeForgeApi::queue(vec![ok_with_headers(
+            200,
+            GITHUB_LIST_FIXTURE,
+            vec![(
+                "Link".to_string(),
+                "<https://api.github.com/repos/acme/widget/pulls?page=2>; rel=\"next\"".to_string(),
+            )],
+        )]);
+        let service = PullRequestService::new(&api);
+
+        let result = service
+            .list_pull_requests(&github_repo(), Some("gh-token-123"))
+            .unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(result.pull_requests.len(), 1);
+    }
+
+    #[test]
+    fn a_github_link_header_without_rel_next_is_not_truncated() {
+        let api = FakeForgeApi::queue(vec![ok_with_headers(
+            200,
+            GITHUB_LIST_FIXTURE,
+            vec![(
+                "Link".to_string(),
+                "<https://api.github.com/repos/acme/widget/pulls?page=1>; rel=\"prev\"".to_string(),
+            )],
+        )]);
+        let service = PullRequestService::new(&api);
+
+        let result = service
+            .list_pull_requests(&github_repo(), Some("gh-token-123"))
+            .unwrap();
+
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn detects_truncation_from_a_non_null_bitbucket_next_field() {
+        const TRUNCATED_FIXTURE: &str = r#"{
+            "next": "https://api.bitbucket.org/2.0/repositories/acme/widget/pullrequests?page=2",
+            "values": [
+                {
+                    "id": 12,
+                    "title": "Add pull request support",
+                    "links": {"html": {"href": "https://bitbucket.org/acme/widget/pull-requests/12"}},
+                    "author": {"display_name": "Rene Langer"},
+                    "source": {"branch": {"name": "feature/pr"}},
+                    "destination": {"branch": {"name": "main"}},
+                    "state": "OPEN"
+                }
+            ]
+        }"#;
+        let api = FakeForgeApi::queue(vec![ok(200, TRUNCATED_FIXTURE)]);
+        let service = PullRequestService::new(&api);
+
+        let result = service
+            .list_pull_requests(&bitbucket_repo(), Some("bb-token-456"))
+            .unwrap();
+
+        assert!(result.truncated);
+    }
+
+    #[test]
+    fn build_list_request_asks_for_a_large_explicit_page_size() {
+        assert!(build_list_request(&github_repo(), "token")
+            .url
+            .contains("per_page=100"));
+        assert!(build_list_request(&bitbucket_repo(), "token")
+            .url
+            .contains("pagelen=100"));
+    }
+
+    // --- Finding 5: a missing/null author must not fail the whole list ---
+
+    #[test]
+    fn a_github_pull_request_with_a_null_user_falls_back_to_an_unknown_author() {
+        const FIXTURE: &str = r#"[
+            {
+                "id": 101,
+                "number": 7,
+                "title": "Add pull request support",
+                "html_url": "https://github.com/acme/widget/pull/7",
+                "user": null,
+                "head": {"ref": "feature/pr"},
+                "base": {"ref": "main"},
+                "state": "open"
+            }
+        ]"#;
+        let api = FakeForgeApi::queue(vec![ok(200, FIXTURE)]);
+        let service = PullRequestService::new(&api);
+
+        let result = service
+            .list_pull_requests(&github_repo(), Some("gh-token-123"))
+            .expect("a null user must not fail the whole list");
+
+        assert_eq!(result.pull_requests[0].author, "unknown");
+    }
+
+    #[test]
+    fn a_bitbucket_pull_request_missing_display_name_falls_back_to_an_unknown_author() {
+        const FIXTURE: &str = r#"{
+            "values": [
+                {
+                    "id": 12,
+                    "title": "Add pull request support",
+                    "links": {"html": {"href": "https://bitbucket.org/acme/widget/pull-requests/12"}},
+                    "author": {},
+                    "source": {"branch": {"name": "feature/pr"}},
+                    "destination": {"branch": {"name": "main"}},
+                    "state": "OPEN"
+                }
+            ]
+        }"#;
+        let api = FakeForgeApi::queue(vec![ok(200, FIXTURE)]);
+        let service = PullRequestService::new(&api);
+
+        let result = service
+            .list_pull_requests(&bitbucket_repo(), Some("bb-token-456"))
+            .expect("a missing display_name must not fail the whole list");
+
+        assert_eq!(result.pull_requests[0].author, "unknown");
+    }
+
+    // --- Minor: `ForgeHttpRequest`'s `Debug` impl must redact the bearer token ---
+
+    #[test]
+    fn forge_http_request_debug_output_redacts_the_authorization_header() {
+        let request = ForgeHttpRequest {
+            method: ForgeHttpMethod::Get,
+            url: "https://api.github.com/repos/acme/widget/pulls".to_string(),
+            headers: vec![(
+                "Authorization".to_string(),
+                "Bearer super-secret-token".to_string(),
+            )],
+            json_body: None,
+        };
+
+        let debug_output = format!("{request:?}");
+
+        assert!(!debug_output.contains("super-secret-token"));
+        assert!(debug_output.contains("<redacted>"));
     }
 }

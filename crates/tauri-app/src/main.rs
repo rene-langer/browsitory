@@ -13,10 +13,10 @@ use commands::{
     get_conflict_hunks, get_current_upstream, get_merge_message, get_rebase_progress, get_reflog,
     get_remote_upstreams, get_status, get_working_diff, init_submodule, list_branches,
     list_pull_requests, list_recent_repos, list_reflog_refs, list_remotes, list_stashes,
-    list_submodules, list_tags, list_worktrees, open_repo, pick_repo_folder, prune_worktrees,
-    pull_current_upstream, push_current_branch, push_tags, rebase_continue, remove_remote,
-    remove_worktree, rename_branch, rename_remote, resolve_add_delete_conflict, resolve_conflict,
-    restore_reflog_entry, save_forge_token, save_https_credential, save_stash,
+    list_submodules, list_tags, list_worktrees, open_external_url, open_repo, pick_repo_folder,
+    prune_worktrees, pull_current_upstream, push_current_branch, push_tags, rebase_continue,
+    remove_remote, remove_worktree, rename_branch, rename_remote, resolve_add_delete_conflict,
+    resolve_conflict, restore_reflog_entry, save_forge_token, save_https_credential, save_stash,
     set_current_upstream, set_remote_auth_mode, stage_file, start_merge, start_rebase,
     switch_branch, unstage_file, update_remote_urls, update_submodule, AppState,
 };
@@ -24,6 +24,7 @@ use commands::{
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             open_repo,
@@ -92,6 +93,7 @@ fn main() {
             forget_forge_token,
             list_pull_requests,
             create_pull_request,
+            open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
