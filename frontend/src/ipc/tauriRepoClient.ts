@@ -4,11 +4,15 @@ import type {
   BlameLine,
   BranchInfo,
   ConflictSegment,
+  CreatePullRequest,
   DiffHunk,
   FileConflictChoice,
+  ForgeProvider,
+  ForgeRepository,
   GraphCommit,
   MergeOutcome,
   PullOutcome,
+  PullRequest,
   RebasePlanCommit,
   RebasePlanEntry,
   ReflogEntry,
@@ -152,6 +156,16 @@ export const tauriRepoClient: RepoClient = {
   abortRebase: () => invoke("abort_rebase"),
   getRebaseProgress: () =>
     invoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress"),
+  detectForgeRepository: () =>
+    invoke<ForgeRepository[]>("detect_forge_repository"),
+  saveForgeToken: (provider: ForgeProvider, account: string, token: string) =>
+    invoke("save_forge_token", { provider, account, token }),
+  forgetForgeToken: (provider: ForgeProvider, account: string) =>
+    invoke("forget_forge_token", { provider, account }),
+  listPullRequests: (remoteName: string, account: string) =>
+    invoke<PullRequest[]>("list_pull_requests", { remoteName, account }),
+  createPullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) =>
+    invoke<PullRequest>("create_pull_request", { remoteName, account, pullRequest }),
 };
 
 export function validateRemoteUrls(fetchUrl: string, pushUrl: string | null) {

@@ -164,6 +164,34 @@ export type RebaseStepResult =
   | { kind: "Advanced" }
   | { kind: "Done" };
 
+export type ForgeProvider = "GitHub" | "Bitbucket";
+
+export interface ForgeRepository {
+  provider: ForgeProvider;
+  host: string;
+  owner: string;
+  name: string;
+  remoteName: string;
+}
+
+export interface PullRequest {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  sourceBranch: string;
+  targetBranch: string;
+  state: string;
+}
+
+export interface CreatePullRequest {
+  title: string;
+  description: string | null;
+  sourceBranch: string;
+  targetBranch: string;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -227,4 +255,9 @@ export interface RepoClient {
   rebaseContinue(): Promise<RebaseStepResult>;
   abortRebase(): Promise<void>;
   getRebaseProgress(): Promise<{ currentStep: number; totalSteps: number } | null>;
+  detectForgeRepository(): Promise<ForgeRepository[]>;
+  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
+  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
+  listPullRequests(remoteName: string, account: string): Promise<PullRequest[]>;
+  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<PullRequest>;
 }

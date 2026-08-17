@@ -560,6 +560,103 @@ impl From<DiffHunk> for DiffHunkDto {
     }
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum ForgeProviderDto {
+    GitHub,
+    Bitbucket,
+}
+
+impl From<git_core::forge::ForgeProvider> for ForgeProviderDto {
+    fn from(provider: git_core::forge::ForgeProvider) -> Self {
+        match provider {
+            git_core::forge::ForgeProvider::GitHub => ForgeProviderDto::GitHub,
+            git_core::forge::ForgeProvider::Bitbucket => ForgeProviderDto::Bitbucket,
+        }
+    }
+}
+
+impl From<ForgeProviderDto> for git_core::forge::ForgeProvider {
+    fn from(provider: ForgeProviderDto) -> Self {
+        match provider {
+            ForgeProviderDto::GitHub => git_core::forge::ForgeProvider::GitHub,
+            ForgeProviderDto::Bitbucket => git_core::forge::ForgeProvider::Bitbucket,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeRepositoryDto {
+    pub provider: ForgeProviderDto,
+    pub host: String,
+    pub owner: String,
+    pub name: String,
+    pub remote_name: String,
+}
+
+impl From<git_core::forge::ForgeRepository> for ForgeRepositoryDto {
+    fn from(repository: git_core::forge::ForgeRepository) -> Self {
+        Self {
+            provider: repository.provider.into(),
+            host: repository.host,
+            owner: repository.owner,
+            name: repository.name,
+            remote_name: repository.remote_name,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDto {
+    pub id: String,
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub author: String,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub state: String,
+}
+
+impl From<crate::pull_requests::PullRequest> for PullRequestDto {
+    fn from(pull_request: crate::pull_requests::PullRequest) -> Self {
+        Self {
+            id: pull_request.id,
+            number: pull_request.number,
+            title: pull_request.title,
+            url: pull_request.url,
+            author: pull_request.author,
+            source_branch: pull_request.source_branch,
+            target_branch: pull_request.target_branch,
+            state: pull_request.state,
+        }
+    }
+}
+
+/// The fields a caller supplies to open a new pull request. Never carries a token — see
+/// `crate::pull_requests::CreatePullRequest`'s doc comment, which this DTO mirrors field-for-
+/// field.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePullRequestDto {
+    pub title: String,
+    pub description: Option<String>,
+    pub source_branch: String,
+    pub target_branch: String,
+}
+
+impl From<CreatePullRequestDto> for crate::pull_requests::CreatePullRequest {
+    fn from(dto: CreatePullRequestDto) -> Self {
+        Self {
+            title: dto.title,
+            description: dto.description,
+            source_branch: dto.source_branch,
+            target_branch: dto.target_branch,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct AppState {
     pub worker: Mutex<Option<Worker>>,
@@ -1108,6 +1205,61 @@ pub async fn get_rebase_progress(
     )
 }
 
+#[tauri::command]
+pub async fn detect_forge_repository(
+    state: State<'_, AppState>,
+) -> Result<Vec<ForgeRepositoryDto>, String> {
+    Ok(worker_handle(&state)?
+        .detect_forge_repository()?
+        .into_iter()
+        .map(ForgeRepositoryDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn save_forge_token(
+    provider: ForgeProviderDto,
+    account: String,
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.save_forge_token(provider.into(), account, token)
+}
+
+#[tauri::command]
+pub async fn forget_forge_token(
+    provider: ForgeProviderDto,
+    account: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state)?.forget_forge_token(provider.into(), account)
+}
+
+#[tauri::command]
+pub async fn list_pull_requests(
+    remote_name: String,
+    account: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PullRequestDto>, String> {
+    Ok(worker_handle(&state)?
+        .list_pull_requests(remote_name, account)?
+        .into_iter()
+        .map(PullRequestDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn create_pull_request(
+    remote_name: String,
+    account: String,
+    pull_request: CreatePullRequestDto,
+    state: State<'_, AppState>,
+) -> Result<PullRequestDto, String> {
+    let created =
+        worker_handle(&state)?.create_pull_request(remote_name, account, pull_request.into())?;
+    Ok(PullRequestDto::from(created))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1122,8 +1274,8 @@ mod tests {
     use crate::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        SubmoduleInfoDto, WorktreeInfoDto,
+        transfer_event_payload, ForgeProviderDto, PullOutcomeDto, ReflogEntryDto,
+        RemoteAuthModeDto, SubmoduleInfoDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1247,6 +1399,18 @@ mod tests {
         assert_eq!(
             serde_json::to_value(RemoteAuthModeDto::SshAgent).unwrap(),
             serde_json::json!("SshAgent")
+        );
+    }
+
+    #[test]
+    fn forge_provider_wire_values_match_the_typescript_union() {
+        assert_eq!(
+            serde_json::to_value(ForgeProviderDto::GitHub).unwrap(),
+            serde_json::json!("GitHub")
+        );
+        assert_eq!(
+            serde_json::to_value(ForgeProviderDto::Bitbucket).unwrap(),
+            serde_json::json!("Bitbucket")
         );
     }
 

@@ -51,6 +51,11 @@ const remoteManagementClient = {
   listReflogRefs: async () => [],
   getReflog: async () => [],
   restoreReflogEntry: async () => unimplemented(),
+  detectForgeRepository: async () => [],
+  saveForgeToken: async () => unimplemented(),
+  forgetForgeToken: async () => unimplemented(),
+  listPullRequests: async () => unimplemented(),
+  createPullRequest: async () => unimplemented(),
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
