@@ -19,11 +19,11 @@ use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
 
-use crate::credentials::{
-    CredentialService, CredentialStore, KeyringCredentialStore, RemoteCredentialProvider,
-};
+#[cfg(not(feature = "forge-fixture-override"))]
+use crate::credentials::KeyringCredentialStore;
+use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialProvider};
 use crate::pull_requests::{
-    CreatePullRequest, ForgeApi, PullRequest, PullRequestService, ReqwestForgeApi,
+    CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -338,7 +338,7 @@ pub(crate) enum Command {
     ListPullRequests {
         remote_name: String,
         account: String,
-        reply: Sender<Result<Vec<PullRequest>, String>>,
+        reply: Sender<Result<PullRequestList, String>>,
     },
     CreatePullRequest {
         remote_name: String,
@@ -378,8 +378,24 @@ fn resolve_forge_repository(
 }
 
 impl Worker {
+    /// Production entry point: constructs the real OS-keychain credential store. Behind the
+    /// `forge-fixture-override` feature (E2E builds only — see `Cargo.toml`'s doc comment on
+    /// that feature and `credentials.rs`'s `InMemoryCredentialStore`), an in-memory store is
+    /// used instead so the E2E binary never touches a real OS keychain/D-Bus secrets service.
+    /// Without the feature this function is exactly the line below — same as before that
+    /// feature existed — so a release build's behavior is unchanged.
+    #[cfg(not(feature = "forge-fixture-override"))]
     pub fn spawn(path: PathBuf) -> Result<Self, String> {
         Self::spawn_with(path, KeyringCredentialStore, ReqwestForgeApi::new())
+    }
+
+    #[cfg(feature = "forge-fixture-override")]
+    pub fn spawn(path: PathBuf) -> Result<Self, String> {
+        Self::spawn_with(
+            path,
+            crate::credentials::InMemoryCredentialStore::default(),
+            ReqwestForgeApi::new(),
+        )
     }
 
     /// Constructs the worker's credential store and forge HTTP transport by dependency
@@ -1965,7 +1981,7 @@ impl WorkerHandle {
         &self,
         remote_name: String,
         account: String,
-    ) -> Result<Vec<PullRequest>, String> {
+    ) -> Result<PullRequestList, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ListPullRequests {
@@ -2082,6 +2098,7 @@ mod tests {
         Ok(ForgeHttpResponse {
             status,
             body: body.to_string(),
+            headers: Vec::new(),
         })
     }
 
@@ -3017,9 +3034,13 @@ mod tests {
             .list_pull_requests("origin".to_string(), "rene".to_string())
             .unwrap();
 
-        assert_eq!(pull_requests.len(), 1);
-        assert_eq!(pull_requests[0].number, 7);
-        assert_eq!(pull_requests[0].title, "Add pull request support");
+        assert_eq!(pull_requests.pull_requests.len(), 1);
+        assert_eq!(pull_requests.pull_requests[0].number, 7);
+        assert_eq!(
+            pull_requests.pull_requests[0].title,
+            "Add pull request support"
+        );
+        assert!(!pull_requests.truncated);
         // The lookup happened inside the worker: the request the fake transport actually
         // received carries the saved token in its Authorization header.
         let requests = api.requests();

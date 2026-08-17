@@ -19,6 +19,7 @@ completion (not the full transitive tree).
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
 | tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
+| tauri-plugin-opener 2.5.4 | Apache-2.0 OR MIT | `tauri-app` — opens a pull request's provider URL in the user's default external browser instead of navigating the app's own webview away. Source: [crates.io](https://crates.io/crates/tauri-plugin-opener/2.5.4); verified with `cargo info tauri-plugin-opener` on 2026-08-17. |
 | serde | MIT OR Apache-2.0 | `tauri-app`; also `config` |
 | serde_json | MIT OR Apache-2.0 | `tauri-app` |
 | directories | MIT OR Apache-2.0 | `config` |
