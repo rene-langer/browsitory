@@ -1,0 +1,189 @@
+import { expect } from "@wdio/globals";
+import { ForgeFixtureClient } from "../support/forgeFixtureServer";
+
+// Canned provider responses, matching the exact JSON shapes
+// `crates/tauri-app/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
+// `GITHUB_LIST_FIXTURE`/`BITBUCKET_LIST_FIXTURE`/etc. unit-test constants, mirrored here).
+const GITHUB_LIST_FIXTURE = [
+  {
+    id: 101,
+    number: 7,
+    title: "Add pull request support",
+    html_url: "https://github.com/acme/widget/pull/7",
+    user: { login: "rene" },
+    head: { ref: "feature/pr" },
+    base: { ref: "main" },
+    state: "open",
+  },
+];
+
+const GITHUB_CREATE_FIXTURE = {
+  id: 202,
+  number: 8,
+  title: "Add feature",
+  html_url: "https://github.com/acme/widget/pull/8",
+  user: { login: "rene" },
+  head: { ref: "feature/pr" },
+  base: { ref: "main" },
+  state: "open",
+};
+
+const BITBUCKET_LIST_FIXTURE = {
+  values: [
+    {
+      id: 12,
+      title: "Add pull request support",
+      links: { html: { href: "https://bitbucket.org/acme/widget/pull-requests/12" } },
+      author: { display_name: "Rene Langer" },
+      source: { branch: { name: "feature/pr" } },
+      destination: { branch: { name: "main" } },
+      state: "OPEN",
+    },
+  ],
+};
+
+const BITBUCKET_CREATE_FIXTURE = {
+  id: 13,
+  title: "Add feature",
+  links: { html: { href: "https://bitbucket.org/acme/widget/pull-requests/13" } },
+  author: { display_name: "Rene Langer" },
+  source: { branch: { name: "feature/pr" } },
+  destination: { branch: { name: "main" } },
+  state: "OPEN",
+};
+
+async function addRemote(name: string, url: string) {
+  const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+  await remoteNameInput.waitForExist({ timeout: 10000 });
+  await remoteNameInput.setValue(name);
+  await (await $("[data-testid='add-remote-fetch-url']")).setValue(url);
+  await (await $("button=Add remote")).click();
+  await browser.waitUntil(async () => (await remoteNameInput.getValue()) === "", {
+    timeout: 10000,
+    timeoutMsg: `expected remote ${name} to finish being added`,
+  });
+}
+
+describe("Browsitory pull requests", () => {
+  const server = ForgeFixtureClient.fromEnv();
+
+  before(async () => {
+    await server.reset();
+    await server.setResponse("github-list", 200, GITHUB_LIST_FIXTURE);
+    await server.setResponse("github-create", 201, GITHUB_CREATE_FIXTURE);
+    await server.setResponse("bitbucket-list", 200, BITBUCKET_LIST_FIXTURE);
+    await server.setResponse("bitbucket-create", 201, BITBUCKET_CREATE_FIXTURE);
+  });
+
+  it("renders sections only for supported remotes and sends no request for an unsupported one", async () => {
+    await addRemote("gh-origin", "https://github.com/acme/widget.git");
+    await addRemote("bb-origin", "https://bitbucket.org/acme/widget.git");
+    await addRemote("gl-origin", "https://gitlab.com/acme/widget.git");
+
+    const githubSection = await $("section[aria-labelledby='pull-request-section-gh-origin']");
+    await githubSection.waitForExist({ timeout: 10000 });
+    const bitbucketSection = await $("section[aria-labelledby='pull-request-section-bb-origin']");
+    await expect(bitbucketSection).toBeExisting();
+
+    const gitlabSection = await $("section[aria-labelledby='pull-request-section-gl-origin']");
+    expect(await gitlabSection.isExisting()).toBe(false);
+
+    // Adding remotes (including the unsupported one) never makes a pull-request HTTP call by
+    // itself — only an explicit List/Create action does, and gl-origin renders no such controls
+    // to click in the first place.
+    expect(await server.requestCount()).toBe(0);
+  });
+
+  // `PullRequestPanel` only ever shows the most recently listed repository's rows (see
+  // `PullRequestPanel.tsx`'s `activeRemote`, needed because `state.pullRequests` in app state is
+  // one flat list shared by every remote — not keyed per-remote). So each provider's list/create
+  // flow, and its "forgetting the token hides the list" check, has to run as one self-contained
+  // scenario: once the *other* provider's section is listed, this section's rows are expected to
+  // stop rendering regardless of whether its token was forgotten, which would make a
+  // forget-clears-it assertion checked afterwards meaningless.
+  it("lists and creates a GitHub pull request using the saved token, then hides it once forgotten", async () => {
+    const section = await $("section[aria-labelledby='pull-request-section-gh-origin']");
+    await (await section.$("aria/Account")).setValue("rene");
+    await (await section.$("aria/Access token")).setValue("gh-test-token");
+    await (await section.$("button=Save token")).click();
+    await browser.waitUntil(
+      async () => (await (await section.$("aria/Access token")).getValue()) === "",
+      { timeout: 10000, timeoutMsg: "expected the GitHub token input to clear after save" },
+    );
+
+    await (await section.$("button=List pull requests")).click();
+    const listedRow = await section.$("li*=Add pull request support");
+    await listedRow.waitForExist({ timeout: 10000 });
+    expect(await listedRow.getText()).toContain("#7");
+    expect(await listedRow.getText()).toContain("feature/pr");
+
+    const listRequest = await server.lastRequestFor("github-list");
+    expect(listRequest?.authorization).toBe("Bearer gh-test-token");
+
+    const createForm = await section.$("form[aria-label='Create pull request for gh-origin']");
+    await (await createForm.$("aria/Title")).setValue("Add feature");
+    await (await createForm.$("aria/Source branch")).setValue("feature/pr");
+    await (await createForm.$("aria/Target branch")).setValue("main");
+    await (await createForm.$("button=Create pull request")).click();
+
+    const createdRow = await section.$("li*=Add feature");
+    await createdRow.waitForExist({ timeout: 10000 });
+    expect(await createdRow.getText()).toContain("#8");
+    expect(await (await createForm.$("aria/Title")).getValue()).toBe("");
+
+    const createRequest = await server.lastRequestFor("github-create");
+    expect(createRequest?.authorization).toBe("Bearer gh-test-token");
+    expect(createRequest?.body).toEqual({
+      title: "Add feature",
+      body: "",
+      head: "feature/pr",
+      base: "main",
+    });
+
+    await (await section.$("button=Forget token")).click();
+    await browser.waitUntil(
+      async () => !(await section.$("li*=Add pull request support").isExisting()),
+      { timeout: 10000, timeoutMsg: "expected the stale pull-request list to be hidden after forgetting the token" },
+    );
+  });
+
+  it("warns about app passwords and lists/creates a Bitbucket pull request using the saved token", async () => {
+    const section = await $("section[aria-labelledby='pull-request-section-bb-origin']");
+    await expect(section).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)"));
+
+    await (await section.$("aria/Account")).setValue("rene");
+    await (await section.$("aria/Access token")).setValue("bb-test-token");
+    await (await section.$("button=Save token")).click();
+    await browser.waitUntil(
+      async () => (await (await section.$("aria/Access token")).getValue()) === "",
+      { timeout: 10000, timeoutMsg: "expected the Bitbucket token input to clear after save" },
+    );
+
+    await (await section.$("button=List pull requests")).click();
+    const listedRow = await section.$("li*=Add pull request support");
+    await listedRow.waitForExist({ timeout: 10000 });
+    expect(await listedRow.getText()).toContain("#12");
+
+    const listRequest = await server.lastRequestFor("bitbucket-list");
+    expect(listRequest?.authorization).toBe("Bearer bb-test-token");
+
+    const createForm = await section.$("form[aria-label='Create pull request for bb-origin']");
+    await (await createForm.$("aria/Title")).setValue("Add feature");
+    await (await createForm.$("aria/Source branch")).setValue("feature/pr");
+    await (await createForm.$("aria/Target branch")).setValue("main");
+    await (await createForm.$("button=Create pull request")).click();
+
+    const createdRow = await section.$("li*=Add feature");
+    await createdRow.waitForExist({ timeout: 10000 });
+    expect(await createdRow.getText()).toContain("#13");
+
+    const createRequest = await server.lastRequestFor("bitbucket-create");
+    expect(createRequest?.authorization).toBe("Bearer bb-test-token");
+    expect(createRequest?.body).toEqual({
+      title: "Add feature",
+      description: "",
+      source: { branch: { name: "feature/pr" } },
+      destination: { branch: { name: "main" } },
+    });
+  });
+});
