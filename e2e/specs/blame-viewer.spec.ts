@@ -58,11 +58,11 @@ describe("Browsitory blame", () => {
     // the same behavior the brief's row click was meant to.
     const unchangedLineCell = await $("td*=line one");
     await unchangedLineCell.waitForExist({ timeout: 10000 });
-    await unchangedLineCell.click();
+    await browser.execute((el) => (el as HTMLElement).click(), unchangedLineCell);
 
-    const firstCommitEntry = await $("li*=e2e: blame fixture first commit");
     await browser.waitUntil(
-      async () => (await firstCommitEntry.getAttribute("aria-selected")) === "true",
+      async () =>
+        (await $("li*=e2e: blame fixture first commit").getAttribute("aria-selected")) === "true",
       {
         timeout: 10000,
         timeoutMsg:

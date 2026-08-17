@@ -220,7 +220,10 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
                 .ssh_agent
                 .credential(username.unwrap_or("git"))
                 .map_err(|_| git2::Error::from_str(SSH_AGENT_FAILURE_ERROR)),
-            None => Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
+            None if url.starts_with("https://") || url.starts_with("http://") => {
+                Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR))
+            }
+            None => git2::Cred::default(),
         }
     }
 }
@@ -443,6 +446,20 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
+    fn provider_without_auth_metadata_allows_non_http_remotes_to_use_defaults() {
+        let service = CredentialService::new(MemoryCredentialStore::default());
+        let mut provider = RemoteCredentialProvider::new(&service, None);
+
+        provider
+            .credential(
+                "file:///tmp/remote.git",
+                None,
+                git2::CredentialType::USER_PASS_PLAINTEXT,
+            )
+            .expect("local remotes do not need configured credentials");
     }
 
     #[test]
