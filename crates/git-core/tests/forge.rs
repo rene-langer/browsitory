@@ -135,6 +135,23 @@ fn rejects_a_remote_with_embedded_username_and_password() {
 }
 
 #[test]
+fn rejects_a_remote_with_bare_username_token_and_no_password() {
+    let (_dir, repo) = common::init_repo();
+    add_remote(
+        &repo,
+        "origin",
+        "https://ghp_abcd1234@github.com/acme/widget.git",
+    );
+
+    let error = detect_forge_repositories(&repo).expect_err("expected credential rejection");
+
+    assert!(matches!(error, ForgeError::CredentialBearingUrl));
+    let message = error.to_string();
+    assert!(!message.contains("ghp_abcd1234"));
+    assert!(!message.contains("github.com"));
+}
+
+#[test]
 fn rejects_an_ssh_style_remote_with_embedded_username_and_password() {
     let (_dir, repo) = common::init_repo();
     add_remote(

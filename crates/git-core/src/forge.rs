@@ -104,7 +104,9 @@ fn classify_scheme_url(url: &str) -> Result<Option<ForgeIdentity>, ClassifyError
     let Ok(parsed) = Url::parse(url) else {
         return Ok(None);
     };
-    if matches!(parsed.scheme(), "http" | "https") && parsed.password().is_some() {
+    if matches!(parsed.scheme(), "http" | "https")
+        && (!parsed.username().is_empty() || parsed.password().is_some())
+    {
         return Err(ClassifyError::CredentialBearingUrl);
     }
     let Some(host) = parsed.host_str() else {
