@@ -1,6 +1,6 @@
 mod common;
 
-use git_core::forge::{detect_forge_repositories, ForgeError, ForgeProvider, ForgeRepository};
+use git_core::forge::{detect_forge_repositories, ForgeProvider, ForgeRepository};
 
 fn add_remote(repo: &git2::Repository, name: &str, url: &str) {
     // Bypass git_core::remote::add_remote's own credential validation here: these tests
@@ -117,7 +117,7 @@ fn detects_two_remotes_resolving_to_different_supported_repositories() {
 }
 
 #[test]
-fn rejects_a_remote_with_embedded_username_and_password() {
+fn excludes_a_remote_with_embedded_username_and_password() {
     let (_dir, repo) = common::init_repo();
     add_remote(
         &repo,
@@ -125,17 +125,14 @@ fn rejects_a_remote_with_embedded_username_and_password() {
         "https://alice:secret-token@github.com/acme/widget.git",
     );
 
-    let error = detect_forge_repositories(&repo).expect_err("expected credential rejection");
+    let repositories =
+        detect_forge_repositories(&repo).expect("a bad remote must not abort detection");
 
-    assert!(matches!(error, ForgeError::CredentialBearingUrl));
-    let message = error.to_string();
-    assert!(!message.contains("secret-token"));
-    assert!(!message.contains("alice"));
-    assert!(!message.contains("github.com"));
+    assert!(repositories.is_empty());
 }
 
 #[test]
-fn rejects_a_remote_with_bare_username_token_and_no_password() {
+fn excludes_a_remote_with_bare_username_token_and_no_password() {
     let (_dir, repo) = common::init_repo();
     add_remote(
         &repo,
@@ -143,16 +140,14 @@ fn rejects_a_remote_with_bare_username_token_and_no_password() {
         "https://ghp_abcd1234@github.com/acme/widget.git",
     );
 
-    let error = detect_forge_repositories(&repo).expect_err("expected credential rejection");
+    let repositories =
+        detect_forge_repositories(&repo).expect("a bad remote must not abort detection");
 
-    assert!(matches!(error, ForgeError::CredentialBearingUrl));
-    let message = error.to_string();
-    assert!(!message.contains("ghp_abcd1234"));
-    assert!(!message.contains("github.com"));
+    assert!(repositories.is_empty());
 }
 
 #[test]
-fn rejects_an_ssh_style_remote_with_embedded_username_and_password() {
+fn excludes_an_ssh_style_remote_with_embedded_username_and_password() {
     let (_dir, repo) = common::init_repo();
     add_remote(
         &repo,
@@ -160,35 +155,62 @@ fn rejects_an_ssh_style_remote_with_embedded_username_and_password() {
         "alice:secret-token@github.com:acme/widget.git",
     );
 
-    let error = detect_forge_repositories(&repo).expect_err("expected credential rejection");
+    let repositories =
+        detect_forge_repositories(&repo).expect("a bad remote must not abort detection");
 
-    assert!(matches!(error, ForgeError::CredentialBearingUrl));
-    let message = error.to_string();
-    assert!(!message.contains("secret-token"));
-    assert!(!message.contains("alice"));
+    assert!(repositories.is_empty());
 }
 
 #[test]
-fn rejects_a_supported_host_url_with_too_few_path_segments() {
+fn excludes_a_supported_host_url_with_too_few_path_segments() {
     let (_dir, repo) = common::init_repo();
     add_remote(&repo, "origin", "https://github.com/acme.git");
 
-    let error = detect_forge_repositories(&repo).expect_err("expected ambiguity error");
+    let repositories =
+        detect_forge_repositories(&repo).expect("an ambiguous remote must not abort detection");
 
-    assert!(matches!(error, ForgeError::AmbiguousRemote { .. }));
-    let message = error.to_string();
-    assert!(!message.contains("acme.git"));
-    assert!(message.contains("origin"));
+    assert!(repositories.is_empty());
 }
 
 #[test]
-fn rejects_a_supported_host_url_with_too_many_path_segments() {
+fn excludes_a_supported_host_url_with_too_many_path_segments() {
     let (_dir, repo) = common::init_repo();
     add_remote(&repo, "origin", "https://github.com/acme/widget/extra.git");
 
-    let error = detect_forge_repositories(&repo).expect_err("expected ambiguity error");
+    let repositories =
+        detect_forge_repositories(&repo).expect("an ambiguous remote must not abort detection");
 
-    assert!(matches!(error, ForgeError::AmbiguousRemote { .. }));
+    assert!(repositories.is_empty());
+}
+
+#[test]
+fn a_bad_remote_does_not_hide_a_good_remote_on_the_same_repository() {
+    let (_dir, repo) = common::init_repo();
+    add_remote(&repo, "origin", "https://github.com/acme/widget.git");
+    add_remote(
+        &repo,
+        "broken",
+        "https://alice:secret-token@github.com/acme/other.git",
+    );
+    add_remote(
+        &repo,
+        "ambiguous",
+        "https://github.com/acme/widget/extra.git",
+    );
+
+    let repositories = detect_forge_repositories(&repo)
+        .expect("one bad remote among several must not abort detection");
+
+    assert_eq!(
+        repositories,
+        vec![ForgeRepository {
+            provider: ForgeProvider::GitHub,
+            host: "github.com".to_string(),
+            owner: "acme".to_string(),
+            name: "widget".to_string(),
+            remote_name: "origin".to_string(),
+        }]
+    );
 }
 
 #[test]

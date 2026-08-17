@@ -33,12 +33,6 @@ pub struct ForgeRepository {
 pub enum ForgeError {
     #[error("git remote operation failed: {0}")]
     Git(#[from] git2::Error),
-    #[error("remote URLs must not contain embedded credentials")]
-    CredentialBearingUrl,
-    #[error(
-        "remote '{remote_name}' points at a supported forge host but its repository path is ambiguous"
-    )]
-    AmbiguousRemote { remote_name: String },
 }
 
 /// Enumerates the repo's remotes and resolves the ones that point at a supported forge
@@ -47,29 +41,27 @@ pub enum ForgeError {
 /// Remotes on unrecognized hosts are silently skipped (no HTTP request is ever implied by
 /// this function — it's pure parsing). Remotes on a recognized forge host whose path can't be
 /// read as exactly `owner/name`, and remotes whose URL carries embedded `user:pass`
-/// credentials, are reported as errors rather than silently dropped or silently trusted.
+/// credentials, are likewise skipped rather than surfaced through this Vec — each remote is
+/// judged independently, so one unsupported/ambiguous/credential-bearing remote never hides
+/// the other, perfectly good, remotes on the same repository. `Err` is reserved for a truly
+/// fatal failure to enumerate the repo's remotes at all.
 pub fn detect_forge_repositories(repo: &Repository) -> Result<Vec<ForgeRepository>, ForgeError> {
     let mut repositories = Vec::new();
     for name in repo.remotes()?.iter().flatten().flatten() {
-        let remote = repo.find_remote(name)?;
-        let url = remote.url()?;
-        match classify_remote_url(url) {
-            Ok(Some(identity)) => repositories.push(ForgeRepository {
+        let Ok(remote) = repo.find_remote(name) else {
+            continue;
+        };
+        let Ok(url) = remote.url() else {
+            continue;
+        };
+        if let Ok(Some(identity)) = classify_remote_url(url) {
+            repositories.push(ForgeRepository {
                 provider: identity.provider,
                 host: identity.host,
                 owner: identity.owner,
                 name: identity.name,
                 remote_name: name.to_string(),
-            }),
-            Ok(None) => {}
-            Err(ClassifyError::CredentialBearingUrl) => {
-                return Err(ForgeError::CredentialBearingUrl)
-            }
-            Err(ClassifyError::AmbiguousPath) => {
-                return Err(ForgeError::AmbiguousRemote {
-                    remote_name: name.to_string(),
-                })
-            }
+            });
         }
     }
     Ok(repositories)
@@ -127,7 +119,10 @@ fn classify_host_and_path(host: &str, path: &str) -> Result<Option<ForgeIdentity
         return Err(ClassifyError::AmbiguousPath);
     };
     let name = name.strip_suffix(".git").unwrap_or(name);
-    if owner.is_empty() || name.is_empty() {
+    // `owner` can never be empty here: `segments` is already filtered to non-empty pieces
+    // above, so `segments.next()` only ever yields `Some(owner)` for a non-empty `owner`.
+    // `name` can still end up empty after stripping a lone `.git` segment (e.g. `acme/.git`).
+    if name.is_empty() {
         return Err(ClassifyError::AmbiguousPath);
     }
     Ok(Some(ForgeIdentity {
