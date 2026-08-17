@@ -134,6 +134,7 @@ export default function App() {
         onSaveForgeToken={appState.saveForgeToken}
         onForgetForgeToken={appState.forgetForgeToken}
         onCreatePullRequest={appState.createPullRequest}
+        onOpenExternalUrl={appState.openExternalUrl}
         operationDisabled={repositoryOperationDisabled}
       />
       <TransferPanel progress={appState.state.transfer} />

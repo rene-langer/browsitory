@@ -94,13 +94,11 @@ describe("Browsitory pull requests", () => {
     expect(await server.requestCount()).toBe(0);
   });
 
-  // `PullRequestPanel` only ever shows the most recently listed repository's rows (see
-  // `PullRequestPanel.tsx`'s `activeRemote`, needed because `state.pullRequests` in app state is
-  // one flat list shared by every remote — not keyed per-remote). So each provider's list/create
-  // flow, and its "forgetting the token hides the list" check, has to run as one self-contained
-  // scenario: once the *other* provider's section is listed, this section's rows are expected to
-  // stop rendering regardless of whether its token was forgotten, which would make a
-  // forget-clears-it assertion checked afterwards meaningless.
+  // `PullRequestPanel` keys `state.pullRequests` per remote (see `useAppState.ts`), so each
+  // repository's section renders only its own listed rows independently of any other remote's
+  // section. These two `it()` blocks still run as separate self-contained scenarios per
+  // provider purely for readability — not because listing one remote would otherwise clobber
+  // or hide another remote's rows.
   it("lists and creates a GitHub pull request using the saved token, then hides it once forgotten", async () => {
     const section = await $("section[aria-labelledby='pull-request-section-gh-origin']");
     await (await section.$("aria/Account")).setValue("rene");

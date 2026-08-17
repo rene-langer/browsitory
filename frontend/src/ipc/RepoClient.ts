@@ -192,6 +192,16 @@ export interface CreatePullRequest {
   targetBranch: string;
 }
 
+// GitHub defaults to 30 PRs/page, Bitbucket to 10 — `listPullRequests` asks for a larger
+// explicit page (100), but a repository can still have more open PRs than that. `truncated`
+// tells the UI whether the provider indicated more results exist beyond this page (a GitHub
+// `Link: rel="next"` header, or a non-null Bitbucket `next` field), so it can show an explicit
+// "more available" notice instead of silently displaying a partial list.
+export interface PullRequestList {
+  pullRequests: PullRequest[];
+  truncated: boolean;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -258,6 +268,10 @@ export interface RepoClient {
   detectForgeRepository(): Promise<ForgeRepository[]>;
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
-  listPullRequests(remoteName: string, account: string): Promise<PullRequest[]>;
+  listPullRequests(remoteName: string, account: string): Promise<PullRequestList>;
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<PullRequest>;
+  // Opens `url` in the user's default external browser/handler rather than navigating this
+  // app's own window away from the app entirely (see `tauriRepoClient.ts` and
+  // `PullRequestPanel.tsx`, the only caller).
+  openExternalUrl(url: string): Promise<void>;
 }

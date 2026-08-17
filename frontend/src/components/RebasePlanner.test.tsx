@@ -76,6 +76,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     forgetForgeToken: unused,
     listPullRequests: unused,
     createPullRequest: unused,
+    openExternalUrl: unused,
     ...overrides,
   };
 }
