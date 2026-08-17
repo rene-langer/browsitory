@@ -127,17 +127,35 @@ impl<T: ForgeApi + ?Sized> ForgeApi for &T {
 /// `reqwest`'s blocking client, matching this codebase's synchronous worker-thread model (see
 /// `crates/tauri-app/src/worker.rs` — one `thread::spawn`-owned thread per open repository, no
 /// tokio runtime anywhere in this crate).
+///
+/// The inner client is built lazily, on first use, rather than in `new()`. `Worker::spawn`
+/// constructs a `ReqwestForgeApi` on the *caller's* thread (before handing it off to the
+/// dedicated worker OS thread — see that function), and that caller is a Tauri `async fn`
+/// command running on Tauri's own tokio runtime.
+/// `reqwest::blocking::Client::builder().build()` briefly spins up and tears down its own
+/// internal tokio runtime as part of construction, which panics ("Cannot drop a runtime in a
+/// context where blocking is not allowed") if it happens while already inside another tokio
+/// runtime's async context — exactly `Worker::spawn`'s caller. Deferring the real `build()` call
+/// to first `send()` moves it onto the worker OS thread instead (the only place `send()` is ever
+/// called), which has no tokio runtime at all, matching this struct's doc comment above.
 pub struct ReqwestForgeApi {
-    client: reqwest::blocking::Client,
+    client: std::sync::OnceLock<reqwest::blocking::Client>,
 }
 
 impl ReqwestForgeApi {
     pub fn new() -> Self {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("the bundled rustls TLS backend must build a reqwest client");
-        Self { client }
+        Self {
+            client: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn client(&self) -> &reqwest::blocking::Client {
+        self.client.get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("the bundled rustls TLS backend must build a reqwest client")
+        })
     }
 }
 
@@ -150,8 +168,8 @@ impl Default for ReqwestForgeApi {
 impl ForgeApi for ReqwestForgeApi {
     fn send(&self, request: ForgeHttpRequest) -> Result<ForgeHttpResponse, ForgeApiError> {
         let mut builder = match request.method {
-            ForgeHttpMethod::Get => self.client.get(&request.url),
-            ForgeHttpMethod::Post => self.client.post(&request.url),
+            ForgeHttpMethod::Get => self.client().get(&request.url),
+            ForgeHttpMethod::Post => self.client().post(&request.url),
         };
         for (name, value) in &request.headers {
             builder = builder.header(name, value);
@@ -249,13 +267,39 @@ fn extract_validation_message(body: &str) -> String {
         .to_string()
 }
 
+// Test-only seams: `PullRequestService` otherwise always talks to the real GitHub/Bitbucket
+// Cloud APIs, by design (see this module's doc comment — unit tests use `ForgeApi` fakes
+// instead, precisely so they never need a mock HTTP server). Black-box E2E coverage
+// (`e2e/specs/pull-requests.spec.ts`) drives the actual built binary through WebDriver and has
+// no seam inside the process to substitute a fake `ForgeApi`, so it needs the HTTP destination
+// itself to be redirectable to a loopback fixture server. These env vars are that redirect,
+// read fresh on every request (no caching) and consulted nowhere else in the app. Unset (the
+// production default), behavior is byte-identical to the hardcoded hosts below. Mirrors the
+// existing `BROWSITORY_E2E_CREDENTIAL_KEY`/`_CERT` pattern `e2e/wdio.conf.ts` uses for the Git
+// HTTPS credential E2E flow.
+fn github_api_base() -> String {
+    std::env::var("BROWSITORY_FORGE_GITHUB_API_BASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://api.github.com".to_string())
+}
+
+fn bitbucket_api_base() -> String {
+    std::env::var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://api.bitbucket.org/2.0".to_string())
+}
+
 fn build_list_request(repository: &ForgeRepository, token: &str) -> ForgeHttpRequest {
     match repository.provider {
         ForgeProvider::GitHub => ForgeHttpRequest {
             method: ForgeHttpMethod::Get,
             url: format!(
-                "https://api.github.com/repos/{}/{}/pulls?state=open",
-                repository.owner, repository.name
+                "{}/repos/{}/{}/pulls?state=open",
+                github_api_base(),
+                repository.owner,
+                repository.name
             ),
             headers: github_headers(token),
             json_body: None,
@@ -263,8 +307,10 @@ fn build_list_request(repository: &ForgeRepository, token: &str) -> ForgeHttpReq
         ForgeProvider::Bitbucket => ForgeHttpRequest {
             method: ForgeHttpMethod::Get,
             url: format!(
-                "https://api.bitbucket.org/2.0/repositories/{}/{}/pullrequests?state=OPEN",
-                repository.owner, repository.name
+                "{}/repositories/{}/{}/pullrequests?state=OPEN",
+                bitbucket_api_base(),
+                repository.owner,
+                repository.name
             ),
             headers: bitbucket_headers(token),
             json_body: None,
@@ -282,8 +328,10 @@ fn build_create_request(
         ForgeProvider::GitHub => ForgeHttpRequest {
             method: ForgeHttpMethod::Post,
             url: format!(
-                "https://api.github.com/repos/{}/{}/pulls",
-                repository.owner, repository.name
+                "{}/repos/{}/{}/pulls",
+                github_api_base(),
+                repository.owner,
+                repository.name
             ),
             headers: github_headers(token),
             json_body: Some(serde_json::json!({
@@ -296,8 +344,10 @@ fn build_create_request(
         ForgeProvider::Bitbucket => ForgeHttpRequest {
             method: ForgeHttpMethod::Post,
             url: format!(
-                "https://api.bitbucket.org/2.0/repositories/{}/{}/pullrequests",
-                repository.owner, repository.name
+                "{}/repositories/{}/{}/pullrequests",
+                bitbucket_api_base(),
+                repository.owner,
+                repository.name
             ),
             headers: bitbucket_headers(token),
             json_body: Some(serde_json::json!({
@@ -543,6 +593,44 @@ mod tests {
             }
         ]
     }"#;
+
+    #[test]
+    fn the_api_base_url_env_overrides_default_to_the_real_forge_hosts() {
+        // SAFETY / hygiene: no other test in this module reads either env var, so this doesn't
+        // race with them; both are cleared again before returning so a later test run (or a
+        // parallel test elsewhere in this binary that happened to read them) never observes a
+        // value this test set. See this module's `github_api_base`/`bitbucket_api_base` doc
+        // comment for why this seam exists at all.
+        assert!(std::env::var("BROWSITORY_FORGE_GITHUB_API_BASE_URL").is_err());
+        assert!(std::env::var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL").is_err());
+        assert_eq!(github_api_base(), "https://api.github.com");
+        assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
+
+        // SAFETY: `pull_requests` tests never spawn threads, so no other test observes this
+        // process's environment mutating concurrently with this one.
+        unsafe {
+            std::env::set_var("BROWSITORY_FORGE_GITHUB_API_BASE_URL", "http://127.0.0.1:9");
+            std::env::set_var(
+                "BROWSITORY_FORGE_BITBUCKET_API_BASE_URL",
+                "http://127.0.0.1:9",
+            );
+        }
+        assert_eq!(github_api_base(), "http://127.0.0.1:9");
+        assert_eq!(bitbucket_api_base(), "http://127.0.0.1:9");
+
+        let request = build_list_request(&github_repo(), "token");
+        assert_eq!(
+            request.url,
+            "http://127.0.0.1:9/repos/acme/widget/pulls?state=open"
+        );
+
+        unsafe {
+            std::env::remove_var("BROWSITORY_FORGE_GITHUB_API_BASE_URL");
+            std::env::remove_var("BROWSITORY_FORGE_BITBUCKET_API_BASE_URL");
+        }
+        assert_eq!(github_api_base(), "https://api.github.com");
+        assert_eq!(bitbucket_api_base(), "https://api.bitbucket.org/2.0");
+    }
 
     #[test]
     fn listing_without_a_token_is_rejected_before_any_request_is_sent() {

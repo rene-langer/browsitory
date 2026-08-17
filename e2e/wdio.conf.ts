@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 // packages ship their own types rather than `@types/*` packages.
 import "webdriverio";
 import "@wdio/types";
+import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -180,7 +181,7 @@ export const config: WebdriverIO.Config = {
     timeout: 60000,
   },
 
-  onPrepare: () => {
+  onPrepare: async () => {
     if (!fs.existsSync(tauriAppBinary)) {
       throw new Error(
         `tauri-app binary not found at ${tauriAppBinary}. Run \`cargo build --workspace\` ` +
@@ -192,6 +193,15 @@ export const config: WebdriverIO.Config = {
     setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
     resetFixtureRepo();
     setupCredentialCertificate();
+
+    // See `e2e/support/forgeFixtureServer.ts`'s header comment for why this has to be a real
+    // loopback server started before the app process exists, rather than something the spec
+    // file wires up per-test: the app only reads these env vars (via
+    // `crates/tauri-app/src/pull_requests.rs`'s `github_api_base`/`bitbucket_api_base`) once,
+    // implicitly, at process-environment-inheritance time when `tauri-driver` spawns it below.
+    const forgeFixtureServer = await startSharedForgeFixtureServer();
+    process.env.BROWSITORY_FORGE_GITHUB_API_BASE_URL = forgeFixtureServer.url;
+    process.env.BROWSITORY_FORGE_BITBUCKET_API_BASE_URL = forgeFixtureServer.url;
   },
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
@@ -224,7 +234,8 @@ export const config: WebdriverIO.Config = {
     closeTauriDriver();
   },
 
-  onComplete: () => {
+  onComplete: async () => {
     fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
+    await closeSharedForgeFixtureServer();
   },
 };
