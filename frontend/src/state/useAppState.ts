@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BranchInfo,
+  CreatePullRequest,
   FileConflictChoice,
+  ForgeProvider,
+  ForgeRepository,
   GraphCommit,
   MergeOutcome,
   PullOutcome,
+  PullRequest,
   RebasePlanEntry,
   RebaseStepResult,
   RemoteAuthMode,
@@ -64,6 +68,8 @@ export interface AppState {
   tags: TagInfo[];
   upstream: UpstreamInfo | null;
   remoteUpstreams: Record<string, UpstreamInfo[]>;
+  forgeRepositories: ForgeRepository[];
+  pullRequests: PullRequest[];
   createBranchDraft: { startPoint: string } | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
@@ -128,6 +134,10 @@ export interface UseAppStateResult {
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
   abortRebase(): Promise<void>;
+  listPullRequests(remoteName: string, account: string): Promise<void>;
+  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
+  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
+  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -147,6 +157,8 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     tags: [],
     upstream: null,
     remoteUpstreams: {},
+    forgeRepositories: [],
+    pullRequests: [],
     createBranchDraft: null,
     stashes: [],
     mergeMessage: null,
@@ -164,7 +176,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   const refresh = useCallback(async () => {
     try {
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
         await Promise.all([
           client.getStatus(),
           client.getCommitGraph(GRAPH_LIMIT),
@@ -178,6 +190,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           client.listStashes(),
           client.getMergeMessage(),
           client.getRebaseProgress(),
+          client.detectForgeRepository(),
         ]);
       const remoteUpstreams = Object.fromEntries(
         await Promise.all(
@@ -209,6 +222,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         stashes,
         mergeMessage,
         rebaseProgress,
+        forgeRepositories,
         error: null,
       }));
     } catch (err) {
@@ -650,6 +664,36 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [client, runMutation],
   );
 
+  const listPullRequests = useCallback(
+    async (remoteName: string, account: string) => {
+      try {
+        const pullRequests = await client.listPullRequests(remoteName, account);
+        setState((prev) => ({ ...prev, pullRequests, error: null }));
+      } catch (err) {
+        setState((prev) => ({ ...prev, error: String(err) }));
+      }
+    },
+    [client],
+  );
+  const saveForgeToken = useCallback(
+    (provider: ForgeProvider, account: string, token: string) =>
+      runMutation(() => client.saveForgeToken(provider, account, token)),
+    [client, runMutation],
+  );
+  const forgetForgeToken = useCallback(
+    (provider: ForgeProvider, account: string) =>
+      runMutation(() => client.forgetForgeToken(provider, account)),
+    [client, runMutation],
+  );
+  const createPullRequest = useCallback(
+    (remoteName: string, account: string, pullRequest: CreatePullRequest) =>
+      runMutation(async () => {
+        const created = await client.createPullRequest(remoteName, account, pullRequest);
+        setState((prev) => ({ ...prev, pullRequests: [created, ...prev.pullRequests] }));
+      }),
+    [client, runMutation],
+  );
+
   return {
     state,
     openRepo,
@@ -698,6 +742,10 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     startRebase,
     rebaseContinue,
     abortRebase,
+    listPullRequests,
+    saveForgeToken,
+    forgetForgeToken,
+    createPullRequest,
     refresh,
   };
 }

@@ -12,14 +12,9 @@ const SERVICE_NAME: &str = "com.browsitory.git";
 // namespaced with a `forge:<provider>:` prefix: a saved Git HTTPS transport credential must
 // never collide with, or be mistaken for, a forge (GitHub/Bitbucket) API token. See
 // `docs/superpowers/specs/2026-08-15-browsitory-phase4-design.md`'s "Pull requests" section.
-// `#[allow(dead_code)]` below: not yet called from `commands.rs` (Tauri commands for saving/
-// looking up/forgetting a forge token are a later task in this plan) — only this module's own
-// tests exercise the forge-token key/service methods for now.
-#[allow(dead_code)]
 const FORGE_SERVICE_NAME: &str = "com.browsitory.forge";
 const CREDENTIAL_LOOKUP_FAILURE_ERROR: &str = "credential lookup failed";
 
-#[allow(dead_code)]
 fn forge_provider_slug(provider: ForgeProvider) -> &'static str {
     match provider {
         ForgeProvider::GitHub => "github",
@@ -56,7 +51,6 @@ impl CredentialKey {
         })
     }
 
-    #[allow(dead_code)]
     pub fn for_forge(provider: ForgeProvider, account: &str) -> Self {
         Self {
             service: FORGE_SERVICE_NAME.to_owned(),
@@ -172,10 +166,6 @@ impl<S: CredentialStore> CredentialService<S> {
     /// Saves a forge (GitHub/Bitbucket) API token under its own keychain namespace, separate
     /// from any Git HTTPS transport credential. Never reads or reuses an HTTPS token: the user
     /// must explicitly save a provider token for PR operations.
-    // `#[allow(dead_code)]` on these three: not yet called from `commands.rs`/`worker.rs` (a
-    // later task in this plan wires PR/token Tauri commands) — only this module's own tests
-    // exercise them for now.
-    #[allow(dead_code)]
     pub fn save_forge_token(
         &self,
         provider: ForgeProvider,
@@ -186,7 +176,6 @@ impl<S: CredentialStore> CredentialService<S> {
         self.store.set(&key, token)
     }
 
-    #[allow(dead_code)]
     pub fn lookup_forge_token(
         &self,
         provider: ForgeProvider,
@@ -196,7 +185,6 @@ impl<S: CredentialStore> CredentialService<S> {
         self.store.get(&key)
     }
 
-    #[allow(dead_code)]
     pub fn forget_forge_token(
         &self,
         provider: ForgeProvider,
