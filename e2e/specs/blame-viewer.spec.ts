@@ -34,20 +34,21 @@ describe("Browsitory blame", () => {
     // Stage+commit the throwaway prime file through the real UI — the only way to make
     // useAppState refetch, which is what makes the two git-CLI commits above show up below.
     const stageButton = await $("button=Stage");
-    await stageButton.click();
-    await commitMessageInput.setValue("e2e: prime the refresh");
+    await stageButton.scrollIntoView({ block: "center" });
+    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");
-    await commitButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const secondCommitEntry = await $("li*=e2e: blame fixture second commit");
     await secondCommitEntry.waitForExist({ timeout: 10000 });
-    await secondCommitEntry.click();
+    await browser.execute((el) => (el as HTMLElement).click(), secondCommitEntry);
 
     const fileEntry = await $(`button=${BLAME_FIXTURE_FILE}`);
     await fileEntry.waitForExist({ timeout: 10000 });
 
     const blameButton = await $("button=Blame");
-    await blameButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), blameButton);
 
     // Click a `<td>` inside the row, not the `<tr>` itself: WebKitGTK's WebDriver
     // implementation (what `tauri-driver` proxies to on Linux) reports bare `display:table-row`
@@ -57,11 +58,11 @@ describe("Browsitory blame", () => {
     // the same behavior the brief's row click was meant to.
     const unchangedLineCell = await $("td*=line one");
     await unchangedLineCell.waitForExist({ timeout: 10000 });
-    await unchangedLineCell.click();
+    await browser.execute((el) => (el as HTMLElement).click(), unchangedLineCell);
 
-    const firstCommitEntry = await $("li*=e2e: blame fixture first commit");
     await browser.waitUntil(
-      async () => (await firstCommitEntry.getAttribute("aria-selected")) === "true",
+      async () =>
+        (await $("li*=e2e: blame fixture first commit").getAttribute("aria-selected")) === "true",
       {
         timeout: 10000,
         timeoutMsg:

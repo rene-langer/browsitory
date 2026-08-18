@@ -204,9 +204,10 @@ fn download_target_from_url(
 }
 
 fn uninitialized_nested_submodule(path: &Path) -> SubmoduleError {
+    let display_path = path.to_string_lossy().replace("\\", "/");
     git2::Error::from_str(&format!(
         "nested submodule is not initialized: {}",
-        path.display()
+        display_path
     ))
     .into()
 }

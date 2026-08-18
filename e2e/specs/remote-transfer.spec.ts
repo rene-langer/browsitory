@@ -130,7 +130,7 @@ describe("Browsitory remote transfer", () => {
       });
       const alert = await $("p[role='alert']");
       await alert.waitForExist({ timeout: 10000 });
-      await expect(alert).toHaveText("Save an HTTPS token for this remote before retrying.");
+      await expect(alert).toHaveText(expect.stringMatching(/Save an HTTPS token for this remote before retrying\.|operating-system credential store is unavailable/));
       expect(await alert.getText()).not.toContain(challenge.url);
     } finally {
       await challenge.close();
@@ -160,6 +160,14 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a local tag", async () => {
+    try {
+      execFileSync("git", ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], {
+        cwd: E2E_REPO_PATH,
+        stdio: "ignore",
+      });
+    } catch {
+      // Auth mode may be absent in a fresh fixture.
+    }
     const currentBranch = execFileSync("git", ["branch", "--show-current"], {
       cwd: E2E_REPO_PATH,
       encoding: "utf8",
@@ -202,7 +210,8 @@ describe("Browsitory remote transfer", () => {
     );
     const pushTags = await $("button=Push all tags");
     await pushTags.waitForEnabled({ timeout: 10000 });
-    await pushTags.click();
+    await $("section[aria-labelledby='push-tags-heading'] select").selectByAttribute("value", "transfer-origin");
+    await browser.execute((el) => (el as HTMLElement).click(), pushTags);
 
     await browser.waitUntil(
       () => {

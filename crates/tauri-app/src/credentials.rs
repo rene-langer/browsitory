@@ -1,5 +1,6 @@
 use std::fmt;
 
+use git_core::forge::ForgeProvider;
 use git_core::remote::{
     CredentialProvider, RemoteAuthMode, CREDENTIAL_STORE_FAILURE_ERROR, MISSING_CREDENTIAL_ERROR,
     SSH_AGENT_FAILURE_ERROR,
@@ -7,7 +8,19 @@ use git_core::remote::{
 use url::Url;
 
 const SERVICE_NAME: &str = "com.browsitory.git";
+// Deliberately a different service name than `SERVICE_NAME` above, and the account is further
+// namespaced with a `forge:<provider>:` prefix: a saved Git HTTPS transport credential must
+// never collide with, or be mistaken for, a forge (GitHub/Bitbucket) API token. See
+// `docs/superpowers/specs/2026-08-15-browsitory-phase4-design.md`'s "Pull requests" section.
+const FORGE_SERVICE_NAME: &str = "com.browsitory.forge";
 const CREDENTIAL_LOOKUP_FAILURE_ERROR: &str = "credential lookup failed";
+
+fn forge_provider_slug(provider: ForgeProvider) -> &'static str {
+    match provider {
+        ForgeProvider::GitHub => "github",
+        ForgeProvider::Bitbucket => "bitbucket",
+    }
+}
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub service: String,
@@ -36,6 +49,13 @@ impl CredentialKey {
             service: SERVICE_NAME.to_owned(),
             account: format!("https://{host}{port}/{username}"),
         })
+    }
+
+    pub fn for_forge(provider: ForgeProvider, account: &str) -> Self {
+        Self {
+            service: FORGE_SERVICE_NAME.to_owned(),
+            account: format!("forge:{}:{account}", forge_provider_slug(provider)),
+        }
     }
 }
 
@@ -69,14 +89,24 @@ pub trait CredentialStore {
     fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError>;
 }
 
+// Cfg-gated out (rather than merely unused) under `forge-fixture-override`: `Worker::spawn`
+// never constructs this type in that build (see `worker.rs` and `InMemoryCredentialStore`'s doc
+// comment below), so removing it from compilation entirely under the feature is a stronger,
+// structural guarantee that the E2E binary can't touch the real OS keychain — not just "nothing
+// currently calls it," but "the type doesn't exist in this binary" — and it also avoids an
+// unused-code warning (which `-D warnings` in CI would turn into a hard failure) for a type that
+// really is dead code in that build by design.
+#[cfg(not(feature = "forge-fixture-override"))]
 pub struct KeyringCredentialStore;
 
+#[cfg(not(feature = "forge-fixture-override"))]
 impl KeyringCredentialStore {
     fn entry(&self, key: &CredentialKey) -> Result<keyring::Entry, CredentialStoreError> {
         keyring::Entry::new(&key.service, &key.account).map_err(|_| CredentialStoreError::Keychain)
     }
 }
 
+#[cfg(not(feature = "forge-fixture-override"))]
 impl CredentialStore for KeyringCredentialStore {
     fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
         match self.entry(key)?.get_password() {
@@ -97,6 +127,55 @@ impl CredentialStore for KeyringCredentialStore {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(CredentialStoreError::Keychain),
         }
+    }
+}
+
+/// An in-memory `CredentialStore`, used only when this crate is built with the
+/// `forge-fixture-override` Cargo feature (see `Cargo.toml`'s doc comment on that feature, and
+/// `pull_requests.rs`'s API-base-URL override — this credential-store swap is the same
+/// pattern's counterpart for the OS-keychain seam). `e2e/specs/pull-requests.spec.ts` drives
+/// the real built binary through WebDriver, including clicking "Save token", and CI's `e2e` job
+/// has no session D-Bus secrets service for the real `KeyringCredentialStore` to talk to (the
+/// pre-existing `e2e/specs/remote-transfer.spec.ts` already has to tolerate this by asserting
+/// an alternation between "credential store unavailable" and success). Swapping this store in
+/// for the E2E build means the E2E binary never touches the real OS keychain at all: no CI
+/// dependency on a live secrets service, and no risk of an E2E run writing a real token into a
+/// developer's actual login keyring.
+///
+/// NOT enabled by default and must never ship in a release build — `Worker::spawn` (see
+/// `worker.rs`) unconditionally constructs a real `KeyringCredentialStore` without this
+/// feature, and without the feature this type doesn't exist in the compiled binary at all.
+#[cfg(feature = "forge-fixture-override")]
+#[derive(Default)]
+pub struct InMemoryCredentialStore {
+    tokens: std::sync::Mutex<std::collections::HashMap<CredentialKey, String>>,
+}
+
+#[cfg(feature = "forge-fixture-override")]
+impl CredentialStore for InMemoryCredentialStore {
+    fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+        Ok(self
+            .tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .get(key)
+            .cloned())
+    }
+
+    fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
+        self.tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .insert(key.clone(), token.to_owned());
+        Ok(())
+    }
+
+    fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
+        self.tokens
+            .lock()
+            .map_err(|_| CredentialStoreError::Keychain)?
+            .remove(key);
+        Ok(())
     }
 }
 
@@ -140,6 +219,37 @@ impl<S: CredentialStore> CredentialService<S> {
 
     pub fn forget_https(&self, url: &str, username: &str) -> Result<(), CredentialStoreError> {
         let key = CredentialKey::for_https(url, username)?;
+        self.store.delete(&key)
+    }
+
+    /// Saves a forge (GitHub/Bitbucket) API token under its own keychain namespace, separate
+    /// from any Git HTTPS transport credential. Never reads or reuses an HTTPS token: the user
+    /// must explicitly save a provider token for PR operations.
+    pub fn save_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+        token: &str,
+    ) -> Result<(), CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
+        self.store.set(&key, token)
+    }
+
+    pub fn lookup_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+    ) -> Result<Option<String>, CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
+        self.store.get(&key)
+    }
+
+    pub fn forget_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: &str,
+    ) -> Result<(), CredentialStoreError> {
+        let key = CredentialKey::for_forge(provider, account);
         self.store.delete(&key)
     }
 }
@@ -220,7 +330,10 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
                 .ssh_agent
                 .credential(username.unwrap_or("git"))
                 .map_err(|_| git2::Error::from_str(SSH_AGENT_FAILURE_ERROR)),
-            None => Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
+            None if url.starts_with("https://") || url.starts_with("http://") => {
+                Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR))
+            }
+            None => git2::Cred::default(),
         }
     }
 }
@@ -230,6 +343,7 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
+    use git_core::forge::ForgeProvider;
     use git_core::remote::{CredentialProvider, RemoteAuthMode};
 
     use super::{
@@ -306,6 +420,24 @@ mod tests {
         }
     }
 
+    // Only compiled with the `forge-fixture-override` feature — without it, `InMemoryCredentialStore`
+    // doesn't exist in the crate at all (see its doc comment). Proves the fixture store itself
+    // implements the `CredentialStore` contract correctly (get/set/delete, and forge-token
+    // namespacing is unaffected by which store backs it) — `Worker::spawn`'s choice of *which*
+    // store to construct under this feature is covered separately in `worker.rs`.
+    #[cfg(feature = "forge-fixture-override")]
+    #[test]
+    fn in_memory_credential_store_saves_reads_and_forgets_a_forge_token() {
+        let store = super::InMemoryCredentialStore::default();
+        let key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+
+        assert!(store.get(&key).unwrap().is_none());
+        store.set(&key, "gh-token-123").unwrap();
+        assert_eq!(store.get(&key).unwrap().as_deref(), Some("gh-token-123"));
+        store.delete(&key).unwrap();
+        assert!(store.get(&key).unwrap().is_none());
+    }
+
     #[test]
     fn saves_reads_and_forgets_an_https_token_using_a_non_secret_key() {
         let store = MemoryCredentialStore::default();
@@ -323,6 +455,67 @@ mod tests {
         service.forget_https(remote_url, "rene").unwrap();
         assert!(service
             .lookup_https(remote_url, Some("rene"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn forge_token_key_uses_a_service_and_account_distinct_from_the_https_git_key() {
+        let forge_key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+        let https_key =
+            CredentialKey::for_https("https://github.com/acme/widget.git", "rene").unwrap();
+
+        assert_ne!(forge_key.service, https_key.service);
+        assert_ne!(forge_key.account, https_key.account);
+        assert_eq!(forge_key.service, "com.browsitory.forge");
+        assert_eq!(forge_key.account, "forge:github:rene");
+    }
+
+    #[test]
+    fn forge_token_keys_are_scoped_per_provider() {
+        let github_key = CredentialKey::for_forge(ForgeProvider::GitHub, "rene");
+        let bitbucket_key = CredentialKey::for_forge(ForgeProvider::Bitbucket, "rene");
+
+        assert_ne!(github_key.account, bitbucket_key.account);
+        assert_eq!(bitbucket_key.account, "forge:bitbucket:rene");
+    }
+
+    #[test]
+    fn saves_reads_and_forgets_a_forge_token_using_the_dedicated_namespace() {
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+
+        service
+            .save_forge_token(ForgeProvider::GitHub, "rene", "gh-token-123")
+            .unwrap();
+        assert_eq!(
+            service
+                .lookup_forge_token(ForgeProvider::GitHub, "rene")
+                .unwrap(),
+            Some("gh-token-123".to_string())
+        );
+
+        service
+            .forget_forge_token(ForgeProvider::GitHub, "rene")
+            .unwrap();
+        assert!(service
+            .lookup_forge_token(ForgeProvider::GitHub, "rene")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_saved_https_credential_is_never_returned_by_the_forge_token_lookup() {
+        // A saved Git HTTPS token must never be implicitly reused for PR APIs — the two
+        // keychain namespaces must stay fully separate even for the same account string.
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        service
+            .save_https("https://github.com/acme/widget.git", "rene", "https-token")
+            .unwrap();
+
+        assert!(service
+            .lookup_forge_token(ForgeProvider::GitHub, "rene")
             .unwrap()
             .is_none());
     }
@@ -443,6 +636,20 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
+    fn provider_without_auth_metadata_allows_non_http_remotes_to_use_defaults() {
+        let service = CredentialService::new(MemoryCredentialStore::default());
+        let mut provider = RemoteCredentialProvider::new(&service, None);
+
+        provider
+            .credential(
+                "file:///tmp/remote.git",
+                None,
+                git2::CredentialType::USER_PASS_PLAINTEXT,
+            )
+            .expect("local remotes do not need configured credentials");
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { DiffPane } from "./components/DiffPane";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
+import { PullRequestPanel } from "./components/PullRequestPanel";
 import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
@@ -125,6 +126,16 @@ export default function App() {
         onDelete={appState.deleteTag}
         onPush={appState.pushTags}
         pushDisabled={repositoryOperationDisabled}
+      />
+      <PullRequestPanel
+        forgeRepositories={appState.state.forgeRepositories}
+        pullRequests={appState.state.pullRequests}
+        onListPullRequests={appState.listPullRequests}
+        onSaveForgeToken={appState.saveForgeToken}
+        onForgetForgeToken={appState.forgetForgeToken}
+        onCreatePullRequest={appState.createPullRequest}
+        onOpenExternalUrl={appState.openExternalUrl}
+        operationDisabled={repositoryOperationDisabled}
       />
       <TransferPanel progress={appState.state.transfer} />
       <div className="app-layout">
