@@ -15,8 +15,9 @@ import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
-import { loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
+import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
+import styles from "./App.module.css";
 
 export default function App() {
   const appState = useAppState(tauriRepoClient);
@@ -27,14 +28,19 @@ export default function App() {
     ),
   );
   useEffect(() => {
-    persistTheme(theme);
+    applyTheme(theme);
   }, [theme]);
 
   const themeToggle = (
     <button
       type="button"
+      className={styles.themeToggle}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      onClick={() => {
+        const next = theme === "dark" ? "light" : "dark";
+        setTheme(next);
+        persistTheme(next);
+      }}
     >
       {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
     </button>
@@ -59,7 +65,10 @@ export default function App() {
   if (appState.state.repoPath === null) {
     return (
       <main>
-        <h1>Browsitory{themeToggle}</h1>
+        <header className={styles.headerRow}>
+          <h1>Browsitory</h1>
+          {themeToggle}
+        </header>
         <LaneBraid />
         {/* `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos`
             calls; an `onOpenRepo` rejection (bad path, a stale recent-repo entry, permissions)
@@ -73,7 +82,10 @@ export default function App() {
 
   return (
     <main>
-      <h1>Browsitory{themeToggle}</h1>
+      <header className={styles.headerRow}>
+        <h1>Browsitory</h1>
+        {themeToggle}
+      </header>
       <LaneBraid />
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
       <BranchSwitcher
