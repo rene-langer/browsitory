@@ -18,9 +18,11 @@
     bundle.icon array references (32x32.png, 128x128.png, 128x128@2x.png,
     icon.icns, icon.ico).
   - The three lane paths and the commit-node circle already carry built-in safe-area
-    padding: the lanes start at y=8 (out of 48) and the horizontal extent runs
-    x=10 to x=38 (out of 48), leaving roughly 17% top margin and roughly 21%
-    margin per side. Preserve this margin if the mark's geometry ever changes.
+    padding: path centerlines start at y=8 and run x=10 to x=38 (out of 48), but
+    account for the 4px stroke width too — the actual painted margins measured on
+    the rendered PNG are roughly 12.5% top, 20% bottom, 17% per side. Preserve
+    real (not just centerline) margins in this range if the mark's geometry
+    ever changes.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
   <rect width="48" height="48" rx="8" fill="#14131a"/>
