@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { SubmoduleInfo } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./SubmodulePanel.module.css";
 
 export function SubmodulePanel({
   submodules,
@@ -25,8 +28,7 @@ export function SubmodulePanel({
   };
 
   return (
-    <section className="submodule-panel" aria-labelledby="submodule-panel-heading">
-      <h2 id="submodule-panel-heading">Submodules</h2>
+    <Panel title="Submodules">
       <label>
         <input
           type="checkbox"
@@ -36,7 +38,7 @@ export function SubmodulePanel({
         />
         Update recursively
       </label>
-      <ul className="submodule-list">
+      <ul className={styles.list}>
         {submodules.map((submodule) => {
           const rowDisabled = operationDisabled || pendingPath === submodule.path;
 
@@ -47,24 +49,26 @@ export function SubmodulePanel({
               <span>{submodule.gitlinkId ?? "No recorded gitlink"}</span>
               <span>{submodule.initialized ? "Initialized" : "Not initialized"}</span>
               {submodule.headId !== null && <span>{submodule.headId}</span>}
-              <button
-                type="button"
-                disabled={rowDisabled}
-                onClick={() => void runMutation(submodule.path, () => onInit(submodule.path))}
-              >
-                Initialize {submodule.path}
-              </button>
-              <button
-                type="button"
-                disabled={rowDisabled}
-                onClick={() => void runMutation(submodule.path, () => onUpdate(submodule.path, recursive))}
-              >
-                Update {submodule.path}
-              </button>
+              <Toolbar>
+                <button
+                  type="button"
+                  disabled={rowDisabled}
+                  onClick={() => void runMutation(submodule.path, () => onInit(submodule.path))}
+                >
+                  Initialize {submodule.path}
+                </button>
+                <button
+                  type="button"
+                  disabled={rowDisabled}
+                  onClick={() => void runMutation(submodule.path, () => onUpdate(submodule.path, recursive))}
+                >
+                  Update {submodule.path}
+                </button>
+              </Toolbar>
             </li>
           );
         })}
       </ul>
-    </section>
+    </Panel>
   );
 }
