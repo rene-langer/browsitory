@@ -6,6 +6,7 @@ use std::thread;
 use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
+use git_core::forge::{ForgeProvider, ForgeRepository};
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
@@ -18,7 +19,12 @@ use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
 
-use crate::credentials::{CredentialService, KeyringCredentialStore, RemoteCredentialProvider};
+#[cfg(not(feature = "forge-fixture-override"))]
+use crate::credentials::KeyringCredentialStore;
+use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialProvider};
+use crate::pull_requests::{
+    CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
+};
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -315,6 +321,31 @@ pub(crate) enum Command {
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
     },
+    DetectForgeRepository {
+        reply: Sender<Result<Vec<ForgeRepository>, String>>,
+    },
+    SaveForgeToken {
+        provider: ForgeProvider,
+        account: String,
+        token: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ForgetForgeToken {
+        provider: ForgeProvider,
+        account: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ListPullRequests {
+        remote_name: String,
+        account: String,
+        reply: Sender<Result<PullRequestList, String>>,
+    },
+    CreatePullRequest {
+        remote_name: String,
+        account: String,
+        create: CreatePullRequest,
+        reply: Sender<Result<PullRequest, String>>,
+    },
 }
 
 pub struct Worker {
@@ -330,8 +361,52 @@ pub struct WorkerHandle {
     tx: Sender<Command>,
 }
 
+/// Finds the `ForgeRepository` for a named remote. Returns a secret-free, static error (never
+/// the raw remote URL or any detection detail) when the remote isn't a supported, unambiguous
+/// forge repository — callers must check this before ever touching `PullRequestService`, so an
+/// unsupported/ambiguous remote never causes an HTTP request.
+fn resolve_forge_repository(
+    repo: &git2::Repository,
+    remote_name: &str,
+) -> Result<ForgeRepository, String> {
+    git_core::forge::detect_forge_repositories(repo)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|repository| repository.remote_name == remote_name)
+        .ok_or_else(|| "this remote is not a supported forge repository".to_string())
+}
+
 impl Worker {
+    /// Production entry point: constructs the real OS-keychain credential store. Behind the
+    /// `forge-fixture-override` feature (E2E builds only — see `Cargo.toml`'s doc comment on
+    /// that feature and `credentials.rs`'s `InMemoryCredentialStore`), an in-memory store is
+    /// used instead so the E2E binary never touches a real OS keychain/D-Bus secrets service.
+    /// Without the feature this function is exactly the line below — same as before that
+    /// feature existed — so a release build's behavior is unchanged.
+    #[cfg(not(feature = "forge-fixture-override"))]
     pub fn spawn(path: PathBuf) -> Result<Self, String> {
+        Self::spawn_with(path, KeyringCredentialStore, ReqwestForgeApi::new())
+    }
+
+    #[cfg(feature = "forge-fixture-override")]
+    pub fn spawn(path: PathBuf) -> Result<Self, String> {
+        Self::spawn_with(
+            path,
+            crate::credentials::InMemoryCredentialStore::default(),
+            ReqwestForgeApi::new(),
+        )
+    }
+
+    /// Constructs the worker's credential store and forge HTTP transport by dependency
+    /// injection, so tests can supply in-memory/fake implementations at both external seams
+    /// (the OS keychain and the forge HTTP transport) instead of a real keychain or a live
+    /// GitHub/Bitbucket account. Production code only ever calls this through `spawn`, above.
+    fn spawn_with<S, A>(path: PathBuf, credential_store: S, forge_api: A) -> Result<Self, String>
+    where
+        S: CredentialStore + Send + 'static,
+        A: ForgeApi + Send + 'static,
+    {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::channel::<Command>();
@@ -339,7 +414,8 @@ impl Worker {
         thread::spawn(move || {
             let mut repo = repo;
             let mut rebase_state: Option<RebaseState> = None;
-            let credential_service = CredentialService::new(KeyringCredentialStore);
+            let credential_service = CredentialService::new(credential_store);
+            let pull_request_service = PullRequestService::new(forge_api);
             for command in rx {
                 match command {
                     Command::GetStatus { reply } => {
@@ -951,6 +1027,69 @@ impl Worker {
                             operation: TransferOperation::PushTags,
                             error: result.err().map(|error| error.transfer_error_kind()),
                         });
+                    }
+                    Command::DetectForgeRepository { reply } => {
+                        // An ambiguous or credential-bearing remote (`Err` from git-core)
+                        // declines rather than surfacing an error: the repo simply has no
+                        // usable forge repository, not a failure to report. No HTTP request is
+                        // ever made by this command either way.
+                        let repositories =
+                            git_core::forge::detect_forge_repositories(&repo).unwrap_or_default();
+                        let _ = reply.send(Ok(repositories));
+                    }
+                    Command::SaveForgeToken {
+                        provider,
+                        account,
+                        token,
+                        reply,
+                    } => {
+                        let result = credential_service
+                            .save_forge_token(provider, &account, &token)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ForgetForgeToken {
+                        provider,
+                        account,
+                        reply,
+                    } => {
+                        let result = credential_service
+                            .forget_forge_token(provider, &account)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListPullRequests {
+                        remote_name,
+                        account,
+                        reply,
+                    } => {
+                        let result = (|| {
+                            let repository = resolve_forge_repository(&repo, &remote_name)?;
+                            let token = credential_service
+                                .lookup_forge_token(repository.provider, &account)
+                                .map_err(|e| e.to_string())?;
+                            pull_request_service
+                                .list_pull_requests(&repository, token.as_deref())
+                                .map_err(|e| e.to_string())
+                        })();
+                        let _ = reply.send(result);
+                    }
+                    Command::CreatePullRequest {
+                        remote_name,
+                        account,
+                        create,
+                        reply,
+                    } => {
+                        let result = (|| {
+                            let repository = resolve_forge_repository(&repo, &remote_name)?;
+                            let token = credential_service
+                                .lookup_forge_token(repository.provider, &account)
+                                .map_err(|e| e.to_string())?;
+                            pull_request_service
+                                .create_pull_request(&repository, token.as_deref(), &create)
+                                .map_err(|e| e.to_string())
+                        })();
+                        let _ = reply.send(result);
                     }
                 }
             }
@@ -1789,18 +1928,192 @@ impl WorkerHandle {
             .recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
+
+    pub fn detect_forge_repository(&self) -> Result<Vec<ForgeRepository>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::DetectForgeRepository { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn save_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: String,
+        token: String,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::SaveForgeToken {
+                provider,
+                account,
+                token,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn forget_forge_token(
+        &self,
+        provider: ForgeProvider,
+        account: String,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ForgetForgeToken {
+                provider,
+                account,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn list_pull_requests(
+        &self,
+        remote_name: String,
+        account: String,
+    ) -> Result<PullRequestList, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListPullRequests {
+                remote_name,
+                account,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn create_pull_request(
+        &self,
+        remote_name: String,
+        account: String,
+        create: CreatePullRequest,
+    ) -> Result<PullRequest, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::CreatePullRequest {
+                remote_name,
+                account,
+                create,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::collections::{HashMap, VecDeque};
     use std::path::Path;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc, Mutex};
 
     use git2::Repository;
+    use git_core::forge::ForgeProvider;
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
     use super::{TransferEvent, Worker};
+    use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
+    use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
+
+    /// In-memory `CredentialStore` fake for worker tests — the design doc's "in-memory trait
+    /// implementations only at external seams such as the keychain" rule applies here just as
+    /// it does to `credentials.rs`'s own tests; the real OS keychain is never touched.
+    #[derive(Default)]
+    struct FakeCredentialStore {
+        tokens: RefCell<HashMap<CredentialKey, String>>,
+    }
+
+    impl CredentialStore for FakeCredentialStore {
+        fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+            Ok(self.tokens.borrow().get(key).cloned())
+        }
+
+        fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
+            self.tokens
+                .borrow_mut()
+                .insert(key.clone(), token.to_owned());
+            Ok(())
+        }
+
+        fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
+            self.tokens.borrow_mut().remove(key);
+            Ok(())
+        }
+    }
+
+    /// Canned-response `ForgeApi` fake — the other external seam the design doc calls out.
+    /// Records every request it receives so tests can assert on headers (e.g. the injected
+    /// `Authorization` token) without ever making a real HTTP call. `Arc<Mutex<..>>`-backed
+    /// (rather than `RefCell`, like `pull_requests.rs`'s own same-thread fake) because this one
+    /// crosses the worker's background-thread boundary: a clone kept in the test can still
+    /// inspect requests recorded by the clone moved into `Worker::spawn_with`.
+    #[derive(Clone, Default)]
+    struct FakeForgeApi {
+        responses: Arc<Mutex<VecDeque<Result<ForgeHttpResponse, ForgeApiError>>>>,
+        requests: Arc<Mutex<Vec<ForgeHttpRequest>>>,
+    }
+
+    impl FakeForgeApi {
+        fn queue(responses: Vec<Result<ForgeHttpResponse, ForgeApiError>>) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(responses.into_iter().collect())),
+                requests: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn requests(&self) -> Vec<ForgeHttpRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl crate::pull_requests::ForgeApi for FakeForgeApi {
+        fn send(&self, request: ForgeHttpRequest) -> Result<ForgeHttpResponse, ForgeApiError> {
+            self.requests.lock().unwrap().push(request);
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("test queued an unexpected extra request")
+        }
+    }
+
+    fn ok(status: u16, body: &str) -> Result<ForgeHttpResponse, ForgeApiError> {
+        Ok(ForgeHttpResponse {
+            status,
+            body: body.to_string(),
+            headers: Vec::new(),
+        })
+    }
+
+    const GITHUB_LIST_FIXTURE: &str = r#"[
+        {
+            "id": 101,
+            "number": 7,
+            "title": "Add pull request support",
+            "html_url": "https://github.com/acme/widget/pull/7",
+            "user": {"login": "rene"},
+            "head": {"ref": "feature/pr"},
+            "base": {"ref": "main"},
+            "state": "open"
+        }
+    ]"#;
 
     fn init_repo() -> (TempDir, Repository) {
         let dir = TempDir::new().expect("create temp dir");
@@ -2652,5 +2965,144 @@ mod tests {
 
         assert_eq!(handle.get_rebase_progress().unwrap(), None);
         assert!(handle.get_status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn detecting_an_ambiguous_remote_declines_rather_than_erroring_or_requesting() {
+        let (dir, repo) = init_repo();
+        // Three path segments (owner/name/extra) is ambiguous per git-core's forge parsing.
+        repo.remote("origin", "https://github.com/acme/widget/extra.git")
+            .unwrap();
+
+        // An empty response queue: any attempted HTTP request panics the test.
+        let worker = Worker::spawn_with(
+            dir.path().to_path_buf(),
+            FakeCredentialStore::default(),
+            FakeForgeApi::queue(vec![]),
+        )
+        .unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(handle.detect_forge_repository().unwrap(), vec![]);
+
+        let error = handle
+            .list_pull_requests("origin".to_string(), "rene".to_string())
+            .expect_err("an ambiguous remote must not be treated as a supported repository");
+        assert_eq!(error, "this remote is not a supported forge repository");
+    }
+
+    #[test]
+    fn saved_forge_token_is_looked_up_inside_rust_and_never_exposed_in_the_result() {
+        let (dir, repo) = init_repo();
+        repo.remote("origin", "https://github.com/acme/widget.git")
+            .unwrap();
+        let token = "gh-token-should-never-leak";
+
+        let api = FakeForgeApi::queue(vec![ok(200, GITHUB_LIST_FIXTURE)]);
+        let worker = Worker::spawn_with(
+            dir.path().to_path_buf(),
+            FakeCredentialStore::default(),
+            api.clone(),
+        )
+        .unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(
+            handle
+                .detect_forge_repository()
+                .unwrap()
+                .into_iter()
+                .map(|repository| repository.remote_name)
+                .collect::<Vec<_>>(),
+            vec!["origin".to_string()]
+        );
+
+        // Listing before any token is saved must be rejected without ever calling the
+        // transport — `Worker::list_pull_requests`'s signature has no token parameter at all,
+        // so the only way this can succeed is a lookup happening inside the worker.
+        let before = handle
+            .list_pull_requests("origin".to_string(), "rene".to_string())
+            .expect_err("a missing token must be rejected before any request");
+        assert_eq!(before, "a provider token is required for this action");
+        assert!(api.requests().is_empty());
+
+        handle
+            .save_forge_token(ForgeProvider::GitHub, "rene".to_string(), token.to_string())
+            .unwrap();
+
+        let pull_requests = handle
+            .list_pull_requests("origin".to_string(), "rene".to_string())
+            .unwrap();
+
+        assert_eq!(pull_requests.pull_requests.len(), 1);
+        assert_eq!(pull_requests.pull_requests[0].number, 7);
+        assert_eq!(
+            pull_requests.pull_requests[0].title,
+            "Add pull request support"
+        );
+        assert!(!pull_requests.truncated);
+        // The lookup happened inside the worker: the request the fake transport actually
+        // received carries the saved token in its Authorization header.
+        let requests = api.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0]
+            .headers
+            .contains(&("Authorization".to_string(), format!("Bearer {token}"))));
+        // Round-tripped result never carries the token.
+        assert!(!format!("{pull_requests:?}").contains(token));
+
+        // Forgetting the token makes subsequent listing fail again the same way.
+        handle
+            .forget_forge_token(ForgeProvider::GitHub, "rene".to_string())
+            .unwrap();
+        let after_forget = handle
+            .list_pull_requests("origin".to_string(), "rene".to_string())
+            .expect_err("a forgotten token must not still be usable");
+        assert_eq!(after_forget, "a provider token is required for this action");
+    }
+
+    #[test]
+    fn create_pull_request_round_trips_through_the_worker_without_exposing_the_token() {
+        let (dir, repo) = init_repo();
+        repo.remote("origin", "https://github.com/acme/widget.git")
+            .unwrap();
+        let token = "gh-token-should-never-leak";
+        const GITHUB_CREATE_FIXTURE: &str = r#"{
+            "id": 202,
+            "number": 8,
+            "title": "Add feature",
+            "html_url": "https://github.com/acme/widget/pull/8",
+            "user": {"login": "rene"},
+            "head": {"ref": "feature/pr"},
+            "base": {"ref": "main"},
+            "state": "open"
+        }"#;
+
+        let worker = Worker::spawn_with(
+            dir.path().to_path_buf(),
+            FakeCredentialStore::default(),
+            FakeForgeApi::queue(vec![ok(201, GITHUB_CREATE_FIXTURE)]),
+        )
+        .unwrap();
+        let handle = worker.handle();
+        handle
+            .save_forge_token(ForgeProvider::GitHub, "rene".to_string(), token.to_string())
+            .unwrap();
+
+        let created = handle
+            .create_pull_request(
+                "origin".to_string(),
+                "rene".to_string(),
+                crate::pull_requests::CreatePullRequest {
+                    title: "Add feature".to_string(),
+                    description: Some("Implements the thing".to_string()),
+                    source_branch: "feature/pr".to_string(),
+                    target_branch: "main".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(created.number, 8);
+        assert!(!format!("{created:?}").contains(token));
     }
 }

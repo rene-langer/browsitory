@@ -17,10 +17,28 @@ tauri-build = { version = "2", features = [] }
 # orchestration layer; a bare `cargo build` needs it passed explicitly, e.g.
 # `cargo build --workspace --features tauri-app/custom-protocol`.
 custom-protocol = ["tauri/custom-protocol"]
+# Lets `crates/tauri-app/src/pull_requests.rs`'s GitHub/Bitbucket API base URLs be redirected via
+# `BROWSITORY_FORGE_GITHUB_API_BASE_URL`/`BROWSITORY_FORGE_BITBUCKET_API_BASE_URL`, so
+# `e2e/specs/pull-requests.spec.ts` can point the real built binary at a local loopback fixture
+# server instead of the real GitHub/Bitbucket Cloud APIs. Also swaps `Worker::spawn`'s (see
+# `worker.rs`) credential store from `credentials.rs`'s real `KeyringCredentialStore` to its
+# in-memory `InMemoryCredentialStore`, so the same E2E build never touches the real OS
+# keychain/D-Bus secrets service either (CI has no session secrets service, and this also stops
+# an E2E run from writing a real token into a developer's actual login keyring). NOT enabled by
+# default and must never ship in a release build: without it, the env vars are never even read
+# (see that module's `github_api_base`/`bitbucket_api_base`) and `KeyringCredentialStore` is the
+# only credential store that exists in the binary at all, so nobody who can set process
+# environment variables before a shipped binary launches can redirect a user's real forge
+# traffic (and their saved token, sent as `Authorization: Bearer <token>`) to another host, and
+# no build-time toggle can silently swap out where a user's real credentials are stored. Only
+# the E2E build passes this, e.g. `cargo build --workspace --features
+# tauri-app/custom-protocol,tauri-app/forge-fixture-override`.
+forge-fixture-override = []
 
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 git-core = { path = "../git-core" }
@@ -28,6 +46,7 @@ config = { path = "../config" }
 git2 = "0.21"
 keyring = { version = "4.1.6", features = ["v1"] }
 url = "2.5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 
 [dev-dependencies]
 tempfile = "3"

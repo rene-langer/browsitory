@@ -164,6 +164,44 @@ export type RebaseStepResult =
   | { kind: "Advanced" }
   | { kind: "Done" };
 
+export type ForgeProvider = "GitHub" | "Bitbucket";
+
+export interface ForgeRepository {
+  provider: ForgeProvider;
+  host: string;
+  owner: string;
+  name: string;
+  remoteName: string;
+}
+
+export interface PullRequest {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  sourceBranch: string;
+  targetBranch: string;
+  state: string;
+}
+
+export interface CreatePullRequest {
+  title: string;
+  description: string | null;
+  sourceBranch: string;
+  targetBranch: string;
+}
+
+// GitHub defaults to 30 PRs/page, Bitbucket to 10 — `listPullRequests` asks for a larger
+// explicit page (100), but a repository can still have more open PRs than that. `truncated`
+// tells the UI whether the provider indicated more results exist beyond this page (a GitHub
+// `Link: rel="next"` header, or a non-null Bitbucket `next` field), so it can show an explicit
+// "more available" notice instead of silently displaying a partial list.
+export interface PullRequestList {
+  pullRequests: PullRequest[];
+  truncated: boolean;
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -227,4 +265,13 @@ export interface RepoClient {
   rebaseContinue(): Promise<RebaseStepResult>;
   abortRebase(): Promise<void>;
   getRebaseProgress(): Promise<{ currentStep: number; totalSteps: number } | null>;
+  detectForgeRepository(): Promise<ForgeRepository[]>;
+  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
+  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
+  listPullRequests(remoteName: string, account: string): Promise<PullRequestList>;
+  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<PullRequest>;
+  // Opens `url` in the user's default external browser/handler rather than navigating this
+  // app's own window away from the app entirely (see `tauriRepoClient.ts` and
+  // `PullRequestPanel.tsx`, the only caller).
+  openExternalUrl(url: string): Promise<void>;
 }

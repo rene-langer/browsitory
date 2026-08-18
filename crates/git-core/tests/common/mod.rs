@@ -9,6 +9,7 @@ pub fn init_repo() -> (TempDir, Repository) {
     {
         let mut config = repo.config().expect("repo config");
         config.set_str("user.name", "Test User").unwrap();
+        config.set_bool("core.autocrlf", false).unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
     }
     (dir, repo)

@@ -40,13 +40,13 @@ describe("Browsitory stash", () => {
     await stashButton.waitForEnabled({ timeout: 10000 });
     await stashButton.scrollIntoView({ block: "center" });
 
-    await stashButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), stashButton);
 
     const stashRow = await $("li*=WIP on");
     await stashRow.waitForExist({ timeout: 10000 });
 
     const applyButton = await $("button=Apply");
-    await applyButton.click();
+    await browser.execute((el) => (el as HTMLElement).click(), applyButton);
 
     await browser.waitUntil(
       async () => {

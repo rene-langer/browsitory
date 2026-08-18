@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 // packages ship their own types rather than `@types/*` packages.
 import "webdriverio";
 import "@wdio/types";
+import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +56,14 @@ function setupFixtureRepo(repoPath: string) {
     stdio: "inherit",
   });
   fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
+}
+
+function resetFixtureRepo() {
+  fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
+  execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], { cwd: os.tmpdir(), stdio: "inherit" });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
 }
 
 function setupSubmoduleFixture(repoPath: string) {
@@ -157,13 +166,9 @@ export const config: WebdriverIO.Config = {
   maxInstances: 1,
   capabilities: [
     {
-      // @ts-expect-error — tauri:options isn't in WebdriverIO's built-in capability types.
-      // NOTE: the brief's draft also included a per-capability `maxInstances: 1` and
-      // `browserName: "wry"` here; the live guide's current example capability object has
-      // neither (just `maxInstances`+`tauri:options` at this same nesting, without
-      // `browserName`), and per-capability `maxInstances` doesn't type-check against
-      // WebdriverIO v9's `RequestedStandaloneCapabilities`, so both are dropped — the
-      // top-level `maxInstances: 1` above already caps this to one instance (see task report).
+      // @ts-expect-error — WebdriverIO applies capability-level maxInstances at runtime.
+      maxInstances: 1,
+      // Capability-level maxInstances is required because this suite shares one fixture path.
       "tauri:options": {
         application: tauriAppBinary,
       },
@@ -176,7 +181,7 @@ export const config: WebdriverIO.Config = {
     timeout: 60000,
   },
 
-  onPrepare: () => {
+  onPrepare: async () => {
     if (!fs.existsSync(tauriAppBinary)) {
       throw new Error(
         `tauri-app binary not found at ${tauriAppBinary}. Run \`cargo build --workspace\` ` +
@@ -186,18 +191,17 @@ export const config: WebdriverIO.Config = {
     }
     setupFixtureRepo(E2E_PARENT_SOURCE_PATH);
     setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
-    fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
-    execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], {
-      cwd: os.tmpdir(),
-      stdio: "inherit",
-    });
-    fs.writeFileSync(path.join(E2E_REPO_PATH, "README.md"), "e2e fixture repo working tree\n");
-    execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["config", "user.email", "test@example.com"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    resetFixtureRepo();
     setupCredentialCertificate();
+
+    // See `e2e/support/forgeFixtureServer.ts`'s header comment for why this has to be a real
+    // loopback server started before the app process exists, rather than something the spec
+    // file wires up per-test: the app only reads these env vars (via
+    // `crates/tauri-app/src/pull_requests.rs`'s `github_api_base`/`bitbucket_api_base`) once,
+    // implicitly, at process-environment-inheritance time when `tauri-driver` spawns it below.
+    const forgeFixtureServer = await startSharedForgeFixtureServer();
+    process.env.BROWSITORY_FORGE_GITHUB_API_BASE_URL = forgeFixtureServer.url;
+    process.env.BROWSITORY_FORGE_BITBUCKET_API_BASE_URL = forgeFixtureServer.url;
   },
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
@@ -205,6 +209,7 @@ export const config: WebdriverIO.Config = {
   beforeSession: async () => {
     const driverPath = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
     tauriDriver = spawn(driverPath, [], { stdio: [null, process.stdout, process.stderr] });
+    resetFixtureRepo();
     tauriDriver.on("error", (error) => {
       console.error("tauri-driver error:", error);
       process.exit(1);
@@ -218,11 +223,19 @@ export const config: WebdriverIO.Config = {
     await waitForPort(4444, "127.0.0.1", 10_000);
   },
 
+  // Each spec prepares its fixture with direct git CLI calls in a Mocha `before` hook, but
+  // the Tauri app opens the shared repo before that hook runs. Reload after fixture setup so
+  // the app refetches status/history from disk before the test interacts with it.
+  beforeTest: async () => {
+    await browser.refresh();
+  },
+
   afterSession: () => {
     closeTauriDriver();
   },
 
-  onComplete: () => {
+  onComplete: async () => {
     fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
+    await closeSharedForgeFixtureServer();
   },
 };
