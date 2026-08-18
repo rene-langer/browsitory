@@ -7,6 +7,7 @@ import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
+import { SplitView } from "./components/primitives/SplitView";
 import { PullRequestPanel } from "./components/PullRequestPanel";
 import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
@@ -162,37 +163,41 @@ export default function App() {
         operationDisabled={repositoryOperationDisabled}
       />
       <TransferPanel progress={appState.state.transfer} />
-      <div className="app-layout">
-        <CommitGraph
-          status={appState.state.status}
-          commits={appState.state.commits}
-          stashes={appState.state.stashes}
-          selectedRow={appState.state.selectedRow}
-          pending={repositoryOperationDisabled}
-          onSelectRow={appState.selectRow}
-          onBranchFromCommit={appState.openCreateBranchDraft}
-          onRebaseFromCommit={appState.openRebasePlanner}
-          onApplyStash={appState.applyStash}
-          onDropStash={appState.dropStash}
-        />
-        <DiffPane
-          client={tauriRepoClient}
-          selectedRow={appState.state.selectedRow}
-          status={appState.state.status}
-          onStageFile={appState.stageFile}
-          onUnstageFile={appState.unstageFile}
-          onCommit={appState.commit}
-          onSaveStash={appState.saveStash}
-          onSelectRow={appState.selectRow}
-          onResolveConflict={appState.resolveConflict}
-          onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
-          mergeMessage={appState.state.mergeMessage}
-          onAbortMerge={appState.abortMerge}
-          rebaseProgress={appState.state.rebaseProgress}
-          onRebaseContinue={appState.rebaseContinue}
-          onRebaseAbort={appState.abortRebase}
-        />
-      </div>
+      <SplitView
+        left={
+          <CommitGraph
+            status={appState.state.status}
+            commits={appState.state.commits}
+            stashes={appState.state.stashes}
+            selectedRow={appState.state.selectedRow}
+            pending={repositoryOperationDisabled}
+            onSelectRow={appState.selectRow}
+            onBranchFromCommit={appState.openCreateBranchDraft}
+            onRebaseFromCommit={appState.openRebasePlanner}
+            onApplyStash={appState.applyStash}
+            onDropStash={appState.dropStash}
+          />
+        }
+        right={
+          <DiffPane
+            client={tauriRepoClient}
+            selectedRow={appState.state.selectedRow}
+            status={appState.state.status}
+            onStageFile={appState.stageFile}
+            onUnstageFile={appState.unstageFile}
+            onCommit={appState.commit}
+            onSaveStash={appState.saveStash}
+            onSelectRow={appState.selectRow}
+            onResolveConflict={appState.resolveConflict}
+            onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
+            mergeMessage={appState.state.mergeMessage}
+            onAbortMerge={appState.abortMerge}
+            rebaseProgress={appState.state.rebaseProgress}
+            onRebaseContinue={appState.rebaseContinue}
+            onRebaseAbort={appState.abortRebase}
+          />
+        }
+      />
       {appState.state.rebaseOnto !== null && (
         <RebasePlanner
           client={tauriRepoClient}

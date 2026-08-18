@@ -11,6 +11,7 @@ import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
+import styles from "./DiffPane.module.css";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 export function DiffPane({
@@ -202,7 +203,7 @@ function UncommittedDiffPane({
 
   return (
     <div>
-      <ul>
+      <ul className={styles.fileList}>
         {status.map((entry) => (
           <li key={`${entry.staged}:${entry.path}`}>
             <button
@@ -373,7 +374,7 @@ function CommitDiffPane({
 
   return (
     <div>
-      <ul>
+      <ul className={styles.fileList}>
         {files.map((path) => (
           <li key={path}>
             <button
