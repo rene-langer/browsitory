@@ -1,4 +1,5 @@
 import type { DiffHunk, DiffLineOrigin } from "../ipc/RepoClient";
+import styles from "./DiffView.module.css";
 
 export function DiffView({ hunks }: { hunks: DiffHunk[] }) {
   if (hunks.length === 0) {
@@ -9,14 +10,14 @@ export function DiffView({ hunks }: { hunks: DiffHunk[] }) {
     <div>
       {hunks.map((hunk, hunkIndex) => (
         <div key={hunkIndex}>
-          <div className="diff-hunk-header">
+          <div className={styles.hunkHeader}>
             @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
           </div>
           <pre>
             {hunk.lines.map((line, lineIndex) => (
               <div
                 key={lineIndex}
-                className={`diff-line diff-line-${line.origin.toLowerCase()}`}
+                className={`${styles.line} ${styles[`line${line.origin}`]} diff-line diff-line-${line.origin.toLowerCase()}`}
               >
                 <span aria-hidden="true">{originPrefix(line.origin)}</span>
                 {line.content}

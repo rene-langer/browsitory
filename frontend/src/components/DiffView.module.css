@@ -1,0 +1,30 @@
+.hunkHeader {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  padding: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.line {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-dense);
+  white-space: pre-wrap;
+  padding: 0 var(--space-2);
+}
+
+.lineAdd {
+  background: var(--color-diff-add-bg);
+  color: var(--color-diff-add-text);
+}
+
+.lineRemove {
+  background: var(--color-diff-remove-bg);
+  color: var(--color-diff-remove-text);
+}
+
+.lineContext {
+  color: var(--color-diff-context-text);
+}

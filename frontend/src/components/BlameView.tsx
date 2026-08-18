@@ -1,5 +1,6 @@
 import type { BlameLine } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import styles from "./BlameView.module.css";
 
 export function BlameView({
   lines,
@@ -9,10 +10,14 @@ export function BlameView({
   onSelectRow: (row: SelectedRow) => void;
 }) {
   return (
-    <table>
+    <table className={styles.table}>
       <tbody>
         {lines.map((line) => (
-          <tr key={line.lineNumber} onClick={() => onSelectRow({ commitId: line.commitId })}>
+          <tr
+            key={line.lineNumber}
+            className={styles.row}
+            onClick={() => onSelectRow({ commitId: line.commitId })}
+          >
             <td>{line.lineNumber}</td>
             <td>{line.shortId}</td>
             <td>{line.authorName}</td>
