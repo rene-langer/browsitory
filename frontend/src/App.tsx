@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
+import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
@@ -12,10 +14,30 @@ import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
+import { loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 
 export default function App() {
   const appState = useAppState(tauriRepoClient);
+  const [theme, setTheme] = useState<Theme>(() =>
+    resolveTheme(
+      loadStoredTheme(),
+      window.matchMedia("(prefers-color-scheme: dark)").matches,
+    ),
+  );
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
+
+  const themeToggle = (
+    <button
+      type="button"
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+    >
+      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
   const repositoryOperationDisabled =
     appState.state.pending ||
     appState.state.transfer !== null ||
@@ -36,7 +58,8 @@ export default function App() {
   if (appState.state.repoPath === null) {
     return (
       <main>
-        <h1>Browsitory</h1>
+        <h1>Browsitory{themeToggle}</h1>
+        <LaneBraid />
         {/* `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos`
             calls; an `onOpenRepo` rejection (bad path, a stale recent-repo entry, permissions)
             lands in `useAppState`'s `state.error`, which is otherwise only rendered in the
@@ -49,7 +72,8 @@ export default function App() {
 
   return (
     <main>
-      <h1>Browsitory</h1>
+      <h1>Browsitory{themeToggle}</h1>
+      <LaneBraid />
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
       <BranchSwitcher
         branches={appState.state.branches}
