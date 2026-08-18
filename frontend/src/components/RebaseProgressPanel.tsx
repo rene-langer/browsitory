@@ -1,3 +1,6 @@
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+
 export function RebaseProgressPanel({
   currentStep,
   totalSteps,
@@ -12,14 +15,16 @@ export function RebaseProgressPanel({
   onAbort: () => void;
 }) {
   return (
-    <div>
+    <Panel title="Rebase in progress">
       <p>
         Step {currentStep} of {totalSteps}
       </p>
-      <button onClick={onContinue} disabled={disabled}>
-        Continue Rebase
-      </button>
-      <button onClick={onAbort}>Abort Rebase</button>
-    </div>
+      <Toolbar>
+        <button onClick={onContinue} disabled={disabled}>
+          Continue Rebase
+        </button>
+        <button onClick={onAbort}>Abort Rebase</button>
+      </Toolbar>
+    </Panel>
   );
 }
