@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./TagPanel.module.css";
 
 export function TagPanel({
   tags,
@@ -54,23 +57,24 @@ export function TagPanel({
   };
 
   return (
-    <section className="tag-panel" aria-labelledby="tag-panel-heading">
-      <h2 id="tag-panel-heading">Tags</h2>
-      <form onSubmit={createTag} aria-label="Create tag">
-        <label>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+    <Panel title="Tags">
+      <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
+        <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
         <label><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
-        {kind === "annotated" && <label>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
+        {kind === "annotated" && <label className={styles.label}>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
         <button type="submit" disabled={pushDisabled}>Create tag</button>
       </form>
 
       {tags.length === 0 ? <p>No local tags.</p> : (
-        <ul className="tag-list">
+        <ul className={styles.list}>
           {tags.map((tag) => (
             <li key={tag.name}>
               <label><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
-              <button type="button" disabled={pushDisabled} onClick={() => setDeleteConfirmation(tag.name)}>Delete {tag.name}</button>
+              <Toolbar>
+                <button type="button" disabled={pushDisabled} onClick={() => setDeleteConfirmation(tag.name)}>Delete {tag.name}</button>
+              </Toolbar>
             </li>
           ))}
         </ul>
@@ -78,14 +82,16 @@ export function TagPanel({
 
       <section aria-labelledby="push-tags-heading">
         <h3 id="push-tags-heading">Push tags</h3>
-        <label>
+        <label className={styles.label}>
           Remote
           <select value={remoteName} onChange={(event) => setRemoteName(event.target.value)} disabled={pushDisabled || remotes.length === 0}>
             {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
           </select>
         </label>
-        <button type="button" disabled={pushDisabled || remoteName === "" || selected.length === 0} onClick={() => void onPush(remoteName, selected)}>Push selected tags</button>
-        <button type="button" disabled={pushDisabled || remoteName === ""} onClick={() => void onPush(remoteName, [])}>Push all tags</button>
+        <Toolbar>
+          <button type="button" disabled={pushDisabled || remoteName === "" || selected.length === 0} onClick={() => void onPush(remoteName, selected)}>Push selected tags</button>
+          <button type="button" disabled={pushDisabled || remoteName === ""} onClick={() => void onPush(remoteName, [])}>Push all tags</button>
+        </Toolbar>
       </section>
 
       {deleteConfirmation !== null && (
@@ -95,6 +101,6 @@ export function TagPanel({
           <button type="button" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
         </dialog>
       )}
-    </section>
+    </Panel>
   );
 }

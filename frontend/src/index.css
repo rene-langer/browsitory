@@ -31,51 +31,6 @@ h1 {
   margin: 0;
 }
 
-.remote-panel,
-.tag-panel {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.remote-panel h2,
-.remote-panel h3,
-.tag-panel h2,
-.tag-panel h3 {
-  margin: 0 0 8px;
-}
-
-.remote-panel form,
-.remote-list li,
-.tag-panel form,
-.tag-list li,
-.tag-panel section {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 8px;
-  margin: 8px 0;
-}
-
-.remote-panel label,
-.tag-panel label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-}
-
-.tag-list {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tag-list li > span {
-  color: var(--color-text-muted);
-}
-
 /* Base form controls */
 button {
   font-family: var(--font-sans);
