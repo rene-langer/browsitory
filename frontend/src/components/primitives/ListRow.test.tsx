@@ -40,4 +40,18 @@ describe("ListRow", () => {
     fireEvent.contextMenu(screen.getByText("row content"));
     expect(onContextMenu).toHaveBeenCalledOnce();
   });
+
+  it("applies a passed className alongside the row's own styling", () => {
+    render(
+      <ul>
+        <ListRow selected={false} onClick={vi.fn()} className="commit-row">
+          row content
+        </ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("row content").closest("li");
+    expect(row?.classList.contains("commit-row")).toBe(true);
+    // The row's own CSS-module class must still be present alongside the passed-in one.
+    expect(row?.className.trim().length).toBeGreaterThan("commit-row".length);
+  });
 });

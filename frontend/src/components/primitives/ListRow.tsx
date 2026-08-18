@@ -5,16 +5,18 @@ export function ListRow({
   selected,
   onClick,
   onContextMenu,
+  className,
   children,
 }: {
   selected: boolean;
   onClick: () => void;
   onContextMenu?: (event: MouseEvent) => void;
+  className?: string;
   children: ReactNode;
 }) {
   return (
     <li
-      className={styles.row}
+      className={`${styles.row} ${className ?? ""}`.trim()}
       aria-selected={selected}
       onClick={onClick}
       onContextMenu={onContextMenu}

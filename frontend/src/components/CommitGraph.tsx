@@ -3,6 +3,8 @@ import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic } from "./CommitLaneGraphic";
+import { ListRow } from "./primitives/ListRow";
+import styles from "./CommitGraph.module.css";
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
   if (a === "uncommitted" || b === "uncommitted") {
@@ -76,22 +78,17 @@ export function CommitGraph({
 
   return (
     <ul onKeyDown={handleKeyDown} tabIndex={0}>
-      <li
-        aria-selected={selectedRow === "uncommitted"}
-        onClick={() => onSelectRow("uncommitted")}
-      >
+      <ListRow selected={selectedRow === "uncommitted"} onClick={() => onSelectRow("uncommitted")}>
         Uncommitted Changes{status.length > 0 && ` (${status.length})`}
-      </li>
+      </ListRow>
       {stashes.map((stash) => (
-        <li
+        <ListRow
           key={stash.commitId}
           className="stash-row"
-          aria-selected={
-            typeof selectedRow === "object" && selectedRow.commitId === stash.commitId
-          }
+          selected={typeof selectedRow === "object" && selectedRow.commitId === stash.commitId}
           onClick={() => onSelectRow({ commitId: stash.commitId })}
         >
-          <span>{stash.message}</span>
+          <span className={styles.stashMessage}>{stash.message}</span>
           <button
             disabled={pending}
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
@@ -110,28 +107,26 @@ export function CommitGraph({
           >
             Drop
           </button>
-        </li>
+        </ListRow>
       ))}
       {commits.map((commit, index) => (
-        <li
+        <ListRow
           key={commit.id}
           className="commit-row"
-          aria-selected={
-            typeof selectedRow === "object" && selectedRow.commitId === commit.id
-          }
+          selected={typeof selectedRow === "object" && selectedRow.commitId === commit.id}
           onClick={() => onSelectRow({ commitId: commit.id })}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
         >
           <CommitLaneGraphic layout={commitLayouts[index]} totalLanes={laneCount} />
           {commit.branchRefs.map((ref) => (
-            <span key={ref} className="branch-badge">
+            <span key={ref} className={styles.branchBadge}>
               {ref}
             </span>
           ))}
-          <span className="commit-summary">
+          <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>
-        </li>
+        </ListRow>
       ))}
       {contextMenu !== null && (
         <ul

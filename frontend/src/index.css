@@ -133,55 +133,6 @@ h1 {
   text-overflow: ellipsis;
 }
 
-/* This row has buttons as children, not just text — the base `.app-layout > ul > li` rule's
-   `white-space: nowrap; overflow: hidden` is a trap for any row with interactive children: it
-   clips them off the visible/clickable area for a long stash message. So this row gets its own
-   flex layout instead, with truncation confined to the message `<span>` below. */
-.app-layout > ul > li.stash-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: normal;
-  overflow: hidden;
-}
-
-.app-layout > ul > li.stash-row > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-/* Same trap as `.stash-row` above: this row has an SVG lane graphic and branch badges as
-   children, not just text — the base rule's nowrap+hidden would clip them for a long commit
-   summary. Flex layout instead, truncation confined to the summary `<span>`. */
-.app-layout > ul > li.commit-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: normal;
-  overflow: hidden;
-}
-
-.app-layout > ul > li.commit-row > span.commit-summary {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.branch-badge {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--hunk-bg);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 .app-layout > ul > li[aria-selected="true"] {
   background: var(--selected-bg);
 }
