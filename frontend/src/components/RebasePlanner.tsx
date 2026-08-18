@@ -207,12 +207,7 @@ export function RebasePlanner({
     <Panel title="Rebase plan">
       <ul className={styles.list}>
         {rows.map((row, index) => (
-          <ListRow
-            key={row.commit.id}
-            selected={false}
-            onClick={() => {}}
-            className={styles.planRow}
-          >
+          <ListRow key={row.commit.id} onClick={() => {}} className={styles.planRow}>
             <span>
               {row.commit.shortId} {row.commit.summary}
             </span>

@@ -8,7 +8,7 @@ export function ListRow({
   className,
   children,
 }: {
-  selected: boolean;
+  selected?: boolean;
   onClick: () => void;
   onContextMenu?: (event: MouseEvent) => void;
   className?: string;
