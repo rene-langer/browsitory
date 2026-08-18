@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
+import { ListRow } from "./primitives/ListRow";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./RepoPicker.module.css";
 
 export function RepoPicker({
   client,
@@ -30,20 +34,22 @@ export function RepoPicker({
   };
 
   return (
-    <div>
-      <button onClick={handleOpenFolder}>Open Folder</button>
+    <Panel title="Open a repository">
+      <Toolbar>
+        <button onClick={handleOpenFolder}>Open Folder</button>
+      </Toolbar>
       {error !== null && <p role="alert">{error}</p>}
       {recentRepos.length === 0 ? (
         <p>No recent repositories</p>
       ) : (
-        <ul>
+        <ul className={styles.list}>
           {recentRepos.map((path) => (
-            <li key={path}>
-              <button onClick={() => onOpenRepo(path)}>{path}</button>
-            </li>
+            <ListRow key={path} onClick={() => onOpenRepo(path)}>
+              {path}
+            </ListRow>
           ))}
         </ul>
       )}
-    </div>
+    </Panel>
   );
 }
