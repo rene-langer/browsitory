@@ -51,6 +51,51 @@ describe("ListRow", () => {
     expect(onContextMenu).toHaveBeenCalledOnce();
   });
 
+  it("is a keyboard-operable button when onClick is given without a selection", () => {
+    const onClick = vi.fn();
+    render(
+      <ul>
+        <ListRow onClick={onClick}>row content</ListRow>
+      </ul>,
+    );
+    const row = screen.getByRole("button", { name: "row content" });
+    expect(row).toHaveAttribute("tabindex", "0");
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onClick).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(row, { key: " " });
+    expect(onClick).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(row, { key: "a" });
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays out of the tab order when the surrounding list owns selection", () => {
+    render(
+      <ul>
+        <ListRow selected={false} onClick={vi.fn()}>
+          row content
+        </ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("row content").closest("li");
+    expect(row).not.toHaveAttribute("tabindex");
+    expect(row).not.toHaveAttribute("role");
+  });
+
+  it("renders a plain non-interactive item when no onClick is given", () => {
+    render(
+      <ul>
+        <ListRow>row content</ListRow>
+      </ul>,
+    );
+    const row = screen.getByRole("listitem");
+    expect(row).not.toHaveAttribute("tabindex");
+    expect(row).not.toHaveAttribute("role");
+    fireEvent.click(row);
+  });
+
   it("applies a passed className alongside the row's own styling", () => {
     render(
       <ul>
