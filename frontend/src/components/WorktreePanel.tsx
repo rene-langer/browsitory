@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./WorktreePanel.module.css";
 
 export function WorktreePanel({
   worktrees,
@@ -50,12 +53,8 @@ export function WorktreePanel({
   };
 
   return (
-    <section
-      className="worktree-panel"
-      aria-labelledby="worktree-panel-heading"
-    >
-      <h2 id="worktree-panel-heading">Worktrees</h2>
-      <form onSubmit={createWorktree} aria-label="Create worktree">
+    <Panel title="Worktrees">
+      <form className={styles.form} onSubmit={createWorktree} aria-label="Create worktree">
         <label>
           Worktree name
           <input
@@ -90,11 +89,13 @@ export function WorktreePanel({
             onChange={(event) => setStartPoint(event.target.value)}
           />
         </label>
-        <button type="submit" disabled={operationDisabled}>
-          Create worktree
-        </button>
+        <Toolbar>
+          <button type="submit" disabled={operationDisabled}>
+            Create worktree
+          </button>
+        </Toolbar>
       </form>
-      <ul className="worktree-list">
+      <ul className={styles.list}>
         {worktrees.map((worktree) => (
           <li key={worktree.path}>
             <strong>{worktree.isMain ? "Main" : "Linked"}</strong>
@@ -102,30 +103,34 @@ export function WorktreePanel({
             <span>{worktree.head ?? "Detached HEAD"}</span>
             {worktree.isLocked && <span>Locked</span>}
             {worktree.isPrunable && <span>Prunable</span>}
-            <button
-              type="button"
-              disabled={operationDisabled}
-              onClick={() => void onOpenWorktree(worktree.path)}
-            >
-              Open {worktree.path}
-            </button>
-            <button
-              type="button"
-              disabled={operationDisabled || worktree.isMain}
-              onClick={() => removeWorktree(worktree)}
-            >
-              Remove {worktree.path}
-            </button>
+            <Toolbar>
+              <button
+                type="button"
+                disabled={operationDisabled}
+                onClick={() => void onOpenWorktree(worktree.path)}
+              >
+                Open {worktree.path}
+              </button>
+              <button
+                type="button"
+                disabled={operationDisabled || worktree.isMain}
+                onClick={() => removeWorktree(worktree)}
+              >
+                Remove {worktree.path}
+              </button>
+            </Toolbar>
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        disabled={operationDisabled}
-        onClick={() => void onPruneWorktrees()}
-      >
-        Prune worktrees
-      </button>
+      <Toolbar>
+        <button
+          type="button"
+          disabled={operationDisabled}
+          onClick={() => void onPruneWorktrees()}
+        >
+          Prune worktrees
+        </button>
+      </Toolbar>
       {removeConfirmation !== null && (
         <dialog open aria-label={`Remove worktree ${removeConfirmation.path}`}>
           <p>Remove worktree at {removeConfirmation.path}?</p>
@@ -141,6 +146,6 @@ export function WorktreePanel({
           </button>
         </dialog>
       )}
-    </section>
+    </Panel>
   );
 }
