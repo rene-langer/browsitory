@@ -24,3 +24,7 @@
   gap: 2px;
   font-size: var(--text-sm);
 }
+
+.inlineLabel {
+  font-size: var(--text-sm);
+}
