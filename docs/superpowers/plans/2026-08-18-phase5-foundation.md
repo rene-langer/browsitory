@@ -347,23 +347,97 @@ git commit -m "feat(frontend): add lucide-react for Phase 5 iconography"
 
 ---
 
-### Task 4: Theme toggle in `App.tsx`
+### Task 4: Theme toggle and lane-braid header signature in `App.tsx`
 
 **Files:**
 - Modify: `frontend/src/App.tsx:1,17-18,36-48,50-53`
+- Create: `frontend/src/components/LaneBraid.tsx`
+- Create: `frontend/src/components/LaneBraid.module.css`
+- Test: `frontend/src/components/LaneBraid.test.tsx`
 
 **Interfaces:**
 - Consumes: `Theme`, `resolveTheme`, `loadStoredTheme`, `persistTheme` from
   `frontend/src/lib/theme.ts` (Task 2); `Sun`, `Moon` from `lucide-react`
   (Task 3).
+- Produces: `LaneBraid()` (no props) — a 2px six-color header strip, the
+  app's signature visual element per
+  `docs/superpowers/specs/2026-08-18-browsitory-phase5-design.md`'s design
+  brainstorm. Built from the same six hues
+  `CommitLaneGraphic.tsx`'s `LANE_COLORS` array already uses for branch
+  lanes (`#e36209 #1a7f37 #0969da #8250df #cf222e #bf8700`), so the app's
+  chrome foreshadows the branch graph before a repo is even open. Appears
+  once, directly under `<h1>Browsitory</h1>`, in both `App.tsx` return
+  branches — this is the one deliberately bold element; nothing else in
+  Phase 5 repeats it.
 
-- [ ] **Step 1: Add theme state and a toggle button**
+- [ ] **Step 1: Write the failing test for `LaneBraid`**
 
-In `frontend/src/App.tsx`, change line 1's import and add the theme import:
+```typescript
+// frontend/src/components/LaneBraid.test.tsx
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { LaneBraid } from "./LaneBraid";
+
+describe("LaneBraid", () => {
+  it("renders one segment per lane color", () => {
+    render(<LaneBraid />);
+    const braid = screen.getByRole("presentation");
+    expect(braid.children).toHaveLength(6);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd frontend && pnpm test -- --run LaneBraid.test.tsx`
+Expected: FAIL — `LaneBraid.tsx` does not exist yet.
+
+- [ ] **Step 3: Write `LaneBraid.tsx` and `LaneBraid.module.css`**
+
+```tsx
+// frontend/src/components/LaneBraid.tsx
+import styles from "./LaneBraid.module.css";
+
+// Matches CommitLaneGraphic.tsx's LANE_COLORS exactly — the header braid and
+// the branch graph must stay the same six hues in the same order.
+const LANE_COLORS = ["#e36209", "#1a7f37", "#0969da", "#8250df", "#cf222e", "#bf8700"];
+
+export function LaneBraid() {
+  return (
+    <div className={styles.braid} role="presentation" aria-hidden="true">
+      {LANE_COLORS.map((color) => (
+        <div key={color} className={styles.segment} style={{ background: color }} />
+      ))}
+    </div>
+  );
+}
+```
+
+```css
+/* frontend/src/components/LaneBraid.module.css */
+.braid {
+  display: flex;
+  height: 2px;
+}
+
+.segment {
+  flex: 1 1 0;
+}
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cd frontend && pnpm test -- --run LaneBraid.test.tsx`
+Expected: PASS (1 test).
+
+- [ ] **Step 5: Add theme state and a toggle button**
+
+In `frontend/src/App.tsx`, change line 1's import and add the new imports:
 
 ```typescript
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { LaneBraid } from "./components/LaneBraid";
 import { loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 ```
 
@@ -391,26 +465,27 @@ Inside `App()`, right after the `appState` declaration on line 18, add:
   );
 ```
 
-Then render `{themeToggle}` next to `<h1>Browsitory</h1>` in both return
-branches (the pre-open branch around line 39 and the post-open branch
-around line 52), e.g.:
+Then render `{themeToggle}` next to `<h1>Browsitory</h1>`, and `<LaneBraid
+/>` directly under it, in both return branches (the pre-open branch around
+line 39 and the post-open branch around line 52), e.g.:
 
 ```tsx
 <h1>Browsitory{themeToggle}</h1>
+<LaneBraid />
 ```
 
-- [ ] **Step 2: Verify the build and existing tests**
+- [ ] **Step 6: Verify the build and existing tests**
 
 Run: `cd frontend && pnpm build && pnpm test -- --run && pnpm lint`
 Expected: all succeed — this task adds new UI but changes no existing
 component's props or `RepoClient` usage, so no existing test should need
 updating.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/src/App.tsx
-git commit -m "feat(frontend): add theme toggle to App header"
+git add frontend/src/App.tsx frontend/src/components/LaneBraid.tsx frontend/src/components/LaneBraid.module.css frontend/src/components/LaneBraid.test.tsx
+git commit -m "feat(frontend): add theme toggle and lane-braid header signature"
 ```
 
 ---
