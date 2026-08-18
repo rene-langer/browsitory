@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./RemotePanel.module.css";
 
 export function RemotePanel({
   remotes,
@@ -148,25 +151,24 @@ export function RemotePanel({
   }, [pendingPull]);
 
   return (
-    <section className="remote-panel" aria-labelledby="remote-panel-heading">
-      <h2 id="remote-panel-heading">Remotes</h2>
+    <Panel title="Remotes">
       {remotes.length === 0 ? (
         <p>No remotes configured.</p>
       ) : (
-        <ul className="remote-list">
+        <ul className={styles.list}>
           {remotes.map((remote) => (
             <li key={remote.name}>
               {editing === remote.name ? (
-                <form onSubmit={(event) => submitEdit(event, remote.name)} aria-label={`Edit ${remote.name}`}>
-                  <label>
+                <form className={styles.form} onSubmit={(event) => submitEdit(event, remote.name)} aria-label={`Edit ${remote.name}`}>
+                  <label className={styles.label}>
                     Remote name
                     <input value={editName} onChange={(event) => setEditName(event.target.value)} />
                   </label>
-                  <label>
+                  <label className={styles.label}>
                     Fetch URL
                     <input value={editFetchUrl} onChange={(event) => setEditFetchUrl(event.target.value)} />
                   </label>
-                  <label>
+                  <label className={styles.label}>
                     Push URL (optional)
                     <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
                   </label>
@@ -178,11 +180,13 @@ export function RemotePanel({
                   <strong>{remote.name}</strong>
                   <span>Fetch: {remote.fetchUrl}</span>
                   {remote.pushUrl !== null && <span>Push: {remote.pushUrl}</span>}
-                  <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
-                  <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
-                  <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
-                  <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
-                  <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
+                  <Toolbar>
+                    <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
+                    <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
+                    <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
+                    <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
+                    <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
+                  </Toolbar>
                 </>
               )}
             </li>
@@ -191,9 +195,9 @@ export function RemotePanel({
       )}
 
       {credentialRemote !== null && (
-        <form onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
+        <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
           <h3>Credentials for {credentialRemote}</h3>
-          <label>
+          <label className={styles.label}>
             Authentication for {credentialRemote}
             <select
               value={credentialMode}
@@ -205,8 +209,8 @@ export function RemotePanel({
           </label>
           {credentialMode === "HttpsToken" ? (
             <>
-              <label>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
-              <label>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
+              <label className={styles.label}>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
+              <label className={styles.label}>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
               <button type="submit">Save HTTPS credential</button>
               <button type="button" onClick={() => void onForgetHttpsCredential(credentialRemote)}>Forget HTTPS credential</button>
             </>
@@ -234,11 +238,11 @@ export function RemotePanel({
         </div>
       )}
 
-      <form onSubmit={submitAdd} aria-label="Add remote">
+      <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
         <h3>Add remote</h3>
-        <label>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
-        <label>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
-        <label>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
+        <label className={styles.label}>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
+        <label className={styles.label}>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
+        <label className={styles.label}>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
         <button type="submit" disabled={fetchDisabled}>Add remote</button>
       </form>
 
@@ -249,15 +253,15 @@ export function RemotePanel({
           Pull
         </button>
         {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
-        <form onSubmit={submitUpstream} aria-label="Set upstream">
-          <label>
+        <form className={styles.form} onSubmit={submitUpstream} aria-label="Set upstream">
+          <label className={styles.label}>
             Upstream remote
             <select value={upstreamRemote} onChange={(event) => setUpstreamRemote(event.target.value)}>
               <option value="">Choose a remote</option>
               {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
             </select>
           </label>
-          <label>Upstream branch<input value={upstreamBranch} onChange={(event) => setUpstreamBranch(event.target.value)} /></label>
+          <label className={styles.label}>Upstream branch<input value={upstreamBranch} onChange={(event) => setUpstreamBranch(event.target.value)} /></label>
           <button type="submit">Set upstream</button>
         </form>
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
@@ -277,6 +281,6 @@ export function RemotePanel({
           <button type="button" data-autofocus onClick={onCancelPull}>Cancel</button>
         </dialog>
       )}
-    </section>
+    </Panel>
   );
 }
