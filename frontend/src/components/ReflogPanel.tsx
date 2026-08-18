@@ -1,5 +1,9 @@
 import { useState } from "react";
 import type { ReflogEntry } from "../ipc/RepoClient";
+import { ListRow } from "./primitives/ListRow";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./ReflogPanel.module.css";
 
 export function ReflogPanel({
   references,
@@ -22,8 +26,7 @@ export function ReflogPanel({
   );
 
   return (
-    <section className="reflog-panel" aria-labelledby="reflog-panel-heading">
-      <h2 id="reflog-panel-heading">Reflog</h2>
+    <Panel title="Reflog">
       <label>
         Reflog reference
         <select
@@ -38,44 +41,52 @@ export function ReflogPanel({
           ))}
         </select>
       </label>
-      <ul className="reflog-list">
+      <ul className={styles.entryList}>
         {entries.map((entry, ordinal) => (
-          <li key={`${entry.reference}:${ordinal}`}>
-            <span>Old ID: {entry.oldId}</span>
-            <span>New ID: {entry.newId}</span>
+          <ListRow
+            key={`${entry.reference}:${ordinal}`}
+            className={styles.entryRow}
+            onClick={() => {}}
+          >
+            <span className={styles.entryMeta}>Old ID: {entry.oldId}</span>
+            <span className={styles.entryMeta}>New ID: {entry.newId}</span>
             <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
             <time dateTime={new Date(entry.timestamp * 1000).toISOString()}>
               {new Date(entry.timestamp * 1000).toLocaleString()}
             </time>
             <span>{entry.message}</span>
             {entry.summary !== null && <span>{entry.summary}</span>}
-            <button
-              type="button"
-              disabled={operationDisabled}
-              aria-label={`Restore ${entry.reference} to ${entry.newId}`}
-              onClick={() => setRestoreConfirmation(entry)}
-            >
-              Restore {entry.reference}
-            </button>
-          </li>
+            <Toolbar>
+              <button
+                type="button"
+                disabled={operationDisabled}
+                aria-label={`Restore ${entry.reference} to ${entry.newId}`}
+                onClick={() => setRestoreConfirmation(entry)}
+              >
+                Restore {entry.reference}
+              </button>
+            </Toolbar>
+          </ListRow>
         ))}
       </ul>
       {restoreConfirmation !== null && (
         <dialog open aria-label={`Restore ${restoreConfirmation.reference}`}>
           <p>Restore {restoreConfirmation.reference} to {restoreConfirmation.newId}?</p>
-          <button
-            type="button"
-            disabled={operationDisabled}
-            onClick={() => {
-              void onRestore(restoreConfirmation.reference, restoreConfirmation.newId)
-                .then(() => setRestoreConfirmation(null));
-            }}
-          >
-            Restore reflog entry
-          </button>
-          <button type="button" onClick={() => setRestoreConfirmation(null)}>Cancel</button>
+          <Toolbar>
+            <button
+              type="button"
+              disabled={operationDisabled}
+              onClick={() => {
+                void onRestore(restoreConfirmation.reference, restoreConfirmation.newId)
+                  .then(() => setRestoreConfirmation(null));
+              }}
+            >
+              Restore reflog entry
+            </button>
+            <button type="button" onClick={() => setRestoreConfirmation(null)}>Cancel</button>
+          </Toolbar>
         </dialog>
       )}
-    </section>
+    </Panel>
   );
 }

@@ -1,0 +1,24 @@
+/* frontend/src/components/ReflogPanel.module.css */
+.entryList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entryMeta {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Reflog entries have no click/selection behavior (ListRow's onClick is a required prop we
+   satisfy with a no-op) — override its pointer-cursor and hover-highlight affordances so the row
+   doesn't visually imply it's clickable. Doubled class selector bumps specificity above
+   ListRow's own `.row`/`.row:hover` rules regardless of CSS module load order. */
+.entryRow.entryRow {
+  cursor: default;
+}
+
+.entryRow.entryRow:hover {
+  background: transparent;
+}
