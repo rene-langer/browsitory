@@ -13,12 +13,15 @@ Phase 5 is deliberately split into two implementation plans and releases:
 
 1. **Design system foundation** — tokens, typography, layout primitives, an
    icon system, and a motion/interaction system, proven by reskinning the core
-   commit-review loop: `DiffPane`, `CommitBox`, `HistoryList`.
+   commit-review loop: `DiffPane` (and the `DiffView`/`BlameView` it renders),
+   `CommitBox`, `CommitGraph` (and the `CommitLaneGraphic` it renders — this
+   is the commit/stash history list; there is no separate `HistoryList`
+   component).
 2. **Rollout** — apply the system from (1) to every remaining component:
-   `BranchSwitcher`, stash UI, `ConflictResolutionPane`, `RebasePlanner`,
-   `BlameView`, `CommitGraph`/`CommitLaneGraphic`, `RemotePanel`,
-   `PullRequestPanel`, credential UI, `WorktreePanel`, submodule UI,
-   `ReflogPanel`, `RepoPicker`, `App.tsx` shell.
+   `BranchSwitcher`, `RebaseProgressPanel`, `ConflictResolutionPane`,
+   `RebasePlanner`, `RemotePanel`, `TagPanel`, `TransferPanel`,
+   `PullRequestPanel`, `WorktreePanel`, `SubmodulePanel`, `ReflogPanel`,
+   `RepoPicker`, `App.tsx` shell.
 3. **App icon and favicon** — replace the placeholder desktop app icon set
    with a real mark; independent of (1) and (2), so it can ship in parallel
    with either.
@@ -56,7 +59,7 @@ only tokens.
 Two font-family tokens exist: a sans stack for UI chrome (labels, buttons,
 panel headers) and a mono stack for git data — commit hashes, diff lines,
 refs, branch names, blame commit IDs. A 5-6 step type scale is token-driven;
-line-height is tighter for dense list views (`HistoryList`, `DiffPane`,
+line-height is tighter for dense list views (`CommitGraph`, `DiffPane`,
 `BlameView`) than for forms and panels (`CommitBox`, credential dialogs).
 
 ## Layout primitives
