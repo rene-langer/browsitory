@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
+import { GitBranch } from "lucide-react";
 import type { BranchInfo } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -95,11 +96,12 @@ export function BranchSwitcher({
           }
         }}
       >
+        <GitBranch size={14} aria-hidden="true" className={styles.branchIcon} />
         {current?.name ?? "no branch"}
       </button>
       {open && (
         <div>
-          <ul>
+          <ul className={styles.branchList}>
             {branches.map((b) => (
               <li key={b.name}>
                 <Toolbar>
@@ -160,9 +162,11 @@ export function BranchSwitcher({
               </li>
             ))}
           </ul>
-          <button disabled={isRebasing} onClick={() => onOpenCreateBranchDraft("HEAD")}>
-            New Branch…
-          </button>
+          <Toolbar>
+            <button disabled={isRebasing} onClick={() => onOpenCreateBranchDraft("HEAD")}>
+              New Branch…
+            </button>
+          </Toolbar>
         </div>
       )}
       {createBranchDraft !== null && (

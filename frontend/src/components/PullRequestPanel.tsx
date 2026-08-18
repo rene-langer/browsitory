@@ -142,11 +142,11 @@ function ForgeRepositorySection({
   return (
     <Panel title={sectionLabel} ariaLabel={sectionLabel}>
       <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
-        <label>
+        <label className={styles.label}>
           Account
           <input value={account} onChange={(event) => setAccount(event.target.value)} autoComplete="off" />
         </label>
-        <label>
+        <label className={styles.label}>
           Access token
           <input ref={tokenRef} type="password" autoComplete="off" />
         </label>
@@ -193,19 +193,19 @@ function ForgeRepositorySection({
       )}
 
       <form className={styles.form} onSubmit={submitCreate} aria-label={`Create pull request for ${repository.remoteName}`}>
-        <label>
+        <label className={styles.label}>
           Title
           <input value={title} onChange={(event) => setTitle(event.target.value)} />
         </label>
-        <label>
+        <label className={styles.label}>
           Description
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
         </label>
-        <label>
+        <label className={styles.label}>
           Source branch
           <input value={sourceBranch} onChange={(event) => setSourceBranch(event.target.value)} />
         </label>
-        <label>
+        <label className={styles.label}>
           Target branch
           <input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
         </label>
@@ -242,29 +242,31 @@ export function PullRequestPanel({
 }) {
   if (forgeRepositories.length === 0) {
     return (
-      <section aria-labelledby="pull-request-panel-heading">
-        <h2 id="pull-request-panel-heading">Pull Requests</h2>
+      <Panel title="Pull Requests">
         <p>No supported GitHub or Bitbucket remotes detected.</p>
-      </section>
+      </Panel>
     );
   }
 
+  // Nested Panels are intentional: the outer one is this stack entry's card ("Pull Requests"),
+  // each inner one is a per-forge-repository card titled with its own provider/owner/remote.
   return (
-    <section aria-labelledby="pull-request-panel-heading">
-      <h2 id="pull-request-panel-heading">Pull Requests</h2>
-      {forgeRepositories.map((repository) => (
-        <ForgeRepositorySection
-          key={repository.remoteName}
-          repository={repository}
-          pullRequests={pullRequests[repository.remoteName]}
-          onListPullRequests={onListPullRequests}
-          onForgetForgeToken={onForgetForgeToken}
-          onSaveForgeToken={onSaveForgeToken}
-          onCreatePullRequest={onCreatePullRequest}
-          onOpenExternalUrl={onOpenExternalUrl}
-          operationDisabled={operationDisabled}
-        />
-      ))}
-    </section>
+    <Panel title="Pull Requests">
+      <div className={styles.sections}>
+        {forgeRepositories.map((repository) => (
+          <ForgeRepositorySection
+            key={repository.remoteName}
+            repository={repository}
+            pullRequests={pullRequests[repository.remoteName]}
+            onListPullRequests={onListPullRequests}
+            onForgetForgeToken={onForgetForgeToken}
+            onSaveForgeToken={onSaveForgeToken}
+            onCreatePullRequest={onCreatePullRequest}
+            onOpenExternalUrl={onOpenExternalUrl}
+            operationDisabled={operationDisabled}
+          />
+        ))}
+      </div>
+    </Panel>
   );
 }

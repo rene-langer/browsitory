@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Package } from "lucide-react";
 import type { SubmoduleInfo } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -44,6 +45,7 @@ export function SubmodulePanel({
 
           return (
             <li key={submodule.path}>
+              <Package size={14} aria-hidden="true" className={styles.rowIcon} />
               <strong>{submodule.path}</strong>
               <span>{submodule.url ?? "No URL configured"}</span>
               <span>{submodule.gitlinkId ?? "No recorded gitlink"}</span>

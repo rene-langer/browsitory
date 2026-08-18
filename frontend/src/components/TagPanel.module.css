@@ -28,3 +28,15 @@
 .inlineLabel {
   font-size: var(--text-sm);
 }
+
+/* Sub-section heading in the panel body — replaces the retired global `.tag-panel h3` margin. */
+.sectionHeading {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-md);
+}
+
+.rowIcon {
+  vertical-align: text-bottom;
+  margin-right: var(--space-1);
+  color: var(--color-text-muted);
+}

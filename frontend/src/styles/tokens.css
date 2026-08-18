@@ -1,4 +1,11 @@
 :root {
+  /* Tells the engine which palette to render native surfaces with — select dropdown popups,
+     scrollbars, checkbox/radio glyphs, `<dialog>` defaults, form-control text. Without it every
+     one of those stays light even in the dark theme; `prefers-color-scheme` alone does not do
+     this. Must be restated in each dark block below, including the explicit `data-theme`
+     override, so the in-app theme toggle moves native surfaces too. */
+  color-scheme: light;
+
   /* Color */
   --color-bg: #ffffff;
   --color-bg-subtle: #f6f8fa;
@@ -50,6 +57,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --color-bg: #14131a;
     --color-bg-subtle: #1d1c26;
     --color-surface: #1a1922;
@@ -69,6 +77,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --color-bg: #14131a;
   --color-bg-subtle: #1d1c26;
   --color-surface: #1a1922;
