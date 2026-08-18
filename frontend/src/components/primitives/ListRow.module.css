@@ -3,16 +3,26 @@
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-3);
-  cursor: pointer;
   white-space: normal;
   overflow: hidden;
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.row:hover {
+/* Only rows that actually do something on activation get a clickable affordance. */
+.interactive {
+  cursor: pointer;
+}
+
+.interactive:hover {
   background: var(--color-bg-subtle);
 }
 
+.interactive:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* Declared after `.interactive:hover` (same specificity) so the selected tint wins on hover. */
 .row[aria-selected="true"] {
   background: var(--color-selected-bg);
 }
