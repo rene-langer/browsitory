@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ConflictSegment, FileConflictChoice, RepoClient } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./ConflictResolutionPane.module.css";
 
 type Resolution = "ours" | "theirs" | "both";
 
@@ -55,18 +58,20 @@ export function ConflictResolutionPane({
   if (error !== null) {
     if (isAddDeleteConflict) {
       return (
-        <div>
+        <Panel title="Resolve conflict">
           <p>{error}</p>
-          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Ours")}>
-            Keep Our Version
-          </button>
-          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Theirs")}>
-            Keep Their Version
-          </button>
-          <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Delete")}>
-            Delete File
-          </button>
-        </div>
+          <Toolbar>
+            <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Ours")}>
+              Keep Our Version
+            </button>
+            <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Theirs")}>
+              Keep Their Version
+            </button>
+            <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Delete")}>
+              Delete File
+            </button>
+          </Toolbar>
+        </Panel>
       );
     }
     return <p role="alert">{error}</p>;
@@ -98,23 +103,29 @@ export function ConflictResolutionPane({
   };
 
   return (
-    <div>
+    <Panel title="Resolve conflict">
       {segments.map((segment, index) =>
         segment.kind === "Clean" ? (
-          <pre key={index}>{segment.content}</pre>
+          <pre key={index} className={styles.segment}>
+            {segment.content}
+          </pre>
         ) : (
           <div key={index}>
-            <pre>Ours: {segment.ours}</pre>
-            <pre>Theirs: {segment.theirs}</pre>
-            <button onClick={() => setResolutionAt(index, "ours")}>Accept Ours</button>
-            <button onClick={() => setResolutionAt(index, "theirs")}>Accept Theirs</button>
-            <button onClick={() => setResolutionAt(index, "both")}>Accept Both</button>
+            <pre className={`${styles.segment} ${styles.segmentOurs}`}>Ours: {segment.ours}</pre>
+            <pre className={`${styles.segment} ${styles.segmentTheirs}`}>
+              Theirs: {segment.theirs}
+            </pre>
+            <Toolbar>
+              <button onClick={() => setResolutionAt(index, "ours")}>Accept Ours</button>
+              <button onClick={() => setResolutionAt(index, "theirs")}>Accept Theirs</button>
+              <button onClick={() => setResolutionAt(index, "both")}>Accept Both</button>
+            </Toolbar>
           </div>
         ),
       )}
       <button onClick={save} disabled={!loaded}>
         Save resolution
       </button>
-    </div>
+    </Panel>
   );
 }
