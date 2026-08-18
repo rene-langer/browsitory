@@ -140,4 +140,9 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
 - **Phase 2**: branch management, stash, merge with conflict resolution, interactive rebase,
   blame viewer, multi-branch commit graph.
 - **Phase 3**: push/pull/fetch with progress, multi-remote, tag push, credential handling.
-- **Phase 4**: worktrees, submodules, reflog viewer, PR integration.
+- **Phase 4** (complete): worktrees, submodules, reflog viewer, PR integration.
+- **Phase 5**: UI/UX polish pass over the full feature set built in Phases 1-4 — visual
+  design, typography, keyboard-driven interaction, and motion, matching the speed and
+  polish bar the project targets. Must land through `RepoClient` alone (no new backend
+  seams) so the same visual system works unmodified in both the Tauri desktop app and
+  the future VSCode webview frontend.
