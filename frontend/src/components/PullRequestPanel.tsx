@@ -1,10 +1,14 @@
 import { useRef, useState } from "react";
+import { ExternalLink, GitPullRequest } from "lucide-react";
 import type {
   CreatePullRequest,
   ForgeProvider,
   ForgeRepository,
   PullRequestList,
 } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./PullRequestPanel.module.css";
 
 interface ForgeRepositorySectionProps {
   repository: ForgeRepository;
@@ -126,16 +130,18 @@ function ForgeRepositorySection({
     }
   };
 
-  const headingId = `pull-request-section-${repository.remoteName}`;
+  // The Panel's identifying title/region-name — provider, owner/name, and remoteName together,
+  // since remoteName is the true disambiguator (a repo can be listed under multiple
+  // remotes/providers with identical owner/name, per `AppState.pullRequests`' per-remote
+  // keying above). `ForgeRepository` has no single "slug" field (confirmed against
+  // `RepoClient.ts`: provider/host/owner/name/remoteName), so this composes the closest
+  // equivalent — matching the identifying text the section heading showed before this reskin.
+  const sectionLabel = `${repository.provider}: ${repository.owner}/${repository.name} (${repository.remoteName})`;
   const visibleRows = tokenForgotten ? null : (pullRequests?.pullRequests ?? null);
 
   return (
-    <section aria-labelledby={headingId}>
-      <h3 id={headingId}>
-        {repository.provider}: {repository.owner}/{repository.name} ({repository.remoteName})
-      </h3>
-
-      <form onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
+    <Panel title={sectionLabel} ariaLabel={sectionLabel}>
+      <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
         <label>
           Account
           <input value={account} onChange={(event) => setAccount(event.target.value)} autoComplete="off" />
@@ -149,16 +155,20 @@ function ForgeRepositorySection({
             Requires a Bitbucket repository or workspace access token (not an app password).
           </p>
         )}
-        <button type="submit" disabled={operationDisabled}>Save token</button>
-        <button type="button" disabled={operationDisabled} onClick={() => void forgetToken()}>
-          Forget token
-        </button>
-        <button type="button" onClick={cancelToken}>Cancel</button>
+        <Toolbar>
+          <button type="submit" disabled={operationDisabled}>Save token</button>
+          <button type="button" disabled={operationDisabled} onClick={() => void forgetToken()}>
+            Forget token
+          </button>
+          <button type="button" onClick={cancelToken}>Cancel</button>
+        </Toolbar>
       </form>
 
-      <button type="button" disabled={listing} onClick={() => void listPullRequests()}>
-        List pull requests
-      </button>
+      <Toolbar>
+        <button type="button" disabled={listing} onClick={() => void listPullRequests()}>
+          List pull requests
+        </button>
+      </Toolbar>
       {visibleRows !== null && (
         <>
           {!tokenForgotten && pullRequests?.truncated === true && (
@@ -166,12 +176,14 @@ function ForgeRepositorySection({
               Showing the first {visibleRows.length} pull requests — more may be available on the provider.
             </p>
           )}
-          <ul aria-label={`Pull requests for ${repository.remoteName}`}>
+          <ul className={styles.prList} aria-label={`Pull requests for ${repository.remoteName}`}>
             {visibleRows.map((pullRequest) => (
-              <li key={pullRequest.id}>
+              <li key={pullRequest.id} className={styles.prRow}>
+                <GitPullRequest size={14} aria-hidden="true" />
                 #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
                 {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}{" "}
                 <button type="button" onClick={() => void onOpenExternalUrl(pullRequest.url)}>
+                  <ExternalLink size={14} aria-hidden="true" />
                   {pullRequest.url}
                 </button>
               </li>
@@ -180,7 +192,7 @@ function ForgeRepositorySection({
         </>
       )}
 
-      <form onSubmit={submitCreate} aria-label={`Create pull request for ${repository.remoteName}`}>
+      <form className={styles.form} onSubmit={submitCreate} aria-label={`Create pull request for ${repository.remoteName}`}>
         <label>
           Title
           <input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -197,9 +209,11 @@ function ForgeRepositorySection({
           Target branch
           <input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
         </label>
-        <button type="submit" disabled={operationDisabled || creating}>Create pull request</button>
+        <Toolbar>
+          <button type="submit" disabled={operationDisabled || creating}>Create pull request</button>
+        </Toolbar>
       </form>
-    </section>
+    </Panel>
   );
 }
 
