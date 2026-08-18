@@ -1,3 +1,5 @@
+@import "./styles/tokens.css";
+
 /* Reset */
 *,
 *::before,
@@ -12,22 +14,24 @@ body,
   margin: 0;
 }
 
-/* Base typography */
-:root {
-  --text: #1f2328;
-  --text-muted: #57606a;
-  --bg: #ffffff;
-  --border: #d0d7de;
-  --selected-bg: #cfe6ff;
-  --hunk-bg: #f6f8fa;
-  --add-bg: #e6ffed;
-  --add-text: #1a7f37;
-  --remove-bg: #ffeef0;
-  --remove-text: #b31d28;
+body {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
 
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+/* Temporary aliases for old token names (deleted in Task 11) */
+:root {
+  --text: var(--color-text);
+  --text-muted: var(--color-text-muted);
+  --bg: var(--color-bg);
+  --border: var(--color-border);
+  --selected-bg: var(--color-selected-bg);
+  --hunk-bg: var(--color-bg-subtle);
+  --add-bg: var(--color-diff-add-bg);
+  --add-text: var(--color-diff-add-text);
+  --remove-bg: var(--color-diff-remove-bg);
+  --remove-text: var(--color-diff-remove-text);
 }
 
 main {
