@@ -1,0 +1,8 @@
+.braid {
+  display: flex;
+  height: 2px;
+}
+
+.segment {
+  flex: 1 1 0;
+}
