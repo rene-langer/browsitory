@@ -19,11 +19,15 @@ Phase 5 is deliberately split into two implementation plans and releases:
    `BlameView`, `CommitGraph`/`CommitLaneGraphic`, `RemotePanel`,
    `PullRequestPanel`, credential UI, `WorktreePanel`, submodule UI,
    `ReflogPanel`, `RepoPicker`, `App.tsx` shell.
+3. **App icon and favicon** — replace the placeholder desktop app icon set
+   with a real mark; independent of (1) and (2), so it can ship in parallel
+   with either.
 
 The foundation plan must leave the app in a working, tested state with a
 visible before/after on the flagship views; the rollout plan does not begin
 until the foundation has shipped, so its primitives are stable before every
-other component adopts them.
+other component adopts them. The app-icon plan has no dependency on the
+other two and may be scheduled independently.
 
 ## Shared architecture
 
@@ -87,6 +91,26 @@ states get consistent treatment app-wide, including visible keyboard-focus
 rings for every interactive element — the interaction-speed half of the
 Sublime Merge bar, applied uniformly rather than per-component.
 
+## App icon and favicon
+
+`crates/tauri-app/icons/` currently holds five files — `32x32.png`,
+`128x128.png`, `128x128@2x.png`, `icon.icns`, `icon.ico` — all referenced by
+`crates/tauri-app/tauri.conf.json`'s `bundle.icon` array, and all a flat
+solid-blue placeholder square with no mark. `frontend/public/favicon.svg`,
+by contrast, is a real angular purple logo mark (clip-masked layered
+ellipses), used only as the browser-tab favicon and disconnected from the
+desktop app icon.
+
+Phase 5 designs one mark, derived from or replacing the `favicon.svg`
+shape, expressed as the token palette's accent color rather than the
+favicon's current one-off purple, and regenerates the full desktop icon
+set from it — all five files Tauri's bundler expects, at their existing
+sizes, via `cargo tauri icon` or equivalent. `frontend/public/favicon.svg`
+and `frontend/public/icons.svg` (the UI sprite sheet) are updated to match
+the same mark and palette so the web favicon, desktop icon, and in-app
+iconography read as one brand across both target frontends (Tauri app and
+future VSCode webview).
+
 ## Behavior policy
 
 Phase 5 is visual-first, not visual-only: component logic and `RepoClient`
@@ -120,3 +144,7 @@ rule), so the entire visual system is verified portable to a future
   first use.
 - Both light and dark themes are exercised for every touched component
   (visual review, not an automated visual-regression suite in this phase).
+- The regenerated icon set is verified with `cargo tauri build` (or
+  `cargo build --workspace` at minimum) so `tauri.conf.json`'s
+  `bundle.icon` array resolves against real files at every listed path
+  and size.
