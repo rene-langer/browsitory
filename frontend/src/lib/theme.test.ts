@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadStoredTheme, persistTheme, resolveTheme } from "./theme";
+import { applyTheme, loadStoredTheme, persistTheme, resolveTheme } from "./theme";
 
 describe("resolveTheme", () => {
   it("uses the stored theme when it is a valid value", () => {
@@ -26,5 +26,16 @@ describe("persistTheme / loadStoredTheme", () => {
     persistTheme("light");
     expect(loadStoredTheme()).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
+  });
+});
+
+describe("applyTheme", () => {
+  it("sets the document's data-theme without touching localStorage", () => {
+    localStorage.clear();
+
+    applyTheme("dark");
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(loadStoredTheme()).toBeNull();
   });
 });
