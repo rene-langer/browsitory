@@ -5,6 +5,10 @@ import type {
   RebasePlanEntry,
   RepoClient,
 } from "../ipc/RepoClient";
+import { ListRow } from "./primitives/ListRow";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./RebasePlanner.module.css";
 
 type ActionKind = RebaseAction["kind"];
 
@@ -200,10 +204,10 @@ export function RebasePlanner({
   };
 
   return (
-    <div>
-      <ul>
+    <Panel title="Rebase plan">
+      <ul className={styles.list}>
         {rows.map((row, index) => (
-          <li key={row.commit.id}>
+          <ListRow key={row.commit.id} selected={false} onClick={() => {}}>
             <span>
               {row.commit.shortId} {row.commit.summary}
             </span>
@@ -217,6 +221,7 @@ export function RebasePlanner({
               Action
               <select
                 aria-label="Action"
+                className={styles.actionSelect}
                 value={row.actionKind}
                 onChange={(event) => setActionKind(index, event.target.value as ActionKind)}
               >
@@ -249,11 +254,15 @@ export function RebasePlanner({
                 />
               </label>
             )}
-          </li>
+          </ListRow>
         ))}
       </ul>
-      <button onClick={start} disabled={operationDisabled}>Start Rebase</button>
-      <button onClick={onCancel}>Cancel</button>
-    </div>
+      <Toolbar>
+        <button onClick={start} disabled={operationDisabled}>
+          Start Rebase
+        </button>
+        <button onClick={onCancel}>Cancel</button>
+      </Toolbar>
+    </Panel>
   );
 }
