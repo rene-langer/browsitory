@@ -104,15 +104,21 @@ by contrast, is a real angular purple logo mark (clip-masked layered
 ellipses), used only as the browser-tab favicon and disconnected from the
 desktop app icon.
 
-Phase 5 designs one mark, derived from or replacing the `favicon.svg`
-shape, expressed as the token palette's accent color rather than the
-favicon's current one-off purple, and regenerates the full desktop icon
-set from it — all five files Tauri's bundler expects, at their existing
-sizes, via `cargo tauri icon` or equivalent. `frontend/public/favicon.svg`
-and `frontend/public/icons.svg` (the UI sprite sheet) are updated to match
-the same mark and palette so the web favicon, desktop icon, and in-app
-iconography read as one brand across both target frontends (Tauri app and
-future VSCode webview).
+Phase 5 designs one mark and regenerates the full desktop icon set from
+it — all five files Tauri's bundler expects, at their existing sizes, via
+`tauri icon`. The old `favicon.svg` shape's origin turned out to be
+unattributed (no license record since Phase 0, and an adjacent sprite of
+third-party brand logos suggesting a downloaded asset kit rather than
+original work) — too risky to promote to shipped application identity, so
+Phase 5 designs an original mark instead of deriving from it: a git
+branch-merge glyph (two curved outer lanes and a straight center lane
+converging into a commit-node dot), colored from this phase's own design
+tokens (`frontend/src/lib/laneColors.ts`'s lane hues for the strokes,
+`--color-accent` for the node). `frontend/public/favicon.svg` is replaced
+with the same glyph so the web favicon and desktop icon read as one brand.
+`frontend/public/icons.svg` (the old UI sprite sheet) is deleted rather
+than updated — Phase 5 Foundation already replaced all in-app iconography
+with `lucide-react`, so the sprite was unreferenced dead weight.
 
 ## Behavior policy
 
