@@ -15,6 +15,16 @@ describe("ListRow", () => {
     expect(row).toHaveAttribute("aria-selected", "true");
   });
 
+  it("omits aria-selected entirely when selected isn't passed", () => {
+    render(
+      <ul>
+        <ListRow onClick={vi.fn()}>row content</ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("row content").closest("li");
+    expect(row).not.toHaveAttribute("aria-selected");
+  });
+
   it("calls onClick when clicked", () => {
     const onClick = vi.fn();
     render(
