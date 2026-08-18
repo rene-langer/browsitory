@@ -15,7 +15,7 @@ export function Panel({
   ariaLabel?: string;
 }) {
   return (
-    <section className={styles.panel} aria-live={ariaLive} aria-label={ariaLabel}>
+    <section className={styles.panel} aria-live={ariaLive} aria-label={ariaLabel ?? title}>
       {title !== undefined && (
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>

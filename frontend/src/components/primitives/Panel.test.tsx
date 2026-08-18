@@ -36,4 +36,13 @@ describe("Panel", () => {
     );
     expect(screen.getByLabelText("Status")).toHaveAttribute("aria-live", "polite");
   });
+
+  it("defaults aria-label to title when ariaLabel not given", () => {
+    render(
+      <Panel title="Remotes">
+        <p>content</p>
+      </Panel>,
+    );
+    expect(screen.getByLabelText("Remotes")).toBeInTheDocument();
+  });
 });
