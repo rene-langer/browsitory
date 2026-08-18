@@ -88,93 +88,95 @@ export default function App() {
       </header>
       <LaneBraid />
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
-      <BranchSwitcher
-        branches={appState.state.branches}
-        createBranchDraft={appState.state.createBranchDraft}
-        onSwitchBranch={appState.switchBranch}
-        onCreateBranch={appState.createBranch}
-        onDeleteBranch={appState.deleteBranch}
-        onRenameBranch={appState.renameBranch}
-        onOpenCreateBranchDraft={appState.openCreateBranchDraft}
-        onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-        onMergeBranch={appState.mergeBranch}
-        isMerging={appState.state.mergeMessage !== null}
-        isRebasing={appState.state.rebaseProgress !== null}
-        operationDisabled={repositoryOperationDisabled}
-      />
-      <WorktreePanel
-        worktrees={appState.state.worktrees}
-        branches={appState.state.branches}
-        onOpenWorktree={appState.openRepo}
-        onCreateWorktree={appState.createWorktree}
-        onRemoveWorktree={appState.removeWorktree}
-        onPruneWorktrees={appState.pruneWorktrees}
-        operationDisabled={repositoryOperationDisabled}
-      />
-      <SubmodulePanel
-        submodules={appState.state.submodules}
-        onInit={appState.initSubmodule}
-        onUpdate={appState.updateSubmodule}
-        operationDisabled={repositoryOperationDisabled}
-      />
-      <ReflogPanel
-        references={appState.state.reflogRefs}
-        selectedReference={appState.state.selectedReflogReference}
-        entries={appState.state.reflog}
-        onSelectReference={appState.selectReflogReference}
-        onRestore={appState.restoreReflogEntry}
-        operationDisabled={repositoryOperationDisabled}
-      />
-      <RemotePanel
-        remotes={appState.state.remotes}
-        upstream={appState.state.upstream}
-        remoteUpstreams={appState.state.remoteUpstreams}
-        onAddRemote={appState.addRemote}
-        onRenameRemote={appState.renameRemote}
-        onUpdateRemoteUrls={appState.updateRemoteUrls}
-        onRemoveRemote={appState.removeRemote}
-        onSaveHttpsCredential={appState.saveHttpsCredential}
-        onForgetHttpsCredential={appState.forgetHttpsCredential}
-        onSetRemoteAuthMode={appState.setRemoteAuthMode}
-        onSetUpstream={appState.setCurrentUpstream}
-        onClearUpstream={appState.clearCurrentUpstream}
-        onFetchRemote={appState.fetchRemote}
-        fetchDisabled={repositoryOperationDisabled}
-        onPushCurrentBranch={appState.pushCurrentBranch}
-        pushDisabled={repositoryOperationDisabled}
-        onPull={appState.pullCurrentUpstream}
-        pullDisabled={repositoryOperationDisabled}
-        pendingPull={appState.state.pendingPull}
-        pullOutcome={appState.state.pullOutcome}
-        onMergePull={async (upstreamRef) => {
-          appState.clearPendingPull();
-          await appState.mergeBranch(upstreamRef);
-        }}
-        onRebasePull={(upstreamRef) => {
-          appState.clearPendingPull();
-          appState.openRebasePlanner(upstreamRef);
-        }}
-        onCancelPull={appState.clearPendingPull}
-      />
-      <TagPanel
-        tags={appState.state.tags}
-        remotes={appState.state.remotes}
-        onCreate={appState.createTag}
-        onDelete={appState.deleteTag}
-        onPush={appState.pushTags}
-        pushDisabled={repositoryOperationDisabled}
-      />
-      <PullRequestPanel
-        forgeRepositories={appState.state.forgeRepositories}
-        pullRequests={appState.state.pullRequests}
-        onListPullRequests={appState.listPullRequests}
-        onSaveForgeToken={appState.saveForgeToken}
-        onForgetForgeToken={appState.forgetForgeToken}
-        onCreatePullRequest={appState.createPullRequest}
-        onOpenExternalUrl={appState.openExternalUrl}
-        operationDisabled={repositoryOperationDisabled}
-      />
-      <TransferPanel progress={appState.state.transfer} />
+      <div className={styles.panelStack}>
+        <BranchSwitcher
+          branches={appState.state.branches}
+          createBranchDraft={appState.state.createBranchDraft}
+          onSwitchBranch={appState.switchBranch}
+          onCreateBranch={appState.createBranch}
+          onDeleteBranch={appState.deleteBranch}
+          onRenameBranch={appState.renameBranch}
+          onOpenCreateBranchDraft={appState.openCreateBranchDraft}
+          onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
+          onMergeBranch={appState.mergeBranch}
+          isMerging={appState.state.mergeMessage !== null}
+          isRebasing={appState.state.rebaseProgress !== null}
+          operationDisabled={repositoryOperationDisabled}
+        />
+        <WorktreePanel
+          worktrees={appState.state.worktrees}
+          branches={appState.state.branches}
+          onOpenWorktree={appState.openRepo}
+          onCreateWorktree={appState.createWorktree}
+          onRemoveWorktree={appState.removeWorktree}
+          onPruneWorktrees={appState.pruneWorktrees}
+          operationDisabled={repositoryOperationDisabled}
+        />
+        <SubmodulePanel
+          submodules={appState.state.submodules}
+          onInit={appState.initSubmodule}
+          onUpdate={appState.updateSubmodule}
+          operationDisabled={repositoryOperationDisabled}
+        />
+        <ReflogPanel
+          references={appState.state.reflogRefs}
+          selectedReference={appState.state.selectedReflogReference}
+          entries={appState.state.reflog}
+          onSelectReference={appState.selectReflogReference}
+          onRestore={appState.restoreReflogEntry}
+          operationDisabled={repositoryOperationDisabled}
+        />
+        <RemotePanel
+          remotes={appState.state.remotes}
+          upstream={appState.state.upstream}
+          remoteUpstreams={appState.state.remoteUpstreams}
+          onAddRemote={appState.addRemote}
+          onRenameRemote={appState.renameRemote}
+          onUpdateRemoteUrls={appState.updateRemoteUrls}
+          onRemoveRemote={appState.removeRemote}
+          onSaveHttpsCredential={appState.saveHttpsCredential}
+          onForgetHttpsCredential={appState.forgetHttpsCredential}
+          onSetRemoteAuthMode={appState.setRemoteAuthMode}
+          onSetUpstream={appState.setCurrentUpstream}
+          onClearUpstream={appState.clearCurrentUpstream}
+          onFetchRemote={appState.fetchRemote}
+          fetchDisabled={repositoryOperationDisabled}
+          onPushCurrentBranch={appState.pushCurrentBranch}
+          pushDisabled={repositoryOperationDisabled}
+          onPull={appState.pullCurrentUpstream}
+          pullDisabled={repositoryOperationDisabled}
+          pendingPull={appState.state.pendingPull}
+          pullOutcome={appState.state.pullOutcome}
+          onMergePull={async (upstreamRef) => {
+            appState.clearPendingPull();
+            await appState.mergeBranch(upstreamRef);
+          }}
+          onRebasePull={(upstreamRef) => {
+            appState.clearPendingPull();
+            appState.openRebasePlanner(upstreamRef);
+          }}
+          onCancelPull={appState.clearPendingPull}
+        />
+        <TagPanel
+          tags={appState.state.tags}
+          remotes={appState.state.remotes}
+          onCreate={appState.createTag}
+          onDelete={appState.deleteTag}
+          onPush={appState.pushTags}
+          pushDisabled={repositoryOperationDisabled}
+        />
+        <PullRequestPanel
+          forgeRepositories={appState.state.forgeRepositories}
+          pullRequests={appState.state.pullRequests}
+          onListPullRequests={appState.listPullRequests}
+          onSaveForgeToken={appState.saveForgeToken}
+          onForgetForgeToken={appState.forgetForgeToken}
+          onCreatePullRequest={appState.createPullRequest}
+          onOpenExternalUrl={appState.openExternalUrl}
+          operationDisabled={repositoryOperationDisabled}
+        />
+        <TransferPanel progress={appState.state.transfer} />
+      </div>
       <SplitView
         left={
           <CommitGraph

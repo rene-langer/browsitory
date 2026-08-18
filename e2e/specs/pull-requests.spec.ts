@@ -80,12 +80,16 @@ describe("Browsitory pull requests", () => {
     await addRemote("bb-origin", "https://bitbucket.org/acme/widget.git");
     await addRemote("gl-origin", "https://gitlab.com/acme/widget.git");
 
-    const githubSection = await $("section[aria-labelledby='pull-request-section-gh-origin']");
+    // `PullRequestPanel`'s reskin onto the `Panel` primitive replaced the old
+    // `aria-labelledby="pull-request-section-{remoteName}"` heading-id wiring with a plain
+    // `aria-label` on the section, composed as "{provider}: {owner}/{name} ({remoteName})" (see
+    // `PullRequestPanel.tsx`'s `sectionLabel`) — selectors below match that new label text.
+    const githubSection = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
     await githubSection.waitForExist({ timeout: 10000 });
-    const bitbucketSection = await $("section[aria-labelledby='pull-request-section-bb-origin']");
+    const bitbucketSection = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(bitbucketSection).toBeExisting();
 
-    const gitlabSection = await $("section[aria-labelledby='pull-request-section-gl-origin']");
+    const gitlabSection = await $("section[aria-label='GitLab: acme/widget (gl-origin)']");
     expect(await gitlabSection.isExisting()).toBe(false);
 
     // Adding remotes (including the unsupported one) never makes a pull-request HTTP call by
@@ -100,7 +104,7 @@ describe("Browsitory pull requests", () => {
   // provider purely for readability — not because listing one remote would otherwise clobber
   // or hide another remote's rows.
   it("lists and creates a GitHub pull request using the saved token, then hides it once forgotten", async () => {
-    const section = await $("section[aria-labelledby='pull-request-section-gh-origin']");
+    const section = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
     await (await section.$("aria/Account")).setValue("rene");
     await (await section.$("aria/Access token")).setValue("gh-test-token");
     await (await section.$("button=Save token")).click();
@@ -146,7 +150,7 @@ describe("Browsitory pull requests", () => {
   });
 
   it("warns about app passwords and lists/creates a Bitbucket pull request using the saved token", async () => {
-    const section = await $("section[aria-labelledby='pull-request-section-bb-origin']");
+    const section = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(section).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)"));
 
     await (await section.$("aria/Account")).setValue("rene");
