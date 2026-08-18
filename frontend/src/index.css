@@ -20,20 +20,6 @@ body {
   background: var(--color-bg);
 }
 
-/* Temporary aliases for old token names (deleted in Task 11) */
-:root {
-  --text: var(--color-text);
-  --text-muted: var(--color-text-muted);
-  --bg: var(--color-bg);
-  --border: var(--color-border);
-  --selected-bg: var(--color-selected-bg);
-  --hunk-bg: var(--color-bg-subtle);
-  --add-bg: var(--color-diff-add-bg);
-  --add-text: var(--color-diff-add-text);
-  --remove-bg: var(--color-diff-remove-bg);
-  --remove-text: var(--color-diff-remove-text);
-}
-
 main {
   display: flex;
   flex-direction: column;
@@ -44,14 +30,14 @@ h1 {
   font-size: 20px;
   margin: 0;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   flex: 0 0 auto;
 }
 
 .remote-panel,
 .tag-panel {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .remote-panel h2,
@@ -90,7 +76,7 @@ h1 {
 }
 
 .remote-list li > span {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
 }
 
 .tag-list {
@@ -102,6 +88,6 @@ h1 {
 }
 
 .tag-list li > span {
-  color: var(--text-muted);
+  color: var(--color-text-muted);
 }
 
