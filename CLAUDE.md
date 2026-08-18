@@ -55,8 +55,22 @@ registry backed by TOML; added 9 Tauri commands and a `tauri-plugin-dialog`-back
 picker; and built the unified frontend layout (`RepoPicker`, `HistoryList`, `DiffPane`,
 `CommitBox`, composed in `App.tsx`) with basic keyboard navigation, retiring the old
 `StatusView`. Also added Browsitory's first GUI E2E layer (`e2e/`, see "Testing conventions"
-below) and a CI job for it. Phase 2 (branch management, stash, merge, rebase, blame, multi-branch
-graph) is next and not started — see `docs/ARCHITECTURE.md`'s Roadmap.
+below) and a CI job for it.
+
+Phases 2-4 are also complete: branch management, stash, merge with conflict resolution,
+interactive rebase, blame viewer, and the multi-branch commit graph (Phase 2); push/pull/fetch
+with transfer progress, multi-remote and tag push, and OS-keychain-backed credential handling
+(Phase 3); worktrees, submodules, a reflog viewer, and forge (GitHub/Bitbucket) pull request
+integration (Phase 4) — see `docs/ARCHITECTURE.md`'s Roadmap for the full breakdown.
+
+Phase 5 (UI/UX polish over the full feature set, kept behind `RepoClient` so it works
+unmodified in both the Tauri app and the future VSCode webview) is underway. Its
+foundation sub-project is complete: design tokens with light/dark theming, four layout
+primitives (`Panel`, `SplitView`, `Toolbar`, `ListRow`) under
+`frontend/src/components/primitives/`, `lucide-react` iconography, and a reskin of the
+core commit-review loop (`CommitBox`, `CommitGraph`, `DiffPane`/`DiffView`/`BlameView`).
+Remaining: the rollout of that system to every other component, and a new app icon —
+see `docs/superpowers/specs/2026-08-18-browsitory-phase5-design.md` and its plans.
 
 ## Architecture
 
