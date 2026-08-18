@@ -31,6 +31,7 @@ completion (not the full transitive tree).
 |---|---|---|
 | react | MIT | |
 | react-dom | MIT | |
+| lucide-react | ISC | Icon set adopted in Phase 5 for stage/unstage, merge-conflict, branch, stash, tag, worktree, submodule, PR-status, and theme-toggle iconography. |
 | @tauri-apps/api | Apache-2.0 OR MIT | |
 | vite | MIT | dev only |
 | typescript | Apache-2.0 | dev only |
