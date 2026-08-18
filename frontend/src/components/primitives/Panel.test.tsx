@@ -27,4 +27,13 @@ describe("Panel", () => {
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     expect(screen.getByText("content")).toBeInTheDocument();
   });
+
+  it("passes through aria-live and aria-label when provided", () => {
+    render(
+      <Panel ariaLive="polite" ariaLabel="Status">
+        <p>content</p>
+      </Panel>,
+    );
+    expect(screen.getByLabelText("Status")).toHaveAttribute("aria-live", "polite");
+  });
 });
