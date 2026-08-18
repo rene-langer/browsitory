@@ -64,18 +64,6 @@ h1 {
   font-size: 13px;
 }
 
-.remote-list {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.remote-list li > span {
-  color: var(--color-text-muted);
-}
-
 .tag-list {
   display: grid;
   gap: 4px;
