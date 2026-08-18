@@ -1,5 +1,8 @@
 import { useState, type KeyboardEvent } from "react";
 import type { BranchInfo } from "../ipc/RepoClient";
+import { Panel } from "./primitives/Panel";
+import { Toolbar } from "./primitives/Toolbar";
+import styles from "./BranchSwitcher.module.css";
 
 export function BranchSwitcher({
   branches,
@@ -80,9 +83,10 @@ export function BranchSwitcher({
   };
 
   return (
-    <div>
+    <Panel title="Branches">
       <button
         aria-label="Branch switcher"
+        className={styles.select}
         onClick={() => {
           if (open) {
             closePopoverState();
@@ -98,59 +102,61 @@ export function BranchSwitcher({
           <ul>
             {branches.map((b) => (
               <li key={b.name}>
-                {renaming === b.name ? (
-                  <input
-                    value={renameValue}
-                    onChange={(event) => setRenameValue(event.target.value)}
-                    onKeyDown={(event) => handleRenameKeyDown(event, b.name)}
-                  />
-                ) : (
+                <Toolbar>
+                  {renaming === b.name ? (
+                    <input
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      onKeyDown={(event) => handleRenameKeyDown(event, b.name)}
+                    />
+                  ) : (
+                    <button
+                      disabled={isRebasing}
+                      onClick={() => {
+                        onSwitchBranch(b.name);
+                        closePopoverState();
+                      }}
+                    >
+                      {b.name}
+                      {b.isCurrent && " (current)"}
+                    </button>
+                  )}
                   <button
                     disabled={isRebasing}
                     onClick={() => {
-                      onSwitchBranch(b.name);
-                      closePopoverState();
+                      setRenaming(b.name);
+                      setRenameValue(b.name);
                     }}
                   >
-                    {b.name}
-                    {b.isCurrent && " (current)"}
+                    Rename
                   </button>
-                )}
-                <button
-                  disabled={isRebasing}
-                  onClick={() => {
-                    setRenaming(b.name);
-                    setRenameValue(b.name);
-                  }}
-                >
-                  Rename
-                </button>
-                {!b.isCurrent && (
-                  <button
-                    disabled={isMerging || isRebasing || operationDisabled}
-                    onClick={() => {
-                      onMergeBranch(b.name);
-                      closePopoverState();
-                    }}
-                  >
-                    Merge into current branch
-                  </button>
-                )}
-                {pendingForceFor === b.name ? (
-                  <button
-                    disabled={isRebasing}
-                    onClick={() => {
-                      onDeleteBranch(b.name, true);
-                      setPendingForceFor(null);
-                    }}
-                  >
-                    Force Delete
-                  </button>
-                ) : (
-                  <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
-                    Delete
-                  </button>
-                )}
+                  {!b.isCurrent && (
+                    <button
+                      disabled={isMerging || isRebasing || operationDisabled}
+                      onClick={() => {
+                        onMergeBranch(b.name);
+                        closePopoverState();
+                      }}
+                    >
+                      Merge into current branch
+                    </button>
+                  )}
+                  {pendingForceFor === b.name ? (
+                    <button
+                      disabled={isRebasing}
+                      onClick={() => {
+                        onDeleteBranch(b.name, true);
+                        setPendingForceFor(null);
+                      }}
+                    >
+                      Force Delete
+                    </button>
+                  ) : (
+                    <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
+                      Delete
+                    </button>
+                  )}
+                </Toolbar>
               </li>
             ))}
           </ul>
@@ -160,7 +166,7 @@ export function BranchSwitcher({
         </div>
       )}
       {createBranchDraft !== null && (
-        <div>
+        <div className={styles.draftForm}>
           <input
             value={newBranchName}
             onChange={(event) => setNewBranchName(event.target.value)}
@@ -177,6 +183,6 @@ export function BranchSwitcher({
           <button onClick={onCloseCreateBranchDraft}>Cancel</button>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
