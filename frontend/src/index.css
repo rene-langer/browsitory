@@ -60,7 +60,10 @@ button:disabled {
   cursor: not-allowed;
 }
 
-input,
+/* Checkboxes and radios are excluded: the padding inflates their hit box, and an authored
+   background/border makes some engines drop native rendering entirely (the checkmark
+   disappears). They keep the browser's own control rendering, tinted by `color-scheme`. */
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   font-family: var(--font-sans);
@@ -88,5 +91,17 @@ input:disabled,
 select:disabled,
 textarea:disabled {
   opacity: 0.5;
+}
+
+/* The app's confirmation dialogs have no CSS module of their own; without this they render as a
+   raw browser box (hairline border, square corners, no elevation) inside an otherwise surfaced
+   panel stack. Kept to the same tokens `Panel` uses so a dialog reads as a lifted panel. */
+dialog {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-4);
 }
 

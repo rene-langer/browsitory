@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -70,6 +71,7 @@ export function TagPanel({
         <ul className={styles.list}>
           {tags.map((tag) => (
             <li key={tag.name}>
+              <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
               <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
               <Toolbar>
@@ -81,7 +83,7 @@ export function TagPanel({
       )}
 
       <section aria-labelledby="push-tags-heading">
-        <h3 id="push-tags-heading">Push tags</h3>
+        <h3 id="push-tags-heading" className={styles.sectionHeading}>Push tags</h3>
         <label className={styles.label}>
           Remote
           <select value={remoteName} onChange={(event) => setRemoteName(event.target.value)} disabled={pushDisabled || remotes.length === 0}>

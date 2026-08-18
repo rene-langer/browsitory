@@ -196,7 +196,7 @@ export function RemotePanel({
 
       {credentialRemote !== null && (
         <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
-          <h3>Credentials for {credentialRemote}</h3>
+          <h3 className={styles.formHeading}>Credentials for {credentialRemote}</h3>
           <label className={styles.label}>
             Authentication for {credentialRemote}
             <select
@@ -239,7 +239,7 @@ export function RemotePanel({
       )}
 
       <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
-        <h3>Add remote</h3>
+        <h3 className={styles.formHeading}>Add remote</h3>
         <label className={styles.label}>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
         <label className={styles.label}>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
         <label className={styles.label}>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
@@ -247,7 +247,7 @@ export function RemotePanel({
       </form>
 
       <section aria-labelledby="upstream-heading">
-        <h3 id="upstream-heading">Upstream</h3>
+        <h3 id="upstream-heading" className={styles.sectionHeading}>Upstream</h3>
         {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
         <button type="button" disabled={pullDisabled || upstream === null || pendingPull !== null} onClick={() => void onPull()}>
           Pull

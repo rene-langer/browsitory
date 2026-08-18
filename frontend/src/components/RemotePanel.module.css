@@ -24,3 +24,19 @@
   gap: 2px;
   font-size: var(--text-sm);
 }
+
+/* A heading that lives *inside* a `.form` flex row. Without `flex-basis: 100%` it is laid out as
+   a flex item beside the first input, and the browser's default `1em 0` heading margin drops it
+   out of alignment — the shared `.remote-panel h3` rule that used to zero that margin was
+   retired along with the rest of the global panel CSS. */
+.formHeading {
+  flex-basis: 100%;
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-md);
+}
+
+/* Sub-section heading in the panel body (not inside a flex row). */
+.sectionHeading {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-md);
+}

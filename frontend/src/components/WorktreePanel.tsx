@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FolderGit2 } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -55,21 +56,21 @@ export function WorktreePanel({
   return (
     <Panel title="Worktrees">
       <form className={styles.form} onSubmit={createWorktree} aria-label="Create worktree">
-        <label>
+        <label className={styles.label}>
           Worktree name
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
         </label>
-        <label>
+        <label className={styles.label}>
           Worktree path
           <input
             value={path}
             onChange={(event) => setPath(event.target.value)}
           />
         </label>
-        <label>
+        <label className={styles.label}>
           Branch
           <input
             list="worktree-branches"
@@ -82,7 +83,7 @@ export function WorktreePanel({
             <option key={item.name} value={item.name} />
           ))}
         </datalist>
-        <label>
+        <label className={styles.label}>
           Start point
           <input
             value={startPoint}
@@ -98,6 +99,7 @@ export function WorktreePanel({
       <ul className={styles.list}>
         {worktrees.map((worktree) => (
           <li key={worktree.path}>
+            <FolderGit2 size={14} aria-hidden="true" className={styles.rowIcon} />
             <strong>{worktree.isMain ? "Main" : "Linked"}</strong>
             <span>{worktree.path}</span>
             <span>{worktree.head ?? "Detached HEAD"}</span>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { ListRow } from "./primitives/ListRow";
 import { Panel } from "./primitives/Panel";
@@ -43,11 +44,8 @@ export function ReflogPanel({
       </label>
       <ul className={styles.entryList}>
         {entries.map((entry, ordinal) => (
-          <ListRow
-            key={`${entry.reference}:${ordinal}`}
-            className={styles.entryRow}
-            onClick={() => {}}
-          >
+          <ListRow key={`${entry.reference}:${ordinal}`}>
+            <History size={14} aria-hidden="true" className={styles.rowIcon} />
             <span className={styles.entryMeta}>Old ID: {entry.oldId}</span>
             <span className={styles.entryMeta}>New ID: {entry.newId}</span>
             <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
