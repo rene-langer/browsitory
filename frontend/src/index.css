@@ -125,18 +125,6 @@ h1 {
   border-right: 1px solid var(--border);
 }
 
-.app-layout > ul > li {
-  padding: 6px 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.app-layout > ul > li[aria-selected="true"] {
-  background: var(--selected-bg);
-}
-
 .app-layout > div {
   flex: 1 1 auto;
   overflow-y: auto;
