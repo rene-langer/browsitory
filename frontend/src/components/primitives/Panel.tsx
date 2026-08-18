@@ -5,13 +5,17 @@ export function Panel({
   title,
   actions,
   children,
+  ariaLive,
+  ariaLabel,
 }: {
   title?: string;
   actions?: ReactNode;
   children: ReactNode;
+  ariaLive?: "polite" | "assertive";
+  ariaLabel?: string;
 }) {
   return (
-    <section className={styles.panel}>
+    <section className={styles.panel} aria-live={ariaLive} aria-label={ariaLabel}>
       {title !== undefined && (
         <header className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
