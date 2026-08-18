@@ -11,10 +11,10 @@
 ```bash
 git clone <this-repo-url>
 cd browsitory
-cd frontend && pnpm install && cd ..
+cd frontend && pnpm install && cd ../crates/tauri-app
 cargo tauri dev
 ```
 
-Requires Rust, [pnpm](https://pnpm.io), and the [Tauri CLI](https://tauri.app/) prerequisites for your OS.
+Requires Rust, [pnpm](https://pnpm.io), the [Tauri CLI](https://tauri.app/) (`cargo install tauri-cli`), and the Tauri prerequisites for your OS.
 
 See [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md) for full build, test, and E2E commands.
