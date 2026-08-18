@@ -60,8 +60,8 @@ export function TagPanel({
     <Panel title="Tags">
       <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
         <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
-        <label><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
+        <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
+        <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
         {kind === "annotated" && <label className={styles.label}>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
         <button type="submit" disabled={pushDisabled}>Create tag</button>
       </form>
@@ -70,7 +70,7 @@ export function TagPanel({
         <ul className={styles.list}>
           {tags.map((tag) => (
             <li key={tag.name}>
-              <label><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
+              <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
               <Toolbar>
                 <button type="button" disabled={pushDisabled} onClick={() => setDeleteConfirmation(tag.name)}>Delete {tag.name}</button>
