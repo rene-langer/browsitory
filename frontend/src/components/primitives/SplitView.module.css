@@ -1,0 +1,19 @@
+.splitView {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.left {
+  flex: 0 0 300px;
+  width: 300px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+}
+
+.right {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+}
