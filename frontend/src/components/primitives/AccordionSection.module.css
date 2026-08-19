@@ -17,7 +17,7 @@
   cursor: pointer;
 }
 
-.header:hover {
+.header:hover:not(:disabled) {
   background: var(--color-bg-subtle);
 }
 
