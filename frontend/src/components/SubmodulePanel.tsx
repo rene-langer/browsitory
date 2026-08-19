@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Package } from "lucide-react";
 import type { SubmoduleInfo } from "../ipc/RepoClient";
-import { Panel } from "./primitives/Panel";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SubmodulePanel.module.css";
 
@@ -29,7 +29,7 @@ export function SubmodulePanel({
   };
 
   return (
-    <Panel title="Submodules">
+    <AccordionSection title="Submodules" storageKey="sidebar-submodules">
       <label>
         <input
           type="checkbox"
@@ -71,6 +71,6 @@ export function SubmodulePanel({
           );
         })}
       </ul>
-    </Panel>
+    </AccordionSection>
   );
 }
