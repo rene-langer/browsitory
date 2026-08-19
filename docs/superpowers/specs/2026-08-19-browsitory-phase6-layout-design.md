@@ -21,10 +21,9 @@ primitives, proven working, before every consumer adopts them:
    (resize + collapse, which it does not currently have).
 2. **Layout rollout** — migrate `BranchSwitcher`, `RemotePanel`,
    `TagPanel`, `WorktreePanel`, `SubmodulePanel`, `PullRequestPanel` into
-   the sidebar; move `RebasePlanner`, `RebaseProgressPanel`,
-   `ConflictResolutionPane`, `TransferPanel` into `Overlay`; recompose
-   `App.tsx` around the new three-pane layout; full verification (unit
-   tests, lint, build, GUI E2E).
+   the sidebar; move `RebasePlanner` and `TransferPanel` into `Overlay`;
+   recompose `App.tsx` around the new three-pane layout; full
+   verification (unit tests, lint, build, GUI E2E).
 
 Out of scope for Phase 6: a command palette (candidate for a later phase),
 any `RepoClient`/DTO/Tauri-command/`git-core` change, and any change to
@@ -102,12 +101,22 @@ entire layout, conditionally, only while a transient operation is active.
   title/chrome, so wrapping them in `Panel` too would double the card
   chrome. Everything else (state, handlers, `Toolbar`/`ListRow` usage,
   icons) is unchanged.
-- `RebasePlanner`, `RebaseProgressPanel`, `ConflictResolutionPane`,
-  `TransferPanel` — no internal changes. `App.tsx` repositions them
-  inside `Overlay` instead of the old panel stack.
+- `RebasePlanner` and `TransferPanel` — no internal changes. `App.tsx`
+  repositions them inside `Overlay` instead of the old panel stack (both
+  are currently rendered at the app-shell level today — `RebasePlanner`
+  as a conditional sibling, `TransferPanel` inside the panel stack — so
+  this is a pure relocation).
+- `RebaseProgressPanel` and `ConflictResolutionPane` are **not** touched
+  by this phase. They are rendered inside `DiffPane`, not at the
+  app-shell level (verified against the current `DiffPane.tsx`, which
+  conditionally renders both based on its `rebaseProgress`/`mergeMessage`
+  props) — contextual to the diff view itself, not page-level chrome.
+  Moving them into `Overlay` would be a real UX change (turning an
+  in-context panel into a full-screen interruption), not a pure
+  relocation, and is out of scope for this phase.
 - `App.tsx` — becomes the layout composer: the nested-`SplitView`
   structure above, with `Overlay` conditionally rendered on top when
-  `appState` indicates an active rebase, conflict, or transfer.
+  `appState` indicates an active rebase-plan or transfer.
 
 ## Data flow and state
 
@@ -119,9 +128,10 @@ entire layout, conditionally, only while a transient operation is active.
   initial view gives history/diff the full remaining width, which is the
   point of this phase.
 - `Overlay`'s visibility is derived from existing `appState` fields
-  already tracked today for the old panel-stack rendering (rebase-planner
-  open, rebase-in-progress, conflict-present, transfer-in-progress) — no
-  new state, only a new rendering location.
+  already tracked today for the old panel-stack/sibling rendering
+  (`appState.state.rebaseOnto !== null` for `RebasePlanner`,
+  `appState.state.transfer !== null` for `TransferPanel`) — no new
+  state, only a new rendering location.
 - `localStorage` access fails gracefully: unavailable or throwing storage
   falls back to default ratios and default (closed) section state, no
   crash — matching how the existing theme toggle already handles storage
@@ -168,5 +178,5 @@ plans may execute in separate sessions.)
   every task.
 - Every touched or new component is checked in both light and dark theme.
 - No behavior change to the six migrated components beyond removing their
-  own `Panel` wrapper; no behavior change to the four `Overlay`-hosted
+  own `Panel` wrapper; no behavior change to the two `Overlay`-hosted
   components at all.
