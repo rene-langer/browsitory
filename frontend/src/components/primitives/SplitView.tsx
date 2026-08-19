@@ -10,12 +10,21 @@ import styles from "./SplitView.module.css";
 
 const ARROW_KEY_STEP = 16;
 
-function loadWidth(storageKey: string | undefined, defaultWidth: number, min: number, max: number): number {
+function loadWidth(
+  storageKey: string | undefined,
+  defaultWidth: number,
+  min: number,
+  max: number,
+  collapsible: boolean,
+): number {
   if (storageKey === undefined) return defaultWidth;
   const stored = localStorage.getItem(storageKey);
   if (stored === null) return defaultWidth;
   const parsed = Number.parseInt(stored, 10);
   if (Number.isNaN(parsed)) return defaultWidth;
+  // A collapsed pane persists as 0, which is outside [min, max]; clamping it
+  // would silently re-expand the pane on the next mount.
+  if (collapsible && parsed === 0) return 0;
   return Math.min(max, Math.max(min, parsed));
 }
 
@@ -27,6 +36,7 @@ export function SplitView({
   minWidth = 160,
   maxWidth = 480,
   collapsible = false,
+  label = "Resize",
 }: {
   left: ReactNode;
   right: ReactNode;
@@ -35,8 +45,11 @@ export function SplitView({
   minWidth?: number;
   maxWidth?: number;
   collapsible?: boolean;
+  label?: string;
 }) {
-  const [width, setWidth] = useState(() => loadWidth(storageKey, defaultWidth, minWidth, maxWidth));
+  const [width, setWidth] = useState(() =>
+    loadWidth(storageKey, defaultWidth, minWidth, maxWidth, collapsible),
+  );
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
   function persist(next: number) {
@@ -78,15 +91,19 @@ export function SplitView({
   }, [collapsible, minWidth, maxWidth]);
 
   function handleKeyDown(event: ReactKeyboardEvent) {
-    if (event.key === "ArrowRight") {
-      const next = clamp(width + ARROW_KEY_STEP);
-      setWidth(next);
-      persist(next);
-    } else if (event.key === "ArrowLeft") {
-      const next = clamp(width - ARROW_KEY_STEP);
-      setWidth(next);
-      persist(next);
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    // From a collapsed (0) width, clamp() snaps anything below minWidth / 2
+    // straight back to 0, so stepping alone can never re-expand the pane.
+    // Treat either arrow key as an explicit expand instead.
+    if (collapsible && width === 0) {
+      setWidth(defaultWidth);
+      persist(defaultWidth);
+      return;
     }
+    const delta = event.key === "ArrowRight" ? ARROW_KEY_STEP : -ARROW_KEY_STEP;
+    const next = clamp(width + delta);
+    setWidth(next);
+    persist(next);
   }
 
   function handleDoubleClick() {
@@ -98,19 +115,27 @@ export function SplitView({
 
   return (
     <div className={styles.splitView}>
-      <div className={styles.left} style={{ width: `${width}px` }}>
+      {/* `hidden` keeps a collapsed pane mounted (no remount cost when it is
+          re-expanded) while removing it from the tab order and a11y tree. */}
+      <div className={styles.left} hidden={width === 0} style={{ width: `${width}px` }}>
         {left}
       </div>
       <div
         className={styles.divider}
         role="separator"
         aria-orientation="vertical"
+        aria-label={label}
+        aria-valuenow={width}
+        aria-valuemin={minWidth}
+        aria-valuemax={maxWidth}
         tabIndex={0}
         onPointerDown={handlePointerDown}
         onKeyDown={handleKeyDown}
         onDoubleClick={handleDoubleClick}
       />
-      <div className={styles.right}>{right}</div>
+      <div className={styles.right}>
+        <div className={styles.rightInner}>{right}</div>
+      </div>
     </div>
   );
 }
