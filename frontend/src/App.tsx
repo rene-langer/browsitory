@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
+import { CommandPalette } from "./components/CommandPalette";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
 import { LaneBraid } from "./components/LaneBraid";
@@ -17,6 +18,7 @@ import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
+import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import styles from "./App.module.css";
@@ -32,6 +34,20 @@ export default function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        if (appState.state.repoPath === null) return;
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [appState.state.repoPath]);
 
   const themeToggle = (
     <button
@@ -93,6 +109,11 @@ export default function App() {
       {appState.state.transfer !== null && (
         <Overlay>
           <TransferPanel progress={appState.state.transfer} />
+        </Overlay>
+      )}
+      {paletteOpen && (
+        <Overlay onClose={() => setPaletteOpen(false)}>
+          <CommandPalette commands={buildCommands(appState)} onRun={() => setPaletteOpen(false)} />
         </Overlay>
       )}
       <SplitView
