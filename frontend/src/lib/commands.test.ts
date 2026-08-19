@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   buildCommands,
   filterAndSortCommands,
@@ -168,7 +168,7 @@ describe("buildCommands", () => {
     expect(withMerge.some((c) => c.id === "merge-abort")).toBe(true);
   });
 
-  it("includes apply/drop per stash and delete per tag", () => {
+  it("includes apply/drop per stash", () => {
     const appState = makeAppState();
     const commands = buildCommands(appState);
     const applyCmd = commands.find((c) => c.id === "apply-stash:0");
@@ -179,21 +179,18 @@ describe("buildCommands", () => {
     const dropCmd = commands.find((c) => c.id === "drop-stash:0");
     dropCmd?.run();
     expect(appState.dropStash).toHaveBeenCalledWith(0);
-
-    const deleteTagCmd = commands.find((c) => c.id === "delete-tag:v1.0");
-    deleteTagCmd?.run();
-    expect(appState.deleteTag).toHaveBeenCalledWith("v1.0");
   });
 
   it("excludes the main worktree from open/remove commands", () => {
-    const commands = buildCommands(makeAppState());
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
     expect(commands.some((c) => c.id === "open-worktree:/repo")).toBe(false);
     expect(commands.some((c) => c.id === "remove-worktree:main")).toBe(false);
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
     expect(openCmd?.label).toBe("Open worktree wt1");
     openCmd?.run();
-    expect(commands.find((c) => c.id === "open-worktree:/repo-wt1"));
+    expect(appState.openRepo).toHaveBeenCalledWith("/repo-wt1");
   });
 
   it("splits submodule commands by initialized state", () => {
@@ -210,16 +207,158 @@ describe("buildCommands", () => {
     expect(commands.some((c) => c.id === "update-submodule:libs/a")).toBe(false);
   });
 
-  it("includes one restore command per reflog entry, with both reference and newId bound", () => {
-    const appState = makeAppState();
-    const commands = buildCommands(appState);
-    const restoreCmd = commands.find((c) => c.id.startsWith("restore-reflog:"));
-    expect(restoreCmd?.label).toBe("Restore HEAD@{0} to bbbbbbb");
-    restoreCmd?.run();
-    expect(appState.restoreReflogEntry).toHaveBeenCalledWith(
-      "HEAD@{0}",
-      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  it("emits no per-entry restore-reflog commands, regardless of reflog size", () => {
+    // state.reflog is an unbounded read of the whole reflog for the selected
+    // reference — a per-entry command would grow without bound. Restoring is
+    // reachable only via the single "Go to Reflog" navigate command.
+    const manyEntries = Array.from({ length: 500 }, (_, i) => ({
+      reference: "HEAD@{0}",
+      oldId: "aaa",
+      newId: `${i}`.padStart(40, "0"),
+      committerName: "Test",
+      committerEmail: "test@example.com",
+      timestamp: i,
+      message: "commit: test",
+      summary: null,
+    }));
+    const commands = buildCommands(makeAppState({ reflog: manyEntries }));
+    expect(commands.some((c) => c.id.startsWith("restore-reflog:"))).toBe(false);
+    expect(commands.filter((c) => c.id === "go-to:Reflog")).toHaveLength(1);
+  });
+
+  describe("destructive commands navigate instead of mutating directly", () => {
+    function mountSection(title: string): HTMLButtonElement {
+      const section = document.createElement("section");
+      section.setAttribute("aria-label", title);
+      // jsdom doesn't implement scrollIntoView; goToSidebarSection calls it
+      // unconditionally after expanding, so stub it out.
+      section.scrollIntoView = vi.fn();
+      const button = document.createElement("button");
+      button.setAttribute("aria-expanded", "false");
+      // Mirror AccordionSection's real toggle behavior so we can assert on
+      // the attribute goToSidebarSection reads and flips via button.click().
+      button.addEventListener("click", () => {
+        button.setAttribute("aria-expanded", "true");
+      });
+      section.appendChild(button);
+      document.body.appendChild(section);
+      return button;
+    }
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("delete-tag expands the Tags section instead of calling deleteTag", () => {
+      const button = mountSection("Tags");
+      const appState = makeAppState();
+      const commands = buildCommands(appState);
+      const deleteTagCmd = commands.find((c) => c.id === "delete-tag:v1.0");
+      expect(deleteTagCmd).toBeDefined();
+      deleteTagCmd?.run();
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(appState.deleteTag).not.toHaveBeenCalled();
+    });
+
+    it("remove-worktree expands the Worktrees section instead of calling removeWorktree", () => {
+      const button = mountSection("Worktrees");
+      const appState = makeAppState();
+      const commands = buildCommands(appState);
+      const removeWorktreeCmd = commands.find((c) => c.id === "remove-worktree:wt1");
+      expect(removeWorktreeCmd).toBeDefined();
+      removeWorktreeCmd?.run();
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(appState.removeWorktree).not.toHaveBeenCalled();
+    });
+
+    it("go-to:Reflog (the only reflog affordance left) expands the Reflog section instead of calling restoreReflogEntry", () => {
+      const button = mountSection("Reflog");
+      const appState = makeAppState();
+      const commands = buildCommands(appState);
+      const goToReflogCmd = commands.find((c) => c.id === "go-to:Reflog");
+      expect(goToReflogCmd).toBeDefined();
+      goToReflogCmd?.run();
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(appState.restoreReflogEntry).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("repositoryOperationDisabled guard", () => {
+    const guardedStates: [string, Partial<UseAppStateResult["state"]>][] = [
+      ["pending", { pending: true }],
+      [
+        "transfer in progress",
+        {
+          transfer: {
+            operationId: "op-1",
+            operation: "Fetch",
+            phase: "Receiving",
+            errorKind: null,
+            current: 1,
+            total: 2,
+            receivedBytes: 100,
+            message: null,
+          },
+        },
+      ],
+      ["merge in progress", { mergeMessage: "Merge branch" }],
+      ["rebase in progress", { rebaseProgress: { currentStep: 1, totalSteps: 3 } }],
+    ];
+
+    it.each(guardedStates)(
+      "omits mutating command families while %s, but keeps escape hatches, refresh, and go-to navigation",
+      (_label, overrides) => {
+        const commands = buildCommands(makeAppState(overrides));
+        const ids = commands.map((c) => c.id);
+
+        // Mutating families must be entirely absent, not merely disabled.
+        expect(ids.some((id) => id.startsWith("switch-branch:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("fetch-remote:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("push-branch:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("push-tags:"))).toBe(false);
+        expect(ids).not.toContain("pull");
+        expect(ids.some((id) => id.startsWith("delete-tag:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("open-worktree:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("remove-worktree:"))).toBe(false);
+        expect(ids).not.toContain("prune-worktrees");
+        expect(ids.some((id) => id.startsWith("init-submodule:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("update-submodule:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("apply-stash:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("drop-stash:"))).toBe(false);
+
+        // Escape hatches and pure navigation stay available in every guarded state.
+        expect(ids).toContain("refresh");
+        for (const title of [
+          "Branches",
+          "Worktrees",
+          "Submodules",
+          "Reflog",
+          "Remotes",
+          "Tags",
+          "Pull Requests",
+        ]) {
+          expect(ids).toContain(`go-to:${title}`);
+        }
+      },
     );
+
+    it("keeps merge-abort available while a merge is in progress, even though it mutates state", () => {
+      const commands = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
+      expect(commands.some((c) => c.id === "merge-abort")).toBe(true);
+    });
+
+    it("keeps rebase-continue/rebase-abort available while a rebase is in progress", () => {
+      const commands = buildCommands(
+        makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 } }),
+      );
+      expect(commands.some((c) => c.id === "rebase-continue")).toBe(true);
+      expect(commands.some((c) => c.id === "rebase-abort")).toBe(true);
+    });
+
+    it("keeps save-stash unconditional, matching DiffPane's real button (no full guard)", () => {
+      const commands = buildCommands(makeAppState({ pending: true }));
+      expect(commands.some((c) => c.id === "save-stash")).toBe(true);
+    });
   });
 
   it("always includes exactly one go-to command per sidebar section", () => {

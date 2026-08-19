@@ -36,7 +36,17 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
 
-  if (state.upstream !== null) {
+  // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
+  // sidebar mutation button behind. Mutating command families must be omitted
+  // (not merely disabled) while it's true; navigation and the in-progress
+  // escape hatches (merge-abort/rebase-continue/rebase-abort/refresh) stay.
+  const repositoryOperationDisabled =
+    state.pending ||
+    state.transfer !== null ||
+    state.mergeMessage !== null ||
+    state.rebaseProgress !== null;
+
+  if (!repositoryOperationDisabled && state.upstream !== null) {
     commands.push({
       id: "pull",
       label: "Pull",
@@ -44,18 +54,23 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
       run: () => void appState.pullCurrentUpstream(),
     });
   }
+  // DiffPane's real "Save stash" button is only disabled by
+  // `status.length === 0 || rebaseProgress !== null` — it does not carry the
+  // full repositoryOperationDisabled guard, so this command stays unconditional.
   commands.push({
     id: "save-stash",
     label: "Save stash",
     keywords: ["stash", "save"],
     run: () => void appState.saveStash(),
   });
-  commands.push({
-    id: "prune-worktrees",
-    label: "Prune worktrees",
-    keywords: ["worktree", "prune"],
-    run: () => void appState.pruneWorktrees(),
-  });
+  if (!repositoryOperationDisabled) {
+    commands.push({
+      id: "prune-worktrees",
+      label: "Prune worktrees",
+      keywords: ["worktree", "prune"],
+      run: () => void appState.pruneWorktrees(),
+    });
+  }
   if (state.rebaseProgress !== null) {
     commands.push({
       id: "rebase-continue",
@@ -85,102 +100,106 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
     run: () => void appState.refresh(),
   });
 
-  for (const branch of state.branches) {
-    if (branch.isCurrent) continue;
-    commands.push({
-      id: `switch-branch:${branch.name}`,
-      label: `Switch to ${branch.name}`,
-      keywords: ["branch", "switch", "checkout", branch.name],
-      run: () => void appState.switchBranch(branch.name),
-    });
-  }
-
-  for (const remote of state.remotes) {
-    commands.push({
-      id: `fetch-remote:${remote.name}`,
-      label: `Fetch ${remote.name}`,
-      keywords: ["fetch", "remote", remote.name],
-      run: () => void appState.fetchRemote(remote.name),
-    });
-    commands.push({
-      id: `push-branch:${remote.name}`,
-      label: `Push to ${remote.name}`,
-      keywords: ["push", "remote", remote.name],
-      run: () => void appState.pushCurrentBranch(remote.name),
-    });
-    commands.push({
-      id: `push-tags:${remote.name}`,
-      label: `Push all tags to ${remote.name}`,
-      keywords: ["push", "tags", "remote", remote.name],
-      run: () => void appState.pushTags(remote.name, []),
-    });
-  }
-
-  for (const tag of state.tags) {
-    commands.push({
-      id: `delete-tag:${tag.name}`,
-      label: `Delete tag ${tag.name}`,
-      keywords: ["tag", "delete", tag.name],
-      run: () => void appState.deleteTag(tag.name),
-    });
-  }
-
-  for (const stash of state.stashes) {
-    commands.push({
-      id: `apply-stash:${stash.index}`,
-      label: `Apply stash: ${stash.message}`,
-      keywords: ["stash", "apply"],
-      run: () => void appState.applyStash(stash.index),
-    });
-    commands.push({
-      id: `drop-stash:${stash.index}`,
-      label: `Drop stash: ${stash.message}`,
-      keywords: ["stash", "drop", "delete"],
-      run: () => void appState.dropStash(stash.index),
-    });
-  }
-
-  for (const worktree of state.worktrees) {
-    if (worktree.isMain) continue;
-    commands.push({
-      id: `open-worktree:${worktree.path}`,
-      label: `Open worktree ${worktree.name}`,
-      keywords: ["worktree", "open", worktree.name],
-      run: () => void appState.openRepo(worktree.path),
-    });
-    commands.push({
-      id: `remove-worktree:${worktree.name}`,
-      label: `Remove worktree ${worktree.name}`,
-      keywords: ["worktree", "remove", "delete", worktree.name],
-      run: () => void appState.removeWorktree(worktree.name),
-    });
-  }
-
-  for (const submodule of state.submodules) {
-    if (submodule.initialized) {
+  if (!repositoryOperationDisabled) {
+    for (const branch of state.branches) {
+      if (branch.isCurrent) continue;
       commands.push({
-        id: `update-submodule:${submodule.path}`,
-        label: `Update submodule ${submodule.path}`,
-        keywords: ["submodule", "update", submodule.path],
-        run: () => void appState.updateSubmodule(submodule.path, false),
-      });
-    } else {
-      commands.push({
-        id: `init-submodule:${submodule.path}`,
-        label: `Initialize submodule ${submodule.path}`,
-        keywords: ["submodule", "init", "initialize", submodule.path],
-        run: () => void appState.initSubmodule(submodule.path),
+        id: `switch-branch:${branch.name}`,
+        label: `Switch to ${branch.name}`,
+        keywords: ["branch", "switch", "checkout", branch.name],
+        run: () => void appState.switchBranch(branch.name),
       });
     }
-  }
 
-  for (const entry of state.reflog) {
-    commands.push({
-      id: `restore-reflog:${entry.reference}:${entry.newId}`,
-      label: `Restore ${entry.reference} to ${entry.newId.slice(0, 7)}`,
-      keywords: ["reflog", "restore", entry.reference],
-      run: () => void appState.restoreReflogEntry(entry.reference, entry.newId),
-    });
+    for (const remote of state.remotes) {
+      commands.push({
+        id: `fetch-remote:${remote.name}`,
+        label: `Fetch ${remote.name}`,
+        keywords: ["fetch", "remote", remote.name],
+        run: () => void appState.fetchRemote(remote.name),
+      });
+      commands.push({
+        id: `push-branch:${remote.name}`,
+        label: `Push to ${remote.name}`,
+        keywords: ["push", "remote", remote.name],
+        run: () => void appState.pushCurrentBranch(remote.name),
+      });
+      commands.push({
+        id: `push-tags:${remote.name}`,
+        label: `Push all tags to ${remote.name}`,
+        keywords: ["push", "tags", "remote", remote.name],
+        run: () => void appState.pushTags(remote.name, []),
+      });
+    }
+
+    // Deleting a tag has a real confirmation dialog in TagPanel — the palette
+    // must not skip it. This stays discoverable by tag name but only navigates
+    // to the Tags section; the actual mutation happens behind the confirmation.
+    for (const tag of state.tags) {
+      commands.push({
+        id: `delete-tag:${tag.name}`,
+        label: `Delete tag ${tag.name}`,
+        keywords: ["tag", "delete", tag.name],
+        run: () => goToSidebarSection("Tags"),
+      });
+    }
+
+    for (const stash of state.stashes) {
+      commands.push({
+        id: `apply-stash:${stash.index}`,
+        label: `Apply stash: ${stash.message}`,
+        keywords: ["stash", "apply"],
+        run: () => void appState.applyStash(stash.index),
+      });
+      commands.push({
+        id: `drop-stash:${stash.index}`,
+        label: `Drop stash: ${stash.message}`,
+        keywords: ["stash", "drop", "delete"],
+        run: () => void appState.dropStash(stash.index),
+      });
+    }
+
+    for (const worktree of state.worktrees) {
+      if (worktree.isMain) continue;
+      commands.push({
+        id: `open-worktree:${worktree.path}`,
+        label: `Open worktree ${worktree.name}`,
+        keywords: ["worktree", "open", worktree.name],
+        run: () => void appState.openRepo(worktree.path),
+      });
+      // Removing a worktree has a real confirmation dialog in WorktreePanel —
+      // navigate there instead of removing directly from the palette.
+      commands.push({
+        id: `remove-worktree:${worktree.name}`,
+        label: `Remove worktree ${worktree.name}`,
+        keywords: ["worktree", "remove", "delete", worktree.name],
+        run: () => goToSidebarSection("Worktrees"),
+      });
+    }
+
+    for (const submodule of state.submodules) {
+      if (submodule.initialized) {
+        commands.push({
+          id: `update-submodule:${submodule.path}`,
+          label: `Update submodule ${submodule.path}`,
+          keywords: ["submodule", "update", submodule.path],
+          run: () => void appState.updateSubmodule(submodule.path, false),
+        });
+      } else {
+        commands.push({
+          id: `init-submodule:${submodule.path}`,
+          label: `Initialize submodule ${submodule.path}`,
+          keywords: ["submodule", "init", "initialize", submodule.path],
+          run: () => void appState.initSubmodule(submodule.path),
+        });
+      }
+    }
+
+    // Restoring a reflog entry has a real confirmation dialog in ReflogPanel,
+    // and state.reflog is unbounded (a full, uncapped reflog read for the
+    // selected reference) — so this is not a per-entry loop. The existing
+    // "Go to Reflog" command below covers navigating there; no separate
+    // restore-reflog command is emitted.
   }
 
   for (const title of SIDEBAR_SECTIONS) {
