@@ -32,14 +32,18 @@ export function AccordionSection({
 
   return (
     <section className={styles.section} aria-label={title}>
-      <button type="button" className={styles.header} aria-expanded={open} onClick={toggle}>
-        {open ? (
-          <ChevronDown size={14} aria-hidden="true" />
-        ) : (
-          <ChevronRight size={14} aria-hidden="true" />
-        )}
-        <span className={styles.title}>{title}</span>
-      </button>
+      {/* WAI-ARIA APG accordion pattern: a heading wrapping the trigger
+          button, so the section carries the heading role Panel used to. */}
+      <h2 className={styles.heading}>
+        <button type="button" className={styles.header} aria-expanded={open} onClick={toggle}>
+          {open ? (
+            <ChevronDown size={14} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={14} aria-hidden="true" />
+          )}
+          <span className={styles.title}>{title}</span>
+        </button>
+      </h2>
       {open && <div className={styles.body}>{children}</div>}
     </section>
   );

@@ -2,6 +2,11 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* The heading only carries the role; the button inside owns all the spacing. */
+.heading {
+  margin: 0;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -17,8 +22,10 @@
   cursor: pointer;
 }
 
+/* Not --color-bg-subtle: that is exactly Sidebar's own background, so the
+   hover would be invisible for a section nested inside a Sidebar. */
 .header:hover:not(:disabled) {
-  background: var(--color-bg-subtle);
+  background: var(--color-selected-bg);
 }
 
 .title {
