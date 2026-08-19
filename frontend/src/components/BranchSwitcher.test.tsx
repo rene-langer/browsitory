@@ -9,7 +9,8 @@ const branches: BranchInfo[] = [
 ];
 
 function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]> = {}) {
-  return render(
+  localStorage.removeItem("sidebar-branches");
+  const result = render(
     <BranchSwitcher
       branches={branches}
       createBranchDraft={null}
@@ -26,6 +27,8 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Branches" }));
+  return result;
 }
 
 describe("BranchSwitcher", () => {
