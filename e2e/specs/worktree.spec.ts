@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const WORKTREE_NAME = "feature-tree";
@@ -18,6 +19,11 @@ describe("Browsitory worktrees", () => {
   });
 
   it("creates, opens, returns from, and removes a linked worktree", async () => {
+    // "Worktrees" holds the create form; "Branches" holds the switcher this test reads text
+    // from throughout. Both default closed.
+    await expandSidebarSection("Worktrees");
+    await expandSidebarSection("Branches");
+
     const createForm = await $("aria/Create worktree");
     await createForm.waitForExist({ timeout: 10000 });
     const branchSwitcher = await $("aria/Branch switcher");

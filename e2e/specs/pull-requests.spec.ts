@@ -1,5 +1,6 @@
 import { expect } from "@wdio/globals";
 import { ForgeFixtureClient } from "../support/forgeFixtureServer";
+import { expandSidebarSection } from "../support/sidebar";
 
 // Canned provider responses, matching the exact JSON shapes
 // `crates/tauri-app/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
@@ -76,6 +77,11 @@ describe("Browsitory pull requests", () => {
   });
 
   it("renders sections only for supported remotes and sends no request for an unsupported one", async () => {
+    // "Remotes" holds the Add remote form `addRemote` drives; "Pull Requests" holds the
+    // per-remote sections asserted on below. Both default closed.
+    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Pull Requests");
+
     await addRemote("gh-origin", "https://github.com/acme/widget.git");
     await addRemote("bb-origin", "https://bitbucket.org/acme/widget.git");
     await addRemote("gl-origin", "https://gitlab.com/acme/widget.git");
@@ -104,6 +110,11 @@ describe("Browsitory pull requests", () => {
   // provider purely for readability — not because listing one remote would otherwise clobber
   // or hide another remote's rows.
   it("lists and creates a GitHub pull request using the saved token, then hides it once forgotten", async () => {
+    // "Pull Requests" was already opened by the previous `it()` in this file (its open state
+    // persists in localStorage across `beforeTest`'s page refresh), but expand it again here too
+    // — idempotent, and keeps this test self-sufficient if run in isolation.
+    await expandSidebarSection("Pull Requests");
+
     const section = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
     await (await section.$("aria/Account")).setValue("rene");
     await (await section.$("aria/Access token")).setValue("gh-test-token");
@@ -150,6 +161,9 @@ describe("Browsitory pull requests", () => {
   });
 
   it("warns about app passwords and lists/creates a Bitbucket pull request using the saved token", async () => {
+    // See the GitHub test above: idempotent re-expand, self-sufficient if run in isolation.
+    await expandSidebarSection("Pull Requests");
+
     const section = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(section).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)"));
 
