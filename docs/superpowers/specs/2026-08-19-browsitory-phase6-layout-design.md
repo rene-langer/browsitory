@@ -132,10 +132,10 @@ entire layout, conditionally, only while a transient operation is active.
   (`appState.state.rebaseOnto !== null` for `RebasePlanner`,
   `appState.state.transfer !== null` for `TransferPanel`) — no new
   state, only a new rendering location.
-- `localStorage` access fails gracefully: unavailable or throwing storage
-  falls back to default ratios and default (closed) section state, no
-  crash — matching how the existing theme toggle already handles storage
-  failure.
+- `localStorage` access uses the same plain, unguarded
+  `localStorage.getItem`/`setItem` style already established in
+  `frontend/src/lib/theme.ts` — no new defensive wrapping introduced by
+  this phase.
 - No `RepoClient`/DTO/Tauri-command change anywhere in this phase.
 
 ## Testing
