@@ -76,12 +76,17 @@ entire layout, conditionally, only while a transient operation is active.
   **closed**.
 - **`Overlay`** (`frontend/src/components/primitives/Overlay.tsx`) — a
   centered surface with a backdrop, positioned above the rest of the
-  layout. Built on native `<dialog>` with `showModal()`, matching the
-  existing `<dialog>` elements from Phase 5 — this gets focus-trapping,
-  Escape-to-close, and `::backdrop` click-through prevention for free
-  from the browser instead of reimplementing them. Token-driven
-  surface/border/shadow. Renders (and calls `showModal()`) only while
-  active; calls `close()` and unmounts otherwise.
+  layout. Built on native `<dialog>`, using the same guarded pattern
+  `RemotePanel.tsx:145-148` already established (`typeof
+  dialog.showModal === "function"` before calling it, falling back to
+  setting the `open` attribute directly) — this gets focus-trapping,
+  Escape-to-close, and `::backdrop` click-through prevention for free in
+  real browsers/webviews, without depending on jsdom implementing
+  `showModal()`, which most of this codebase's existing dialogs avoid
+  relying on. Token-driven surface/border/shadow. Mounted only while its
+  operation is active (the existing conditional-render pattern
+  `App.tsx` already uses for these two components); calls `close()` on
+  unmount if the dialog was actually opened via `showModal()`.
 
 ### Extended primitive
 
