@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FolderGit2 } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
-import { Panel } from "./primitives/Panel";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
 
@@ -54,7 +54,7 @@ export function WorktreePanel({
   };
 
   return (
-    <Panel title="Worktrees">
+    <AccordionSection title="Worktrees" storageKey="sidebar-worktrees">
       <form className={styles.form} onSubmit={createWorktree} aria-label="Create worktree">
         <label className={styles.label}>
           Worktree name
@@ -148,6 +148,6 @@ export function WorktreePanel({
           </button>
         </dialog>
       )}
-    </Panel>
+    </AccordionSection>
   );
 }
