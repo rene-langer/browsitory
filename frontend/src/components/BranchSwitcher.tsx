@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from "react";
 import { GitBranch } from "lucide-react";
 import type { BranchInfo } from "../ipc/RepoClient";
-import { Panel } from "./primitives/Panel";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
 
@@ -84,7 +84,7 @@ export function BranchSwitcher({
   };
 
   return (
-    <Panel title="Branches">
+    <AccordionSection title="Branches" storageKey="sidebar-branches" defaultOpen={true}>
       <button
         aria-label="Branch switcher"
         className={styles.select}
@@ -187,6 +187,6 @@ export function BranchSwitcher({
           <button onClick={onCloseCreateBranchDraft}>Cancel</button>
         </div>
       )}
-    </Panel>
+    </AccordionSection>
   );
 }
