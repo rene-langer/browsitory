@@ -31,7 +31,8 @@ const openPullRequest: PullRequest = {
 };
 
 function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> = {}) {
-  return render(
+  localStorage.removeItem("sidebar-pull-requests");
+  const result = render(
     <PullRequestPanel
       forgeRepositories={[githubRepo]}
       pullRequests={{}}
@@ -44,6 +45,8 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Pull Requests" }));
+  return result;
 }
 
 describe("PullRequestPanel", () => {
