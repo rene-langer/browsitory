@@ -84,7 +84,7 @@ export function BranchSwitcher({
   };
 
   return (
-    <AccordionSection title="Branches" storageKey="sidebar-branches" defaultOpen={true}>
+    <AccordionSection title="Branches" storageKey="sidebar-branches">
       <button
         aria-label="Branch switcher"
         className={styles.select}
