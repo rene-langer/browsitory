@@ -7,6 +7,7 @@ import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
+import { Overlay } from "./components/primitives/Overlay";
 import { SplitView } from "./components/primitives/SplitView";
 import { PullRequestPanel } from "./components/PullRequestPanel";
 import { RemotePanel } from "./components/RemotePanel";
@@ -175,8 +176,12 @@ export default function App() {
           onOpenExternalUrl={appState.openExternalUrl}
           operationDisabled={repositoryOperationDisabled}
         />
-        <TransferPanel progress={appState.state.transfer} />
       </div>
+      {appState.state.transfer !== null && (
+        <Overlay>
+          <TransferPanel progress={appState.state.transfer} />
+        </Overlay>
+      )}
       <SplitView
         left={
           <CommitGraph
@@ -213,13 +218,15 @@ export default function App() {
         }
       />
       {appState.state.rebaseOnto !== null && (
-        <RebasePlanner
-          client={tauriRepoClient}
-          onto={appState.state.rebaseOnto}
-          onStartRebase={appState.startRebase}
-          onCancel={appState.closeRebasePlanner}
-          operationDisabled={repositoryOperationDisabled}
-        />
+        <Overlay onClose={appState.closeRebasePlanner}>
+          <RebasePlanner
+            client={tauriRepoClient}
+            onto={appState.state.rebaseOnto}
+            onStartRebase={appState.startRebase}
+            onCancel={appState.closeRebasePlanner}
+            operationDisabled={repositoryOperationDisabled}
+          />
+        </Overlay>
       )}
     </main>
   );
