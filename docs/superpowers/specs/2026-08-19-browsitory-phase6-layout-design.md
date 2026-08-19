@@ -20,14 +20,15 @@ primitives, proven working, before every consumer adopts them:
    `Overlay`) and an extension to the existing `SplitView` primitive
    (resize + collapse, which it does not currently have).
 2. **Layout rollout** — migrate `BranchSwitcher`, `RemotePanel`,
-   `TagPanel`, `WorktreePanel`, `SubmodulePanel`, `PullRequestPanel` into
-   the sidebar; move `RebasePlanner` and `TransferPanel` into `Overlay`;
+   `TagPanel`, `WorktreePanel`, `SubmodulePanel`, `ReflogPanel`,
+   `PullRequestPanel` into the sidebar; move `RebasePlanner` and
+   `TransferPanel` into `Overlay`;
    recompose `App.tsx` around the new three-pane layout; full
    verification (unit tests, lint, build, GUI E2E).
 
 Out of scope for Phase 6: a command palette (candidate for a later phase),
 any `RepoClient`/DTO/Tauri-command/`git-core` change, and any change to
-the six migrated components' internal behavior beyond removing their own
+the seven migrated components' internal behavior beyond removing their own
 `Panel` wrapper.
 
 ## Shared architecture
@@ -64,14 +65,14 @@ entire layout, conditionally, only while a transient operation is active.
 ### New primitives
 
 - **`Sidebar`** (`frontend/src/components/primitives/Sidebar.tsx`) — the
-  outer column. Renders its children (six `AccordionSection`s) as a
+  outer column. Renders its children (seven `AccordionSection`s) as a
   scrollable list. No state of its own beyond what `SplitView` already
   tracks for its width.
 - **`AccordionSection`**
   (`frontend/src/components/primitives/AccordionSection.tsx`) — a
   collapsible header (title + expand/collapse affordance) plus a content
   region. Takes over the accessible-name and heading role that `Panel`
-  currently provides for the six components moving into the sidebar.
+  currently provides for the seven components moving into the sidebar.
   Persists its own open/closed state (see Data flow), defaulting to
   **closed**.
 - **`Overlay`** (`frontend/src/components/primitives/Overlay.tsx`) — a
@@ -91,18 +92,23 @@ entire layout, conditionally, only while a transient operation is active.
 ### Extended primitive
 
 - **`SplitView`** (`frontend/src/components/primitives/SplitView.tsx`) —
-  currently a static two-column split with no resize or collapse. Gains:
-  a draggable divider, an optional `defaultRatio` prop, an optional
-  `collapsible` prop, and an `onRatioChange` callback so a consumer can
-  persist the ratio. Existing consumer (`App.tsx`'s history/diff split)
-  keeps working with default props; behavior for existing usage does not
-  change unless the new props are passed.
+  currently a static two-column split (`left` fixed at 300px, no resize
+  or collapse). Gains: a draggable divider (mouse drag and arrow-key
+  resize), an optional `storageKey` prop (when set, the left pane's
+  pixel width persists to and restores from `localStorage` under that
+  key — persistence is internal to `SplitView`, not pushed onto the
+  consumer via a callback), `defaultWidth`/`minWidth`/`maxWidth` props
+  (pixel-based, defaulting to 300/160/480 — matching the current fixed
+  width exactly when no props are passed), and an optional `collapsible`
+  prop (double-clicking the divider snaps the left pane to 0 width and
+  back). Existing consumer (`App.tsx`'s history/diff split) keeps
+  working with unchanged visual behavior when no new prop is passed.
 
 ### Changed components
 
 - `BranchSwitcher`, `RemotePanel`, `TagPanel`, `WorktreePanel`,
-  `SubmodulePanel`, `PullRequestPanel` — drop their own `<Panel>`
-  wrapper. They render inside an `AccordionSection` now, which owns the
+  `SubmodulePanel`, `ReflogPanel`, `PullRequestPanel` — drop their own
+  `<Panel>` wrapper. They render inside an `AccordionSection` now, which owns the
   title/chrome, so wrapping them in `Panel` too would double the card
   chrome. Everything else (state, handlers, `Toolbar`/`ListRow` usage,
   icons) is unchanged.
@@ -151,7 +157,7 @@ entire layout, conditionally, only while a transient operation is active.
   null when inactive, renders content + backdrop when active),
   `SplitView` (existing tests plus new assertions for the resize/collapse
   behavior, mocked drag interaction, persisted-ratio round-trip).
-- The six migrated components' existing test files need updating wherever
+- The seven migrated components' existing test files need updating wherever
   they currently assert against `Panel`'s region role/accessible name —
   those assertions retarget to `AccordionSection`'s heading/region
   instead. No other test assertion should need to change, since none of
@@ -182,6 +188,6 @@ plans may execute in separate sessions.)
 - `pnpm build`, `pnpm lint`, and `pnpm test -- --run` must pass after
   every task.
 - Every touched or new component is checked in both light and dark theme.
-- No behavior change to the six migrated components beyond removing their
+- No behavior change to the seven migrated components beyond removing their
   own `Panel` wrapper; no behavior change to the two `Overlay`-hosted
   components at all.
