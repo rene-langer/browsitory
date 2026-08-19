@@ -1,0 +1,8 @@
+/* frontend/src/components/primitives/Sidebar.module.css */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-bg-subtle);
+}
