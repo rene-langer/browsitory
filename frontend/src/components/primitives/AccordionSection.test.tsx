@@ -62,4 +62,15 @@ describe("AccordionSection", () => {
     );
     expect(screen.getByRole("region", { name: "Remotes" })).toBeInTheDocument();
   });
+
+  it("wraps its toggle button in a level-2 heading", () => {
+    render(
+      <AccordionSection title="Branches" storageKey="test-branches-5">
+        <div>branch list</div>
+      </AccordionSection>,
+    );
+    const heading = screen.getByRole("heading", { level: 2, name: "Branches" });
+    expect(heading).toBeInTheDocument();
+    expect(heading).toContainElement(screen.getByRole("button", { name: "Branches" }));
+  });
 });
