@@ -29,7 +29,8 @@ const backup: RemoteInfo = {
 };
 
 function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {
-  return render(
+  localStorage.removeItem("sidebar-tags");
+  const result = render(
     <TagPanel
       tags={[tag]}
       remotes={[origin]}
@@ -40,6 +41,8 @@ function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  return result;
 }
 
 describe("TagPanel", () => {

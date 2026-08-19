@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
-import { Panel } from "./primitives/Panel";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./TagPanel.module.css";
 
@@ -58,7 +58,7 @@ export function TagPanel({
   };
 
   return (
-    <Panel title="Tags">
+    <AccordionSection title="Tags" storageKey="sidebar-tags">
       <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
         <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
@@ -103,6 +103,6 @@ export function TagPanel({
           <button type="button" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
         </dialog>
       )}
-    </Panel>
+    </AccordionSection>
   );
 }
