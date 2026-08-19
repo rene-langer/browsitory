@@ -6,6 +6,7 @@ import type {
   ForgeRepository,
   PullRequestList,
 } from "../ipc/RepoClient";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./PullRequestPanel.module.css";
@@ -242,16 +243,16 @@ export function PullRequestPanel({
 }) {
   if (forgeRepositories.length === 0) {
     return (
-      <Panel title="Pull Requests">
+      <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests">
         <p>No supported GitHub or Bitbucket remotes detected.</p>
-      </Panel>
+      </AccordionSection>
     );
   }
 
-  // Nested Panels are intentional: the outer one is this stack entry's card ("Pull Requests"),
-  // each inner one is a per-forge-repository card titled with its own provider/owner/remote.
+  // The inner Panel per forge repository is intentional: each one is a card titled with its
+  // own provider/owner/remote, nested inside this section's AccordionSection body.
   return (
-    <Panel title="Pull Requests">
+    <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests">
       <div className={styles.sections}>
         {forgeRepositories.map((repository) => (
           <ForgeRepositorySection
@@ -267,6 +268,6 @@ export function PullRequestPanel({
           />
         ))}
       </div>
-    </Panel>
+    </AccordionSection>
   );
 }
