@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FIRST_SUMMARY = "e2e: reflog first recovery point";
@@ -35,6 +36,11 @@ describe("Browsitory reflog recovery", () => {
   });
 
   it("restores a prior local branch entry and refreshes the selected branch history", async () => {
+    // "Reflog" holds the reference selector and restore controls; "Branches" holds the switcher
+    // whose text is asserted after the restore. Both default closed.
+    await expandSidebarSection("Reflog");
+    await expandSidebarSection("Branches");
+
     const branchRef = `refs/heads/${branchName}`;
     const selector = await $("aria/Reflog reference");
     await selector.waitForExist({ timeout: 10000 });
