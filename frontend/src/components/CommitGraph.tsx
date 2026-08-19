@@ -77,7 +77,7 @@ export function CommitGraph({
     ) + 1;
 
   return (
-    <ul className={styles.list} onKeyDown={handleKeyDown} tabIndex={0}>
+    <ul className={styles.list} onKeyDown={handleKeyDown} tabIndex={0} role="listbox" aria-label="Commit history">
       <ListRow selected={selectedRow === "uncommitted"} onClick={() => onSelectRow("uncommitted")}>
         Uncommitted Changes{status.length > 0 && ` (${status.length})`}
       </ListRow>
