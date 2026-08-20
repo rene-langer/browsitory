@@ -4,14 +4,6 @@
   list-style: none;
 }
 
-.stashMessage {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
 .commitSummary {
   overflow: hidden;
   text-overflow: ellipsis;
