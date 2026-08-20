@@ -22,7 +22,7 @@ import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
-import { useOpenRepos } from "./state/useOpenRepos";
+import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
 import styles from "./App.module.css";
 
 function RepoWorkspace({
@@ -30,6 +30,8 @@ function RepoWorkspace({
   active,
   onOpenRepoTab,
   onBusyChange,
+  openRepos,
+  onSwitchRepoTab,
 }: {
   repoPath: string;
   active: boolean;
@@ -38,6 +40,8 @@ function RepoWorkspace({
   // assignable to `buildCommands`' `(path: string) => void` parameter (Task 8).
   onOpenRepoTab: (path: string) => Promise<void>;
   onBusyChange: (repoPath: string, busy: boolean) => void;
+  openRepos: OpenRepo[];
+  onSwitchRepoTab: (path: string) => void;
 }) {
   const appState = useAppState(tauriRepoClient, repoPath);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -77,7 +81,15 @@ function RepoWorkspace({
       )}
       {paletteOpen && (
         <Overlay onClose={() => setPaletteOpen(false)}>
-          <CommandPalette commands={buildCommands(appState, onOpenRepoTab)} onRun={() => setPaletteOpen(false)} />
+          <CommandPalette
+            commands={buildCommands(
+              appState,
+              onOpenRepoTab,
+              openRepos.filter((repo) => repo.path !== repoPath),
+              onSwitchRepoTab,
+            )}
+            onRun={() => setPaletteOpen(false)}
+          />
         </Overlay>
       )}
       <SplitView
@@ -350,6 +362,8 @@ export default function App() {
             active={repo.path === openRepos.activePath}
             onOpenRepoTab={openRepoTab}
             onBusyChange={onBusyChange}
+            openRepos={openRepos.openRepos}
+            onSwitchRepoTab={openRepos.switchTo}
           />
         ))
       )}
