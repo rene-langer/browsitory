@@ -76,7 +76,9 @@ pub fn set_open_repos(paths: &[PathBuf], active: Option<&Path>) -> Result<(), Co
     set_open_repos_at(&config_file_path()?, paths, active)
 }
 
-pub fn list_open_repos_at(config_file: &Path) -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
+pub fn list_open_repos_at(
+    config_file: &Path,
+) -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
     let config = read_config(config_file)?;
     Ok((config.open_repos, config.active_repo))
 }

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use config::{add_recent_repo_at, list_recent_repos_at, list_open_repos_at, set_open_repos_at};
+use config::{add_recent_repo_at, list_open_repos_at, list_recent_repos_at, set_open_repos_at};
 
 #[test]
 fn config_file_path_env_override_is_used_when_set() {
@@ -11,7 +11,10 @@ fn config_file_path_env_override_is_used_when_set() {
     let result = (|| -> Result<(), config::ConfigError> {
         config::add_recent_repo(std::path::Path::new("/repos/env-override-check"))?;
         let recent = config::list_recent_repos()?;
-        assert_eq!(recent, vec![std::path::PathBuf::from("/repos/env-override-check")]);
+        assert_eq!(
+            recent,
+            vec![std::path::PathBuf::from("/repos/env-override-check")]
+        );
         assert!(dir.path().join("config.toml").exists());
         Ok(())
     })();
@@ -98,7 +101,10 @@ fn set_open_repos_at_persists_paths_and_active_repo() {
     .unwrap();
 
     let (paths, active) = list_open_repos_at(&config_file).unwrap();
-    assert_eq!(paths, vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]);
+    assert_eq!(
+        paths,
+        vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]
+    );
     assert_eq!(active, Some(PathBuf::from("/repos/b")));
 }
 
