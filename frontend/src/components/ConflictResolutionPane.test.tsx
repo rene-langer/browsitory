@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConflictSegment, RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 
+const TEST_REPO_PATH = "/repo";
+
 function unused(): never {
   throw new Error("not used in this test");
 }
@@ -94,7 +96,7 @@ describe("ConflictResolutionPane", () => {
   it("renders clean segments as text and conflict segments with both sides", async () => {
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText(/line one/));
     expect(screen.getByText(/main two/)).toBeInTheDocument();
@@ -106,7 +108,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText(/line one/));
     fireEvent.click(screen.getByText("Save resolution"));
@@ -118,7 +120,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Theirs"));
     fireEvent.click(screen.getByText("Accept Theirs"));
@@ -131,7 +133,7 @@ describe("ConflictResolutionPane", () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Both"));
     fireEvent.click(screen.getByText("Accept Both"));
@@ -150,7 +152,7 @@ describe("ConflictResolutionPane", () => {
       getConflictHunks: () => new Promise((resolve) => (resolveHunks = resolve)),
     });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     const saveButton = screen.getByText("Save resolution").closest("button");
     expect(saveButton).toBeDisabled();
@@ -170,7 +172,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => oneEmptySide });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Both"));
     fireEvent.click(screen.getByText("Accept Both"));
@@ -188,7 +190,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => theirsEmpty });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Ours"));
     fireEvent.click(screen.getByText("Accept Ours"));
@@ -206,7 +208,7 @@ describe("ConflictResolutionPane", () => {
     ];
     const client = fakeClient({ getConflictHunks: async () => oursEmpty });
 
-    render(<ConflictResolutionPane client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText("Accept Theirs"));
     fireEvent.click(screen.getByText("Accept Theirs"));
@@ -224,6 +226,7 @@ describe("ConflictResolutionPane", () => {
 
     render(
       <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
         client={client}
         path="binary.dat"
         onResolve={vi.fn()}
@@ -246,6 +249,7 @@ describe("ConflictResolutionPane", () => {
 
     render(
       <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
         client={client}
         path="binary.dat"
         onResolve={vi.fn()}
@@ -268,6 +272,7 @@ describe("ConflictResolutionPane", () => {
 
     render(
       <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
         client={client}
         path="shared.txt"
         onResolve={vi.fn()}

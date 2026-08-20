@@ -200,6 +200,7 @@ function RepoWorkspace({
             }
             right={
               <DiffPane
+                repoPath={repoPath}
                 client={tauriRepoClient}
                 selectedRow={appState.state.selectedRow}
                 status={appState.state.status}
@@ -223,6 +224,7 @@ function RepoWorkspace({
       {appState.state.rebaseOnto !== null && (
         <Overlay onClose={appState.closeRebasePlanner}>
           <RebasePlanner
+            repoPath={repoPath}
             client={tauriRepoClient}
             onto={appState.state.rebaseOnto}
             onStartRebase={appState.startRebase}
