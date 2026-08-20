@@ -23,7 +23,15 @@ const SIDEBAR_SECTIONS = [
 ] as const;
 
 function goToSidebarSection(title: string): void {
-  const button = document.querySelector<HTMLButtonElement>(
+  // Scoped to the active tab's workspace, not the whole document: every open repo's
+  // `RepoWorkspace` stays mounted simultaneously (inactive ones are only `display: none`), so a
+  // document-wide lookup always resolves to whichever tab is first in document order. On any
+  // other tab that silently expanded a hidden tab's accordion and scrolled an invisible element
+  // into view — a no-op from the user's side. `App.tsx` marks the visible workspace with
+  // `data-active-repo="true"`.
+  const workspace = document.querySelector(`[data-active-repo="true"]`);
+  if (workspace === null) return;
+  const button = workspace.querySelector<HTMLButtonElement>(
     `section[aria-label="${title}"] button[aria-expanded]`,
   );
   if (button === null) return;

@@ -10,6 +10,10 @@ export interface UseOpenReposResult {
   openRepos: OpenRepo[];
   activePath: string | null;
   loading: boolean;
+  // Set when the mount-time restore itself failed (see the `.catch` on the restore effect).
+  // `App` renders it next to its own `openError`, so a failed restore is visible rather than
+  // silently indistinguishable from "no tabs were persisted".
+  restoreError: string | null;
   openRepo(path: string): Promise<void>;
   closeRepo(path: string): void;
   switchTo(path: string): void;
@@ -25,6 +29,7 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
   const [openRepos, setOpenRepos] = useState<OpenRepo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -47,6 +52,15 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
           ? restoredActive
           : restoredPaths[0] ?? null,
       );
+      setLoading(false);
+    }).catch((error: unknown) => {
+      if (ignore) return;
+      // Without this, a rejected `listOpenRepos` (unreadable/corrupt config, IPC failure) would
+      // leave `loading` stuck at `true` forever — and `App` renders nothing at all while loading,
+      // i.e. a permanently blank window with no error and no way back short of editing
+      // config.toml by hand. Clearing `loading` instead falls through to the empty-state
+      // `RepoPicker` (no tabs were restored), with the error surfaced next to it.
+      setRestoreError(String(error));
       setLoading(false);
     });
     return () => {
@@ -108,5 +122,5 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
     [openRepos, persist],
   );
 
-  return { openRepos, activePath, loading, openRepo, closeRepo, switchTo };
+  return { openRepos, activePath, loading, restoreError, openRepo, closeRepo, switchTo };
 }

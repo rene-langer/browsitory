@@ -85,14 +85,28 @@ function RepoWorkspace({
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
 
   return (
-    <div style={{ display: active ? "contents" : "none" }}>
+    // `data-active-repo` marks which workspace is the visible one. Every tab's `RepoWorkspace`
+    // stays mounted (only CSS-hidden when inactive), so a document-wide `querySelector` would
+    // always hit whichever tab is first in document order — `commands.ts`'s `goToSidebarSection`
+    // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
+    // actually looking at.
+    <div style={{ display: active ? "contents" : "none" }} data-active-repo={active ? "true" : "false"}>
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
-      {appState.state.transfer !== null && (
+      {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
+          calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
+          outside the dialog) even when this wrapper is `display: none` — so a backgrounded tab
+          whose transfer/palette/rebase overlay is open would freeze the visible tab behind an
+          invisible modal. The transfer overlay makes that the common case: it opens by itself
+          whenever `state.transfer !== null`, i.e. exactly the "start a push, switch tabs"
+          flow this feature exists for. Gating unmounts the dialog (releasing the block) while
+          backgrounded and loses nothing — `paletteOpen`/`transfer`/`rebaseOnto` all live in
+          state this doesn't touch, so switching back re-shows the same overlay. */}
+      {active && appState.state.transfer !== null && (
         <Overlay>
           <TransferPanel progress={appState.state.transfer} />
         </Overlay>
       )}
-      {paletteOpen && (
+      {active && paletteOpen && (
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
             commands={buildCommands(
@@ -246,7 +260,7 @@ function RepoWorkspace({
           />
         }
       />
-      {appState.state.rebaseOnto !== null && (
+      {active && appState.state.rebaseOnto !== null && (
         <Overlay onClose={appState.closeRebasePlanner}>
           <RebasePlanner
             repoPath={repoPath}
@@ -376,6 +390,7 @@ export default function App() {
         {themeToggle}
       </header>
       <LaneBraid />
+      {openRepos.restoreError !== null && <p role="alert">{openRepos.restoreError}</p>}
       {openError !== null && <p role="alert">{openError}</p>}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
