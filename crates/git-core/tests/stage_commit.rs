@@ -85,17 +85,29 @@ fn stage_hunk_stages_only_the_targeted_hunk_leaving_the_other_unstaged() {
     write_file(dir.path(), "tracked.txt", &changed);
 
     let hunks = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
-    assert_eq!(hunks.len(), 2, "expected two separate hunks from two far-apart edits");
+    assert_eq!(
+        hunks.len(),
+        2,
+        "expected two separate hunks from two far-apart edits"
+    );
 
     stage_hunk(&repo, "tracked.txt", hunks[0].old_start, hunks[0].new_start).unwrap();
 
     let staged = git_core::diff::working_diff(&repo, "tracked.txt", true).unwrap();
-    let staged_text: String = staged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    let staged_text: String = staged
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|l| l.content.clone())
+        .collect();
     assert!(staged_text.contains("line 2 changed"));
     assert!(!staged_text.contains("line 14 changed"));
 
     let still_unstaged = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
-    let unstaged_text: String = still_unstaged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    let unstaged_text: String = still_unstaged
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|l| l.content.clone())
+        .collect();
     assert!(unstaged_text.contains("line 14 changed"));
     assert!(!unstaged_text.contains("line 2 changed"));
 }
@@ -110,7 +122,10 @@ fn stage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
 
     let result = stage_hunk(&repo, "tracked.txt", 999, 999);
 
-    assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
+    assert!(matches!(
+        result,
+        Err(git_core::stage::StageError::HunkNotFound)
+    ));
 }
 
 #[test]
@@ -140,12 +155,20 @@ fn unstage_hunk_unstages_only_the_targeted_hunk_leaving_the_other_staged() {
     unstage_hunk(&repo, "tracked.txt", target.0, target.1).unwrap();
 
     let staged = git_core::diff::working_diff(&repo, "tracked.txt", true).unwrap();
-    let staged_text: String = staged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    let staged_text: String = staged
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|l| l.content.clone())
+        .collect();
     assert!(!staged_text.contains("line 2 changed"));
     assert!(staged_text.contains("line 14 changed"));
 
     let unstaged = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
-    let unstaged_text: String = unstaged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    let unstaged_text: String = unstaged
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|l| l.content.clone())
+        .collect();
     assert!(unstaged_text.contains("line 2 changed"));
     assert!(!unstaged_text.contains("line 14 changed"));
 }
@@ -161,7 +184,10 @@ fn unstage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
 
     let result = unstage_hunk(&repo, "tracked.txt", 999, 999);
 
-    assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
+    assert!(matches!(
+        result,
+        Err(git_core::stage::StageError::HunkNotFound)
+    ));
 }
 
 #[test]
@@ -184,9 +210,15 @@ fn discard_hunk_reverts_only_the_targeted_hunk_in_the_workdir() {
     discard_hunk(&repo, "tracked.txt", hunks[0].old_start, hunks[0].new_start).unwrap();
 
     let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
-    assert!(on_disk.contains("line 2\n"), "discarded hunk's line should be back to original");
+    assert!(
+        on_disk.contains("line 2\n"),
+        "discarded hunk's line should be back to original"
+    );
     assert!(!on_disk.contains("line 2 changed"));
-    assert!(on_disk.contains("line 14 changed"), "the other hunk's edit must survive");
+    assert!(
+        on_disk.contains("line 14 changed"),
+        "the other hunk's edit must survive"
+    );
 }
 
 #[test]
@@ -199,7 +231,10 @@ fn discard_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
 
     let result = discard_hunk(&repo, "tracked.txt", 999, 999);
 
-    assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
+    assert!(matches!(
+        result,
+        Err(git_core::stage::StageError::HunkNotFound)
+    ));
 }
 
 #[test]

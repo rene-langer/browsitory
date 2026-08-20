@@ -51,7 +51,8 @@ pub fn stage_hunk(
     let matched = std::cell::Cell::new(false);
     let mut apply_opts = git2::ApplyOptions::new();
     apply_opts.hunk_callback(|hunk| {
-        let is_match = matches!(hunk, Some(h) if h.old_start() == old_start && h.new_start() == new_start);
+        let is_match =
+            matches!(hunk, Some(h) if h.old_start() == old_start && h.new_start() == new_start);
         if is_match {
             matched.set(true);
         }
@@ -84,7 +85,8 @@ pub fn discard_hunk(
     let mut apply_opts = git2::ApplyOptions::new();
     // Same old/new swap as `unstage_hunk` — see its comment.
     apply_opts.hunk_callback(|hunk| {
-        let is_match = matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
+        let is_match =
+            matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
         if is_match {
             matched.set(true);
         }
@@ -106,7 +108,9 @@ pub fn unstage_hunk(
 ) -> Result<(), StageError> {
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = git2::DiffOptions::new();
-    opts.pathspec(path).disable_pathspec_match(true).reverse(true);
+    opts.pathspec(path)
+        .disable_pathspec_match(true)
+        .reverse(true);
     let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
 
     let matched = std::cell::Cell::new(false);
@@ -115,7 +119,8 @@ pub fn unstage_hunk(
     // sees has old/new flipped relative to the (old_start, new_start) the caller captured from
     // the forward (non-reversed) diff.
     apply_opts.hunk_callback(|hunk| {
-        let is_match = matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
+        let is_match =
+            matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
         if is_match {
             matched.set(true);
         }

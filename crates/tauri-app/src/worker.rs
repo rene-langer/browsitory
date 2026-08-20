@@ -493,8 +493,9 @@ impl Worker {
                         new_start,
                         reply,
                     } => {
-                        let result = git_core::stage::stage_hunk(&repo, &path, old_start, new_start)
-                            .map_err(|e| e.to_string());
+                        let result =
+                            git_core::stage::stage_hunk(&repo, &path, old_start, new_start)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::UnstageHunk {
@@ -503,8 +504,9 @@ impl Worker {
                         new_start,
                         reply,
                     } => {
-                        let result = git_core::stage::unstage_hunk(&repo, &path, old_start, new_start)
-                            .map_err(|e| e.to_string());
+                        let result =
+                            git_core::stage::unstage_hunk(&repo, &path, old_start, new_start)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::DiscardHunk {
@@ -513,8 +515,9 @@ impl Worker {
                         new_start,
                         reply,
                     } => {
-                        let result = git_core::stage::discard_hunk(&repo, &path, old_start, new_start)
-                            .map_err(|e| e.to_string());
+                        let result =
+                            git_core::stage::discard_hunk(&repo, &path, old_start, new_start)
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::Commit { message, reply } => {
@@ -2338,7 +2341,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+        let hunks = handle
+            .get_working_diff("tracked.txt".into(), false)
+            .unwrap();
         assert_eq!(hunks.len(), 1);
 
         handle
@@ -2358,7 +2363,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+        let hunks = handle
+            .get_working_diff("tracked.txt".into(), false)
+            .unwrap();
         handle
             .stage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
             .unwrap();
@@ -2380,7 +2387,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+        let hunks = handle
+            .get_working_diff("tracked.txt".into(), false)
+            .unwrap();
 
         handle
             .discard_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
