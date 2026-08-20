@@ -28,10 +28,25 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
 
   useEffect(() => {
     let ignore = false;
-    client.listOpenRepos().then(({ paths, activePath: restoredActive }) => {
+    client.listOpenRepos().then(async ({ paths, activePath: restoredActive }) => {
       if (ignore) return;
-      setOpenRepos(paths.map((path) => ({ path, displayName: displayNameFor(path) })));
-      setActivePath(restoredActive ?? paths[0] ?? null);
+      // `listOpenRepos` only reports what *was* open — the backend's worker registry starts
+      // empty every launch (a fresh process), so each restored path has to be (re-)opened for
+      // real, the same as a user-driven `openRepo` does, or its `RepoWorkspace` would render
+      // with a live tab bound to a worker that was never spawned (every fetch permanently
+      // failing with "repo not open"). A path that fails to reopen (removed/renamed/permissions
+      // changed since last launch) is dropped rather than kept as a tab stuck in that state.
+      const reopened = await Promise.all(
+        paths.map((path) => client.openRepo(path).then(() => path, () => null)),
+      );
+      if (ignore) return;
+      const restoredPaths = reopened.filter((path): path is string => path !== null);
+      setOpenRepos(restoredPaths.map((path) => ({ path, displayName: displayNameFor(path) })));
+      setActivePath(
+        restoredActive !== null && restoredPaths.includes(restoredActive)
+          ? restoredActive
+          : restoredPaths[0] ?? null,
+      );
       setLoading(false);
     });
     return () => {

@@ -26,6 +26,37 @@ describe("useOpenRepos", () => {
     expect(result.current.activePath).toBe("/repos/b");
   });
 
+  it("re-opens every persisted path against the backend on restore, not just the frontend tab list", async () => {
+    // `listOpenRepos` only reports what *was* open in a prior session — the backend's worker
+    // registry starts empty every launch, so a restored tab whose repo was never actually
+    // (re-)opened would render with every fetch permanently failing ("repo not open").
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b"], activePath: "/repos/b" }),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(client.openRepo).toHaveBeenCalledWith("/repos/a");
+    expect(client.openRepo).toHaveBeenCalledWith("/repos/b");
+  });
+
+  it("drops a persisted path that fails to reopen, rather than keeping a permanently broken tab", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/gone"], activePath: "/repos/gone" }),
+      openRepo: vi.fn().mockImplementation((path: string) =>
+        path === "/repos/gone" ? Promise.reject(new Error("not a git repository")) : Promise.resolve(undefined),
+      ),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a"]);
+    // The persisted active path failed to reopen too — falls back to the first surviving tab.
+    expect(result.current.activePath).toBe("/repos/a");
+  });
+
   it("opening a new path calls client.openRepo, adds a tab, and focuses it", async () => {
     const client = fakeClient();
     const { result } = renderHook(() => useOpenRepos(client));
@@ -83,7 +114,12 @@ describe("useOpenRepos", () => {
   it("a failed openRepo rejects and does not add a tab or change activePath", async () => {
     const client = fakeClient({
       listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a"], activePath: "/repos/a" }),
-      openRepo: vi.fn().mockRejectedValue(new Error("not a git repository")),
+      // Rejects only the path under test — the mount-time restore of "/repos/a" also calls
+      // `openRepo` now (each persisted path is re-opened for real against the fresh backend
+      // worker registry) and must succeed so this test can isolate the *later* failed open.
+      openRepo: vi.fn().mockImplementation((path: string) =>
+        path === "/repos/broken" ? Promise.reject(new Error("not a git repository")) : Promise.resolve(undefined),
+      ),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
