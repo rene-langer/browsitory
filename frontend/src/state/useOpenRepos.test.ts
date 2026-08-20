@@ -57,6 +57,22 @@ describe("useOpenRepos", () => {
     expect(result.current.activePath).toBe("/repos/a");
   });
 
+  it("a rejected listOpenRepos still resolves loading, rather than hanging on a blank screen", async () => {
+    // `App` renders nothing while `loading` is true, so a restore that never settles is a
+    // permanently blank window. Falling through to `loading: false` with no tabs lands on the
+    // empty-state RepoPicker instead, with the failure surfaced via `restoreError`.
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockRejectedValue(new Error("config.toml is unreadable")),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.openRepos).toEqual([]);
+    expect(result.current.activePath).toBeNull();
+    expect(result.current.restoreError).toContain("config.toml is unreadable");
+  });
+
   it("opening a new path calls client.openRepo, adds a tab, and focuses it", async () => {
     const client = fakeClient();
     const { result } = renderHook(() => useOpenRepos(client));
@@ -130,6 +146,7 @@ describe("useOpenRepos", () => {
       }),
     ).rejects.toThrow("not a git repository");
 
+    expect(client.openRepo).toHaveBeenCalledWith("/repos/broken");
     expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a"]);
     expect(result.current.activePath).toBe("/repos/a");
     expect(client.persistOpenRepos).not.toHaveBeenCalled();
@@ -153,5 +170,21 @@ describe("useOpenRepos", () => {
     });
 
     expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a", "/repos/c", "/repos/d"]);
+    expect(result.current.activePath).toBe("/repos/d");
+  });
+
+  it("closing the last open tab clears activePath, so App falls back to the RepoPicker", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/only"], activePath: "/repos/only" }),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.closeRepo("/repos/only"));
+
+    expect(client.closeRepo).toHaveBeenCalledWith("/repos/only");
+    expect(result.current.openRepos).toEqual([]);
+    expect(result.current.activePath).toBeNull();
+    expect(client.persistOpenRepos).toHaveBeenLastCalledWith([], null);
   });
 });
