@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { RebasePlanCommit, RepoClient } from "../ipc/RepoClient";
 import { RebasePlanner } from "./RebasePlanner";
 
+const TEST_REPO_PATH = "/repo";
+
 function unused(): never {
   throw new Error("not used in this test");
 }
@@ -105,6 +107,7 @@ describe("RebasePlanner", () => {
 
     render(
       <RebasePlanner
+        repoPath={TEST_REPO_PATH}
         client={client}
         onto="base"
         onStartRebase={vi.fn()}
@@ -121,7 +124,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
     );
 
     expect(await screen.findByText(/add a/)).toBeInTheDocument();
@@ -134,6 +137,7 @@ describe("RebasePlanner", () => {
 
     render(
       <RebasePlanner
+        repoPath={TEST_REPO_PATH}
         client={client}
         onto="base"
         onStartRebase={onStartRebase}
@@ -163,6 +167,7 @@ describe("RebasePlanner", () => {
 
     render(
       <RebasePlanner
+        repoPath={TEST_REPO_PATH}
         client={client}
         onto="base"
         onStartRebase={onStartRebase}
@@ -185,7 +190,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
     );
     await screen.findByText(/add a/);
 
@@ -207,6 +212,7 @@ describe("RebasePlanner", () => {
 
     render(
       <RebasePlanner
+        repoPath={TEST_REPO_PATH}
         client={client}
         onto="base"
         onStartRebase={onStartRebase}
@@ -246,6 +252,7 @@ describe("RebasePlanner", () => {
 
     render(
       <RebasePlanner
+        repoPath={TEST_REPO_PATH}
         client={client}
         onto="base"
         onStartRebase={onStartRebase}
@@ -281,7 +288,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => fourCommits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
     );
     await screen.findByText(/add a/);
 
@@ -300,7 +307,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => threeCommits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
     );
     await screen.findByText(/add a/);
 
@@ -320,7 +327,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
     );
     await screen.findByText(/add a/);
 
@@ -340,7 +347,7 @@ describe("RebasePlanner", () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
-      <RebasePlanner client={client} onto="base" onStartRebase={vi.fn()} onCancel={onCancel} />,
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={onCancel} />,
     );
     await screen.findByText(/add a/);
 

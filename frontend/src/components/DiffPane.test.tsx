@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
 
+const TEST_REPO_PATH = "/repo";
+
 function unused(): never {
   throw new Error("not used in this test");
 }
@@ -93,6 +95,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -121,6 +124,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -159,6 +163,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -180,7 +185,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("a.txt (Modified)"));
 
       expect(await screen.findByText(/changed line/)).toBeInTheDocument();
-      expect(getWorkingDiff).toHaveBeenCalledWith("a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
     });
 
     it("clicking a staged file's diff button fetches the staged diff", async () => {
@@ -198,6 +203,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -219,7 +225,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("b.txt (New)"));
 
       expect(await screen.findByText(/staged content/)).toBeInTheDocument();
-      expect(getWorkingDiff).toHaveBeenCalledWith("b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
     });
 
     it("refetches the diff when status changes for the same selected file", async () => {
@@ -241,6 +247,7 @@ describe("DiffPane", () => {
 
       const { rerender } = render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -271,6 +278,7 @@ describe("DiffPane", () => {
       ];
       rerender(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={refreshedStatus}
@@ -300,6 +308,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={unstagedOnly}
@@ -327,6 +336,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={stagedOnly}
@@ -360,6 +370,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -387,6 +398,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -415,6 +427,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={[]}
@@ -441,6 +454,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -471,6 +485,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -497,6 +512,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -534,6 +550,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -555,7 +572,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getAllByText("Blame")[0]);
 
       expect(await screen.findByText("hello")).toBeInTheDocument();
-      expect(getBlame).toHaveBeenCalledWith("HEAD", "a.txt");
+      expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "HEAD", "a.txt");
     });
 
     it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
@@ -575,6 +592,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -608,6 +626,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -654,6 +673,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -689,6 +709,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={conflictedStatus}
@@ -726,6 +747,7 @@ describe("DiffPane", () => {
 
       const { rerender } = render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={conflictedStatus}
@@ -751,6 +773,7 @@ describe("DiffPane", () => {
       // through this same pane): the conflicted entry is gone.
       rerender(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={[]}
@@ -773,7 +796,7 @@ describe("DiffPane", () => {
       // Finding 5: the pane falls back to the real diff view (which fetches), not a
       // permanently blank one — `viewMode` transitioned back to `"diff"`.
       await waitFor(() =>
-        expect(client.getWorkingDiff).toHaveBeenCalledWith("shared.txt", false),
+        expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false),
       );
     });
 
@@ -783,7 +806,7 @@ describe("DiffPane", () => {
         { path: "shared.txt", staged: false, kind: "Conflicted" },
       ];
       let resolveSharedHunks: (segments: ConflictSegment[]) => void = () => {};
-      const getConflictHunks = vi.fn((path: string): Promise<ConflictSegment[]> => {
+      const getConflictHunks = vi.fn((_repoPath: string, path: string): Promise<ConflictSegment[]> => {
         if (path === "binary.dat") {
           return Promise.reject(
             new Error("'binary.dat' is an add/delete conflict, not a text conflict"),
@@ -799,6 +822,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={twoConflicts}
@@ -842,6 +866,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={mixedStatus}
@@ -869,6 +894,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
           status={status}
@@ -910,6 +936,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -933,7 +960,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("src/main.rs"));
 
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
-      expect(getCommitDiff).toHaveBeenCalledWith("abc123", "src/main.rs");
+      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
     it("no CommitBox or stage/unstage buttons render", async () => {
@@ -941,6 +968,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -970,6 +998,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -998,6 +1027,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -1036,6 +1066,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -1058,7 +1089,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("Blame"));
 
       expect(await screen.findByText("fn main() {}")).toBeInTheDocument();
-      expect(getBlame).toHaveBeenCalledWith("abc123", "src/main.rs");
+      expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
     it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
@@ -1078,6 +1109,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
@@ -1114,6 +1146,7 @@ describe("DiffPane", () => {
 
       render(
         <DiffPane
+          repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow={{ commitId: "abc123" }}
           status={[]}
