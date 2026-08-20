@@ -2,7 +2,7 @@ mod common;
 
 use common::{init_repo, write_file};
 use git_core::commit::commit;
-use git_core::stage::{stage_file, stage_hunk, unstage_file, unstage_hunk};
+use git_core::stage::{discard_hunk, stage_file, stage_hunk, unstage_file, unstage_hunk};
 use git_core::status::StatusKind;
 
 #[test]
@@ -160,6 +160,44 @@ fn unstage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     stage_file(&repo, "tracked.txt").unwrap();
 
     let result = unstage_hunk(&repo, "tracked.txt", 999, 999);
+
+    assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
+}
+
+#[test]
+fn discard_hunk_reverts_only_the_targeted_hunk_in_the_workdir() {
+    let (dir, mut repo) = init_repo();
+    let original: String = (1..=15).map(|n| format!("line {n}\n")).collect();
+    write_file(dir.path(), "tracked.txt", &original);
+    stage_file(&repo, "tracked.txt").unwrap();
+    commit(&mut repo, "initial commit").unwrap();
+
+    let mut lines: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
+    lines[1] = "line 2 changed".to_string();
+    lines[13] = "line 14 changed".to_string();
+    let changed = lines.join("\n") + "\n";
+    write_file(dir.path(), "tracked.txt", &changed);
+
+    let hunks = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
+    assert_eq!(hunks.len(), 2);
+
+    discard_hunk(&repo, "tracked.txt", hunks[0].old_start, hunks[0].new_start).unwrap();
+
+    let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
+    assert!(on_disk.contains("line 2\n"), "discarded hunk's line should be back to original");
+    assert!(!on_disk.contains("line 2 changed"));
+    assert!(on_disk.contains("line 14 changed"), "the other hunk's edit must survive");
+}
+
+#[test]
+fn discard_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "line one\n");
+    stage_file(&repo, "tracked.txt").unwrap();
+    commit(&mut repo, "initial commit").unwrap();
+    write_file(dir.path(), "tracked.txt", "line one changed\n");
+
+    let result = discard_hunk(&repo, "tracked.txt", 999, 999);
 
     assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
 }
