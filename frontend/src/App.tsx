@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommandPalette } from "./components/CommandPalette";
@@ -45,6 +45,19 @@ function RepoWorkspace({
 }) {
   const appState = useAppState(tauriRepoClient, repoPath);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Populate this tab's state as soon as it mounts. `useAppState` no longer fetches anything on
+  // its own — its old `openRepo` method (removed when repo-opening moved out to `useOpenRepos`)
+  // used to be what triggered the first `refresh()` right after a repo opened, via
+  // `runMutation`'s trailing `await refresh()`. `RepoWorkspace` only ever mounts once a repo is
+  // already open (`App`'s `openRepos.openRepos.map` below, keyed by `repo.path` so each tab gets
+  // exactly one fresh `RepoWorkspace`/`useAppState` instance for its lifetime), so firing this
+  // once on mount reproduces that old behavior without needing `useAppState` itself to auto-fetch
+  // — which would also fire on every render in hook-level tests that manage refresh manually.
+  useEffect(() => {
+    void appState.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -309,17 +322,40 @@ export default function App() {
   // so the E2E build points at a fixture repo via this Vite env var instead — opened as this
   // session's first tab. Statically absent from a normal production build unless
   // VITE_E2E_REPO_PATH is set at build time.
+  // Guards the E2E reconciliation effect below so it only forces a deterministic starting repo
+  // once, at launch — not on every later `openRepos.openRepos` change, which would otherwise
+  // also fire for (and undo) a tab the test itself opens afterward.
+  const e2eReconciledRef = useRef(false);
   useEffect(() => {
     // Wait for the persisted-tab restore to settle first: on the mount pass `openRepos` is still
     // the empty initial value, so without this the fixture would be opened concurrently with
     // `listOpenRepos`, and whichever promise resolved last would clobber the other's tab list.
-    if (openRepos.loading) return;
+    if (openRepos.loading || e2eReconciledRef.current) return;
     const autoOpenPath = import.meta.env.VITE_E2E_REPO_PATH;
-    if (typeof autoOpenPath === "string" && autoOpenPath.length > 0 && openRepos.openRepos.length === 0) {
-      void openRepoTab(autoOpenPath);
+    if (typeof autoOpenPath !== "string" || autoOpenPath.length === 0) {
+      e2eReconciledRef.current = true;
+      return;
     }
+    // E2E fixtures need a deterministic single starting repo, not whatever tabs happen to be
+    // persisted from a prior run — e.g. a previous spec that crashed after opening a second tab
+    // but before closing it would otherwise leak a two-tab restore into the next spec's launch.
+    // So this bypasses the persisted-tab restore entirely rather than only firing when it
+    // happened to already be empty: close anything that isn't the fixture first (the effect
+    // re-runs once that settles, since `openRepos.openRepos` is a dependency), then open the
+    // fixture if it isn't already the sole tab. Once exactly the fixture is open, mark
+    // reconciliation done so this stops touching tabs — the spec itself opens more afterward.
+    const stale = openRepos.openRepos.filter((repo) => repo.path !== autoOpenPath);
+    if (stale.length > 0) {
+      stale.forEach((repo) => openRepos.closeRepo(repo.path));
+      return;
+    }
+    if (openRepos.openRepos.length === 0) {
+      void openRepoTab(autoOpenPath);
+      return;
+    }
+    e2eReconciledRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openRepos.loading]);
+  }, [openRepos.loading, openRepos.openRepos]);
 
   if (openRepos.loading) {
     return null;
