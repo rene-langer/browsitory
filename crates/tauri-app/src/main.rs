@@ -8,7 +8,7 @@ mod worker;
 use commands::{
     abort_merge, abort_rebase, add_remote, apply_stash, clear_current_upstream, close_repo, commit,
     commits_since, create_branch, create_pull_request, create_tag, create_worktree, delete_branch,
-    delete_tag, detect_forge_repository, drop_stash, fetch_remote, forget_forge_token,
+    delete_tag, detect_forge_repository, discard_hunk, drop_stash, fetch_remote, forget_forge_token,
     forget_https_credential, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
     get_conflict_hunks, get_current_upstream, get_merge_message, get_rebase_progress, get_reflog,
     get_remote_upstreams, get_status, get_working_diff, init_submodule, list_branches,
@@ -18,8 +18,8 @@ use commands::{
     push_current_branch, push_tags, rebase_continue, remove_remote, remove_worktree, rename_branch,
     rename_remote, resolve_add_delete_conflict, resolve_conflict, restore_reflog_entry,
     save_forge_token, save_https_credential, save_stash, set_current_upstream,
-    set_remote_auth_mode, stage_file, start_merge, start_rebase, switch_branch, unstage_file,
-    update_remote_urls, update_submodule, AppState,
+    set_remote_auth_mode, stage_file, stage_hunk, start_merge, start_rebase, switch_branch,
+    unstage_file, unstage_hunk, update_remote_urls, update_submodule, AppState,
 };
 
 fn main() {
@@ -36,7 +36,10 @@ fn main() {
             get_commit_diff,
             get_commit_files,
             stage_file,
+            stage_hunk,
             unstage_file,
+            unstage_hunk,
+            discard_hunk,
             commit,
             pick_repo_folder,
             list_recent_repos,
