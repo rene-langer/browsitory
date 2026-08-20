@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import { CommitGraph } from "./CommitGraph";
 
 const status: StatusEntry[] = [
@@ -37,14 +37,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -56,14 +53,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -75,14 +69,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -98,14 +89,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -120,14 +108,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -143,14 +128,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -166,14 +148,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow={{ commitId: "bbb222..." }}
         pending={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -188,14 +167,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -210,14 +186,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={onBranchFromCommit}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -233,167 +206,17 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
     fireEvent.contextMenu(screen.getByText(/Uncommitted Changes/).closest("li")!);
 
     expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
-  });
-
-  // Deliberately distinct from `log`'s "aaa1111"/"bbb2222" shortIds above — a stash message
-  // containing either substring would make `getByText` match both the stash row and the
-  // colliding commit row and throw on the ambiguity.
-  const stashes: StashEntry[] = [
-    { index: 0, message: "WIP on main: stash0fix uncommitted edit", commitId: "stash0" },
-    { index: 1, message: "WIP on main: stash1fix earlier edit", commitId: "stash1" },
-  ];
-
-  it("renders each stash's message", () => {
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={vi.fn()}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText(/WIP on main: stash0fix uncommitted edit/)).toBeInTheDocument();
-    expect(screen.getByText(/WIP on main: stash1fix earlier edit/)).toBeInTheDocument();
-  });
-
-  it("clicking a stash row calls onSelectRow with its commit id", () => {
-    const onSelectRow = vi.fn();
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={onSelectRow}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByText(/stash0fix/).closest("li")!);
-
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });
-  });
-
-  it("clicking Apply on a stash row calls onApplyStash with its index, not onSelectRow", () => {
-    const onApplyStash = vi.fn();
-    const onSelectRow = vi.fn();
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={onSelectRow}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={onApplyStash}
-        onDropStash={vi.fn()}
-      />,
-    );
-
-    const applyButtons = screen.getAllByText("Apply");
-    fireEvent.click(applyButtons[0]);
-
-    expect(onApplyStash).toHaveBeenCalledWith(0);
-    expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  it("clicking Drop on a stash row calls onDropStash with its index, not onSelectRow", () => {
-    const onDropStash = vi.fn();
-    const onSelectRow = vi.fn();
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={onSelectRow}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={onDropStash}
-      />,
-    );
-
-    const dropButtons = screen.getAllByText("Drop");
-    fireEvent.click(dropButtons[1]);
-
-    expect(onDropStash).toHaveBeenCalledWith(1);
-    expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  it("disables every stash row's Apply and Drop buttons while pending", () => {
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={true}
-        onSelectRow={vi.fn()}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
-      />,
-    );
-
-    for (const button of screen.getAllByText("Apply")) {
-      expect(button).toBeDisabled();
-    }
-    for (const button of screen.getAllByText("Drop")) {
-      expect(button).toBeDisabled();
-    }
-  });
-
-  it("ArrowDown from Uncommitted Changes lands on the first stash when stashes are present", () => {
-    const onSelectRow = vi.fn();
-    render(
-      <CommitGraph
-        status={status}
-        commits={commits}
-        stashes={stashes}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={onSelectRow}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
-      />,
-    );
-
-    const list = screen.getByRole("listbox");
-    fireEvent.keyDown(list, { key: "ArrowDown" });
-
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });
   });
 
   it("renders a branch badge for a commit that is a branch tip", () => {
@@ -405,14 +228,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commitsWithBranch}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -424,14 +244,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -443,14 +260,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -465,14 +279,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow={{ commitId: "aaa111..." }}
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -487,14 +298,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={onRebaseFromCommit}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
@@ -510,14 +318,11 @@ describe("CommitGraph", () => {
       <CommitGraph
         status={status}
         commits={commits}
-        stashes={[]}
         selectedRow="uncommitted"
         pending={true}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onApplyStash={vi.fn()}
-        onDropStash={vi.fn()}
       />,
     );
 
