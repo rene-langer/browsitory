@@ -27,3 +27,10 @@
   margin-right: var(--space-1);
   color: var(--color-text-muted);
 }
+
+.list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
