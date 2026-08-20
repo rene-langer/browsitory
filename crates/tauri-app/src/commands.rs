@@ -861,6 +861,39 @@ pub async fn unstage_file(
 }
 
 #[tauri::command]
+pub async fn stage_hunk(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start)
+}
+
+#[tauri::command]
+pub async fn unstage_hunk(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start)
+}
+
+#[tauri::command]
+pub async fn discard_hunk(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start)
+}
+
+#[tauri::command]
 pub async fn commit(
     repo_path: String,
     message: String,

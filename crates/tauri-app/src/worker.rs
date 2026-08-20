@@ -93,6 +93,24 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<(), String>>,
     },
+    StageHunk {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        reply: Sender<Result<(), String>>,
+    },
+    UnstageHunk {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        reply: Sender<Result<(), String>>,
+    },
+    DiscardHunk {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        reply: Sender<Result<(), String>>,
+    },
     Commit {
         message: String,
         reply: Sender<Result<String, String>>,
@@ -467,6 +485,36 @@ impl Worker {
                     Command::UnstageFile { path, reply } => {
                         let result =
                             git_core::stage::unstage_file(&repo, &path).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::StageHunk {
+                        path,
+                        old_start,
+                        new_start,
+                        reply,
+                    } => {
+                        let result = git_core::stage::stage_hunk(&repo, &path, old_start, new_start)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::UnstageHunk {
+                        path,
+                        old_start,
+                        new_start,
+                        reply,
+                    } => {
+                        let result = git_core::stage::unstage_hunk(&repo, &path, old_start, new_start)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::DiscardHunk {
+                        path,
+                        old_start,
+                        new_start,
+                        reply,
+                    } => {
+                        let result = git_core::stage::discard_hunk(&repo, &path, old_start, new_start)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::Commit { message, reply } => {
@@ -1324,6 +1372,51 @@ impl WorkerHandle {
         self.tx
             .send(Command::UnstageFile {
                 path,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn stage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::StageHunk {
+                path,
+                old_start,
+                new_start,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn unstage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::UnstageHunk {
+                path,
+                old_start,
+                new_start,
+                reply: reply_tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn discard_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::DiscardHunk {
+                path,
+                old_start,
+                new_start,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -2234,6 +2327,67 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stage_hunk_then_commit_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "tracked.txt", "line one\nline two\n");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+        assert_eq!(hunks.len(), 1);
+
+        handle
+            .stage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .unwrap();
+
+        let staged = handle.get_status().unwrap();
+        assert!(staged.iter().any(|e| e.path == "tracked.txt" && e.staged));
+    }
+
+    #[test]
+    fn unstage_hunk_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "tracked.txt", "line one\nline two\n");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+        handle
+            .stage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .unwrap();
+
+        handle
+            .unstage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .unwrap();
+
+        let status = handle.get_status().unwrap();
+        assert!(!status.iter().any(|e| e.path == "tracked.txt" && e.staged));
+    }
+
+    #[test]
+    fn discard_hunk_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "tracked.txt", "line one\nline two\n");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let hunks = handle.get_working_diff("tracked.txt".into(), false).unwrap();
+
+        handle
+            .discard_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .unwrap();
+
+        let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
+        assert_eq!(on_disk, "line one\nline two\n");
     }
 
     #[test]
