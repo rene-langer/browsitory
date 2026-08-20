@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommandPalette } from "./components/CommandPalette";
@@ -8,6 +8,7 @@ import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
+import { RepoTabs } from "./components/RepoTabs";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -21,90 +22,53 @@ import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
+import { useOpenRepos } from "./state/useOpenRepos";
 import styles from "./App.module.css";
 
-export default function App() {
-  const appState = useAppState(tauriRepoClient);
-  const [theme, setTheme] = useState<Theme>(() =>
-    resolveTheme(
-      loadStoredTheme(),
-      window.matchMedia("(prefers-color-scheme: dark)").matches,
-    ),
-  );
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
+function RepoWorkspace({
+  repoPath,
+  active,
+  onOpenRepoTab,
+  onBusyChange,
+}: {
+  repoPath: string;
+  active: boolean;
+  // `Promise<void>` rather than the plan's `void`: `WorktreePanel`'s `onOpenWorktree` is typed
+  // `(path: string) => Promise<void>`, and this is the only value passed to it. It stays
+  // assignable to `buildCommands`' `(path: string) => void` parameter (Task 8).
+  onOpenRepoTab: (path: string) => Promise<void>;
+  onBusyChange: (repoPath: string, busy: boolean) => void;
+}) {
+  const appState = useAppState(tauriRepoClient, repoPath);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (!active) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        if (appState.state.repoPath === null) return;
         event.preventDefault();
         setPaletteOpen((prev) => !prev);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [appState.state.repoPath]);
+  }, [active]);
 
-  const themeToggle = (
-    <button
-      type="button"
-      className={styles.themeToggle}
-      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      onClick={() => {
-        const next = theme === "dark" ? "light" : "dark";
-        setTheme(next);
-        persistTheme(next);
-      }}
-    >
-      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-    </button>
-  );
   const repositoryOperationDisabled =
     appState.state.pending ||
     appState.state.transfer !== null ||
     appState.state.mergeMessage !== null ||
     appState.state.rebaseProgress !== null;
 
-  // E2E-only auto-open: `RepoPicker`'s native folder dialog can't be driven through WebDriver,
-  // so the E2E build points at a fixture repo via this Vite env var instead. Statically absent
-  // from a normal production build unless VITE_E2E_REPO_PATH is set at build time.
+  // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
+  // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
+  // rule that already disables every other mutating action while this is true.
   useEffect(() => {
-    const autoOpenPath = import.meta.env.VITE_E2E_REPO_PATH;
-    if (typeof autoOpenPath === "string" && autoOpenPath.length > 0) {
-      appState.openRepo(autoOpenPath);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (appState.state.repoPath === null) {
-    return (
-      <main>
-        <header className={styles.headerRow}>
-          <h1>Browsitory</h1>
-          {themeToggle}
-        </header>
-        <LaneBraid />
-        {/* `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos`
-            calls; an `onOpenRepo` rejection (bad path, a stale recent-repo entry, permissions)
-            lands in `useAppState`'s `state.error`, which is otherwise only rendered in the
-            post-open branch below — leaving a failed open looking like nothing happened. */}
-        {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
-        <RepoPicker client={tauriRepoClient} onOpenRepo={appState.openRepo} />
-      </main>
-    );
-  }
+    onBusyChange(repoPath, repositoryOperationDisabled);
+  }, [repoPath, repositoryOperationDisabled, onBusyChange]);
 
   return (
-    <main>
-      <header className={styles.headerRow}>
-        <h1>Browsitory</h1>
-        {themeToggle}
-      </header>
-      <LaneBraid />
+    <div style={{ display: active ? "contents" : "none" }}>
       {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
       {appState.state.transfer !== null && (
         <Overlay>
@@ -113,7 +77,7 @@ export default function App() {
       )}
       {paletteOpen && (
         <Overlay onClose={() => setPaletteOpen(false)}>
-          <CommandPalette commands={buildCommands(appState)} onRun={() => setPaletteOpen(false)} />
+          <CommandPalette commands={buildCommands(appState, onOpenRepoTab)} onRun={() => setPaletteOpen(false)} />
         </Overlay>
       )}
       <SplitView
@@ -142,7 +106,7 @@ export default function App() {
             <WorktreePanel
               worktrees={appState.state.worktrees}
               branches={appState.state.branches}
-              onOpenWorktree={appState.openRepo}
+              onOpenWorktree={onOpenRepoTab}
               onCreateWorktree={appState.createWorktree}
               onRemoveWorktree={appState.removeWorktree}
               onPruneWorktrees={appState.pruneWorktrees}
@@ -266,6 +230,126 @@ export default function App() {
             operationDisabled={repositoryOperationDisabled}
           />
         </Overlay>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const openRepos = useOpenRepos(tauriRepoClient);
+  const [theme, setTheme] = useState<Theme>(() =>
+    resolveTheme(
+      loadStoredTheme(),
+      window.matchMedia("(prefers-color-scheme: dark)").matches,
+    ),
+  );
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const [busyByPath, setBusyByPath] = useState<Record<string, boolean>>({});
+  const onBusyChange = useCallback((repoPath: string, busy: boolean) => {
+    setBusyByPath((prev) => (prev[repoPath] === busy ? prev : { ...prev, [repoPath]: busy }));
+  }, []);
+  const busyPaths = useMemo(
+    () => new Set(Object.entries(busyByPath).filter(([, busy]) => busy).map(([path]) => path)),
+    [busyByPath],
+  );
+
+  const [pickingRepo, setPickingRepo] = useState(false);
+
+  // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
+  // `useOpenRepos.openRepo` deliberately rejects rather than opening a tab for a repo that failed
+  // to open (bad path, a stale recent-repo entry, permissions). Nothing else catches that now
+  // that `App` has no `useAppState` of its own, so a failed open would look like nothing
+  // happened — the same trap the pre-tabs `App` carried a comment about.
+  const [openError, setOpenError] = useState<string | null>(null);
+  const { openRepo } = openRepos;
+  const openRepoTab = useCallback(
+    // Both branches settle asynchronously on purpose: the E2E auto-open effect below calls this
+    // directly, and a synchronous `setOpenError` in the body would be a setState-in-effect.
+    (path: string) =>
+      openRepo(path).then(
+        () => setOpenError(null),
+        (error: unknown) => setOpenError(String(error)),
+      ),
+    [openRepo],
+  );
+
+  const themeToggle = (
+    <button
+      type="button"
+      className={styles.themeToggle}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      onClick={() => {
+        const next = theme === "dark" ? "light" : "dark";
+        setTheme(next);
+        persistTheme(next);
+      }}
+    >
+      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+    </button>
+  );
+
+  // E2E-only auto-open: `RepoPicker`'s native folder dialog can't be driven through WebDriver,
+  // so the E2E build points at a fixture repo via this Vite env var instead — opened as this
+  // session's first tab. Statically absent from a normal production build unless
+  // VITE_E2E_REPO_PATH is set at build time.
+  useEffect(() => {
+    // Wait for the persisted-tab restore to settle first: on the mount pass `openRepos` is still
+    // the empty initial value, so without this the fixture would be opened concurrently with
+    // `listOpenRepos`, and whichever promise resolved last would clobber the other's tab list.
+    if (openRepos.loading) return;
+    const autoOpenPath = import.meta.env.VITE_E2E_REPO_PATH;
+    if (typeof autoOpenPath === "string" && autoOpenPath.length > 0 && openRepos.openRepos.length === 0) {
+      void openRepoTab(autoOpenPath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRepos.loading]);
+
+  if (openRepos.loading) {
+    return null;
+  }
+
+  return (
+    <main>
+      <header className={styles.headerRow}>
+        <h1>Browsitory</h1>
+        <RepoTabs
+          openRepos={openRepos.openRepos}
+          activePath={openRepos.activePath}
+          busyPaths={busyPaths}
+          onSwitchTo={openRepos.switchTo}
+          onClose={openRepos.closeRepo}
+          onAddTab={() => setPickingRepo(true)}
+        />
+        {themeToggle}
+      </header>
+      <LaneBraid />
+      {openError !== null && <p role="alert">{openError}</p>}
+      {pickingRepo && (
+        <Overlay onClose={() => setPickingRepo(false)}>
+          <RepoPicker
+            client={tauriRepoClient}
+            onOpenRepo={(path) => {
+              void openRepoTab(path);
+              setPickingRepo(false);
+            }}
+          />
+        </Overlay>
+      )}
+      {openRepos.openRepos.length === 0 ? (
+        <RepoPicker client={tauriRepoClient} onOpenRepo={openRepoTab} />
+      ) : (
+        openRepos.openRepos.map((repo) => (
+          <RepoWorkspace
+            key={repo.path}
+            repoPath={repo.path}
+            active={repo.path === openRepos.activePath}
+            onOpenRepoTab={openRepoTab}
+            onBusyChange={onBusyChange}
+          />
+        ))
       )}
     </main>
   );
