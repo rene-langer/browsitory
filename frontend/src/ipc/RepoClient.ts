@@ -216,6 +216,9 @@ export interface RepoClient {
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
+  stageHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
+  unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
+  discardHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
   commit(repoPath: string, message: string): Promise<void>;
   listBranches(repoPath: string): Promise<BranchInfo[]>;
   createBranch(repoPath: string, name: string, startPoint: string): Promise<void>;
