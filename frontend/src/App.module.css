@@ -7,10 +7,18 @@
   flex: 0 0 auto;
 }
 
+/* The tab strip between the title and the toggle is `flex: 1 1 auto`, so with enough open
+   repos it would otherwise squeeze both of its neighbours; the toggle's only content is a
+   fixed-size icon, which shrinks to a clipped sliver rather than pushing back. */
+.headerRow > h1 {
+  flex: 0 0 auto;
+}
+
 .themeToggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
