@@ -141,7 +141,7 @@ function ForgeRepositorySection({
   const visibleRows = tokenForgotten ? null : (pullRequests?.pullRequests ?? null);
 
   return (
-    <Panel title={sectionLabel} ariaLabel={sectionLabel}>
+    <Panel title={sectionLabel} ariaLabel={sectionLabel} headingLevel={3}>
       <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
         <label className={styles.label}>
           Account

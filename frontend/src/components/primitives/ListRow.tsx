@@ -16,15 +16,20 @@ import styles from "./ListRow.module.css";
  * - **`onClick` with `selected`** — a row in a list whose *container* owns selection and
  *   keyboard navigation (CommitGraph's `<ul tabIndex={0}>` with arrow/j/k keys). The row stays
  *   out of the tab order on purpose: a thousand-commit history must not become a thousand tab
- *   stops, and the container is the single tab stop that moves the selection.
+ *   stops, and the container is the single tab stop that moves the selection. Gets
+ *   `role="option"` so `aria-selected` is valid ARIA (it's otherwise meaningless on a plain
+ *   `listitem`) — the container must carry a matching `role="listbox"` for this to form a
+ *   complete pattern.
  */
 export function ListRow({
+  id,
   selected,
   onClick,
   onContextMenu,
   className,
   children,
 }: {
+  id?: string;
   selected?: boolean;
   onClick?: () => void;
   onContextMenu?: (event: MouseEvent) => void;
@@ -35,6 +40,7 @@ export function ListRow({
   // `selected` present means the surrounding list tracks a selection and therefore already
   // handles keyboard navigation itself — see the doc comment above.
   const standalone = interactive && selected === undefined;
+  const containerOwnsSelection = interactive && selected !== undefined;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
     if (onClick === undefined) return;
@@ -46,10 +52,11 @@ export function ListRow({
 
   return (
     <li
+      id={id}
       className={[styles.row, interactive ? styles.interactive : null, className]
         .filter((part) => part !== null && part !== undefined && part !== "")
         .join(" ")}
-      role={standalone ? "button" : undefined}
+      role={standalone ? "button" : containerOwnsSelection ? "option" : undefined}
       tabIndex={standalone ? 0 : undefined}
       aria-selected={selected}
       onClick={onClick}

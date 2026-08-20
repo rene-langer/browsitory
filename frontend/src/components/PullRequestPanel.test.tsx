@@ -62,6 +62,9 @@ describe("PullRequestPanel", () => {
     renderPanel();
 
     const section = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    expect(
+      within(section).getByRole("heading", { level: 3, name: /github: acme\/widget \(origin\)/i }),
+    ).toBeInTheDocument();
     expect(within(section).getByLabelText("Account")).toBeInTheDocument();
     expect(within(section).getByLabelText("Access token")).toBeInTheDocument();
     expect(within(section).getByRole("button", { name: "Save token" })).toBeInTheDocument();

@@ -25,7 +25,7 @@ describe("CommandPalette", () => {
 
   it("filters as the user types", () => {
     render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "fetch" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fetch" } });
     expect(screen.getByText("Fetch origin")).toBeInTheDocument();
     expect(screen.queryByText("Switch to main")).not.toBeInTheDocument();
   });
@@ -34,7 +34,7 @@ describe("CommandPalette", () => {
     const commands = makeCommands();
     const onRun = vi.fn();
     render(<CommandPalette commands={commands} onRun={onRun} />);
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
     // With an empty query, filterAndSortCommands (Task 1) sorts tied-score results
     // alphabetically by label, so "Fetch origin" (commands[2]) is highlighted first —
     // not the original array order.
@@ -45,7 +45,7 @@ describe("CommandPalette", () => {
   it("moves the highlight with arrow keys before running", () => {
     const commands = makeCommands();
     render(<CommandPalette commands={commands} onRun={vi.fn()} />);
-    const input = screen.getByRole("textbox");
+    const input = screen.getByRole("combobox");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(commands[1].run).toHaveBeenCalledOnce();
@@ -70,7 +70,36 @@ describe("CommandPalette", () => {
 
   it("shows an empty-state message when nothing matches", () => {
     render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "zzz-no-match" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "zzz-no-match" } });
     expect(screen.getByText("No matching commands")).toBeInTheDocument();
+  });
+
+  it("wires the input as a combobox controlling a labeled listbox", () => {
+    render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    const listbox = screen.getByRole("listbox", { name: "Command results" });
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    expect(input).toHaveAttribute("aria-controls", listbox.id);
+  });
+
+  it("points aria-activedescendant at the highlighted row", () => {
+    const commands = makeCommands();
+    render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    // Empty query, alphabetical tiebreak: "Fetch origin" (commands[2]) highlighted first.
+    const options = screen.getAllByRole("option");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+    expect(options[0]).toHaveTextContent("Fetch origin");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", options[1].id);
+  });
+
+  it("has aria-expanded=false and no aria-activedescendant when nothing matches", () => {
+    render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "zzz-no-match" } });
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
   });
 });

@@ -45,4 +45,22 @@ describe("Panel", () => {
     );
     expect(screen.getByLabelText("Remotes")).toBeInTheDocument();
   });
+
+  it("defaults the title heading to level 2", () => {
+    render(
+      <Panel title="Remotes">
+        <p>content</p>
+      </Panel>,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Remotes" })).toBeInTheDocument();
+  });
+
+  it("renders the title at a caller-supplied heading level, for nesting under another heading", () => {
+    render(
+      <Panel title="octocat/hello-world" headingLevel={3}>
+        <p>content</p>
+      </Panel>,
+    );
+    expect(screen.getByRole("heading", { level: 3, name: "octocat/hello-world" })).toBeInTheDocument();
+  });
 });

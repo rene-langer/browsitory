@@ -81,7 +81,39 @@ describe("ListRow", () => {
     );
     const row = screen.getByText("row content").closest("li");
     expect(row).not.toHaveAttribute("tabindex");
-    expect(row).not.toHaveAttribute("role");
+  });
+
+  it("gets role=\"option\" when the surrounding list owns selection, so aria-selected is valid ARIA", () => {
+    render(
+      <ul>
+        <ListRow selected={false} onClick={vi.fn()}>
+          row content
+        </ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("row content").closest("li");
+    expect(row).toHaveAttribute("role", "option");
+  });
+
+  it("does not get role=\"option\" in standalone (button) mode", () => {
+    render(
+      <ul>
+        <ListRow onClick={vi.fn()}>row content</ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("row content").closest("li");
+    expect(row).not.toHaveAttribute("role", "option");
+  });
+
+  it("applies a passed id to the row, for a container to reference via aria-activedescendant", () => {
+    render(
+      <ul>
+        <ListRow id="row-3" selected={true} onClick={vi.fn()}>
+          row content
+        </ListRow>
+      </ul>,
+    );
+    expect(document.getElementById("row-3")).toHaveTextContent("row content");
   });
 
   it("renders a plain non-interactive item when no onClick is given", () => {
