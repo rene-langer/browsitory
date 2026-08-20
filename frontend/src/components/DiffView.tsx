@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { DiffHunk, DiffLineOrigin } from "../ipc/RepoClient";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./DiffView.module.css";
@@ -14,15 +14,19 @@ export function DiffView({
   onUnstageHunk?: (oldStart: number, newStart: number) => void;
   onDiscardHunk?: (oldStart: number, newStart: number) => void;
 }) {
+  const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
 
   // A stale armed confirmation must never carry over to a different hunk list (switching files,
   // or any hunk mutation refetching this file's own hunks) — `hunkIndex` is only meaningful
   // relative to the specific `hunks` array it was armed against. Same class of bug
-  // `BranchSwitcher`'s `closePopoverState` guards against for `pendingForceFor`.
-  useEffect(() => {
+  // `BranchSwitcher`'s `closePopoverState` guards against for `pendingForceFor`; same
+  // reset-during-render pattern `TagPanel`'s `previousRemotes`/`previousTags` use, rather than
+  // an effect (an effect here would fire a second, avoidable render after every hunks refetch).
+  if (previousHunks !== hunks) {
+    setPreviousHunks(hunks);
     setConfirmingDiscardIndex(null);
-  }, [hunks]);
+  }
 
   if (hunks.length === 0) {
     return <p>No differences</p>;
