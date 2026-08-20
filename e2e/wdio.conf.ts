@@ -27,6 +27,8 @@ const tauriAppBinary = path.resolve(__dirname, "../target/debug/tauri-app");
 // `VITE_E2E_REPO_PATH=<this exact path>` *before* `cargo build --workspace` embeds
 // `frontend/dist` (see the CI `e2e` job, and this file's `onPrepare` below).
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
+const E2E_SECOND_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-second-repo");
+const E2E_CONFIG_DIR = path.join(os.tmpdir(), "browsitory-e2e-config");
 const CREDENTIAL_CERT_DIR = path.join(os.tmpdir(), "browsitory-e2e-credential-cert");
 const E2E_PARENT_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-parent-source");
 const E2E_SUBMODULE_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-submodule");
@@ -193,6 +195,28 @@ export const config: WebdriverIO.Config = {
     setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
     resetFixtureRepo();
     setupCredentialCertificate();
+
+    // A second, genuinely independent fixture repo (not a branch/clone of E2E_REPO_PATH) for
+    // multi-repo.spec.ts, seeded with one real commit so it has a resolvable HEAD immediately.
+    setupFixtureRepo(E2E_SECOND_REPO_PATH);
+    fs.writeFileSync(path.join(E2E_SECOND_REPO_PATH, "second.txt"), "second repo\n");
+    execFileSync("git", ["add", "second.txt"], { cwd: E2E_SECOND_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", "e2e: second repo base commit"], { cwd: E2E_SECOND_REPO_PATH, stdio: "inherit" });
+
+    // Seed a BROWSITORY_CONFIG_DIR the app will read/write for the whole suite run, so the
+    // second repo is already in RepoPicker's recent-repos list (its "Open Folder" button drives
+    // a native OS dialog WebDriver can't operate). Deliberately seeds only `recent_repos` here,
+    // never `open_repos`/`active_repo` — App.tsx's E2E auto-open effect is written to force a
+    // deterministic single starting repo regardless of what's persisted (see its comment), but
+    // keeping this seed free of a persisted tab set is also the simplest way to guarantee every
+    // spec (including this suite's very first launch) starts from the same known state.
+    fs.rmSync(E2E_CONFIG_DIR, { recursive: true, force: true });
+    fs.mkdirSync(E2E_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(E2E_CONFIG_DIR, "config.toml"),
+      `recent_repos = ["${E2E_SECOND_REPO_PATH.replace(/\\/g, "\\\\")}"]\n`,
+    );
+    process.env.BROWSITORY_CONFIG_DIR = E2E_CONFIG_DIR;
 
     // See `e2e/support/forgeFixtureServer.ts`'s header comment for why this has to be a real
     // loopback server started before the app process exists, rather than something the spec
