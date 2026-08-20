@@ -32,6 +32,25 @@ const commits: GraphCommit[] = [
 ];
 
 describe("CommitGraph", () => {
+  it("exposes the row list as a labeled listbox, matching ListRow's option rows", () => {
+    render(
+      <CommitGraph
+        status={status}
+        commits={commits}
+        stashes={[]}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onApplyStash={vi.fn()}
+        onDropStash={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+  });
+
   it("renders the Uncommitted Changes row with a change-count badge", () => {
     render(
       <CommitGraph
@@ -112,7 +131,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    const list = screen.getByRole("list");
+    const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." });
@@ -135,7 +154,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    const list = screen.getByRole("list");
+    const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowUp" });
 
     expect(onSelectRow).toHaveBeenCalledWith("uncommitted");
@@ -158,7 +177,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    const list = screen.getByRole("list");
+    const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." });
@@ -371,7 +390,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    const list = screen.getByRole("list");
+    const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });

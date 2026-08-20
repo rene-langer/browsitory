@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useId, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ListRow } from "./primitives/ListRow";
 import { filterAndSortCommands, recordCommandUsed, type Command } from "../lib/commands";
 import styles from "./CommandPalette.module.css";
@@ -6,9 +6,12 @@ import styles from "./CommandPalette.module.css";
 export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun: () => void }) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const listboxId = useId();
 
   const results = useMemo(() => filterAndSortCommands(commands, query), [commands, query]);
   const clampedIndex = results.length === 0 ? 0 : Math.min(highlightedIndex, results.length - 1);
+  const activeDescendantId =
+    results.length === 0 ? undefined : `${listboxId}-option-${clampedIndex}`;
 
   function runCommand(command: Command) {
     recordCommandUsed(command.id);
@@ -44,10 +47,19 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
         }}
         onKeyDown={handleKeyDown}
         aria-label="Command palette"
+        role="combobox"
+        aria-expanded={results.length > 0}
+        aria-controls={listboxId}
+        aria-activedescendant={activeDescendantId}
       />
-      <ul className={styles.list}>
+      <ul className={styles.list} id={listboxId} role="listbox" aria-label="Command results">
         {results.map((command, index) => (
-          <ListRow key={command.id} selected={index === clampedIndex} onClick={() => runCommand(command)}>
+          <ListRow
+            key={command.id}
+            id={`${listboxId}-option-${index}`}
+            selected={index === clampedIndex}
+            onClick={() => runCommand(command)}
+          >
             {command.label}
           </ListRow>
         ))}
