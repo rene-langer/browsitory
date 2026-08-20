@@ -1,3 +1,4 @@
+/* frontend/src/components/primitives/SplitView.module.css */
 .splitView {
   display: flex;
   flex: 1 1 auto;
@@ -6,14 +7,46 @@
 }
 
 .left {
-  flex: 0 0 300px;
-  width: 300px;
+  flex: 0 0 auto;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
+  overflow-x: hidden;
 }
 
+.divider {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background: var(--color-border);
+  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.divider:hover {
+  background: var(--color-accent);
+}
+
+.divider:focus-visible {
+  background: var(--color-accent);
+  /* Matches index.css's focus convention; a background-only indicator would
+     disappear under forced-colors. The offset is negative so the 2px outline
+     stays inside the 4px-wide divider instead of bleeding over both panes. */
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+/* A bare flex column so a nested SplitView (itself `flex: 1 1 auto;
+   min-height: 0`) can fill it. Padding and scrolling live on .rightInner. */
 .right {
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rightInner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-3) var(--space-4);
 }

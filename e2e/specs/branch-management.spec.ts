@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 // Deviation from the task brief: the brief assumed the fixture repo already has a commit by the
 // time this spec runs, so a branch can be created "from HEAD". But `wdio.conf.ts`'s `onPrepare`
@@ -29,6 +30,9 @@ describe("Browsitory branch management", () => {
   });
 
   it("creates a branch from HEAD, switches to it, and shows it as current", async () => {
+    // "Branches" defaults closed; expand it before its contents (the switcher button) exist.
+    await expandSidebarSection("Branches");
+
     const switcherButton = await $('[aria-label="Branch switcher"]');
     await switcherButton.waitForExist({ timeout: 10000 });
     await switcherButton.click();

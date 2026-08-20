@@ -21,7 +21,8 @@ const initializedSubmodule: SubmoduleInfo = {
 function renderPanel(
   overrides: Partial<Parameters<typeof SubmodulePanel>[0]> = {},
 ) {
-  return render(
+  localStorage.removeItem("sidebar-submodules");
+  const result = render(
     <SubmodulePanel
       submodules={[uninitializedSubmodule, initializedSubmodule]}
       onInit={vi.fn().mockResolvedValue(undefined)}
@@ -30,6 +31,8 @@ function renderPanel(
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Submodules" }));
+  return result;
 }
 
 describe("SubmodulePanel", () => {

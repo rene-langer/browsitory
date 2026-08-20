@@ -1,0 +1,37 @@
+.section {
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The heading only carries the role; the button inside owns all the spacing. */
+.heading {
+  margin: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Not --color-bg-subtle: that is exactly Sidebar's own background, so the
+   hover would be invisible for a section nested inside a Sidebar. */
+.header:hover:not(:disabled) {
+  background: var(--color-selected-bg);
+}
+
+.title {
+  flex: 1 1 auto;
+}
+
+.body {
+  padding: 0 var(--space-3) var(--space-3);
+}

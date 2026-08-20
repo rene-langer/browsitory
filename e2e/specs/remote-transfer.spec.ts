@@ -4,6 +4,7 @@ import { createServer } from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
@@ -69,6 +70,9 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("fetches a configured remote", async () => {
+    // "Remotes" defaults closed; expand it before its Add remote/Fetch controls exist.
+    await expandSidebarSection("Remotes");
+
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
     const addRemoteButton = await $("button=Add remote");
@@ -102,6 +106,9 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("remediates a missing HTTPS credential without exposing the callback diagnostic", async () => {
+    // Idempotent re-expand — see the previous test's comment.
+    await expandSidebarSection("Remotes");
+
     const challenge = await startCredentialChallengeServer();
     try {
       const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
@@ -138,6 +145,9 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("fast-forwards a clean tracked upstream", async () => {
+    // Idempotent re-expand — see the first test's comment.
+    await expandSidebarSection("Remotes");
+
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe("");
     const upstreamRemote = await $("form[aria-label='Set upstream'] select");
     await upstreamRemote.selectByAttribute("value", "transfer-origin");
@@ -160,6 +170,11 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a local tag", async () => {
+    // "Remotes" holds the branch-push button; "Tags" holds the tag-creation form and the
+    // push-tags controls used later in this test. Both default closed.
+    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Tags");
+
     try {
       execFileSync("git", ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], {
         cwd: E2E_REPO_PATH,
@@ -227,6 +242,9 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {
+    // Idempotent re-expand — see the first test's comment.
+    await expandSidebarSection("Remotes");
+
     await (await $("button=Credentials for transfer-origin")).click();
     const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
     await credentialsForm.waitForExist({ timeout: 10000 });

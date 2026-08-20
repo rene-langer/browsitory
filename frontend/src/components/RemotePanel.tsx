@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
-import { Panel } from "./primitives/Panel";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
@@ -151,7 +151,7 @@ export function RemotePanel({
   }, [pendingPull]);
 
   return (
-    <Panel title="Remotes">
+    <AccordionSection title="Remotes" storageKey="sidebar-remotes">
       {remotes.length === 0 ? (
         <p>No remotes configured.</p>
       ) : (
@@ -281,6 +281,6 @@ export function RemotePanel({
           <button type="button" data-autofocus onClick={onCancelPull}>Cancel</button>
         </dialog>
       )}
-    </Panel>
+    </AccordionSection>
   );
 }

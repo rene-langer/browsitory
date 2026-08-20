@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
+import { AccordionSection } from "./primitives/AccordionSection";
 import { ListRow } from "./primitives/ListRow";
-import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ReflogPanel.module.css";
 
@@ -27,7 +27,7 @@ export function ReflogPanel({
   );
 
   return (
-    <Panel title="Reflog">
+    <AccordionSection title="Reflog" storageKey="sidebar-reflog">
       <label>
         Reflog reference
         <select
@@ -85,6 +85,6 @@ export function ReflogPanel({
           </Toolbar>
         </dialog>
       )}
-    </Panel>
+    </AccordionSection>
   );
 }

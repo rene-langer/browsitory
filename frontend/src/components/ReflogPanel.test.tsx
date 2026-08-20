@@ -17,7 +17,8 @@ const entry: ReflogEntry = {
 function renderPanel(
   overrides: Partial<Parameters<typeof ReflogPanel>[0]> = {},
 ) {
-  return render(
+  localStorage.removeItem("sidebar-reflog");
+  const result = render(
     <ReflogPanel
       references={["HEAD", "refs/heads/main", "refs/remotes/origin/main"]}
       selectedReference="refs/heads/main"
@@ -28,6 +29,8 @@ function renderPanel(
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Reflog" }));
+  return result;
 }
 
 describe("ReflogPanel", () => {

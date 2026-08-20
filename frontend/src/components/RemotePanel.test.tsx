@@ -28,34 +28,51 @@ const upstream: UpstreamInfo = {
 };
 
 function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {}) {
-  return render(
-    <RemotePanel
-      remotes={[origin]}
-      upstream={null}
-      remoteUpstreams={{ origin: [] }}
-      onAddRemote={vi.fn()}
-      onRenameRemote={vi.fn().mockResolvedValue(true)}
-      onUpdateRemoteUrls={vi.fn()}
-      onRemoveRemote={vi.fn().mockResolvedValue(undefined)}
-      onSaveHttpsCredential={vi.fn().mockResolvedValue(undefined)}
-      onForgetHttpsCredential={vi.fn().mockResolvedValue(undefined)}
-      onSetRemoteAuthMode={vi.fn().mockResolvedValue(true)}
-      onSetUpstream={vi.fn()}
-      onClearUpstream={vi.fn()}
-      onFetchRemote={vi.fn()}
-      fetchDisabled={false}
-      onPushCurrentBranch={vi.fn()}
-      pushDisabled={false}
-      onPull={vi.fn()}
-      pullDisabled={false}
-      pendingPull={null}
-      pullOutcome={null}
-      onMergePull={vi.fn()}
-      onRebasePull={vi.fn()}
-      onCancelPull={vi.fn()}
-      {...overrides}
-    />,
-  );
+  localStorage.removeItem("sidebar-remotes");
+
+  // pendingPull is handled separately below: in real usage the Pull button only
+  // exists inside an already-open panel, so pendingPull only ever transitions to
+  // non-null while the accordion is already mounted open — never present at
+  // initial mount. Applying it via rerender (after opening) instead of at the
+  // initial render reproduces that real ordering, so the pull-diverged <dialog>'s
+  // showModal() effect (which only runs when the dialog ref is already attached)
+  // fires the same way it does in production.
+  const { pendingPull, ...restOverrides } = overrides;
+  const props: Parameters<typeof RemotePanel>[0] = {
+    remotes: [origin],
+    upstream: null,
+    remoteUpstreams: { origin: [] },
+    onAddRemote: vi.fn(),
+    onRenameRemote: vi.fn().mockResolvedValue(true),
+    onUpdateRemoteUrls: vi.fn(),
+    onRemoveRemote: vi.fn().mockResolvedValue(undefined),
+    onSaveHttpsCredential: vi.fn().mockResolvedValue(undefined),
+    onForgetHttpsCredential: vi.fn().mockResolvedValue(undefined),
+    onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
+    onSetUpstream: vi.fn(),
+    onClearUpstream: vi.fn(),
+    onFetchRemote: vi.fn(),
+    fetchDisabled: false,
+    onPushCurrentBranch: vi.fn(),
+    pushDisabled: false,
+    onPull: vi.fn(),
+    pullDisabled: false,
+    pendingPull: null,
+    pullOutcome: null,
+    onMergePull: vi.fn(),
+    onRebasePull: vi.fn(),
+    onCancelPull: vi.fn(),
+    ...restOverrides,
+  };
+  const result = render(<RemotePanel {...props} />);
+  // Scoped to this render's container: some tests call renderPanel() twice
+  // without unmounting the first instance, so an unscoped query would match
+  // more than one "Remotes" toggle button.
+  fireEvent.click(within(result.container).getByRole("button", { name: "Remotes" }));
+  if (pendingPull !== undefined) {
+    result.rerender(<RemotePanel {...props} pendingPull={pendingPull} />);
+  }
+  return result;
 }
 
 describe("RemotePanel", () => {

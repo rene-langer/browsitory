@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -43,6 +44,9 @@ describe("Browsitory merge with conflict resolution", () => {
   });
 
   it("merges a diverged branch, resolves a conflict per hunk, and commits the merge", async () => {
+    // "Branches" defaults closed; expand it before its switcher button exists.
+    await expandSidebarSection("Branches");
+
     const branchSwitcherButton = await $("[aria-label='Branch switcher']");
     await branchSwitcherButton.waitForExist({ timeout: 10000 });
     await branchSwitcherButton.click();
@@ -123,6 +127,10 @@ describe("Browsitory merge with conflict resolution", () => {
     // direct fix — it re-mounts `App`, which re-runs the same `openRepo()` auto-open effect
     // against the current on-disk repo state, no stale cache involved.
     await browser.refresh();
+
+    // Idempotent re-expand — see the previous test's comment. Not reset by the reload above:
+    // `AccordionSection`'s open state persists in localStorage, which survives a page refresh.
+    await expandSidebarSection("Branches");
 
     const branchSwitcherButton = await $("[aria-label='Branch switcher']");
     await branchSwitcherButton.waitForExist({ timeout: 10000 });
