@@ -54,7 +54,7 @@ const GRAPH_LIMIT = 300;
 export type SelectedRow = "uncommitted" | { commitId: string };
 
 export interface AppState {
-  repoPath: string | null;
+  repoPath: string;
   selectedRow: SelectedRow;
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -93,7 +93,6 @@ export interface AppState {
 
 export interface UseAppStateResult {
   state: AppState;
-  openRepo(path: string): Promise<void>;
   selectRow(row: SelectedRow): void;
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
@@ -152,9 +151,9 @@ export interface UseAppStateResult {
   refresh(): Promise<void>;
 }
 
-export function useAppState(client: RepoClient): UseAppStateResult {
+export function useAppState(client: RepoClient, repoPath: string): UseAppStateResult {
   const [state, setState] = useState<AppState>({
-    repoPath: null,
+    repoPath,
     selectedRow: "uncommitted",
     status: [],
     commits: [],
@@ -189,23 +188,23 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     try {
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
         await Promise.all([
-          client.getStatus(),
-          client.getCommitGraph(GRAPH_LIMIT),
-          client.listBranches(),
-          client.listWorktrees(),
-          client.listSubmodules(),
-          client.listReflogRefs(),
-          client.listRemotes(),
-          client.listTags(),
-          client.getCurrentUpstream(),
-          client.listStashes(),
-          client.getMergeMessage(),
-          client.getRebaseProgress(),
-          client.detectForgeRepository(),
+          client.getStatus(repoPath),
+          client.getCommitGraph(repoPath, GRAPH_LIMIT),
+          client.listBranches(repoPath),
+          client.listWorktrees(repoPath),
+          client.listSubmodules(repoPath),
+          client.listReflogRefs(repoPath),
+          client.listRemotes(repoPath),
+          client.listTags(repoPath),
+          client.getCurrentUpstream(repoPath),
+          client.listStashes(repoPath),
+          client.getMergeMessage(repoPath),
+          client.getRebaseProgress(repoPath),
+          client.detectForgeRepository(repoPath),
         ]);
       const remoteUpstreams = Object.fromEntries(
         await Promise.all(
-          remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(remote.name)]),
+          remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(repoPath, remote.name)]),
         ),
       );
       const reference = selectedReflogReference.current;
@@ -215,7 +214,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       selectedReflogReference.current = selectedReference;
       const reflog = selectedReference === null
         ? []
-        : await client.getReflog(selectedReference);
+        : await client.getReflog(repoPath, selectedReference);
       setState((prev) => ({
         ...prev,
         status,
@@ -239,14 +238,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     } catch (err) {
       setState((prev) => ({ ...prev, error: String(err) }));
     }
-  }, [client]);
+  }, [client, repoPath]);
 
   const activeTransferId = useRef<string | null>(null);
   const transferRequestPending = useRef(false);
 
   useEffect(() => {
-    if (state.repoPath === null) return;
-
     return client.subscribeTransferProgress((progress) => {
       if (progress.phase === "Starting") {
         if (!transferRequestPending.current || activeTransferId.current !== null) return;
@@ -281,7 +278,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
       setState((prev) => ({ ...prev, transfer: progress }));
     });
-  }, [client, refresh, state.repoPath]);
+  }, [client, refresh, repoPath]);
 
   const runMutation = useCallback(
     async (mutate: () => Promise<void>) => {
@@ -313,94 +310,69 @@ export function useAppState(client: RepoClient): UseAppStateResult {
     [refresh],
   );
 
-  const openRepo = useCallback(
-    (path: string) => {
-      // Invalidate a former repository's transfer before opening the replacement. A completion
-      // event can arrive while the worker is changing repositories; it must never refresh or
-      // clear pending state for the newly opened repository.
-      activeTransferId.current = null;
-      transferRequestPending.current = false;
-      selectedReflogReference.current = null;
-      setState((prev) => ({ ...prev, transfer: null }));
-      return runMutation(async () => {
-        await client.openRepo(path);
-        setState((prev) => ({
-          ...prev,
-          repoPath: path,
-          selectedRow: "uncommitted",
-          pullOutcome: null,
-          // A different repository can have a remote with the same name (e.g. "origin") — its
-          // pull-request lists must not linger under that name for the newly opened repository.
-          pullRequests: {},
-        }));
-      });
-    },
-    [client, runMutation],
-  );
-
   const selectRow = useCallback((row: SelectedRow) => {
     setState((prev) => ({ ...prev, selectedRow: row }));
   }, []);
 
   const stageFile = useCallback(
-    (path: string) => runMutation(() => client.stageFile(path)),
-    [client, runMutation],
+    (path: string) => runMutation(() => client.stageFile(repoPath, path)),
+    [client, runMutation, repoPath],
   );
   const unstageFile = useCallback(
-    (path: string) => runMutation(() => client.unstageFile(path)),
-    [client, runMutation],
+    (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
+    [client, runMutation, repoPath],
   );
   const commit = useCallback(
-    (message: string) => runMutation(() => client.commit(message)),
-    [client, runMutation],
+    (message: string) => runMutation(() => client.commit(repoPath, message)),
+    [client, runMutation, repoPath],
   );
 
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
       runMutation(async () => {
-        await client.createBranch(name, startPoint);
+        await client.createBranch(repoPath, name, startPoint);
         setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const switchBranch = useCallback(
     (name: string) =>
       runMutation(async () => {
-        await client.switchBranch(name);
+        await client.switchBranch(repoPath, name);
         setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const deleteBranch = useCallback(
-    (name: string, force: boolean) => runMutation(() => client.deleteBranch(name, force)),
-    [client, runMutation],
+    (name: string, force: boolean) => runMutation(() => client.deleteBranch(repoPath, name, force)),
+    [client, runMutation, repoPath],
   );
   const renameBranch = useCallback(
-    (oldName: string, newName: string) => runMutation(() => client.renameBranch(oldName, newName)),
-    [client, runMutation],
+    (oldName: string, newName: string) => runMutation(() => client.renameBranch(repoPath, oldName, newName)),
+    [client, runMutation, repoPath],
   );
   const createWorktree = useCallback(
     (name: string, path: string, branch: string, startPoint: string | null) =>
-      runMutation(() => client.createWorktree(name, path, branch, startPoint)),
-    [client, runMutation],
+      runMutation(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
+    [client, runMutation, repoPath],
   );
   const removeWorktree = useCallback(
-    (name: string) => runMutation(() => client.removeWorktree(name)),
-    [client, runMutation],
+    (name: string) => runMutation(() => client.removeWorktree(repoPath, name)),
+    [client, runMutation, repoPath],
   );
   const pruneWorktrees = useCallback(
-    () => runMutation(() => client.pruneWorktrees()),
-    [client, runMutation],
+    () => runMutation(() => client.pruneWorktrees(repoPath)),
+    [client, runMutation, repoPath],
   );
 
   const initSubmodule = useCallback(
-    (path: string) => runMutation(() => client.initSubmodule(path)),
-    [client, runMutation],
+    (path: string) => runMutation(() => client.initSubmodule(repoPath, path)),
+    [client, runMutation, repoPath],
   );
   const updateSubmodule = useCallback(
     (path: string, recursive: boolean) =>
-      runMutation(() => client.updateSubmodule(path, recursive)),
-    [client, runMutation],
+      runMutation(() => client.updateSubmodule(repoPath, path, recursive)),
+    [client, runMutation, repoPath],
   );
 
   const selectReflogReference = useCallback(
@@ -408,7 +380,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
       const requestGeneration = ++reflogRequestGeneration.current;
       try {
         selectedReflogReference.current = reference;
-        const reflog = await client.getReflog(reference);
+        const reflog = await client.getReflog(repoPath, reference);
         if (
           requestGeneration !== reflogRequestGeneration.current ||
           selectedReflogReference.current !== reference
@@ -430,70 +402,70 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         }
       }
     },
-    [client],
+    [client, repoPath],
   );
   const restoreReflogEntry = useCallback(
     (reference: string, newId: string) => {
       selectedReflogReference.current = reference;
       reflogRequestGeneration.current += 1;
       setState((prev) => ({ ...prev, selectedReflogReference: reference }));
-      return runMutation(() => client.restoreReflogEntry(reference, newId));
+      return runMutation(() => client.restoreReflogEntry(repoPath, reference, newId));
     },
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
 
   const addRemote = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(name, fetchUrl, pushUrl)),
-    [client, runMutation],
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(repoPath, name, fetchUrl, pushUrl)),
+    [client, runMutation, repoPath],
   );
   const renameRemote = useCallback(
     async (oldName: string, newName: string) => {
       let renamed = false;
       await runMutation(async () => {
-        await client.renameRemote(oldName, newName);
+        await client.renameRemote(repoPath, oldName, newName);
         renamed = true;
       });
       return renamed;
     },
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const updateRemoteUrls = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(name, fetchUrl, pushUrl)),
-    [client, runMutation],
+    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl)),
+    [client, runMutation, repoPath],
   );
   const removeRemote = useCallback(
-    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(name, clearUpstreams)),
-    [client, runMutation],
+    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(repoPath, name, clearUpstreams)),
+    [client, runMutation, repoPath],
   );
   const saveHttpsCredential = useCallback(
     (remoteName: string, username: string, token: string) =>
-      runMutation(() => client.saveHttpsCredential(remoteName, username, token)),
-    [client, runMutation],
+      runMutation(() => client.saveHttpsCredential(repoPath, remoteName, username, token)),
+    [client, runMutation, repoPath],
   );
   const forgetHttpsCredential = useCallback(
-    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(remoteName)),
-    [client, runMutation],
+    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(repoPath, remoteName)),
+    [client, runMutation, repoPath],
   );
   const setRemoteAuthMode = useCallback(
     (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
-      runMutationWithOutcome(() => client.setRemoteAuthMode(remoteName, mode, username)),
-    [client, runMutationWithOutcome],
+      runMutationWithOutcome(() => client.setRemoteAuthMode(repoPath, remoteName, mode, username)),
+    [client, runMutationWithOutcome, repoPath],
   );
   const setCurrentUpstream = useCallback(
     (remoteName: string, remoteBranch: string) =>
       runMutation(async () => {
-        await client.setCurrentUpstream(remoteName, remoteBranch);
+        await client.setCurrentUpstream(repoPath, remoteName, remoteBranch);
         setState((prev) => ({ ...prev, pullOutcome: null }));
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const clearCurrentUpstream = useCallback(
     () =>
       runMutation(async () => {
-        await client.clearCurrentUpstream();
+        await client.clearCurrentUpstream(repoPath);
         setState((prev) => ({ ...prev, pullOutcome: null }));
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const startTransfer = useCallback(
     async (operation: TransferProgress["operation"], start: () => Promise<string>) => {
@@ -530,27 +502,27 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   );
 
   const fetchRemote = useCallback(
-    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(remoteName)),
-    [client, startTransfer],
+    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName)),
+    [client, startTransfer, repoPath],
   );
 
   const createTag = useCallback(
-    (name: string, message: string | null) => runMutation(() => client.createTag(name, message)),
-    [client, runMutation],
+    (name: string, message: string | null) => runMutation(() => client.createTag(repoPath, name, message)),
+    [client, runMutation, repoPath],
   );
   const deleteTag = useCallback(
-    (name: string) => runMutation(() => client.deleteTag(name)),
-    [client, runMutation],
+    (name: string) => runMutation(() => client.deleteTag(repoPath, name)),
+    [client, runMutation, repoPath],
   );
   const pushCurrentBranch = useCallback(
     (remoteName: string) =>
-      startTransfer("PushBranch", () => client.pushCurrentBranch(remoteName)),
-    [client, startTransfer],
+      startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName)),
+    [client, startTransfer, repoPath],
   );
   const pushTags = useCallback(
     (remoteName: string, names: string[]) =>
-      startTransfer("PushTags", () => client.pushTags(remoteName, names)),
-    [client, startTransfer],
+      startTransfer("PushTags", () => client.pushTags(repoPath, remoteName, names)),
+    [client, startTransfer, repoPath],
   );
 
   const pullCurrentUpstream = useCallback(async () => {
@@ -564,7 +536,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         pendingPull: null,
         pullOutcome: null,
       }));
-      const outcome: PullOutcome = await client.pullCurrentUpstream();
+      const outcome: PullOutcome = await client.pullCurrentUpstream(repoPath);
       if (outcome.kind === "Diverged") {
         setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
         return;
@@ -587,7 +559,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           : message,
       }));
     }
-  }, [client, refresh]);
+  }, [client, refresh, repoPath]);
   const clearPendingPull = useCallback(() => {
     setState((prev) => ({ ...prev, pendingPull: null }));
   }, []);
@@ -600,12 +572,12 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   }, []);
 
   const saveStash = useCallback(
-    () => runMutation(() => client.saveStash()),
-    [client, runMutation],
+    () => runMutation(() => client.saveStash(repoPath)),
+    [client, runMutation, repoPath],
   );
   const applyStash = useCallback(
-    (index: number) => runMutation(() => client.applyStash(index)),
-    [client, runMutation],
+    (index: number) => runMutation(() => client.applyStash(repoPath, index)),
+    [client, runMutation, repoPath],
   );
   const dropStash = useCallback(
     (index: number) =>
@@ -618,35 +590,35 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           droppedCommitId !== undefined &&
           typeof state.selectedRow === "object" &&
           state.selectedRow.commitId === droppedCommitId;
-        await client.dropStash(index);
+        await client.dropStash(repoPath, index);
         if (dropsSelectedStash) {
           setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
         }
       }),
-    [client, runMutation, state],
+    [client, runMutation, state, repoPath],
   );
 
   const mergeBranch = useCallback(
     (branchName: string): Promise<void> =>
       runMutation(async () => {
-        const outcome: MergeOutcome = await client.mergeBranch(branchName);
+        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName);
         void outcome;
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const resolveConflict = useCallback(
     (path: string, resolvedContent: string) =>
-      runMutation(() => client.resolveConflict(path, resolvedContent)),
-    [client, runMutation],
+      runMutation(() => client.resolveConflict(repoPath, path, resolvedContent)),
+    [client, runMutation, repoPath],
   );
   const resolveAddDeleteConflict = useCallback(
     (path: string, choice: FileConflictChoice) =>
-      runMutation(() => client.resolveAddDeleteConflict(path, choice)),
-    [client, runMutation],
+      runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice)),
+    [client, runMutation, repoPath],
   );
   const abortMerge = useCallback(
-    () => runMutation(() => client.abortMerge()),
-    [client, runMutation],
+    () => runMutation(() => client.abortMerge(repoPath)),
+    [client, runMutation, repoPath],
   );
 
   const openRebasePlanner = useCallback((commitId: string) => {
@@ -659,29 +631,29 @@ export function useAppState(client: RepoClient): UseAppStateResult {
   const startRebase = useCallback(
     (onto: string, plan: RebasePlanEntry[]): Promise<void> =>
       runMutation(async () => {
-        const result: RebaseStepResult = await client.startRebase(onto, plan);
+        const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
         void result;
         setState((prev) => ({ ...prev, rebaseOnto: null }));
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const rebaseContinue = useCallback(
     (): Promise<void> =>
       runMutation(async () => {
-        const result: RebaseStepResult = await client.rebaseContinue();
+        const result: RebaseStepResult = await client.rebaseContinue(repoPath);
         void result;
       }),
-    [client, runMutation],
+    [client, runMutation, repoPath],
   );
   const abortRebase = useCallback(
-    () => runMutation(() => client.abortRebase()),
-    [client, runMutation],
+    () => runMutation(() => client.abortRebase(repoPath)),
+    [client, runMutation, repoPath],
   );
 
   const listPullRequests = useCallback(
     async (remoteName: string, account: string) => {
       try {
-        const result = await client.listPullRequests(remoteName, account);
+        const result = await client.listPullRequests(repoPath, remoteName, account);
         setState((prev) => ({
           ...prev,
           pullRequests: { ...prev.pullRequests, [remoteName]: result },
@@ -699,22 +671,22 @@ export function useAppState(client: RepoClient): UseAppStateResult {
         });
       }
     },
-    [client],
+    [client, repoPath],
   );
   const saveForgeToken = useCallback(
     (provider: ForgeProvider, account: string, token: string) =>
-      runMutation(() => client.saveForgeToken(provider, account, token)),
-    [client, runMutation],
+      runMutation(() => client.saveForgeToken(repoPath, provider, account, token)),
+    [client, runMutation, repoPath],
   );
   const forgetForgeToken = useCallback(
     (provider: ForgeProvider, account: string) =>
-      runMutation(() => client.forgetForgeToken(provider, account)),
-    [client, runMutation],
+      runMutation(() => client.forgetForgeToken(repoPath, provider, account)),
+    [client, runMutation, repoPath],
   );
   const createPullRequest = useCallback(
     (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
       runMutationWithOutcome(async () => {
-        const created = await client.createPullRequest(remoteName, account, pullRequest);
+        const created = await client.createPullRequest(repoPath, remoteName, account, pullRequest);
         setState((prev) => {
           const existing = prev.pullRequests[remoteName];
           const updated: PullRequestList = {
@@ -727,7 +699,7 @@ export function useAppState(client: RepoClient): UseAppStateResult {
           };
         });
       }),
-    [client, runMutationWithOutcome],
+    [client, runMutationWithOutcome, repoPath],
   );
   const openExternalUrl = useCallback(
     (url: string) => client.openExternalUrl(url),
@@ -736,7 +708,6 @@ export function useAppState(client: RepoClient): UseAppStateResult {
 
   return {
     state,
-    openRepo,
     selectRow,
     stageFile,
     unstageFile,

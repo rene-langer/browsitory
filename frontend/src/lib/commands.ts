@@ -1,4 +1,5 @@
 import type { UseAppStateResult } from "../state/useAppState";
+import type { OpenRepo } from "../state/useOpenRepos";
 
 export interface Command {
   id: string;
@@ -22,7 +23,15 @@ const SIDEBAR_SECTIONS = [
 ] as const;
 
 function goToSidebarSection(title: string): void {
-  const button = document.querySelector<HTMLButtonElement>(
+  // Scoped to the active tab's workspace, not the whole document: every open repo's
+  // `RepoWorkspace` stays mounted simultaneously (inactive ones are only `display: none`), so a
+  // document-wide lookup always resolves to whichever tab is first in document order. On any
+  // other tab that silently expanded a hidden tab's accordion and scrolled an invisible element
+  // into view — a no-op from the user's side. `App.tsx` marks the visible workspace with
+  // `data-active-repo="true"`.
+  const workspace = document.querySelector(`[data-active-repo="true"]`);
+  if (workspace === null) return;
+  const button = workspace.querySelector<HTMLButtonElement>(
     `section[aria-label="${title}"] button[aria-expanded]`,
   );
   if (button === null) return;
@@ -32,7 +41,12 @@ function goToSidebarSection(title: string): void {
   button.closest("section")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-export function buildCommands(appState: UseAppStateResult): Command[] {
+export function buildCommands(
+  appState: UseAppStateResult,
+  onOpenRepoTab: (path: string) => void = () => {},
+  otherOpenRepos: OpenRepo[] = [],
+  onSwitchRepoTab: (path: string) => void = () => {},
+): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
 
@@ -165,7 +179,7 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
         id: `open-worktree:${worktree.path}`,
         label: `Open worktree ${worktree.name}`,
         keywords: ["worktree", "open", worktree.name],
-        run: () => void appState.openRepo(worktree.path),
+        run: () => onOpenRepoTab(worktree.path),
       });
       // Removing a worktree has a real confirmation dialog in WorktreePanel —
       // navigate there instead of removing directly from the palette.
@@ -208,6 +222,15 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
       label: `Go to ${title}`,
       keywords: ["go", "navigate", title.toLowerCase()],
       run: () => goToSidebarSection(title),
+    });
+  }
+
+  for (const repo of otherOpenRepos) {
+    commands.push({
+      id: `switch-repo:${repo.path}`,
+      label: `Switch to ${repo.displayName}`,
+      keywords: ["repo", "switch", "tab", repo.displayName],
+      run: () => onSwitchRepoTab(repo.path),
     });
   }
 
