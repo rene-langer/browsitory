@@ -141,6 +141,10 @@ function RepoWorkspace({
               isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
+              stashes={appState.state.stashes}
+              onSelectRow={appState.selectRow}
+              onApplyStash={appState.applyStash}
+              onDropStash={appState.dropStash}
             />
             <WorktreePanel
               worktrees={appState.state.worktrees}
@@ -227,14 +231,11 @@ function RepoWorkspace({
               <CommitGraph
                 status={appState.state.status}
                 commits={appState.state.commits}
-                stashes={appState.state.stashes}
                 selectedRow={appState.state.selectedRow}
                 pending={repositoryOperationDisabled}
                 onSelectRow={appState.selectRow}
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
-                onApplyStash={appState.applyStash}
-                onDropStash={appState.dropStash}
               />
             }
             right={

@@ -1,5 +1,5 @@
 import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic } from "./CommitLaneGraphic";
@@ -16,28 +16,21 @@ function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
 export function CommitGraph({
   status,
   commits,
-  stashes,
   selectedRow,
   pending,
   onSelectRow,
   onBranchFromCommit,
   onRebaseFromCommit,
-  onApplyStash,
-  onDropStash,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
-  stashes: StashEntry[];
   selectedRow: SelectedRow;
-  // True while a mutation (e.g. an Apply/Drop stash) is in flight. Disables the Apply/Drop
-  // buttons below so a rapid double-click can't fire the same index-based mutation twice
-  // before the first one's refresh has landed — see `useAppState.ts`'s `runMutation`.
+  // True while a repository operation is in flight. Disables the "Rebase onto here" context
+  // menu entry below.
   pending: boolean;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
   onRebaseFromCommit: (commitId: string) => void;
-  onApplyStash: (index: number) => void;
-  onDropStash: (index: number) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -47,7 +40,6 @@ export function CommitGraph({
 
   const rows: SelectedRow[] = [
     "uncommitted",
-    ...stashes.map((stash) => ({ commitId: stash.commitId })),
     ...commits.map((commit) => ({ commitId: commit.id })),
   ];
   const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
@@ -81,34 +73,6 @@ export function CommitGraph({
       <ListRow selected={selectedRow === "uncommitted"} onClick={() => onSelectRow("uncommitted")}>
         Uncommitted Changes{status.length > 0 && ` (${status.length})`}
       </ListRow>
-      {stashes.map((stash) => (
-        <ListRow
-          key={stash.commitId}
-          className="stash-row"
-          selected={typeof selectedRow === "object" && selectedRow.commitId === stash.commitId}
-          onClick={() => onSelectRow({ commitId: stash.commitId })}
-        >
-          <span className={styles.stashMessage}>{stash.message}</span>
-          <button
-            disabled={pending}
-            onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              event.stopPropagation();
-              onApplyStash(stash.index);
-            }}
-          >
-            Apply
-          </button>
-          <button
-            disabled={pending}
-            onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              event.stopPropagation();
-              onDropStash(stash.index);
-            }}
-          >
-            Drop
-          </button>
-        </ListRow>
-      ))}
       {commits.map((commit, index) => (
         <ListRow
           key={commit.id}
