@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Mutex};
 use std::thread;
@@ -682,20 +683,58 @@ impl From<CreatePullRequestDto> for crate::pull_requests::CreatePullRequest {
 
 #[derive(Default)]
 pub struct AppState {
-    pub worker: Mutex<Option<Worker>>,
+    pub workers: Mutex<HashMap<String, Worker>>,
 }
 
 #[tauri::command]
 pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let guard = state.workers.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.contains_key(&path) {
+            drop(guard);
+            let _ = config::add_recent_repo(Path::new(&path));
+            return Ok(());
+        }
+    }
     let worker = Worker::spawn(PathBuf::from(&path))?;
-    // A poisoned lock is recoverable here: the worker thread never touches this mutex, so
-    // the `Option<Worker>` behind it can't have been left half-updated.
-    *state.worker.lock().unwrap_or_else(|e| e.into_inner()) = Some(worker);
+    state
+        .workers
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(path.clone(), worker);
     // Best-effort: a repo that opened successfully should count as "recent" even if we can't
     // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
     // over it.
     let _ = config::add_recent_repo(Path::new(&path));
     Ok(())
+}
+
+#[tauri::command]
+pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .workers
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_open_repos() -> Result<(Vec<String>, Option<String>), String> {
+    let (paths, active) = config::list_open_repos().map_err(|e| e.to_string())?;
+    Ok((
+        paths.into_iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        active.map(|p| p.to_string_lossy().into_owned()),
+    ))
+}
+
+#[tauri::command]
+pub fn persist_open_repos(paths: Vec<String>, active_path: Option<String>) -> Result<(), String> {
+    config::set_open_repos(
+        &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
+        active_path.as_deref().map(Path::new),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -721,17 +760,17 @@ pub fn list_recent_repos() -> Result<Vec<String>, String> {
 // Clone the worker's channel handle and drop the guard before blocking on the reply —
 // holding the mutex across the round-trip would serialize every command behind this one
 // and let a wedged worker hold the lock forever.
-fn worker_handle(state: &State<AppState>) -> Result<crate::worker::WorkerHandle, String> {
-    let guard = state.worker.lock().unwrap_or_else(|e| e.into_inner());
+fn worker_handle(state: &State<AppState>, repo_path: &str) -> Result<crate::worker::WorkerHandle, String> {
+    let guard = state.workers.lock().unwrap_or_else(|e| e.into_inner());
     guard
-        .as_ref()
+        .get(repo_path)
         .map(Worker::handle)
-        .ok_or_else(|| "no repo open".to_string())
+        .ok_or_else(|| format!("repo not open: {repo_path}"))
 }
 
 #[tauri::command]
-pub async fn get_status(state: State<'_, AppState>) -> Result<Vec<StatusEntryDto>, String> {
-    let entries = worker_handle(&state)?.get_status()?;
+pub async fn get_status(repo_path: String, state: State<'_, AppState>) -> Result<Vec<StatusEntryDto>, String> {
+    let entries = worker_handle(&state, &repo_path)?.get_status()?;
     Ok(entries
         .into_iter()
         .map(|e| StatusEntryDto {
@@ -744,75 +783,80 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<Vec<StatusEntryDto
 
 #[tauri::command]
 pub async fn get_commit_graph(
+    repo_path: String,
     limit: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, String> {
-    let commits = worker_handle(&state)?.get_commit_graph(limit)?;
+    let commits = worker_handle(&state, &repo_path)?.get_commit_graph(limit)?;
     Ok(commits.into_iter().map(GraphCommitDto::from).collect())
 }
 
 #[tauri::command]
 pub async fn get_working_diff(
+    repo_path: String,
     path: String,
     staged: bool,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    let hunks = worker_handle(&state)?.get_working_diff(path, staged)?;
+    let hunks = worker_handle(&state, &repo_path)?.get_working_diff(path, staged)?;
     Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
 }
 
 #[tauri::command]
 pub async fn get_commit_diff(
+    repo_path: String,
     commit_id: String,
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    let hunks = worker_handle(&state)?.get_commit_diff(commit_id, path)?;
+    let hunks = worker_handle(&state, &repo_path)?.get_commit_diff(commit_id, path)?;
     Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
 }
 
 #[tauri::command]
 pub async fn get_commit_files(
+    repo_path: String,
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    worker_handle(&state)?.get_commit_files(commit_id)
+    worker_handle(&state, &repo_path)?.get_commit_files(commit_id)
 }
 
 #[tauri::command]
 pub async fn get_blame(
+    repo_path: String,
     commit_id: String,
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<BlameLineDto>, String> {
-    let lines = worker_handle(&state)?.get_blame(commit_id, path)?;
+    let lines = worker_handle(&state, &repo_path)?.get_blame(commit_id, path)?;
     Ok(lines.into_iter().map(BlameLineDto::from).collect())
 }
 
 #[tauri::command]
-pub async fn stage_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.stage_file(path)
+pub async fn stage_file(repo_path: String, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.stage_file(path)
 }
 
 #[tauri::command]
-pub async fn unstage_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.unstage_file(path)
+pub async fn unstage_file(repo_path: String, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.unstage_file(path)
 }
 
 #[tauri::command]
-pub async fn commit(message: String, state: State<'_, AppState>) -> Result<String, String> {
-    worker_handle(&state)?.commit(message)
+pub async fn commit(repo_path: String, message: String, state: State<'_, AppState>) -> Result<String, String> {
+    worker_handle(&state, &repo_path)?.commit(message)
 }
 
 #[tauri::command]
-pub async fn list_branches(state: State<'_, AppState>) -> Result<Vec<BranchInfoDto>, String> {
-    let branches = worker_handle(&state)?.list_branches()?;
+pub async fn list_branches(repo_path: String, state: State<'_, AppState>) -> Result<Vec<BranchInfoDto>, String> {
+    let branches = worker_handle(&state, &repo_path)?.list_branches()?;
     Ok(branches.into_iter().map(BranchInfoDto::from).collect())
 }
 
 #[tauri::command]
-pub async fn list_worktrees(state: State<'_, AppState>) -> Result<Vec<WorktreeInfoDto>, String> {
-    Ok(worker_handle(&state)?
+pub async fn list_worktrees(repo_path: String, state: State<'_, AppState>) -> Result<Vec<WorktreeInfoDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
         .list_worktrees()?
         .into_iter()
         .map(WorktreeInfoDto::from)
@@ -821,28 +865,29 @@ pub async fn list_worktrees(state: State<'_, AppState>) -> Result<Vec<WorktreeIn
 
 #[tauri::command]
 pub async fn create_worktree(
+    repo_path: String,
     name: String,
     path: String,
     branch: String,
     start_point: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.create_worktree(name, PathBuf::from(path), branch, start_point)
+    worker_handle(&state, &repo_path)?.create_worktree(name, PathBuf::from(path), branch, start_point)
 }
 
 #[tauri::command]
-pub async fn remove_worktree(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.remove_worktree(name)
+pub async fn remove_worktree(repo_path: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.remove_worktree(name)
 }
 
 #[tauri::command]
-pub async fn prune_worktrees(state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.prune_worktrees()
+pub async fn prune_worktrees(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.prune_worktrees()
 }
 
 #[tauri::command]
-pub async fn list_submodules(state: State<'_, AppState>) -> Result<Vec<SubmoduleInfoDto>, String> {
-    Ok(worker_handle(&state)?
+pub async fn list_submodules(repo_path: String, state: State<'_, AppState>) -> Result<Vec<SubmoduleInfoDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
         .list_submodules()?
         .into_iter()
         .map(SubmoduleInfoDto::from)
@@ -850,30 +895,32 @@ pub async fn list_submodules(state: State<'_, AppState>) -> Result<Vec<Submodule
 }
 
 #[tauri::command]
-pub async fn init_submodule(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.init_submodule(path)
+pub async fn init_submodule(repo_path: String, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.init_submodule(path)
 }
 
 #[tauri::command]
 pub async fn update_submodule(
+    repo_path: String,
     path: String,
     recursive: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.update_submodule(path, recursive)
+    worker_handle(&state, &repo_path)?.update_submodule(path, recursive)
 }
 
 #[tauri::command]
-pub async fn list_reflog_refs(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    worker_handle(&state)?.list_reflog_refs()
+pub async fn list_reflog_refs(repo_path: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    worker_handle(&state, &repo_path)?.list_reflog_refs()
 }
 
 #[tauri::command]
 pub async fn get_reflog(
+    repo_path: String,
     reference: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ReflogEntryDto>, String> {
-    Ok(worker_handle(&state)?
+    Ok(worker_handle(&state, &repo_path)?
         .get_reflog(reference)?
         .into_iter()
         .map(ReflogEntryDto::from)
@@ -882,48 +929,52 @@ pub async fn get_reflog(
 
 #[tauri::command]
 pub async fn restore_reflog_entry(
+    repo_path: String,
     reference: String,
     new_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.restore_reflog_entry(reference, new_id)
+    worker_handle(&state, &repo_path)?.restore_reflog_entry(reference, new_id)
 }
 
 #[tauri::command]
 pub async fn create_branch(
+    repo_path: String,
     name: String,
     start_point: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.create_branch(name, start_point)
+    worker_handle(&state, &repo_path)?.create_branch(name, start_point)
 }
 
 #[tauri::command]
-pub async fn switch_branch(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.switch_branch(name)
+pub async fn switch_branch(repo_path: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.switch_branch(name)
 }
 
 #[tauri::command]
 pub async fn delete_branch(
+    repo_path: String,
     name: String,
     force: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.delete_branch(name, force)
+    worker_handle(&state, &repo_path)?.delete_branch(name, force)
 }
 
 #[tauri::command]
 pub async fn rename_branch(
+    repo_path: String,
     old_name: String,
     new_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.rename_branch(old_name, new_name)
+    worker_handle(&state, &repo_path)?.rename_branch(old_name, new_name)
 }
 
 #[tauri::command]
-pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteInfoDto>, String> {
-    let worker = worker_handle(&state)?;
+pub async fn list_remotes(repo_path: String, state: State<'_, AppState>) -> Result<Vec<RemoteInfoDto>, String> {
+    let worker = worker_handle(&state, &repo_path)?;
     worker
         .list_remotes()?
         .into_iter()
@@ -936,17 +987,19 @@ pub async fn list_remotes(state: State<'_, AppState>) -> Result<Vec<RemoteInfoDt
 
 #[tauri::command]
 pub async fn get_current_upstream(
+    repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Option<UpstreamInfoDto>, String> {
-    let upstream = worker_handle(&state)?.get_current_upstream()?;
+    let upstream = worker_handle(&state, &repo_path)?.get_current_upstream()?;
     Ok(upstream.map(UpstreamInfoDto::from))
 }
 #[tauri::command]
 pub async fn get_remote_upstreams(
+    repo_path: String,
     name: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<UpstreamInfoDto>, String> {
-    Ok(worker_handle(&state)?
+    Ok(worker_handle(&state, &repo_path)?
         .get_remote_upstreams(name)?
         .into_iter()
         .map(UpstreamInfoDto::from)
@@ -955,62 +1008,69 @@ pub async fn get_remote_upstreams(
 
 #[tauri::command]
 pub async fn add_remote(
+    repo_path: String,
     name: String,
     fetch_url: String,
     push_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.add_remote(name, fetch_url, push_url)
+    worker_handle(&state, &repo_path)?.add_remote(name, fetch_url, push_url)
 }
 
 #[tauri::command]
 pub async fn rename_remote(
+    repo_path: String,
     old_name: String,
     new_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.rename_remote(old_name, new_name)
+    worker_handle(&state, &repo_path)?.rename_remote(old_name, new_name)
 }
 
 #[tauri::command]
 pub async fn update_remote_urls(
+    repo_path: String,
     name: String,
     fetch_url: String,
     push_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.update_remote_urls(name, fetch_url, push_url)
+    worker_handle(&state, &repo_path)?.update_remote_urls(name, fetch_url, push_url)
 }
 
 #[tauri::command]
 pub async fn remove_remote(
+    repo_path: String,
     name: String,
     clear_upstreams: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.remove_remote(name, clear_upstreams)
+    worker_handle(&state, &repo_path)?.remove_remote(name, clear_upstreams)
 }
 
 #[tauri::command]
 pub async fn save_https_credential(
+    repo_path: String,
     remote_name: String,
     username: String,
     token: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.save_https_credential(remote_name, username, token)
+    worker_handle(&state, &repo_path)?.save_https_credential(remote_name, username, token)
 }
 
 #[tauri::command]
 pub async fn forget_https_credential(
+    repo_path: String,
     remote_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.forget_https_credential(remote_name)
+    worker_handle(&state, &repo_path)?.forget_https_credential(remote_name)
 }
 
 #[tauri::command]
 pub async fn set_remote_auth_mode(
+    repo_path: String,
     remote_name: String,
     mode: RemoteAuthModeDto,
     username: Option<String>,
@@ -1024,26 +1084,27 @@ pub async fn set_remote_auth_mode(
         },
         RemoteAuthModeDto::SshAgent => git_core::remote::RemoteAuthMode::SshAgent,
     };
-    worker_handle(&state)?.set_remote_auth_mode(remote_name, mode)
+    worker_handle(&state, &repo_path)?.set_remote_auth_mode(remote_name, mode)
 }
 
 #[tauri::command]
 pub async fn set_current_upstream(
+    repo_path: String,
     remote_name: String,
     remote_branch: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.set_current_upstream(remote_name, remote_branch)
+    worker_handle(&state, &repo_path)?.set_current_upstream(remote_name, remote_branch)
 }
 
 #[tauri::command]
-pub async fn clear_current_upstream(state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.clear_current_upstream()
+pub async fn clear_current_upstream(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.clear_current_upstream()
 }
 
 #[tauri::command]
-pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagInfoDto>, String> {
-    Ok(worker_handle(&state)?
+pub async fn list_tags(repo_path: String, state: State<'_, AppState>) -> Result<Vec<TagInfoDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
         .list_tags()?
         .into_iter()
         .map(TagInfoDto::from)
@@ -1052,63 +1113,68 @@ pub async fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagInfoDto>, St
 
 #[tauri::command]
 pub async fn create_tag(
+    repo_path: String,
     name: String,
     message: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.create_tag(name, message)
+    worker_handle(&state, &repo_path)?.create_tag(name, message)
 }
 
 #[tauri::command]
-pub async fn delete_tag(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.delete_tag(name)
+pub async fn delete_tag(repo_path: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.delete_tag(name)
 }
 
 #[tauri::command]
 pub async fn fetch_remote(
+    repo_path: String,
     remote_name: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state)?.fetch_remote(remote_name, event_tx)?;
+    let operation_id = worker_handle(&state, &repo_path)?.fetch_remote(remote_name, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
 
 #[tauri::command]
 pub async fn push_current_branch(
+    repo_path: String,
     remote_name: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state)?.push_current_branch(remote_name, event_tx)?;
+    let operation_id = worker_handle(&state, &repo_path)?.push_current_branch(remote_name, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
 
 #[tauri::command]
 pub async fn push_tags(
+    repo_path: String,
     remote_name: String,
     names: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state)?.push_tags(remote_name, names, event_tx)?;
+    let operation_id = worker_handle(&state, &repo_path)?.push_tags(remote_name, names, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
 
 #[tauri::command]
 pub async fn pull_current_upstream(
+    repo_path: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PullOutcomeDto, String> {
     let (event_tx, event_rx) = mpsc::channel();
     emit_transfer_events(app, event_rx);
-    let handle = worker_handle(&state)?;
+    let handle = worker_handle(&state, &repo_path)?;
     Ok(
         tauri::async_runtime::spawn_blocking(move || handle.pull_current_upstream(event_tx))
             .await
@@ -1118,108 +1184,115 @@ pub async fn pull_current_upstream(
 }
 
 #[tauri::command]
-pub async fn list_stashes(state: State<'_, AppState>) -> Result<Vec<StashEntryDto>, String> {
-    let stashes = worker_handle(&state)?.list_stashes()?;
+pub async fn list_stashes(repo_path: String, state: State<'_, AppState>) -> Result<Vec<StashEntryDto>, String> {
+    let stashes = worker_handle(&state, &repo_path)?.list_stashes()?;
     Ok(stashes.into_iter().map(StashEntryDto::from).collect())
 }
 
 #[tauri::command]
-pub async fn save_stash(state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.save_stash()
+pub async fn save_stash(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.save_stash()
 }
 
 #[tauri::command]
-pub async fn apply_stash(index: usize, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.apply_stash(index)
+pub async fn apply_stash(repo_path: String, index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.apply_stash(index)
 }
 
 #[tauri::command]
-pub async fn drop_stash(index: usize, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.drop_stash(index)
+pub async fn drop_stash(repo_path: String, index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.drop_stash(index)
 }
 
 #[tauri::command]
 pub async fn start_merge(
+    repo_path: String,
     branch_name: String,
     state: State<'_, AppState>,
 ) -> Result<MergeOutcomeDto, String> {
-    let outcome = worker_handle(&state)?.start_merge(branch_name)?;
+    let outcome = worker_handle(&state, &repo_path)?.start_merge(branch_name)?;
     Ok(MergeOutcomeDto::from(outcome))
 }
 
 #[tauri::command]
 pub async fn get_conflict_hunks(
+    repo_path: String,
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ConflictSegmentDto>, String> {
-    let segments = worker_handle(&state)?.get_conflict_hunks(path)?;
+    let segments = worker_handle(&state, &repo_path)?.get_conflict_hunks(path)?;
     Ok(segments.into_iter().map(ConflictSegmentDto::from).collect())
 }
 
 #[tauri::command]
 pub async fn resolve_conflict(
+    repo_path: String,
     path: String,
     resolved_content: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.resolve_conflict(path, resolved_content)
+    worker_handle(&state, &repo_path)?.resolve_conflict(path, resolved_content)
 }
 
 #[tauri::command]
-pub async fn abort_merge(state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.abort_merge()
+pub async fn abort_merge(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.abort_merge()
 }
 
 #[tauri::command]
-pub async fn get_merge_message(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    worker_handle(&state)?.get_merge_message()
+pub async fn get_merge_message(repo_path: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    worker_handle(&state, &repo_path)?.get_merge_message()
 }
 
 #[tauri::command]
 pub async fn resolve_add_delete_conflict(
+    repo_path: String,
     path: String,
     choice: FileConflictChoiceDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.resolve_add_delete_conflict(path, choice.into())
+    worker_handle(&state, &repo_path)?.resolve_add_delete_conflict(path, choice.into())
 }
 
 #[tauri::command]
 pub async fn commits_since(
+    repo_path: String,
     onto: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<RebasePlanCommitDto>, String> {
-    let commits = worker_handle(&state)?.commits_since(onto)?;
+    let commits = worker_handle(&state, &repo_path)?.commits_since(onto)?;
     Ok(commits.into_iter().map(RebasePlanCommitDto::from).collect())
 }
 
 #[tauri::command]
 pub async fn start_rebase(
+    repo_path: String,
     onto: String,
     plan: Vec<RebasePlanEntryDto>,
     state: State<'_, AppState>,
 ) -> Result<RebaseStepResultDto, String> {
     let plan = plan.into_iter().map(Into::into).collect();
-    let result = worker_handle(&state)?.start_rebase(onto, plan)?;
+    let result = worker_handle(&state, &repo_path)?.start_rebase(onto, plan)?;
     Ok(RebaseStepResultDto::from(result))
 }
 
 #[tauri::command]
-pub async fn rebase_continue(state: State<'_, AppState>) -> Result<RebaseStepResultDto, String> {
-    let result = worker_handle(&state)?.rebase_continue()?;
+pub async fn rebase_continue(repo_path: String, state: State<'_, AppState>) -> Result<RebaseStepResultDto, String> {
+    let result = worker_handle(&state, &repo_path)?.rebase_continue()?;
     Ok(RebaseStepResultDto::from(result))
 }
 
 #[tauri::command]
-pub async fn abort_rebase(state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state)?.abort_rebase()
+pub async fn abort_rebase(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.abort_rebase()
 }
 
 #[tauri::command]
 pub async fn get_rebase_progress(
+    repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Option<RebaseProgressDto>, String> {
-    let progress = worker_handle(&state)?.get_rebase_progress()?;
+    let progress = worker_handle(&state, &repo_path)?.get_rebase_progress()?;
     Ok(
         progress.map(|(current_step, total_steps)| RebaseProgressDto {
             current_step,
@@ -1230,9 +1303,10 @@ pub async fn get_rebase_progress(
 
 #[tauri::command]
 pub async fn detect_forge_repository(
+    repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ForgeRepositoryDto>, String> {
-    Ok(worker_handle(&state)?
+    Ok(worker_handle(&state, &repo_path)?
         .detect_forge_repository()?
         .into_iter()
         .map(ForgeRepositoryDto::from)
@@ -1241,43 +1315,47 @@ pub async fn detect_forge_repository(
 
 #[tauri::command]
 pub async fn save_forge_token(
+    repo_path: String,
     provider: ForgeProviderDto,
     account: String,
     token: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.save_forge_token(provider.into(), account, token)
+    worker_handle(&state, &repo_path)?.save_forge_token(provider.into(), account, token)
 }
 
 #[tauri::command]
 pub async fn forget_forge_token(
+    repo_path: String,
     provider: ForgeProviderDto,
     account: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state)?.forget_forge_token(provider.into(), account)
+    worker_handle(&state, &repo_path)?.forget_forge_token(provider.into(), account)
 }
 
 #[tauri::command]
 pub async fn list_pull_requests(
+    repo_path: String,
     remote_name: String,
     account: String,
     state: State<'_, AppState>,
 ) -> Result<PullRequestListDto, String> {
     Ok(PullRequestListDto::from(
-        worker_handle(&state)?.list_pull_requests(remote_name, account)?,
+        worker_handle(&state, &repo_path)?.list_pull_requests(remote_name, account)?,
     ))
 }
 
 #[tauri::command]
 pub async fn create_pull_request(
+    repo_path: String,
     remote_name: String,
     account: String,
     pull_request: CreatePullRequestDto,
     state: State<'_, AppState>,
 ) -> Result<PullRequestDto, String> {
     let created =
-        worker_handle(&state)?.create_pull_request(remote_name, account, pull_request.into())?;
+        worker_handle(&state, &repo_path)?.create_pull_request(remote_name, account, pull_request.into())?;
     Ok(PullRequestDto::from(created))
 }
 
@@ -1631,5 +1709,47 @@ mod tests {
                 expected_diff_origin_wire_value(origin)
             );
         }
+    }
+
+    #[test]
+    fn two_open_repos_have_independent_worker_state() {
+        use std::collections::HashMap;
+        use crate::worker::Worker;
+
+        let dir_a = tempfile::TempDir::new().unwrap();
+        let repo_a = git2::Repository::init(dir_a.path()).unwrap();
+        {
+            let mut config = repo_a.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+        std::fs::write(dir_a.path().join("a.txt"), "a").unwrap();
+
+        let dir_b = tempfile::TempDir::new().unwrap();
+        let repo_b = git2::Repository::init(dir_b.path()).unwrap();
+        {
+            let mut config = repo_b.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+        }
+
+        let mut workers: HashMap<String, Worker> = HashMap::new();
+        workers.insert(
+            dir_a.path().to_string_lossy().into_owned(),
+            Worker::spawn(dir_a.path().to_path_buf()).unwrap(),
+        );
+        workers.insert(
+            dir_b.path().to_string_lossy().into_owned(),
+            Worker::spawn(dir_b.path().to_path_buf()).unwrap(),
+        );
+
+        let handle_a = workers[&dir_a.path().to_string_lossy().into_owned()].handle();
+        let handle_b = workers[&dir_b.path().to_string_lossy().into_owned()].handle();
+
+        handle_a.stage_file("a.txt".to_string()).unwrap();
+
+        assert_eq!(handle_a.get_status().unwrap().len(), 1);
+        assert!(handle_a.get_status().unwrap()[0].staged);
+        assert!(handle_b.get_status().unwrap().is_empty());
     }
 }
