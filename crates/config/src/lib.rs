@@ -27,9 +27,16 @@ pub(crate) const MAX_RECENT_REPOS: usize = 10;
 struct ConfigFile {
     #[serde(default)]
     recent_repos: Vec<PathBuf>,
+    #[serde(default)]
+    open_repos: Vec<PathBuf>,
+    #[serde(default)]
+    active_repo: Option<PathBuf>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
+    if let Ok(dir) = std::env::var("BROWSITORY_CONFIG_DIR") {
+        return Ok(PathBuf::from(dir).join("config.toml"));
+    }
     let dirs = directories::ProjectDirs::from("com", "browsitory", "Browsitory")
         .ok_or(ConfigError::NoConfigDir)?;
     Ok(dirs.config_dir().join("config.toml"))
@@ -58,6 +65,32 @@ pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigE
     config.recent_repos.retain(|p| p != path);
     config.recent_repos.insert(0, path.to_path_buf());
     config.recent_repos.truncate(MAX_RECENT_REPOS);
+    write_config(config_file, &config)
+}
+
+pub fn list_open_repos() -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
+    list_open_repos_at(&config_file_path()?)
+}
+
+pub fn set_open_repos(paths: &[PathBuf], active: Option<&Path>) -> Result<(), ConfigError> {
+    set_open_repos_at(&config_file_path()?, paths, active)
+}
+
+pub fn list_open_repos_at(
+    config_file: &Path,
+) -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
+    let config = read_config(config_file)?;
+    Ok((config.open_repos, config.active_repo))
+}
+
+pub fn set_open_repos_at(
+    config_file: &Path,
+    paths: &[PathBuf],
+    active: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.open_repos = paths.to_vec();
+    config.active_repo = active.map(|p| p.to_path_buf());
     write_config(config_file, &config)
 }
 

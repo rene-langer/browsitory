@@ -11,6 +11,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
+const TEST_REPO_PATH = "/repo";
+
 describe("tauriRepoClient remote URL validation", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockClear();
@@ -19,12 +21,19 @@ describe("tauriRepoClient remote URL validation", () => {
   it.each([
     [
       "fetch URL passed to addRemote",
-      () => tauriRepoClient.addRemote("origin", "https://user:secret@example.com/repo.git", null),
+      () =>
+        tauriRepoClient.addRemote(
+          TEST_REPO_PATH,
+          "origin",
+          "https://user:secret@example.com/repo.git",
+          null,
+        ),
     ],
     [
       "push URL passed to updateRemoteUrls",
       () =>
         tauriRepoClient.updateRemoteUrls(
+          TEST_REPO_PATH,
           "origin",
           "https://example.com/repo.git",
           "HTTPS://user@example.com/repo.git",
@@ -46,9 +55,10 @@ describe("tauriRepoClient credentials", () => {
   it("sends a token only as the direct save command argument", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    await tauriRepoClient.saveHttpsCredential("origin", "rene", "token-123");
+    await tauriRepoClient.saveHttpsCredential(TEST_REPO_PATH, "origin", "rene", "token-123");
 
     expect(invoke).toHaveBeenCalledWith("save_https_credential", {
+      repoPath: TEST_REPO_PATH,
       remoteName: "origin",
       username: "rene",
       token: "token-123",
@@ -64,27 +74,30 @@ describe("tauriRepoClient worktrees", () => {
   it("maps worktree operations to their Tauri commands", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    await tauriRepoClient.listWorktrees();
+    await tauriRepoClient.listWorktrees(TEST_REPO_PATH);
     await tauriRepoClient.createWorktree(
+      TEST_REPO_PATH,
       "feature-tree",
       "/repos/project-feature",
       "feature",
       null,
     );
-    await tauriRepoClient.removeWorktree("feature-tree");
-    await tauriRepoClient.pruneWorktrees();
+    await tauriRepoClient.removeWorktree(TEST_REPO_PATH, "feature-tree");
+    await tauriRepoClient.pruneWorktrees(TEST_REPO_PATH);
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "list_worktrees");
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_worktrees", { repoPath: TEST_REPO_PATH });
     expect(invoke).toHaveBeenNthCalledWith(2, "create_worktree", {
+      repoPath: TEST_REPO_PATH,
       name: "feature-tree",
       path: "/repos/project-feature",
       branch: "feature",
       startPoint: null,
     });
     expect(invoke).toHaveBeenNthCalledWith(3, "remove_worktree", {
+      repoPath: TEST_REPO_PATH,
       name: "feature-tree",
     });
-    expect(invoke).toHaveBeenNthCalledWith(4, "prune_worktrees");
+    expect(invoke).toHaveBeenNthCalledWith(4, "prune_worktrees", { repoPath: TEST_REPO_PATH });
   });
 });
 
@@ -96,13 +109,17 @@ describe("tauriRepoClient submodules", () => {
   it("maps submodule operations to their Tauri commands", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    await tauriRepoClient.listSubmodules();
-    await tauriRepoClient.initSubmodule("deps/child");
-    await tauriRepoClient.updateSubmodule("deps/child", true);
+    await tauriRepoClient.listSubmodules(TEST_REPO_PATH);
+    await tauriRepoClient.initSubmodule(TEST_REPO_PATH, "deps/child");
+    await tauriRepoClient.updateSubmodule(TEST_REPO_PATH, "deps/child", true);
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "list_submodules");
-    expect(invoke).toHaveBeenNthCalledWith(2, "init_submodule", { path: "deps/child" });
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_submodules", { repoPath: TEST_REPO_PATH });
+    expect(invoke).toHaveBeenNthCalledWith(2, "init_submodule", {
+      repoPath: TEST_REPO_PATH,
+      path: "deps/child",
+    });
     expect(invoke).toHaveBeenNthCalledWith(3, "update_submodule", {
+      repoPath: TEST_REPO_PATH,
       path: "deps/child",
       recursive: true,
     });
@@ -117,13 +134,17 @@ describe("tauriRepoClient reflog", () => {
   it("maps reflog operations to their Tauri commands", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
 
-    await tauriRepoClient.listReflogRefs();
-    await tauriRepoClient.getReflog("HEAD");
-    await tauriRepoClient.restoreReflogEntry("HEAD", "0123456789abcdef");
+    await tauriRepoClient.listReflogRefs(TEST_REPO_PATH);
+    await tauriRepoClient.getReflog(TEST_REPO_PATH, "HEAD");
+    await tauriRepoClient.restoreReflogEntry(TEST_REPO_PATH, "HEAD", "0123456789abcdef");
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "list_reflog_refs");
-    expect(invoke).toHaveBeenNthCalledWith(2, "get_reflog", { reference: "HEAD" });
+    expect(invoke).toHaveBeenNthCalledWith(1, "list_reflog_refs", { repoPath: TEST_REPO_PATH });
+    expect(invoke).toHaveBeenNthCalledWith(2, "get_reflog", {
+      repoPath: TEST_REPO_PATH,
+      reference: "HEAD",
+    });
     expect(invoke).toHaveBeenNthCalledWith(3, "restore_reflog_entry", {
+      repoPath: TEST_REPO_PATH,
       reference: "HEAD",
       newId: "0123456789abcdef",
     });
@@ -148,7 +169,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
     vi.mocked(invoke).mockResolvedValue("fetch-42");
 
     tauriRepoClient.subscribeTransferProgress(() => {});
-    const fetch = tauriRepoClient.fetchRemote("origin");
+    const fetch = tauriRepoClient.fetchRemote(TEST_REPO_PATH, "origin");
     await Promise.resolve();
     expect(invoke).not.toHaveBeenCalled();
 
@@ -158,7 +179,10 @@ describe("tauriRepoClient transfer progress subscription", () => {
 
     resolveCompleted(() => {});
     await expect(fetch).resolves.toBe("fetch-42");
-    expect(invoke).toHaveBeenCalledWith("fetch_remote", { remoteName: "origin" });
+    expect(invoke).toHaveBeenCalledWith("fetch_remote", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+    });
   });
 
   it("normalizes progress events and unregisters its listeners", async () => {

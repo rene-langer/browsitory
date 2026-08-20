@@ -118,12 +118,14 @@ function recomputeGroupLeaders(prev: Row[], next: Row[]): Row[] {
 }
 
 export function RebasePlanner({
+  repoPath,
   client,
   onto,
   onStartRebase,
   onCancel,
   operationDisabled = false,
 }: {
+  repoPath: string;
   client: RepoClient;
   onto: string;
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
@@ -134,7 +136,7 @@ export function RebasePlanner({
 
   useEffect(() => {
     let ignore = false;
-    client.commitsSince(onto).then((commits) => {
+    client.commitsSince(repoPath, onto).then((commits) => {
       if (!ignore) {
         setRows(
           commits.map((commit) => ({
@@ -149,7 +151,7 @@ export function RebasePlanner({
     return () => {
       ignore = true;
     };
-  }, [client, onto]);
+  }, [repoPath, client, onto]);
 
   const moveRow = (index: number, direction: -1 | 1) => {
     const target = index + direction;

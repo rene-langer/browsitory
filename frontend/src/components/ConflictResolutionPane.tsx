@@ -7,11 +7,13 @@ import styles from "./ConflictResolutionPane.module.css";
 type Resolution = "ours" | "theirs" | "both";
 
 export function ConflictResolutionPane({
+  repoPath,
   client,
   path,
   onResolve,
   onResolveAddDelete,
 }: {
+  repoPath: string;
   client: RepoClient;
   path: string;
   onResolve: (path: string, resolvedContent: string) => void;
@@ -33,7 +35,7 @@ export function ConflictResolutionPane({
   useEffect(() => {
     let ignore = false;
     client
-      .getConflictHunks(path)
+      .getConflictHunks(repoPath, path)
       .then((next) => {
         if (!ignore) {
           setSegments(next);
@@ -53,7 +55,7 @@ export function ConflictResolutionPane({
     return () => {
       ignore = true;
     };
-  }, [client, path]);
+  }, [repoPath, client, path]);
 
   if (error !== null) {
     if (isAddDeleteConflict) {

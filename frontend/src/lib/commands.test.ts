@@ -59,7 +59,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       pending: false,
       ...overrides,
     },
-    openRepo: vi.fn(),
     selectRow: vi.fn(),
     stageFile: vi.fn(),
     unstageFile: vi.fn(),
@@ -189,8 +188,33 @@ describe("buildCommands", () => {
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
     expect(openCmd?.label).toBe("Open worktree wt1");
-    openCmd?.run();
-    expect(appState.openRepo).toHaveBeenCalledWith("/repo-wt1");
+  });
+
+  it("opening a worktree calls onOpenRepoTab instead of a state mutation", () => {
+    const appState = makeAppState({
+      worktrees: [{ name: "feature", path: "/repos/feature-wt", head: "abc123", isMain: false, isLocked: false, isPrunable: false }],
+    });
+    const onOpenRepoTab = vi.fn();
+    const commands = buildCommands(appState, onOpenRepoTab, [], vi.fn());
+
+    const openCommand = commands.find((c) => c.id === "open-worktree:/repos/feature-wt");
+    openCommand?.run();
+    expect(onOpenRepoTab).toHaveBeenCalledWith("/repos/feature-wt");
+  });
+
+  it("includes a Switch to <repo> command for every other open repo", () => {
+    const appState = makeAppState();
+    const otherRepos = [
+      { path: "/repos/widget", displayName: "widget" },
+      { path: "/repos/gadget", displayName: "gadget" },
+    ];
+    const onSwitchRepoTab = vi.fn();
+    const commands = buildCommands(appState, vi.fn(), otherRepos, onSwitchRepoTab);
+
+    const widgetCommand = commands.find((c) => c.id === "switch-repo:/repos/widget");
+    expect(widgetCommand?.label).toBe("Switch to widget");
+    widgetCommand?.run();
+    expect(onSwitchRepoTab).toHaveBeenCalledWith("/repos/widget");
   });
 
   it("splits submodule commands by initialized state", () => {
@@ -227,7 +251,17 @@ describe("buildCommands", () => {
   });
 
   describe("destructive commands navigate instead of mutating directly", () => {
-    function mountSection(title: string): HTMLButtonElement {
+    // Mirrors one tab's `RepoWorkspace`: a wrapper div carrying `data-active-repo`, holding the
+    // sidebar section. Every open tab stays mounted at once, so the wrapper (not the document)
+    // is what `goToSidebarSection` scopes its lookup to.
+    function mountWorkspace(active: boolean): HTMLDivElement {
+      const workspace = document.createElement("div");
+      workspace.setAttribute("data-active-repo", active ? "true" : "false");
+      document.body.appendChild(workspace);
+      return workspace;
+    }
+
+    function mountSectionIn(workspace: HTMLElement, title: string): HTMLButtonElement {
       const section = document.createElement("section");
       section.setAttribute("aria-label", title);
       // jsdom doesn't implement scrollIntoView; goToSidebarSection calls it
@@ -241,8 +275,12 @@ describe("buildCommands", () => {
         button.setAttribute("aria-expanded", "true");
       });
       section.appendChild(button);
-      document.body.appendChild(section);
+      workspace.appendChild(section);
       return button;
+    }
+
+    function mountSection(title: string): HTMLButtonElement {
+      return mountSectionIn(mountWorkspace(true), title);
     }
 
     afterEach(() => {
@@ -280,6 +318,26 @@ describe("buildCommands", () => {
       goToReflogCmd?.run();
       expect(button.getAttribute("aria-expanded")).toBe("true");
       expect(appState.restoreReflogEntry).not.toHaveBeenCalled();
+    });
+
+    it("targets the active tab's section, not the first tab's, when the active tab isn't first", () => {
+      // Both tabs are mounted at once and both carry a "Reflog" section; only the second is
+      // active. A document-wide querySelector would match the first (hidden) tab's button.
+      const backgroundButton = mountSectionIn(mountWorkspace(false), "Reflog");
+      const activeButton = mountSectionIn(mountWorkspace(true), "Reflog");
+
+      buildCommands(makeAppState()).find((c) => c.id === "go-to:Reflog")?.run();
+
+      expect(activeButton.getAttribute("aria-expanded")).toBe("true");
+      expect(backgroundButton.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("does nothing when no workspace is active, rather than expanding a hidden tab's section", () => {
+      const backgroundButton = mountSectionIn(mountWorkspace(false), "Reflog");
+
+      buildCommands(makeAppState()).find((c) => c.id === "go-to:Reflog")?.run();
+
+      expect(backgroundButton.getAttribute("aria-expanded")).toBe("false");
     });
   });
 

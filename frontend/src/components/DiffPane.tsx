@@ -15,6 +15,7 @@ import styles from "./DiffPane.module.css";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 export function DiffPane({
+  repoPath,
   client,
   selectedRow,
   status,
@@ -31,6 +32,7 @@ export function DiffPane({
   onRebaseContinue,
   onRebaseAbort,
 }: {
+  repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
   status: StatusEntry[];
@@ -50,6 +52,7 @@ export function DiffPane({
   if (selectedRow === "uncommitted") {
     return (
       <UncommittedDiffPane
+        repoPath={repoPath}
         client={client}
         status={status}
         onStageFile={onStageFile}
@@ -70,6 +73,7 @@ export function DiffPane({
   return (
     <CommitDiffPane
       key={selectedRow.commitId}
+      repoPath={repoPath}
       client={client}
       commitId={selectedRow.commitId}
       onSelectRow={onSelectRow}
@@ -78,6 +82,7 @@ export function DiffPane({
 }
 
 function UncommittedDiffPane({
+  repoPath,
   client,
   status,
   onStageFile,
@@ -93,6 +98,7 @@ function UncommittedDiffPane({
   onRebaseContinue,
   onRebaseAbort,
 }: {
+  repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
   onStageFile: (path: string) => void;
@@ -131,7 +137,7 @@ function UncommittedDiffPane({
     }
     let ignore = false;
     client
-      .getWorkingDiff(selected.path, selected.staged)
+      .getWorkingDiff(repoPath, selected.path, selected.staged)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -146,7 +152,7 @@ function UncommittedDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, selected, status, viewMode]);
+  }, [repoPath, client, selected, status, viewMode]);
 
   // Same `ignore` guard, gated on `viewMode === "blame"` instead. Blame always targets `"HEAD"`
   // — blaming a dirty working-tree edit isn't meaningful (see the design spec's non-goals).
@@ -159,7 +165,7 @@ function UncommittedDiffPane({
     }
     let ignore = false;
     client
-      .getBlame("HEAD", selected.path)
+      .getBlame(repoPath, "HEAD", selected.path)
       .then((next) => {
         if (!ignore) {
           setBlameLines(next);
@@ -177,7 +183,7 @@ function UncommittedDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, selected, viewMode, status]);
+  }, [repoPath, client, selected, viewMode, status]);
 
   // Once the selected file's conflict is resolved (via this pane, or externally e.g. abort),
   // `status` no longer lists it as `Conflicted`, so the render below correctly stops showing
@@ -244,6 +250,7 @@ function UncommittedDiffPane({
         status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted") ? (
         <ConflictResolutionPane
           key={selected.path}
+          repoPath={repoPath}
           client={client}
           path={selected.path}
           onResolve={onResolveConflict}
@@ -282,10 +289,12 @@ function UncommittedDiffPane({
 }
 
 function CommitDiffPane({
+  repoPath,
   client,
   commitId,
   onSelectRow,
 }: {
+  repoPath: string;
   client: RepoClient;
   commitId: string;
   onSelectRow: (row: SelectedRow) => void;
@@ -303,7 +312,7 @@ function CommitDiffPane({
   useEffect(() => {
     let ignore = false;
     client
-      .getCommitFiles(commitId)
+      .getCommitFiles(repoPath, commitId)
       .then((next) => {
         if (!ignore) {
           setFiles(next);
@@ -318,7 +327,7 @@ function CommitDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, commitId]);
+  }, [repoPath, client, commitId]);
 
   useEffect(() => {
     if (selectedPath === null || viewMode !== "diff") {
@@ -326,7 +335,7 @@ function CommitDiffPane({
     }
     let ignore = false;
     client
-      .getCommitDiff(commitId, selectedPath)
+      .getCommitDiff(repoPath, commitId, selectedPath)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -341,7 +350,7 @@ function CommitDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, commitId, selectedPath, viewMode]);
+  }, [repoPath, client, commitId, selectedPath, viewMode]);
 
   useEffect(() => {
     if (selectedPath === null || viewMode !== "blame") {
@@ -349,7 +358,7 @@ function CommitDiffPane({
     }
     let ignore = false;
     client
-      .getBlame(commitId, selectedPath)
+      .getBlame(repoPath, commitId, selectedPath)
       .then((next) => {
         if (!ignore) {
           setBlameLines(next);
@@ -367,7 +376,7 @@ function CommitDiffPane({
     return () => {
       ignore = true;
     };
-  }, [client, commitId, selectedPath, viewMode]);
+  }, [repoPath, client, commitId, selectedPath, viewMode]);
 
   const displayedHunks = selectedPath === null || viewMode !== "diff" ? [] : hunks;
   const displayedBlameLines = selectedPath === null || viewMode !== "blame" ? [] : blameLines;
