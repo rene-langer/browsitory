@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const STASH_FIXTURE_FILE = "stash-fixture.txt";
@@ -41,6 +42,11 @@ describe("Browsitory stash", () => {
     await stashButton.scrollIntoView({ block: "center" });
 
     await browser.execute((el) => (el as HTMLElement).click(), stashButton);
+
+    // The stash list now lives in the sidebar's "Branches" accordion section, grouped with
+    // branches (see `frontend/src/components/BranchSwitcher.tsx`), not inline in the commit
+    // history — expand it before looking for the row it renders.
+    await expandSidebarSection("Branches");
 
     const stashRow = await $("li*=WIP on");
     await stashRow.waitForExist({ timeout: 10000 });

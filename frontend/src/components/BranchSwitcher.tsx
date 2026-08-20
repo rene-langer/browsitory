@@ -1,7 +1,9 @@
-import { useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 import { GitBranch } from "lucide-react";
-import type { BranchInfo } from "../ipc/RepoClient";
+import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
+import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
 
@@ -18,6 +20,10 @@ export function BranchSwitcher({
   isMerging,
   isRebasing,
   operationDisabled,
+  stashes,
+  onSelectRow,
+  onApplyStash,
+  onDropStash,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -36,6 +42,10 @@ export function BranchSwitcher({
   // drifted — this just stops the user from getting there.
   isRebasing: boolean;
   operationDisabled: boolean;
+  stashes: StashEntry[];
+  onSelectRow: (row: SelectedRow) => void;
+  onApplyStash: (index: number) => void;
+  onDropStash: (index: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -186,6 +196,33 @@ export function BranchSwitcher({
           </button>
           <button onClick={onCloseCreateBranchDraft}>Cancel</button>
         </div>
+      )}
+      {stashes.length > 0 && (
+        <ul className={styles.stashList}>
+          {stashes.map((stash) => (
+            <ListRow key={stash.commitId} className="stash-row" onClick={() => onSelectRow({ commitId: stash.commitId })}>
+              <span className={styles.stashMessage}>{stash.message}</span>
+              <button
+                disabled={operationDisabled}
+                onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                  event.stopPropagation();
+                  onApplyStash(stash.index);
+                }}
+              >
+                Apply
+              </button>
+              <button
+                disabled={operationDisabled}
+                onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                  event.stopPropagation();
+                  onDropStash(stash.index);
+                }}
+              >
+                Drop
+              </button>
+            </ListRow>
+          ))}
+        </ul>
       )}
     </AccordionSection>
   );
