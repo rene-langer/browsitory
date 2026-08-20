@@ -18,10 +18,15 @@ function unimplemented(): never {
   throw new Error("not implemented in this fake");
 }
 
+const TEST_REPO_PATH = "/repo";
+
 const remote: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null, authMode: null, authUsername: null };
 const upstream: UpstreamInfo = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
 
 const remoteManagementClient = {
+  closeRepo: async () => unimplemented(),
+  listOpenRepos: async () => unimplemented(),
+  persistOpenRepos: async () => unimplemented(),
   listRemotes: async () => [remote],
   getCurrentUpstream: async () => upstream,
   getRemoteUpstreams: async () => [upstream],
@@ -113,7 +118,7 @@ describe("useAppState", () => {
         throw new Error("credential keychain failure");
       },
     });
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
     let configured = true;
     await act(async () => {
@@ -127,11 +132,11 @@ describe("useAppState", () => {
   it("forwards a credential token directly to the client without placing it in state", async () => {
     let saved: [string, string, string] | null = null;
     const client = transferClient({
-      saveHttpsCredential: async (remoteName, username, token) => {
+      saveHttpsCredential: async (_repoPath, remoteName, username, token) => {
         saved = [remoteName, username, token];
       },
     });
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
     await act(() => result.current.saveHttpsCredential("origin", "rene", "token-123"));
 
@@ -159,8 +164,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.createTag("v1.0.0", "first release"));
     expect(result.current.state.tags).toEqual([release]);
 
@@ -196,9 +201,9 @@ describe("useAppState", () => {
         removeWorktree: async () => {},
         pruneWorktrees: async () => {},
       });
-      const { result } = renderHook(() => useAppState(client));
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-      await act(() => result.current.openRepo("/repo"));
+      await act(() => result.current.refresh());
       await act(() => {
         if (operation === "create") {
           return result.current.createWorktree("feature", "/repo-feature", "feature", "main");
@@ -238,9 +243,9 @@ describe("useAppState", () => {
         initSubmodule: async () => {},
         updateSubmodule: async () => {},
       });
-      const { result } = renderHook(() => useAppState(client));
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-      await act(() => result.current.openRepo("/repo"));
+      await act(() => result.current.refresh());
       await act(() =>
         operation === "init"
           ? result.current.initSubmodule("deps/child")
@@ -288,9 +293,9 @@ describe("useAppState", () => {
       },
       restoreReflogEntry: async () => {},
     });
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
     await act(() => result.current.restoreReflogEntry("HEAD", entry.newId));
 
     expect(statusCalls).toBe(2);
@@ -324,7 +329,7 @@ describe("useAppState", () => {
     let resolveFeature!: (entries: ReflogEntry[]) => void;
     let rejectHead!: (error: Error) => void;
     const client = transferClient({
-      getReflog: (reference) => new Promise<ReflogEntry[]>((resolve, reject) => {
+      getReflog: (_repoPath, reference) => new Promise<ReflogEntry[]>((resolve, reject) => {
         if (reference === "HEAD") {
           rejectHead = reject;
         } else {
@@ -332,7 +337,7 @@ describe("useAppState", () => {
         }
       }),
     });
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
     let selectHead!: Promise<void>;
     let selectFeature!: Promise<void>;
@@ -369,8 +374,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pushCurrentBranch("origin"));
 
     expect(result.current.state.transfer).toMatchObject({ operationId: "push-42", phase: "Starting" });
@@ -392,8 +397,8 @@ describe("useAppState", () => {
       }),
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     let pull: Promise<void> = Promise.resolve();
     act(() => {
       pull = result.current.pullCurrentUpstream();
@@ -422,8 +427,8 @@ describe("useAppState", () => {
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     expect(result.current.state.transfer).toBeNull();
@@ -449,8 +454,8 @@ describe("useAppState", () => {
       pullCurrentUpstream: async () => outcome,
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     expect(statusCalls).toBe(2);
@@ -458,26 +463,13 @@ describe("useAppState", () => {
     expect(result.current.state.pullOutcome).toEqual(outcome);
   });
 
-  it("clears the last pull outcome when opening another repository", async () => {
-    const client = transferClient({
-      pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
-    });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
-    await act(() => result.current.pullCurrentUpstream());
-
-    await act(() => result.current.openRepo("/other-repo"));
-
-    expect(result.current.state.pullOutcome).toBeNull();
-  });
-
   it("clears the last pull outcome when switching branches", async () => {
     const client = transferClient({
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
       switchBranch: async () => {},
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     await act(() => result.current.switchBranch("feature"));
@@ -490,8 +482,8 @@ describe("useAppState", () => {
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
       setCurrentUpstream: async () => {},
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     await act(() => result.current.setCurrentUpstream("backup", "main"));
@@ -504,8 +496,8 @@ describe("useAppState", () => {
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
       clearCurrentUpstream: async () => {},
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     await act(() => result.current.clearCurrentUpstream());
@@ -528,8 +520,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     expect(result.current.state.pendingPull).toEqual({ upstreamRef: "refs/remotes/origin/main" });
@@ -543,8 +535,8 @@ describe("useAppState", () => {
       pullCurrentUpstream: async () => ({ kind: "Diverged", upstreamRef: "refs/remotes/origin/main" }),
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
     act(() => result.current.clearPendingPull());
 
@@ -559,8 +551,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     expect(result.current.state.pendingPull).toBeNull();
@@ -580,8 +572,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pullCurrentUpstream());
 
     act(() => {
@@ -612,8 +604,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
 
     expect(statusCalls).toBe(2);
@@ -640,8 +632,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
 
     expect(result.current.state.transfer).toBeNull();
@@ -679,8 +671,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
 
     expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
@@ -695,8 +687,8 @@ describe("useAppState", () => {
         throw new Error("Fetch failed");
       },
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
     act(() => listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null }));
 
@@ -718,8 +710,8 @@ describe("useAppState", () => {
         return "agent-push";
       },
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
     expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
     await act(() => result.current.pushCurrentBranch("origin"));
@@ -760,8 +752,8 @@ describe("useAppState", () => {
       },
     });
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     await act(() => result.current.pushCurrentBranch("origin"));
 
     expect(result.current.state.error).toBe(
@@ -770,76 +762,7 @@ describe("useAppState", () => {
     expect(result.current.state.error).not.toBe("Fetch failed");
   });
 
-  it("ignores a former repository's transfer completion after switching repositories", async () => {
-    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
-    let statusCalls = 0;
-    const client: RepoClient = {
-      ...remoteManagementClient,
-      pickRepoFolder: async () => unimplemented(),
-      listRecentRepos: async () => unimplemented(),
-      openRepo: async () => {},
-      getStatus: async () => {
-        statusCalls += 1;
-        return [];
-      },
-      getCommitGraph: async () => [],
-      listBranches: async () => [],
-      createBranch: async () => unimplemented(),
-      switchBranch: async () => unimplemented(),
-      deleteBranch: async () => unimplemented(),
-      renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
-      saveStash: async () => unimplemented(),
-      applyStash: async () => unimplemented(),
-      dropStash: async () => unimplemented(),
-      getBlame: async () => unimplemented(),
-      mergeBranch: async () => unimplemented(),
-      getConflictHunks: async () => unimplemented(),
-      resolveConflict: async () => unimplemented(),
-      abortMerge: async () => unimplemented(),
-      getMergeMessage: async () => null,
-      resolveAddDeleteConflict: async () => unimplemented(),
-      commitsSince: async () => unimplemented(),
-      startRebase: async () => unimplemented(),
-      rebaseContinue: async () => unimplemented(),
-      abortRebase: async () => unimplemented(),
-      getRebaseProgress: async () => null,
-      getWorkingDiff: async () => unimplemented(),
-      getCommitDiff: async () => unimplemented(),
-      getCommitFiles: async () => unimplemented(),
-      stageFile: async () => unimplemented(),
-      unstageFile: async () => unimplemented(),
-      commit: async () => unimplemented(),
-      fetchRemote: async () => "op-1",
-      subscribeTransferProgress: (next) => {
-        listener = next;
-        return () => {};
-      },
-    };
-
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo-a"));
-    await act(() => result.current.fetchRemote("origin"));
-
-    expect(result.current.state.transfer?.operationId).toBe("op-1");
-    expect(result.current.state.pending).toBe(true);
-
-    await act(() => result.current.openRepo("/repo-b"));
-    expect(result.current.state.repoPath).toBe("/repo-b");
-    expect(result.current.state.transfer).toBeNull();
-    expect(result.current.state.pending).toBe(false);
-    expect(statusCalls).toBe(2);
-
-    await act(async () => {
-      listener?.({ operationId: "op-1", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-    });
-
-    expect(result.current.state.transfer).toBeNull();
-    expect(result.current.state.pending).toBe(false);
-    expect(statusCalls).toBe(2);
-  });
-
-  it("openRepo populates repository state including remotes and upstream", async () => {
+  it("refresh populates repository state including remotes and upstream", async () => {
     const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
     const graphCommit: GraphCommit = {
       id: "abc123",
@@ -887,11 +810,11 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
 
-    expect(result.current.state.repoPath).toBe("/repo");
+    expect(result.current.state.repoPath).toBe(TEST_REPO_PATH);
     expect(result.current.state.status.length).toBe(1);
     expect(result.current.state.commits.length).toBe(1);
     expect(result.current.state.remotes).toEqual([remote]);
@@ -941,9 +864,9 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
     expect(getStatusCalls).toBe(1);
 
     act(() => result.current.selectRow({ commitId: "abc123" }));
@@ -990,16 +913,16 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
-      stageFile: async (path: string) => {
+      stageFile: async (_repoPath: string, path: string) => {
         stageFileArg = path;
       },
       unstageFile: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
     expect(result.current.state.status).toEqual([entryA]);
 
     await act(() => result.current.stageFile("a.txt"));
@@ -1008,53 +931,7 @@ describe("useAppState", () => {
     expect(result.current.state.status).toEqual([]);
   });
 
-  it("errors surface in state.error without throwing", async () => {
-    const client: RepoClient = {
-      ...remoteManagementClient,
-      pickRepoFolder: async () => unimplemented(),
-      listRecentRepos: async () => unimplemented(),
-      openRepo: async () => {
-        throw new Error("no such directory");
-      },
-      getStatus: async () => unimplemented(),
-      getCommitGraph: async () => unimplemented(),
-      listBranches: async () => [],
-      createBranch: async () => unimplemented(),
-      switchBranch: async () => unimplemented(),
-      deleteBranch: async () => unimplemented(),
-      renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
-      saveStash: async () => unimplemented(),
-      applyStash: async () => unimplemented(),
-      dropStash: async () => unimplemented(),
-      getBlame: async () => unimplemented(),
-      mergeBranch: async () => unimplemented(),
-      getConflictHunks: async () => unimplemented(),
-      resolveConflict: async () => unimplemented(),
-      abortMerge: async () => unimplemented(),
-      getMergeMessage: async () => null,
-      resolveAddDeleteConflict: async () => unimplemented(),
-      commitsSince: async () => unimplemented(),
-      startRebase: async () => unimplemented(),
-      rebaseContinue: async () => unimplemented(),
-      abortRebase: async () => unimplemented(),
-      getRebaseProgress: async () => null,
-      getWorkingDiff: async () => unimplemented(),
-      getCommitDiff: async () => unimplemented(),
-      getCommitFiles: async () => unimplemented(),
-      stageFile: async () => unimplemented(),
-      unstageFile: async () => unimplemented(),
-      commit: async () => unimplemented(),
-    };
-
-    const { result } = renderHook(() => useAppState(client));
-
-    await act(() => result.current.openRepo("/bad"));
-
-    expect(result.current.state.error).toBe("Error: no such directory");
-  });
-
-  it("openRepo also populates branches", async () => {
+  it("refresh also populates branches", async () => {
     const branch: BranchInfo = { name: "main", isCurrent: true };
     const client: RepoClient = {
       ...remoteManagementClient,
@@ -1092,9 +969,9 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
 
     expect(result.current.state.branches).toEqual([branch]);
   });
@@ -1116,7 +993,7 @@ describe("useAppState", () => {
           : [{ name: "feature", isCurrent: true }, { name: "main", isCurrent: false }];
       },
       createBranch: async () => unimplemented(),
-      switchBranch: async (name: string) => {
+      switchBranch: async (_repoPath: string, name: string) => {
         switchArg = name;
       },
       deleteBranch: async () => unimplemented(),
@@ -1145,8 +1022,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.switchBranch("feature"));
 
@@ -1194,8 +1071,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     act(() => result.current.selectRow({ commitId: "abc123" }));
     expect(result.current.state.selectedRow).toEqual({ commitId: "abc123" });
 
@@ -1214,7 +1091,7 @@ describe("useAppState", () => {
       getStatus: async () => [],
       getCommitGraph: async () => [],
       listBranches: async () => [],
-      createBranch: async (name: string, startPoint: string) => {
+      createBranch: async (_repoPath: string, name: string, startPoint: string) => {
         createArgs = [name, startPoint];
       },
       switchBranch: async () => unimplemented(),
@@ -1244,8 +1121,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     act(() => result.current.openCreateBranchDraft("abc123"));
     expect(result.current.state.createBranchDraft).toEqual({ startPoint: "abc123" });
 
@@ -1292,8 +1169,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     act(() => result.current.selectRow({ commitId: "abc123" }));
     expect(result.current.state.selectedRow).toEqual({ commitId: "abc123" });
 
@@ -1339,7 +1216,7 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     act(() => result.current.openCreateBranchDraft("HEAD"));
 
     act(() => result.current.closeCreateBranchDraft());
@@ -1347,7 +1224,7 @@ describe("useAppState", () => {
     expect(result.current.state.createBranchDraft).toBeNull();
   });
 
-  it("openRepo also populates stashes", async () => {
+  it("refresh also populates stashes", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     const client: RepoClient = {
       ...remoteManagementClient,
@@ -1385,9 +1262,9 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.openRepo("/repo"));
+    await act(() => result.current.refresh());
 
     expect(result.current.state.stashes).toEqual([stash]);
   });
@@ -1438,8 +1315,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.saveStash());
 
@@ -1465,7 +1342,7 @@ describe("useAppState", () => {
       renameBranch: async () => unimplemented(),
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
-      applyStash: async (index: number) => {
+      applyStash: async (_repoPath: string, index: number) => {
         applyStashArg = index;
       },
       dropStash: async () => unimplemented(),
@@ -1489,8 +1366,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.applyStash(0));
 
@@ -1514,7 +1391,7 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
-      dropStash: async (index: number) => {
+      dropStash: async (_repoPath: string, index: number) => {
         dropStashArg = index;
       },
       getBlame: async () => unimplemented(),
@@ -1537,8 +1414,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.dropStash(0));
 
@@ -1587,8 +1464,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     act(() => result.current.selectRow({ commitId: "s1" }));
     expect(result.current.state.selectedRow).toEqual({ commitId: "s1" });
 
@@ -1635,8 +1512,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     act(() => result.current.selectRow({ commitId: "some-other-commit" }));
 
     await act(() => result.current.dropStash(0));
@@ -1685,8 +1562,8 @@ describe("useAppState", () => {
       commit: async () => unimplemented(),
     };
 
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
     expect(result.current.state.pending).toBe(false);
 
     let mutationPromise!: Promise<void>;
@@ -1728,14 +1605,14 @@ describe("useAppState pull requests", () => {
 
   it("creating a pull request on remote B does not touch remote A's already-listed rows", async () => {
     const client = transferClient({
-      listPullRequests: async (remoteName: string) => ({
+      listPullRequests: async (_repoPath: string, remoteName: string) => ({
         pullRequests: remoteName === "remote-a" ? [remoteAPullRequest] : [],
         truncated: false,
       }),
       createPullRequest: async () => remoteBPullRequest,
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.listPullRequests("remote-a", "rene"));
     expect(result.current.state.pullRequests["remote-a"].pullRequests).toEqual([remoteAPullRequest]);
@@ -1756,7 +1633,7 @@ describe("useAppState pull requests", () => {
   it("a failed listing on remote B does not show remote A's stale rows, and clears remote B's own entry", async () => {
     let failNextBListing = false;
     const client = transferClient({
-      listPullRequests: async (remoteName: string) => {
+      listPullRequests: async (_repoPath: string, remoteName: string) => {
         if (remoteName === "remote-b" && failNextBListing) {
           throw new Error("the provider rejected the request");
         }
@@ -1766,8 +1643,8 @@ describe("useAppState pull requests", () => {
         };
       },
     });
-    const { result } = renderHook(() => useAppState(client));
-    await act(() => result.current.openRepo("/repo"));
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
 
     await act(() => result.current.listPullRequests("remote-a", "rene"));
     await act(() => result.current.listPullRequests("remote-b", "rene"));
