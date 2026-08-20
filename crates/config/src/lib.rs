@@ -34,6 +34,9 @@ struct ConfigFile {
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
+    if let Ok(dir) = std::env::var("BROWSITORY_CONFIG_DIR") {
+        return Ok(PathBuf::from(dir).join("config.toml"));
+    }
     let dirs = directories::ProjectDirs::from("com", "browsitory", "Browsitory")
         .ok_or(ConfigError::NoConfigDir)?;
     Ok(dirs.config_dir().join("config.toml"))

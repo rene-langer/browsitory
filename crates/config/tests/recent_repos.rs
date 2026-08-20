@@ -3,6 +3,23 @@ use std::path::{Path, PathBuf};
 use config::{add_recent_repo_at, list_recent_repos_at, list_open_repos_at, set_open_repos_at};
 
 #[test]
+fn config_file_path_env_override_is_used_when_set() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // SAFETY (test-only): this crate's tests don't run this one in parallel with another
+    // that also touches BROWSITORY_CONFIG_DIR — it's set and cleared within this single test.
+    std::env::set_var("BROWSITORY_CONFIG_DIR", dir.path());
+    let result = (|| -> Result<(), config::ConfigError> {
+        config::add_recent_repo(std::path::Path::new("/repos/env-override-check"))?;
+        let recent = config::list_recent_repos()?;
+        assert_eq!(recent, vec![std::path::PathBuf::from("/repos/env-override-check")]);
+        assert!(dir.path().join("config.toml").exists());
+        Ok(())
+    })();
+    std::env::remove_var("BROWSITORY_CONFIG_DIR");
+    result.unwrap();
+}
+
+#[test]
 fn list_recent_repos_at_returns_empty_for_a_missing_file() {
     let dir = tempfile::TempDir::new().unwrap();
     let config_file = dir.path().join("config.toml");
