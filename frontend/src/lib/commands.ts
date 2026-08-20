@@ -1,4 +1,5 @@
 import type { UseAppStateResult } from "../state/useAppState";
+import type { OpenRepo } from "../state/useOpenRepos";
 
 export interface Command {
   id: string;
@@ -32,7 +33,12 @@ function goToSidebarSection(title: string): void {
   button.closest("section")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-export function buildCommands(appState: UseAppStateResult): Command[] {
+export function buildCommands(
+  appState: UseAppStateResult,
+  onOpenRepoTab: (path: string) => void = () => {},
+  otherOpenRepos: OpenRepo[] = [],
+  onSwitchRepoTab: (path: string) => void = () => {},
+): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
 
@@ -165,7 +171,7 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
         id: `open-worktree:${worktree.path}`,
         label: `Open worktree ${worktree.name}`,
         keywords: ["worktree", "open", worktree.name],
-        run: () => void appState.openRepo(worktree.path),
+        run: () => onOpenRepoTab(worktree.path),
       });
       // Removing a worktree has a real confirmation dialog in WorktreePanel —
       // navigate there instead of removing directly from the palette.
@@ -208,6 +214,15 @@ export function buildCommands(appState: UseAppStateResult): Command[] {
       label: `Go to ${title}`,
       keywords: ["go", "navigate", title.toLowerCase()],
       run: () => goToSidebarSection(title),
+    });
+  }
+
+  for (const repo of otherOpenRepos) {
+    commands.push({
+      id: `switch-repo:${repo.path}`,
+      label: `Switch to ${repo.displayName}`,
+      keywords: ["repo", "switch", "tab", repo.displayName],
+      run: () => onSwitchRepoTab(repo.path),
     });
   }
 

@@ -59,7 +59,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       pending: false,
       ...overrides,
     },
-    openRepo: vi.fn(),
     selectRow: vi.fn(),
     stageFile: vi.fn(),
     unstageFile: vi.fn(),
@@ -189,8 +188,33 @@ describe("buildCommands", () => {
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
     expect(openCmd?.label).toBe("Open worktree wt1");
-    openCmd?.run();
-    expect(appState.openRepo).toHaveBeenCalledWith("/repo-wt1");
+  });
+
+  it("opening a worktree calls onOpenRepoTab instead of a state mutation", () => {
+    const appState = makeAppState({
+      worktrees: [{ name: "feature", path: "/repos/feature-wt", head: "abc123", isMain: false, isLocked: false, isPrunable: false }],
+    });
+    const onOpenRepoTab = vi.fn();
+    const commands = buildCommands(appState, onOpenRepoTab, [], vi.fn());
+
+    const openCommand = commands.find((c) => c.id === "open-worktree:/repos/feature-wt");
+    openCommand?.run();
+    expect(onOpenRepoTab).toHaveBeenCalledWith("/repos/feature-wt");
+  });
+
+  it("includes a Switch to <repo> command for every other open repo", () => {
+    const appState = makeAppState();
+    const otherRepos = [
+      { path: "/repos/widget", displayName: "widget" },
+      { path: "/repos/gadget", displayName: "gadget" },
+    ];
+    const onSwitchRepoTab = vi.fn();
+    const commands = buildCommands(appState, vi.fn(), otherRepos, onSwitchRepoTab);
+
+    const widgetCommand = commands.find((c) => c.id === "switch-repo:/repos/widget");
+    expect(widgetCommand?.label).toBe("Switch to widget");
+    widgetCommand?.run();
+    expect(onSwitchRepoTab).toHaveBeenCalledWith("/repos/widget");
   });
 
   it("splits submodule commands by initialized state", () => {
