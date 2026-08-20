@@ -943,6 +943,165 @@ describe("useAppState", () => {
     expect(result.current.state.status).toEqual([]);
   });
 
+  it("stageHunk calls client.stageHunk then refreshes status", async () => {
+    const entryA: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
+    let getStatusCalls = 0;
+    let stageHunkArgs: [string, number, number] | null = null;
+    const client: RepoClient = {
+      ...remoteManagementClient,
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => {
+        getStatusCalls += 1;
+        return getStatusCalls === 1 ? [] : [entryA];
+      },
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getBlame: async () => unimplemented(),
+      mergeBranch: async () => unimplemented(),
+      getConflictHunks: async () => unimplemented(),
+      resolveConflict: async () => unimplemented(),
+      abortMerge: async () => unimplemented(),
+      getMergeMessage: async () => null,
+      resolveAddDeleteConflict: async () => unimplemented(),
+      commitsSince: async () => unimplemented(),
+      startRebase: async () => unimplemented(),
+      rebaseContinue: async () => unimplemented(),
+      abortRebase: async () => unimplemented(),
+      getRebaseProgress: async () => null,
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      stageHunk: async (_repoPath: string, path: string, oldStart: number, newStart: number) => {
+        stageHunkArgs = [path, oldStart, newStart];
+      },
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    expect(result.current.state.status).toEqual([]);
+
+    await act(() => result.current.stageHunk("a.txt", 3, 4));
+
+    expect(stageHunkArgs).toEqual(["a.txt", 3, 4]);
+    expect(result.current.state.status).toEqual([entryA]);
+  });
+
+  it("unstageHunk calls client.unstageHunk with the given path and hunk identity", async () => {
+    let unstageHunkArgs: [string, number, number] | null = null;
+    const client: RepoClient = {
+      ...remoteManagementClient,
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getBlame: async () => unimplemented(),
+      mergeBranch: async () => unimplemented(),
+      getConflictHunks: async () => unimplemented(),
+      resolveConflict: async () => unimplemented(),
+      abortMerge: async () => unimplemented(),
+      getMergeMessage: async () => null,
+      resolveAddDeleteConflict: async () => unimplemented(),
+      commitsSince: async () => unimplemented(),
+      startRebase: async () => unimplemented(),
+      rebaseContinue: async () => unimplemented(),
+      abortRebase: async () => unimplemented(),
+      getRebaseProgress: async () => null,
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async (_repoPath: string, path: string, oldStart: number, newStart: number) => {
+        unstageHunkArgs = [path, oldStart, newStart];
+      },
+      discardHunk: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.unstageHunk("a.txt", 3, 4));
+
+    expect(unstageHunkArgs).toEqual(["a.txt", 3, 4]);
+  });
+
+  it("discardHunk calls client.discardHunk with the given path and hunk identity", async () => {
+    let discardHunkArgs: [string, number, number] | null = null;
+    const client: RepoClient = {
+      ...remoteManagementClient,
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getBlame: async () => unimplemented(),
+      mergeBranch: async () => unimplemented(),
+      getConflictHunks: async () => unimplemented(),
+      resolveConflict: async () => unimplemented(),
+      abortMerge: async () => unimplemented(),
+      getMergeMessage: async () => null,
+      resolveAddDeleteConflict: async () => unimplemented(),
+      commitsSince: async () => unimplemented(),
+      startRebase: async () => unimplemented(),
+      rebaseContinue: async () => unimplemented(),
+      abortRebase: async () => unimplemented(),
+      getRebaseProgress: async () => null,
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async (_repoPath: string, path: string, oldStart: number, newStart: number) => {
+        discardHunkArgs = [path, oldStart, newStart];
+      },
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.discardHunk("a.txt", 3, 4));
+
+    expect(discardHunkArgs).toEqual(["a.txt", 3, 4]);
+  });
+
   it("refresh also populates branches", async () => {
     const branch: BranchInfo = { name: "main", isCurrent: true };
     const client: RepoClient = {
