@@ -78,6 +78,9 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     getCommitFiles: async () => unimplemented(),
     stageFile: async () => unimplemented(),
     unstageFile: async () => unimplemented(),
+    stageHunk: async () => unimplemented(),
+    unstageHunk: async () => unimplemented(),
+    discardHunk: async () => unimplemented(),
     commit: async () => unimplemented(),
     listBranches: async () => [],
     createBranch: async () => unimplemented(),
@@ -807,6 +810,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -861,6 +867,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -917,6 +926,9 @@ describe("useAppState", () => {
         stageFileArg = path;
       },
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -966,6 +978,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1019,6 +1034,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1068,6 +1086,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1118,6 +1139,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1166,6 +1190,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1213,6 +1240,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1259,6 +1289,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1312,6 +1345,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1363,6 +1399,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1411,6 +1450,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1461,6 +1503,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1509,6 +1554,9 @@ describe("useAppState", () => {
       getCommitFiles: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1559,6 +1607,9 @@ describe("useAppState", () => {
           resolveStage = resolve;
         }),
       unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 

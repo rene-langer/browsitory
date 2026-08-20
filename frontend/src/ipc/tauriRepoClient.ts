@@ -52,6 +52,12 @@ export const tauriRepoClient: RepoClient = {
     invoke<string[]>("get_commit_files", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => invoke("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => invoke("unstage_file", { repoPath, path }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    invoke("stage_hunk", { repoPath, path, oldStart, newStart }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    invoke("unstage_hunk", { repoPath, path, oldStart, newStart }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    invoke("discard_hunk", { repoPath, path, oldStart, newStart }),
   commit: (repoPath: string, message: string) => invoke("commit", { repoPath, message }),
   listBranches: (repoPath: string) => invoke<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
