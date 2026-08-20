@@ -6,20 +6,20 @@ mod pull_requests;
 mod worker;
 
 use commands::{
-    abort_merge, abort_rebase, add_remote, apply_stash, clear_current_upstream, close_repo,
-    commit, commits_since, create_branch, create_pull_request, create_tag, create_worktree,
-    delete_branch, delete_tag, detect_forge_repository, drop_stash, fetch_remote,
-    forget_forge_token, forget_https_credential, get_blame, get_commit_diff, get_commit_files,
-    get_commit_graph, get_conflict_hunks, get_current_upstream, get_merge_message,
-    get_rebase_progress, get_reflog, get_remote_upstreams, get_status, get_working_diff,
-    init_submodule, list_branches, list_open_repos, list_pull_requests, list_recent_repos,
-    list_reflog_refs, list_remotes, list_stashes, list_submodules, list_tags, list_worktrees,
-    open_external_url, open_repo, persist_open_repos, pick_repo_folder, prune_worktrees,
-    pull_current_upstream, push_current_branch, push_tags, rebase_continue, remove_remote,
-    remove_worktree, rename_branch, rename_remote, resolve_add_delete_conflict, resolve_conflict,
-    restore_reflog_entry, save_forge_token, save_https_credential, save_stash,
-    set_current_upstream, set_remote_auth_mode, stage_file, start_merge, start_rebase,
-    switch_branch, unstage_file, update_remote_urls, update_submodule, AppState,
+    abort_merge, abort_rebase, add_remote, apply_stash, clear_current_upstream, close_repo, commit,
+    commits_since, create_branch, create_pull_request, create_tag, create_worktree, delete_branch,
+    delete_tag, detect_forge_repository, drop_stash, fetch_remote, forget_forge_token,
+    forget_https_credential, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
+    get_conflict_hunks, get_current_upstream, get_merge_message, get_rebase_progress, get_reflog,
+    get_remote_upstreams, get_status, get_working_diff, init_submodule, list_branches,
+    list_open_repos, list_pull_requests, list_recent_repos, list_reflog_refs, list_remotes,
+    list_stashes, list_submodules, list_tags, list_worktrees, open_external_url, open_repo,
+    persist_open_repos, pick_repo_folder, prune_worktrees, pull_current_upstream,
+    push_current_branch, push_tags, rebase_continue, remove_remote, remove_worktree, rename_branch,
+    rename_remote, resolve_add_delete_conflict, resolve_conflict, restore_reflog_entry,
+    save_forge_token, save_https_credential, save_stash, set_current_upstream,
+    set_remote_auth_mode, stage_file, start_merge, start_rebase, switch_branch, unstage_file,
+    update_remote_urls, update_submodule, AppState,
 };
 
 fn main() {
