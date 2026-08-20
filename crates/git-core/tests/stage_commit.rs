@@ -2,7 +2,7 @@ mod common;
 
 use common::{init_repo, write_file};
 use git_core::commit::commit;
-use git_core::stage::{stage_file, unstage_file};
+use git_core::stage::{stage_file, stage_hunk, unstage_file};
 use git_core::status::StatusKind;
 
 #[test]
@@ -68,6 +68,49 @@ fn unstage_file_on_a_newly_staged_file_makes_it_untracked_again() {
     assert_eq!(entries[0].path, "new.txt");
     assert!(!entries[0].staged);
     assert_eq!(entries[0].kind, StatusKind::New);
+}
+
+#[test]
+fn stage_hunk_stages_only_the_targeted_hunk_leaving_the_other_unstaged() {
+    let (dir, mut repo) = init_repo();
+    let original: String = (1..=15).map(|n| format!("line {n}\n")).collect();
+    write_file(dir.path(), "tracked.txt", &original);
+    stage_file(&repo, "tracked.txt").unwrap();
+    commit(&mut repo, "initial commit").unwrap();
+
+    let mut lines: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
+    lines[1] = "line 2 changed".to_string();
+    lines[13] = "line 14 changed".to_string();
+    let changed = lines.join("\n") + "\n";
+    write_file(dir.path(), "tracked.txt", &changed);
+
+    let hunks = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
+    assert_eq!(hunks.len(), 2, "expected two separate hunks from two far-apart edits");
+
+    stage_hunk(&repo, "tracked.txt", hunks[0].old_start, hunks[0].new_start).unwrap();
+
+    let staged = git_core::diff::working_diff(&repo, "tracked.txt", true).unwrap();
+    let staged_text: String = staged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    assert!(staged_text.contains("line 2 changed"));
+    assert!(!staged_text.contains("line 14 changed"));
+
+    let still_unstaged = git_core::diff::working_diff(&repo, "tracked.txt", false).unwrap();
+    let unstaged_text: String = still_unstaged.iter().flat_map(|h| h.lines.iter()).map(|l| l.content.clone()).collect();
+    assert!(unstaged_text.contains("line 14 changed"));
+    assert!(!unstaged_text.contains("line 2 changed"));
+}
+
+#[test]
+fn stage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "line one\n");
+    stage_file(&repo, "tracked.txt").unwrap();
+    commit(&mut repo, "initial commit").unwrap();
+    write_file(dir.path(), "tracked.txt", "line one changed\n");
+
+    let result = stage_hunk(&repo, "tracked.txt", 999, 999);
+
+    assert!(matches!(result, Err(git_core::stage::StageError::HunkNotFound)));
 }
 
 #[test]
