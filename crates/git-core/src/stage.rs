@@ -65,6 +65,39 @@ pub fn stage_hunk(
     Ok(())
 }
 
+pub fn discard_hunk(
+    repo: &git2::Repository,
+    path: &str,
+    old_start: u32,
+    new_start: u32,
+) -> Result<(), StageError> {
+    let mut opts = git2::DiffOptions::new();
+    opts.pathspec(path)
+        .disable_pathspec_match(true)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true)
+        .reverse(true);
+    let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
+
+    let matched = std::cell::Cell::new(false);
+    let mut apply_opts = git2::ApplyOptions::new();
+    // Same old/new swap as `unstage_hunk` — see its comment.
+    apply_opts.hunk_callback(|hunk| {
+        let is_match = matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
+        if is_match {
+            matched.set(true);
+        }
+        is_match
+    });
+    repo.apply(&diff, git2::ApplyLocation::WorkDir, Some(&mut apply_opts))?;
+
+    if !matched.get() {
+        return Err(StageError::HunkNotFound);
+    }
+    Ok(())
+}
+
 pub fn unstage_hunk(
     repo: &git2::Repository,
     path: &str,
