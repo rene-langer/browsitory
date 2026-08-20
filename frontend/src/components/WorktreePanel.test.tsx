@@ -29,7 +29,8 @@ const branches: BranchInfo[] = [
 function renderPanel(
   overrides: Partial<Parameters<typeof WorktreePanel>[0]> = {},
 ) {
-  return render(
+  localStorage.removeItem("sidebar-worktrees");
+  const result = render(
     <WorktreePanel
       worktrees={[mainWorktree, linkedWorktree]}
       branches={branches}
@@ -41,6 +42,8 @@ function renderPanel(
       {...overrides}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
+  return result;
 }
 
 describe("WorktreePanel", () => {

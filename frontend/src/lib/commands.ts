@@ -1,0 +1,264 @@
+import type { UseAppStateResult } from "../state/useAppState";
+
+export interface Command {
+  id: string;
+  label: string;
+  keywords: string[];
+  run: () => void;
+}
+
+const RECENT_KEY = "command-palette-recent";
+const RECENT_LIMIT = 10;
+const RESULT_LIMIT = 50;
+
+const SIDEBAR_SECTIONS = [
+  "Branches",
+  "Worktrees",
+  "Submodules",
+  "Reflog",
+  "Remotes",
+  "Tags",
+  "Pull Requests",
+] as const;
+
+function goToSidebarSection(title: string): void {
+  const button = document.querySelector<HTMLButtonElement>(
+    `section[aria-label="${title}"] button[aria-expanded]`,
+  );
+  if (button === null) return;
+  if (button.getAttribute("aria-expanded") === "false") {
+    button.click();
+  }
+  button.closest("section")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+export function buildCommands(appState: UseAppStateResult): Command[] {
+  const { state } = appState;
+  const commands: Command[] = [];
+
+  // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
+  // sidebar mutation button behind. Mutating command families must be omitted
+  // (not merely disabled) while it's true; navigation and the in-progress
+  // escape hatches (merge-abort/rebase-continue/rebase-abort/refresh) stay.
+  const repositoryOperationDisabled =
+    state.pending ||
+    state.transfer !== null ||
+    state.mergeMessage !== null ||
+    state.rebaseProgress !== null;
+
+  if (!repositoryOperationDisabled && state.upstream !== null) {
+    commands.push({
+      id: "pull",
+      label: "Pull",
+      keywords: ["pull", "sync"],
+      run: () => void appState.pullCurrentUpstream(),
+    });
+  }
+  // DiffPane's real "Save stash" button is only disabled by
+  // `status.length === 0 || rebaseProgress !== null` — it does not carry the
+  // full repositoryOperationDisabled guard, so this command stays unconditional.
+  commands.push({
+    id: "save-stash",
+    label: "Save stash",
+    keywords: ["stash", "save"],
+    run: () => void appState.saveStash(),
+  });
+  if (!repositoryOperationDisabled) {
+    commands.push({
+      id: "prune-worktrees",
+      label: "Prune worktrees",
+      keywords: ["worktree", "prune"],
+      run: () => void appState.pruneWorktrees(),
+    });
+  }
+  if (state.rebaseProgress !== null) {
+    commands.push({
+      id: "rebase-continue",
+      label: "Continue rebase",
+      keywords: ["rebase", "continue"],
+      run: () => void appState.rebaseContinue(),
+    });
+    commands.push({
+      id: "rebase-abort",
+      label: "Abort rebase",
+      keywords: ["rebase", "abort", "cancel"],
+      run: () => void appState.abortRebase(),
+    });
+  }
+  if (state.mergeMessage !== null) {
+    commands.push({
+      id: "merge-abort",
+      label: "Abort merge",
+      keywords: ["merge", "abort", "cancel"],
+      run: () => void appState.abortMerge(),
+    });
+  }
+  commands.push({
+    id: "refresh",
+    label: "Refresh",
+    keywords: ["refresh", "reload"],
+    run: () => void appState.refresh(),
+  });
+
+  if (!repositoryOperationDisabled) {
+    for (const branch of state.branches) {
+      if (branch.isCurrent) continue;
+      commands.push({
+        id: `switch-branch:${branch.name}`,
+        label: `Switch to ${branch.name}`,
+        keywords: ["branch", "switch", "checkout", branch.name],
+        run: () => void appState.switchBranch(branch.name),
+      });
+    }
+
+    for (const remote of state.remotes) {
+      commands.push({
+        id: `fetch-remote:${remote.name}`,
+        label: `Fetch ${remote.name}`,
+        keywords: ["fetch", "remote", remote.name],
+        run: () => void appState.fetchRemote(remote.name),
+      });
+      commands.push({
+        id: `push-branch:${remote.name}`,
+        label: `Push to ${remote.name}`,
+        keywords: ["push", "remote", remote.name],
+        run: () => void appState.pushCurrentBranch(remote.name),
+      });
+      commands.push({
+        id: `push-tags:${remote.name}`,
+        label: `Push all tags to ${remote.name}`,
+        keywords: ["push", "tags", "remote", remote.name],
+        run: () => void appState.pushTags(remote.name, []),
+      });
+    }
+
+    // Deleting a tag has a real confirmation dialog in TagPanel — the palette
+    // must not skip it. This stays discoverable by tag name but only navigates
+    // to the Tags section; the actual mutation happens behind the confirmation.
+    for (const tag of state.tags) {
+      commands.push({
+        id: `delete-tag:${tag.name}`,
+        label: `Delete tag ${tag.name}`,
+        keywords: ["tag", "delete", tag.name],
+        run: () => goToSidebarSection("Tags"),
+      });
+    }
+
+    for (const stash of state.stashes) {
+      commands.push({
+        id: `apply-stash:${stash.index}`,
+        label: `Apply stash: ${stash.message}`,
+        keywords: ["stash", "apply"],
+        run: () => void appState.applyStash(stash.index),
+      });
+      commands.push({
+        id: `drop-stash:${stash.index}`,
+        label: `Drop stash: ${stash.message}`,
+        keywords: ["stash", "drop", "delete"],
+        run: () => void appState.dropStash(stash.index),
+      });
+    }
+
+    for (const worktree of state.worktrees) {
+      if (worktree.isMain) continue;
+      commands.push({
+        id: `open-worktree:${worktree.path}`,
+        label: `Open worktree ${worktree.name}`,
+        keywords: ["worktree", "open", worktree.name],
+        run: () => void appState.openRepo(worktree.path),
+      });
+      // Removing a worktree has a real confirmation dialog in WorktreePanel —
+      // navigate there instead of removing directly from the palette.
+      commands.push({
+        id: `remove-worktree:${worktree.name}`,
+        label: `Remove worktree ${worktree.name}`,
+        keywords: ["worktree", "remove", "delete", worktree.name],
+        run: () => goToSidebarSection("Worktrees"),
+      });
+    }
+
+    for (const submodule of state.submodules) {
+      if (submodule.initialized) {
+        commands.push({
+          id: `update-submodule:${submodule.path}`,
+          label: `Update submodule ${submodule.path}`,
+          keywords: ["submodule", "update", submodule.path],
+          run: () => void appState.updateSubmodule(submodule.path, false),
+        });
+      } else {
+        commands.push({
+          id: `init-submodule:${submodule.path}`,
+          label: `Initialize submodule ${submodule.path}`,
+          keywords: ["submodule", "init", "initialize", submodule.path],
+          run: () => void appState.initSubmodule(submodule.path),
+        });
+      }
+    }
+
+    // Restoring a reflog entry has a real confirmation dialog in ReflogPanel,
+    // and state.reflog is unbounded (a full, uncapped reflog read for the
+    // selected reference) — so this is not a per-entry loop. The existing
+    // "Go to Reflog" command below covers navigating there; no separate
+    // restore-reflog command is emitted.
+  }
+
+  for (const title of SIDEBAR_SECTIONS) {
+    commands.push({
+      id: `go-to:${title}`,
+      label: `Go to ${title}`,
+      keywords: ["go", "navigate", title.toLowerCase()],
+      run: () => goToSidebarSection(title),
+    });
+  }
+
+  return commands;
+}
+
+function scoreCommand(command: Command, query: string): number | null {
+  const q = query.trim().toLowerCase();
+  if (q === "") return 0;
+  const label = command.label.toLowerCase();
+  if (label.startsWith(q)) return 3;
+  if (command.keywords.some((keyword) => keyword.toLowerCase().startsWith(q))) return 2;
+  if (label.includes(q) || command.keywords.some((keyword) => keyword.toLowerCase().includes(q))) return 1;
+  return null;
+}
+
+export function filterAndSortCommands(commands: Command[], query: string): Command[] {
+  const recent = loadRecentCommandIds();
+  const scored: { command: Command; score: number }[] = [];
+  for (const command of commands) {
+    const score = scoreCommand(command, query);
+    if (score !== null) scored.push({ command, score });
+  }
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    const aRecent = recent.indexOf(a.command.id);
+    const bRecent = recent.indexOf(b.command.id);
+    if (aRecent !== bRecent) {
+      if (aRecent === -1) return 1;
+      if (bRecent === -1) return -1;
+      return aRecent - bRecent;
+    }
+    return a.command.label.localeCompare(b.command.label);
+  });
+  return scored.slice(0, RESULT_LIMIT).map((entry) => entry.command);
+}
+
+export function loadRecentCommandIds(): string[] {
+  const stored = localStorage.getItem(RECENT_KEY);
+  if (stored === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string");
+  } catch {
+    return [];
+  }
+}
+
+export function recordCommandUsed(id: string): void {
+  const recent = loadRecentCommandIds().filter((existing) => existing !== id);
+  recent.unshift(id);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, RECENT_LIMIT)));
+}

@@ -3,12 +3,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const E2E_SUBMODULE_PATH = "deps/e2e-child";
 
 describe("Browsitory submodules", () => {
   it("initializes and updates a local submodule, then shows its changed gitlink in parent status", async () => {
+    // "Submodules" defaults closed; expand it before its Initialize/Update buttons exist.
+    await expandSidebarSection("Submodules");
+
     const initializeButton = await $("button=Initialize " + E2E_SUBMODULE_PATH);
     await initializeButton.waitForExist({ timeout: 10000 });
 
