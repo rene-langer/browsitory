@@ -96,6 +96,9 @@ export interface UseAppStateResult {
   selectRow(row: SelectedRow): void;
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
+  stageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
+  unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
+  discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   commit(message: string): Promise<void>;
   createBranch(name: string, startPoint: string): Promise<void>;
   switchBranch(name: string): Promise<void>;
@@ -320,6 +323,21 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   );
   const unstageFile = useCallback(
     (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
+    [client, runMutation, repoPath],
+  );
+  const stageHunk = useCallback(
+    (path: string, oldStart: number, newStart: number) =>
+      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart)),
+    [client, runMutation, repoPath],
+  );
+  const unstageHunk = useCallback(
+    (path: string, oldStart: number, newStart: number) =>
+      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart)),
+    [client, runMutation, repoPath],
+  );
+  const discardHunk = useCallback(
+    (path: string, oldStart: number, newStart: number) =>
+      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart)),
     [client, runMutation, repoPath],
   );
   const commit = useCallback(
@@ -711,6 +729,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     selectRow,
     stageFile,
     unstageFile,
+    stageHunk,
+    unstageHunk,
+    discardHunk,
     commit,
     createBranch,
     createWorktree,

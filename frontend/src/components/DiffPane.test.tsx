@@ -81,6 +81,9 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getCommitFiles: unused,
     stageFile: unused,
     unstageFile: unused,
+    stageHunk: unused,
+    unstageHunk: unused,
+    discardHunk: unused,
     commit: unused,
     ...overrides,
   };
@@ -104,6 +107,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -121,6 +127,117 @@ describe("DiffPane", () => {
       expect(screen.getByText("Unstage")).toBeInTheDocument();
     });
 
+    it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+      ];
+      const client = fakeClient({ getWorkingDiff: async () => hunks });
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("a.txt (Modified)"));
+
+      expect(await screen.findByText("Stage Hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Unstage Hunk")).not.toBeInTheDocument();
+      expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+    });
+
+    it("shows Unstage Hunk (not Stage Hunk) and Discard Hunk for a staged file's diff", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+      ];
+      const client = fakeClient({ getWorkingDiff: async () => hunks });
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("b.txt (New)"));
+
+      expect(await screen.findByText("Unstage Hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Stage Hunk")).not.toBeInTheDocument();
+      expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+    });
+
+    it("clicking Stage Hunk calls onStageHunk with the selected file's path and the hunk's start lines", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+      ];
+      const client = fakeClient({ getWorkingDiff: async () => hunks });
+      const onStageHunk = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={onStageHunk}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("a.txt (Modified)"));
+      fireEvent.click(await screen.findByText("Stage Hunk"));
+
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+    });
+
     it("clicking Stage calls onStageFile with that path", () => {
       const client = fakeClient({});
       const onStageFile = vi.fn();
@@ -133,6 +250,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={onStageFile}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -172,6 +292,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -212,6 +335,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -256,6 +382,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -287,6 +416,9 @@ describe("DiffPane", () => {
           status={refreshedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -317,6 +449,9 @@ describe("DiffPane", () => {
           status={unstagedOnly}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -345,6 +480,9 @@ describe("DiffPane", () => {
           status={stagedOnly}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -379,6 +517,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -407,6 +548,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={onSaveStash}
           onSelectRow={vi.fn()}
@@ -436,6 +580,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -463,6 +610,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -494,6 +644,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -521,6 +674,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -559,6 +715,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -601,6 +760,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
@@ -635,6 +797,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -682,6 +847,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -718,6 +886,9 @@ describe("DiffPane", () => {
           status={conflictedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -756,6 +927,9 @@ describe("DiffPane", () => {
           status={conflictedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -782,6 +956,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -831,6 +1008,9 @@ describe("DiffPane", () => {
           status={twoConflicts}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -875,6 +1055,9 @@ describe("DiffPane", () => {
           status={mixedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -903,6 +1086,9 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -945,6 +1131,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -977,6 +1166,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -1007,6 +1199,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -1036,6 +1231,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -1075,6 +1273,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
@@ -1118,6 +1319,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={onSelectRow}
@@ -1155,6 +1359,9 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
           onCommit={vi.fn()}
           onSaveStash={vi.fn()}
           onSelectRow={vi.fn()}
