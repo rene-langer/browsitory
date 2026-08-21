@@ -21,6 +21,9 @@ export function DiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageHunk,
+  onUnstageHunk,
+  onDiscardHunk,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -38,6 +41,9 @@ export function DiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -57,6 +63,9 @@ export function DiffPane({
         status={status}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
+        onStageHunk={onStageHunk}
+        onUnstageHunk={onUnstageHunk}
+        onDiscardHunk={onDiscardHunk}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
@@ -87,6 +96,9 @@ function UncommittedDiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageHunk,
+  onUnstageHunk,
+  onDiscardHunk,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -103,6 +115,9 @@ function UncommittedDiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -259,7 +274,24 @@ function UncommittedDiffPane({
       ) : error !== null ? (
         <p role="alert">{error}</p>
       ) : (
-        <DiffView hunks={displayedHunks} />
+        <DiffView
+          hunks={displayedHunks}
+          onStageHunk={
+            selected !== null && !selected.staged
+              ? (hunkOldStart: number, hunkNewStart: number) => onStageHunk(selected.path, hunkOldStart, hunkNewStart)
+              : undefined
+          }
+          onUnstageHunk={
+            selected !== null && selected.staged
+              ? (hunkOldStart: number, hunkNewStart: number) => onUnstageHunk(selected.path, hunkOldStart, hunkNewStart)
+              : undefined
+          }
+          onDiscardHunk={
+            selected !== null
+              ? (hunkOldStart: number, hunkNewStart: number) => onDiscardHunk(selected.path, hunkOldStart, hunkNewStart)
+              : undefined
+          }
+        />
       )}
       {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
           resolved/amended content lives in the working tree, so stashing it away and continuing
