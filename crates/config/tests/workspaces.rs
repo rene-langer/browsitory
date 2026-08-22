@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use config::{delete_workspace_at, list_workspaces_at, save_workspace_at, update_workspace_at};
+use config::{
+    delete_workspace_at, list_open_repos_at, list_workspaces_at, save_workspace_at,
+    update_workspace_at,
+};
 
 #[test]
 fn save_workspace_at_creates_a_workspace_returned_by_list_workspaces_at() {
@@ -67,6 +70,26 @@ fn list_workspaces_at_on_a_missing_file_returns_empty() {
     let config_file = dir.path().join("config.toml");
 
     assert!(list_workspaces_at(&config_file).unwrap().is_empty());
+}
+
+#[test]
+fn save_workspace_at_preserves_open_repos_from_a_legacy_config() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    std::fs::write(
+        &config_file,
+        "open_repos = [\"/repos/a\", \"/repos/b\"]\nactive_repo = \"/repos/b\"\n",
+    )
+    .unwrap();
+
+    save_workspace_at(&config_file, "Workspace", &PathBuf::from("/repos"), &[]).unwrap();
+
+    let (paths, active) = list_open_repos_at(&config_file).unwrap();
+    assert_eq!(
+        paths,
+        vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]
+    );
+    assert_eq!(active, Some(PathBuf::from("/repos/b")));
 }
 
 #[test]
