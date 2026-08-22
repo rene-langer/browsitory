@@ -33,6 +33,13 @@ pub struct Workspace {
     pub member_paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenRepoEntry {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
 static WORKSPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A nanosecond timestamp plus an in-process counter, hex-formatted. Not a UUID — this repo
@@ -73,11 +80,24 @@ struct ConfigFile {
     #[serde(default)]
     recent_repos: Vec<PathBuf>,
     #[serde(default)]
+    active_repo: Option<PathBuf>,
+    // These fields serialize as TOML array-of-tables because their element type is a struct.
+    // TOML requires plain `key = value` lines to precede an array-of-tables section, so they
+    // must remain last.
+    #[serde(default)]
+    open_repos: Vec<OpenRepoEntry>,
+    #[serde(default)]
+    workspaces: Vec<Workspace>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyConfigFile {
+    #[serde(default)]
+    recent_repos: Vec<PathBuf>,
+    #[serde(default)]
     open_repos: Vec<PathBuf>,
     #[serde(default)]
     active_repo: Option<PathBuf>,
-    #[serde(default)]
-    workspaces: Vec<Workspace>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -195,28 +215,28 @@ pub fn delete_workspace_at(config_file: &Path, id: &str) -> Result<(), ConfigErr
     write_config(config_file, &config)
 }
 
-pub fn list_open_repos() -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
+pub fn list_open_repos() -> Result<(Vec<OpenRepoEntry>, Option<PathBuf>), ConfigError> {
     list_open_repos_at(&config_file_path()?)
 }
 
-pub fn set_open_repos(paths: &[PathBuf], active: Option<&Path>) -> Result<(), ConfigError> {
-    set_open_repos_at(&config_file_path()?, paths, active)
+pub fn set_open_repos(entries: &[OpenRepoEntry], active: Option<&Path>) -> Result<(), ConfigError> {
+    set_open_repos_at(&config_file_path()?, entries, active)
 }
 
 pub fn list_open_repos_at(
     config_file: &Path,
-) -> Result<(Vec<PathBuf>, Option<PathBuf>), ConfigError> {
+) -> Result<(Vec<OpenRepoEntry>, Option<PathBuf>), ConfigError> {
     let config = read_config(config_file)?;
     Ok((config.open_repos, config.active_repo))
 }
 
 pub fn set_open_repos_at(
     config_file: &Path,
-    paths: &[PathBuf],
+    entries: &[OpenRepoEntry],
     active: Option<&Path>,
 ) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
-    config.open_repos = paths.to_vec();
+    config.open_repos = entries.to_vec();
     config.active_repo = active.map(|p| p.to_path_buf());
     write_config(config_file, &config)
 }
@@ -226,7 +246,25 @@ fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
         return Ok(ConfigFile::default());
     }
     let contents = fs::read_to_string(path)?;
-    Ok(toml::from_str(&contents)?)
+    match toml::from_str::<ConfigFile>(&contents) {
+        Ok(config) => Ok(config),
+        Err(_) => {
+            let legacy: LegacyConfigFile = toml::from_str(&contents)?;
+            Ok(ConfigFile {
+                recent_repos: legacy.recent_repos,
+                active_repo: legacy.active_repo,
+                open_repos: legacy
+                    .open_repos
+                    .into_iter()
+                    .map(|path| OpenRepoEntry {
+                        path,
+                        workspace_id: None,
+                    })
+                    .collect(),
+                workspaces: Vec::new(),
+            })
+        }
+    }
 }
 
 fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {

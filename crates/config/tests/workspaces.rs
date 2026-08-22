@@ -84,11 +84,15 @@ fn save_workspace_at_preserves_open_repos_from_a_legacy_config() {
 
     save_workspace_at(&config_file, "Workspace", &PathBuf::from("/repos"), &[]).unwrap();
 
-    let (paths, active) = list_open_repos_at(&config_file).unwrap();
+    let (entries, active) = list_open_repos_at(&config_file).unwrap();
     assert_eq!(
-        paths,
+        entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>(),
         vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]
     );
+    assert!(entries.iter().all(|entry| entry.workspace_id.is_none()));
     assert_eq!(active, Some(PathBuf::from("/repos/b")));
 }
 
