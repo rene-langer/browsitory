@@ -134,6 +134,27 @@ describe("RepoTabs grouping", () => {
     expect(onCloseGroup).toHaveBeenCalledWith(["/repos/widget", "/repos/gadget"]);
   });
 
+  it("disables close-all when any repo in the workspace run is busy", () => {
+    const onCloseGroup = vi.fn();
+    render(
+      <RepoTabs
+        openRepos={grouped}
+        activePath="/repos/widget"
+        busyPaths={new Set(["/repos/gadget"])}
+        workspaceNames={{ "ws-1": "Services" }}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={onCloseGroup}
+        onAddTab={vi.fn()}
+      />,
+    );
+
+    const closeGroupButton = screen.getByRole("button", { name: /close services/i });
+    expect(closeGroupButton).toBeDisabled();
+    fireEvent.click(closeGroupButton);
+    expect(onCloseGroup).not.toHaveBeenCalled();
+  });
+
   it("a tab whose workspaceId has no matching name in workspaceNames renders standalone", () => {
     render(
       <RepoTabs

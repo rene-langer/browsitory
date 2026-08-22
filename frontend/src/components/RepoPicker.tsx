@@ -55,7 +55,12 @@ export function RepoPicker({
     return (
       <WorkspaceEditor
         client={client}
-        onSave={(name, root, members) => onCreateWorkspace(name, root, members).then(() => setCreatingWorkspace(false))}
+        onSave={(name, root, members) =>
+          onCreateWorkspace(name, root, members).then((id) => {
+            onOpenWorkspace({ id, name, rootPath: root, memberPaths: members });
+            setCreatingWorkspace(false);
+          })
+        }
         onCancel={() => setCreatingWorkspace(false)}
       />
     );

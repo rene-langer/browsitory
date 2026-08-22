@@ -114,6 +114,32 @@ describe("WorkspaceEditor", () => {
 
       await waitFor(() => expect(onSave).toHaveBeenCalledWith("Services", "/projects/root", ["/projects/root/a"]));
     });
+
+    it("drops saved members that are no longer returned by an explicit edit scan", async () => {
+      const workspaceWithVanishedMember = {
+        ...existing,
+        memberPaths: ["/projects/root/a", "/projects/root/vanished"],
+      };
+      const client = fakeClient({
+        scanReposInRoot: vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/c"]),
+      });
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceEditor
+          client={client}
+          existing={workspaceWithVanishedMember}
+          onSave={onSave}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
+      fireEvent.click(screen.getByText("Save"));
+
+      await waitFor(() =>
+        expect(onSave).toHaveBeenCalledWith("Services", "/projects/root", ["/projects/root/a"]),
+      );
+    });
   });
 
   it("cancel calls onCancel", () => {

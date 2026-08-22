@@ -34,6 +34,9 @@ export function WorkspaceEditor({
         setCandidates(found);
         if (existing === undefined) {
           setSelected(new Set(found));
+        } else {
+          const savedMembers = new Set(existing.memberPaths);
+          setSelected(new Set(found.filter((path) => savedMembers.has(path))));
         }
       })
       .catch((err: unknown) => setError(String(err)));

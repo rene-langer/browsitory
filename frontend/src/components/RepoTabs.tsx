@@ -83,6 +83,8 @@ export function RepoTabs({
                 type="button"
                 className={styles.closeButton}
                 aria-label={`Close ${group.workspaceName}`}
+                title={group.repos.some((repo) => busyPaths.has(repo.path)) ? "A repo in this workspace has an operation in progress" : undefined}
+                disabled={group.repos.some((repo) => busyPaths.has(repo.path))}
                 onClick={() => onCloseGroup(group.repos.map((repo) => repo.path))}
               >
                 <X size={12} aria-hidden="true" />

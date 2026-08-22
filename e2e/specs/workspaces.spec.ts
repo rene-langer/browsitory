@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
@@ -6,6 +7,8 @@ const E2E_WORKSPACE_ROOT = path.join(os.tmpdir(), "browsitory-e2e-workspace-root
 const E2E_WORKSPACE_REPO_A = path.join(E2E_WORKSPACE_ROOT, "repo-a");
 const E2E_WORKSPACE_REPO_B = path.join(E2E_WORKSPACE_ROOT, "repo-b");
 const E2E_WORKSPACE_REPO_C = path.join(E2E_WORKSPACE_ROOT, "repo-c");
+const E2E_CONFIG_FILE = path.join(os.tmpdir(), "browsitory-e2e-config", "config.toml");
+const E2E_RESTORE_OPEN_REPOS_ONCE = "browsitory-e2e-restore-open-repos-once";
 
 async function waitForAppReady(): Promise<void> {
   await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
@@ -17,7 +20,7 @@ async function openPickerOverlay(): Promise<void> {
 }
 
 describe("Browsitory multi-repo workspaces", () => {
-  it("opens all workspace members grouped under a chip, then closes the whole group at once", async () => {
+  it("restores an open workspace group after restart, then closes the whole group at once", async () => {
     await openPickerOverlay();
 
     const openAllButton = await $('button=Open All');
@@ -36,6 +39,25 @@ describe("Browsitory multi-repo workspaces", () => {
     const repoBTab = await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`);
     await repoATab.waitForExist({ timeout: 10000 });
     await repoBTab.waitForExist({ timeout: 10000 });
+
+    await browser.waitUntil(
+      async () => {
+        const config = fs.readFileSync(E2E_CONFIG_FILE, "utf8");
+        return (
+          config.includes(`[[open_repos]]\npath = "${E2E_WORKSPACE_REPO_A}"`) &&
+          config.includes(`[[open_repos]]\npath = "${E2E_WORKSPACE_REPO_B}"`)
+        );
+      },
+      { timeout: 10000, timeoutMsg: "expected workspace members to persist before restart" },
+    );
+
+    await browser.execute((key) => window.localStorage.setItem(key, "true"), E2E_RESTORE_OPEN_REPOS_ONCE);
+    await browser.reloadSession();
+    await waitForAppReady();
+
+    await $('span*=E2E Workspace').waitForExist({ timeout: 10000 });
+    await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).waitForExist({ timeout: 10000 });
+    await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`).waitForExist({ timeout: 10000 });
 
     const closeGroupButton = await $('button[aria-label="Close E2E Workspace"]');
     await browser.execute((el) => (el as HTMLElement).click(), closeGroupButton);
