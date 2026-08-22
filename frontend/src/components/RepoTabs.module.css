@@ -25,6 +25,34 @@
   border-color: var(--color-accent);
 }
 
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px var(--space-1);
+  border-right: 1px solid var(--color-border);
+  flex: 0 0 auto;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.groupLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupTabs {
+  display: flex;
+  gap: var(--space-1);
+}
+
 .tabLabel {
   background: none;
   border: none;
