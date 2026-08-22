@@ -46,6 +46,7 @@ describe("Browsitory multi-repo workspaces", () => {
     );
     expect(await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).isExisting()).toBe(false);
     expect(await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`).isExisting()).toBe(false);
+    expect(await (await $$('[role="tab"]')).length).toBe(1);
   });
 
   it("Edit re-scans the root, pre-checking current members and offering the newly-found repo unchecked", async () => {
@@ -65,8 +66,10 @@ describe("Browsitory multi-repo workspaces", () => {
     await browser.execute((el) => (el as HTMLElement).click(), repoCCheckbox);
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Save'));
 
-    // Re-open the picker and Edit again: the saved membership should now include repo-c.
-    await openPickerOverlay();
+    // Saving waits for the config update and workspace refresh before returning to the picker.
+    // Observe that return before reopening Edit so the second edit reads persisted membership.
+    const openAllAfterSave = await $('button=Open All');
+    await openAllAfterSave.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Edit'));
     const repoCCheckboxAfterSave = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
     await repoCCheckboxAfterSave.waitForExist({ timeout: 10000 });
