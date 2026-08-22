@@ -1645,12 +1645,12 @@ mod tests {
     fn open_repo_entry_input_deserializes_camel_case_workspace_id() {
         let input: OpenRepoEntryInput = serde_json::from_value(serde_json::json!({
             "path": "/repos/suite/api",
-            "workspaceId": null,
+            "workspaceId": "workspace-1",
         }))
         .unwrap();
 
         assert_eq!(input.path, "/repos/suite/api");
-        assert_eq!(input.workspace_id, None);
+        assert_eq!(input.workspace_id, Some("workspace-1".into()));
     }
 
     #[test]
