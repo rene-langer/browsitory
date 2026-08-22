@@ -99,6 +99,26 @@ pub fn add_recent_repo(path: &Path) -> Result<(), ConfigError> {
     add_recent_repo_at(&config_file_path()?, path)
 }
 
+/// Finds repositories directly beneath `root` by looking for a `.git` entry.
+///
+/// The scan intentionally examines only immediate child directories. A `.git` entry may be
+/// either a directory (normal checkout) or a file (worktree/submodule checkout).
+pub fn scan_repos_in_root(root: &Path) -> Result<Vec<PathBuf>, ConfigError> {
+    let mut repos = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if path.join(".git").exists() {
+            repos.push(path);
+        }
+    }
+    repos.sort();
+    Ok(repos)
+}
+
 // Not `pub(crate)`: integration tests in `crates/config/tests/` are a separate compiled
 // crate, so they need `pub` visibility to call these directly. They're still an
 // implementation seam for tests, not part of the crate's intended public API surface —
