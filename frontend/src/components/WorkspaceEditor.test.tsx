@@ -20,14 +20,17 @@ describe("WorkspaceEditor", () => {
     });
 
     it("scans the picked root and pre-checks every found repo, defaulting the name to the root's basename", async () => {
+      const scanReposInRoot = vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/b"]);
       const client = fakeClient({
         pickRepoFolder: vi.fn().mockResolvedValue("/projects/root"),
-        scanReposInRoot: vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/b"]),
+        scanReposInRoot,
       });
       render(<WorkspaceEditor client={client} onSave={vi.fn()} onCancel={vi.fn()} />);
+      expect(scanReposInRoot).not.toHaveBeenCalled();
 
       fireEvent.click(screen.getByText("Choose Root Folder"));
 
+      await waitFor(() => expect(scanReposInRoot).toHaveBeenCalledWith("/projects/root"));
       await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
       for (const checkbox of screen.getAllByRole("checkbox")) {
         expect(checkbox).toBeChecked();
@@ -87,11 +90,13 @@ describe("WorkspaceEditor", () => {
     };
 
     it("scans the existing root immediately, pre-checking current members and leaving new finds unchecked", async () => {
+      const scanReposInRoot = vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/c"]);
       const client = fakeClient({
-        scanReposInRoot: vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/c"]),
+        scanReposInRoot,
       });
       render(<WorkspaceEditor client={client} existing={existing} onSave={vi.fn()} onCancel={vi.fn()} />);
 
+      await waitFor(() => expect(scanReposInRoot).toHaveBeenCalledWith("/projects/root"));
       await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
       expect(screen.getByLabelText("/projects/root/a")).toBeChecked();
       expect(screen.getByLabelText("/projects/root/c")).not.toBeChecked();
