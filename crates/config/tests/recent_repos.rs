@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use config::{add_recent_repo_at, list_open_repos_at, list_recent_repos_at, set_open_repos_at};
+use config::{
+    add_recent_repo_at, list_open_repos_at, list_recent_repos_at, set_open_repos_at, OpenRepoEntry,
+};
 
 #[test]
 fn config_file_path_env_override_is_used_when_set() {
@@ -89,22 +91,32 @@ fn add_recent_repo_at_caps_at_ten_entries() {
 }
 
 #[test]
-fn set_open_repos_at_persists_paths_and_active_repo() {
+fn set_open_repos_at_persists_entries_and_active_repo() {
     let dir = tempfile::TempDir::new().unwrap();
     let config_file = dir.path().join("config.toml");
 
     set_open_repos_at(
         &config_file,
-        &[PathBuf::from("/repos/a"), PathBuf::from("/repos/b")],
+        &[
+            OpenRepoEntry {
+                path: PathBuf::from("/repos/a"),
+                workspace_id: None,
+            },
+            OpenRepoEntry {
+                path: PathBuf::from("/repos/b"),
+                workspace_id: Some("ws-1".into()),
+            },
+        ],
         Some(&PathBuf::from("/repos/b")),
     )
     .unwrap();
 
-    let (paths, active) = list_open_repos_at(&config_file).unwrap();
-    assert_eq!(
-        paths,
-        vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]
-    );
+    let (entries, active) = list_open_repos_at(&config_file).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].path, PathBuf::from("/repos/a"));
+    assert_eq!(entries[0].workspace_id, None);
+    assert_eq!(entries[1].path, PathBuf::from("/repos/b"));
+    assert_eq!(entries[1].workspace_id, Some("ws-1".to_string()));
     assert_eq!(active, Some(PathBuf::from("/repos/b")));
 }
 
@@ -113,19 +125,72 @@ fn list_open_repos_at_on_a_missing_file_returns_empty() {
     let dir = tempfile::TempDir::new().unwrap();
     let config_file = dir.path().join("config.toml");
 
-    let (paths, active) = list_open_repos_at(&config_file).unwrap();
-    assert!(paths.is_empty());
+    let (entries, active) = list_open_repos_at(&config_file).unwrap();
+    assert!(entries.is_empty());
     assert_eq!(active, None);
 }
 
 #[test]
 fn set_open_repos_at_does_not_disturb_recent_repos() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let config_file = dir.path().join("config.toml");
+    let dir = dir_with_recent_repo();
+    let config_file = dir.0;
 
-    add_recent_repo_at(&config_file, &PathBuf::from("/repos/recent")).unwrap();
-    set_open_repos_at(&config_file, &[PathBuf::from("/repos/a")], None).unwrap();
+    set_open_repos_at(
+        &config_file,
+        &[OpenRepoEntry {
+            path: PathBuf::from("/repos/a"),
+            workspace_id: None,
+        }],
+        None,
+    )
+    .unwrap();
 
     let recent = list_recent_repos_at(&config_file).unwrap();
     assert_eq!(recent, vec![PathBuf::from("/repos/recent")]);
+}
+
+fn dir_with_recent_repo() -> (PathBuf, tempfile::TempDir) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    add_recent_repo_at(&config_file, &PathBuf::from("/repos/recent")).unwrap();
+    (config_file, dir)
+}
+
+#[test]
+fn open_repos_round_trip_preserves_a_none_workspace_id() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+
+    set_open_repos_at(
+        &config_file,
+        &[OpenRepoEntry {
+            path: PathBuf::from("/repos/a"),
+            workspace_id: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    let (entries, _) = list_open_repos_at(&config_file).unwrap();
+    assert_eq!(entries[0].workspace_id, None);
+}
+
+#[test]
+fn list_open_repos_at_parses_a_pre_workspaces_config_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    std::fs::write(
+        &config_file,
+        "open_repos = [\"/repos/a\", \"/repos/b\"]\nactive_repo = \"/repos/a\"\n",
+    )
+    .unwrap();
+
+    let (entries, active) = list_open_repos_at(&config_file).unwrap();
+
+    assert_eq!(
+        entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>(),
+        vec![PathBuf::from("/repos/a"), PathBuf::from("/repos/b")]
+    );
+    assert!(entries.iter().all(|e| e.workspace_id.is_none()));
+    assert_eq!(active, Some(PathBuf::from("/repos/a")));
 }
