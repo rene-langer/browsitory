@@ -267,4 +267,42 @@ describe("RepoPicker workspaces", () => {
 
     expect(screen.getByText("New Workspace")).toBeInTheDocument();
   });
+
+  it("opens the selected members with the saved workspace id after creation", async () => {
+    const client = fakeClient({
+      listRecentRepos: async () => [],
+      pickRepoFolder: async () => "/projects/root",
+      scanReposInRoot: async () => ["/projects/root/a", "/projects/root/b"],
+    });
+    const onCreateWorkspace = vi.fn().mockResolvedValue("ws-saved");
+    const onOpenWorkspace = vi.fn();
+    render(
+      <RepoPicker
+        client={client}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={onOpenWorkspace}
+        workspaces={[]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={onCreateWorkspace}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Open Workspace Root"));
+    fireEvent.click(screen.getByText("Choose Root Folder"));
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() =>
+      expect(onOpenWorkspace).toHaveBeenCalledWith({
+        id: "ws-saved",
+        name: "root",
+        rootPath: "/projects/root",
+        memberPaths: ["/projects/root/a", "/projects/root/b"],
+      }),
+    );
+    expect(screen.queryByText("New Workspace")).not.toBeInTheDocument();
+  });
 });

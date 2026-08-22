@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -38,6 +38,29 @@ pub struct OpenRepoEntry {
     pub path: PathBuf,
     #[serde(default)]
     pub workspace_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OpenReposFile {
+    Current(Vec<OpenRepoEntry>),
+    Legacy(Vec<PathBuf>),
+}
+
+fn deserialize_open_repos<'de, D>(deserializer: D) -> Result<Vec<OpenRepoEntry>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match OpenReposFile::deserialize(deserializer)? {
+        OpenReposFile::Current(entries) => entries,
+        OpenReposFile::Legacy(paths) => paths
+            .into_iter()
+            .map(|path| OpenRepoEntry {
+                path,
+                workspace_id: None,
+            })
+            .collect(),
+    })
 }
 
 static WORKSPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -84,20 +107,10 @@ struct ConfigFile {
     // These fields serialize as TOML array-of-tables because their element type is a struct.
     // TOML requires plain `key = value` lines to precede an array-of-tables section, so they
     // must remain last.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
     workspaces: Vec<Workspace>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct LegacyConfigFile {
-    #[serde(default)]
-    recent_repos: Vec<PathBuf>,
-    #[serde(default)]
-    open_repos: Vec<PathBuf>,
-    #[serde(default)]
-    active_repo: Option<PathBuf>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -246,25 +259,7 @@ fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
         return Ok(ConfigFile::default());
     }
     let contents = fs::read_to_string(path)?;
-    match toml::from_str::<ConfigFile>(&contents) {
-        Ok(config) => Ok(config),
-        Err(_) => {
-            let legacy: LegacyConfigFile = toml::from_str(&contents)?;
-            Ok(ConfigFile {
-                recent_repos: legacy.recent_repos,
-                active_repo: legacy.active_repo,
-                open_repos: legacy
-                    .open_repos
-                    .into_iter()
-                    .map(|path| OpenRepoEntry {
-                        path,
-                        workspace_id: None,
-                    })
-                    .collect(),
-                workspaces: Vec::new(),
-            })
-        }
-    }
+    Ok(toml::from_str(&contents)?)
 }
 
 fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {

@@ -349,7 +349,19 @@ export default function App() {
   // Guards the E2E reconciliation effect below so it only forces a deterministic starting repo
   // once, at launch — not on every later `openRepos.openRepos` change, which would otherwise
   // also fire for (and undo) a tab the test itself opens afterward.
+  // The workspace E2E uses a one-shot local-storage marker before restarting the real app so
+  // that one launch can prove persisted workspace grouping is restored. Normal E2E launches
+  // still reconcile to the single fixture repo, preserving cross-test isolation.
   const e2eReconciledRef = useRef(false);
+  useEffect(() => {
+    if (
+      typeof import.meta.env.VITE_E2E_REPO_PATH === "string" &&
+      window.localStorage.getItem("browsitory-e2e-restore-open-repos-once") === "true"
+    ) {
+      e2eReconciledRef.current = true;
+      window.localStorage.removeItem("browsitory-e2e-restore-open-repos-once");
+    }
+  }, []);
   useEffect(() => {
     // Wait for the persisted-tab restore to settle first: on the mount pass `openRepos` is still
     // the empty initial value, so without this the fixture would be opened concurrently with

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use config::{
     delete_workspace_at, list_open_repos_at, list_workspaces_at, save_workspace_at,
-    update_workspace_at,
+    set_open_repos_at, update_workspace_at, ConfigError,
 };
 
 #[test]
@@ -94,6 +94,26 @@ fn save_workspace_at_preserves_open_repos_from_a_legacy_config() {
     );
     assert!(entries.iter().all(|entry| entry.workspace_id.is_none()));
     assert_eq!(active, Some(PathBuf::from("/repos/b")));
+}
+
+#[test]
+fn a_current_config_parse_error_is_not_rewritten_as_an_empty_legacy_config() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    let malformed = r#"recent_repos = ["/repos/recent"]
+
+[[workspaces]]
+id = "ws-1"
+name = "Services"
+root_path = "/projects"
+member_paths = "not-an-array"
+"#;
+    std::fs::write(&config_file, malformed).unwrap();
+
+    let error = set_open_repos_at(&config_file, &[], None).unwrap_err();
+
+    assert!(matches!(error, ConfigError::Parse(_)));
+    assert_eq!(std::fs::read_to_string(&config_file).unwrap(), malformed);
 }
 
 #[test]

@@ -255,7 +255,7 @@ describe("useOpenRepos", () => {
     expect(result.current.openRepos.map((r) => r.path)).toEqual(["/projects/a"]);
   });
 
-  it("openWorkspace does not duplicate a member that is already an open tab", async () => {
+  it("openWorkspace tags an already-open successful member without duplicating it", async () => {
     const client = fakeClient({
       listOpenRepos: vi.fn().mockResolvedValue({ entries: [entry("/projects/a")], activePath: "/projects/a" }),
     });
@@ -271,6 +271,13 @@ describe("useOpenRepos", () => {
       });
     });
 
-    expect(result.current.openRepos.map((r) => r.path)).toEqual(["/projects/a", "/projects/b"]);
+    expect(result.current.openRepos.map((r) => [r.path, r.workspaceId])).toEqual([
+      ["/projects/a", "ws-1"],
+      ["/projects/b", "ws-1"],
+    ]);
+    expect(client.persistOpenRepos).toHaveBeenLastCalledWith(
+      [entry("/projects/a", "ws-1"), entry("/projects/b", "ws-1")],
+      "/projects/b",
+    );
   });
 });
