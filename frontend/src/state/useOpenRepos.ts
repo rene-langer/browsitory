@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RepoClient } from "../ipc/RepoClient";
+import type { RepoClient, Workspace } from "../ipc/RepoClient";
 
 export interface OpenRepo {
   path: string;
   displayName: string;
+  workspaceId: string | null;
 }
 
 export interface UseOpenReposResult {
@@ -15,6 +16,7 @@ export interface UseOpenReposResult {
   // silently indistinguishable from "no tabs were persisted".
   restoreError: string | null;
   openRepo(path: string): Promise<void>;
+  openWorkspace(workspace: Workspace): Promise<void>;
   closeRepo(path: string): void;
   switchTo(path: string): void;
 }
@@ -25,6 +27,10 @@ function displayNameFor(path: string): string {
   return segments[segments.length - 1] || trimmed;
 }
 
+function toEntries(repos: OpenRepo[]): { path: string; workspaceId: string | null }[] {
+  return repos.map((repo) => ({ path: repo.path, workspaceId: repo.workspaceId }));
+}
+
 export function useOpenRepos(client: RepoClient): UseOpenReposResult {
   const [openRepos, setOpenRepos] = useState<OpenRepo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -33,7 +39,7 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
 
   useEffect(() => {
     let ignore = false;
-    client.listOpenRepos().then(async ({ paths, activePath: restoredActive }) => {
+    client.listOpenRepos().then(async ({ entries, activePath: restoredActive }) => {
       if (ignore) return;
       // `listOpenRepos` only reports what *was* open — the backend's worker registry starts
       // empty every launch (a fresh process), so each restored path has to be (re-)opened for
@@ -42,15 +48,19 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
       // failing with "repo not open"). A path that fails to reopen (removed/renamed/permissions
       // changed since last launch) is dropped rather than kept as a tab stuck in that state.
       const reopened = await Promise.all(
-        paths.map((path) => client.openRepo(path).then(() => path, () => null)),
+        entries.map((entry) => client.openRepo(entry.path).then(() => entry, () => null)),
       );
       if (ignore) return;
-      const restoredPaths = reopened.filter((path): path is string => path !== null);
-      setOpenRepos(restoredPaths.map((path) => ({ path, displayName: displayNameFor(path) })));
+      const restored = reopened.filter((entry): entry is { path: string; workspaceId: string | null } => entry !== null);
+      setOpenRepos(restored.map((entry) => ({
+        path: entry.path,
+        displayName: displayNameFor(entry.path),
+        workspaceId: entry.workspaceId,
+      })));
       setActivePath(
-        restoredActive !== null && restoredPaths.includes(restoredActive)
+        restoredActive !== null && restored.some((entry) => entry.path === restoredActive)
           ? restoredActive
-          : restoredPaths[0] ?? null,
+          : restored[0]?.path ?? null,
       );
       setLoading(false);
     }).catch((error: unknown) => {
@@ -71,7 +81,7 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
 
   const persist = useCallback(
     (repos: OpenRepo[], active: string | null) => {
-      void client.persistOpenRepos(repos.map((r) => r.path), active);
+      void client.persistOpenRepos(toEntries(repos), active);
     },
     [client],
   );
@@ -84,11 +94,38 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
       setOpenRepos((prev) => {
         const next = prev.some((r) => r.path === path)
           ? prev
-          : [...prev, { path, displayName: displayNameFor(path) }];
+          : [...prev, { path, displayName: displayNameFor(path), workspaceId: null }];
         persist(next, path);
         return next;
       });
       setActivePath(path);
+    },
+    [client, persist],
+  );
+
+  const openWorkspace = useCallback(
+    async (workspace: Workspace) => {
+      const opened: string[] = [];
+      for (const path of workspace.memberPaths) {
+        try {
+          await client.openRepo(path);
+          opened.push(path);
+        } catch {
+          // Skipped, same silent-drop rule the mount-time restore uses for a path that fails
+          // to (re-)open — moved, deleted, or permissions changed since the workspace was saved.
+        }
+      }
+      if (opened.length === 0) return;
+      setOpenRepos((prev) => {
+        const existingPaths = new Set(prev.map((repo) => repo.path));
+        const added = opened
+          .filter((path) => !existingPaths.has(path))
+          .map((path) => ({ path, displayName: displayNameFor(path), workspaceId: workspace.id }));
+        const next = [...prev, ...added];
+        persist(next, opened[opened.length - 1]);
+        return next;
+      });
+      setActivePath(opened[opened.length - 1]);
     },
     [client, persist],
   );
@@ -122,5 +159,5 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
     [openRepos, persist],
   );
 
-  return { openRepos, activePath, loading, restoreError, openRepo, closeRepo, switchTo };
+  return { openRepos, activePath, loading, restoreError, openRepo, closeRepo, switchTo, openWorkspace };
 }
