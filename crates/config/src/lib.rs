@@ -21,7 +21,52 @@ pub enum ConfigError {
     Serialize(#[from] toml::ser::Error),
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 pub(crate) const MAX_RECENT_REPOS: usize = 10;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub root_path: PathBuf,
+    pub member_paths: Vec<PathBuf>,
+}
+
+static WORKSPACE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A nanosecond timestamp plus an in-process counter, hex-formatted. Not a UUID — this repo
+/// has no `uuid` dependency and doesn't need one: workspace ids are generated locally by a
+/// single user, never compared across machines, so global uniqueness guarantees are overkill.
+/// The counter alone (not just the timestamp) is what protects against two calls landing in
+/// the same clock tick on a coarse-grained OS clock.
+fn generate_workspace_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let counter = WORKSPACE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos:x}-{counter:x}")
+}
+
+fn dedupe_workspace_name(existing: &[Workspace], name: &str, excluding_id: Option<&str>) -> String {
+    let taken = |candidate: &str| {
+        existing
+            .iter()
+            .any(|w| w.name == candidate && Some(w.id.as_str()) != excluding_id)
+    };
+    if !taken(name) {
+        return name.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{name} ({n})");
+        if !taken(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
@@ -31,6 +76,8 @@ struct ConfigFile {
     open_repos: Vec<PathBuf>,
     #[serde(default)]
     active_repo: Option<PathBuf>,
+    #[serde(default)]
+    workspaces: Vec<Workspace>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -65,6 +112,66 @@ pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigE
     config.recent_repos.retain(|p| p != path);
     config.recent_repos.insert(0, path.to_path_buf());
     config.recent_repos.truncate(MAX_RECENT_REPOS);
+    write_config(config_file, &config)
+}
+
+pub fn list_workspaces() -> Result<Vec<Workspace>, ConfigError> {
+    list_workspaces_at(&config_file_path()?)
+}
+
+pub fn list_workspaces_at(config_file: &Path) -> Result<Vec<Workspace>, ConfigError> {
+    Ok(read_config(config_file)?.workspaces)
+}
+
+pub fn save_workspace(name: &str, root: &Path, members: &[PathBuf]) -> Result<String, ConfigError> {
+    save_workspace_at(&config_file_path()?, name, root, members)
+}
+
+pub fn save_workspace_at(
+    config_file: &Path,
+    name: &str,
+    root: &Path,
+    members: &[PathBuf],
+) -> Result<String, ConfigError> {
+    let mut config = read_config(config_file)?;
+    let id = generate_workspace_id();
+    let deduped_name = dedupe_workspace_name(&config.workspaces, name, None);
+    config.workspaces.push(Workspace {
+        id: id.clone(),
+        name: deduped_name,
+        root_path: root.to_path_buf(),
+        member_paths: members.to_vec(),
+    });
+    write_config(config_file, &config)?;
+    Ok(id)
+}
+
+pub fn update_workspace(id: &str, name: &str, members: &[PathBuf]) -> Result<(), ConfigError> {
+    update_workspace_at(&config_file_path()?, id, name, members)
+}
+
+pub fn update_workspace_at(
+    config_file: &Path,
+    id: &str,
+    name: &str,
+    members: &[PathBuf],
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    let deduped_name = dedupe_workspace_name(&config.workspaces, name, Some(id));
+    if let Some(workspace) = config.workspaces.iter_mut().find(|w| w.id == id) {
+        workspace.name = deduped_name;
+        workspace.member_paths = members.to_vec();
+    }
+    write_config(config_file, &config)
+}
+
+pub fn delete_workspace(id: &str) -> Result<(), ConfigError> {
+    delete_workspace_at(&config_file_path()?, id)
+}
+
+pub fn delete_workspace_at(config_file: &Path, id: &str) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.workspaces.retain(|w| w.id != id);
     write_config(config_file, &config)
 }
 
