@@ -7,16 +7,20 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
   return {
     openRepo: vi.fn().mockResolvedValue(undefined),
     closeRepo: vi.fn().mockResolvedValue(undefined),
-    listOpenRepos: vi.fn().mockResolvedValue({ paths: [], activePath: null }),
+    listOpenRepos: vi.fn().mockResolvedValue({ entries: [], activePath: null }),
     persistOpenRepos: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as RepoClient;
 }
 
+function entry(path: string, workspaceId: string | null = null) {
+  return { path, workspaceId };
+}
+
 describe("useOpenRepos", () => {
   it("restores persisted tabs on mount, with the persisted active path focused", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b"], activePath: "/repos/b" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/b"].map((path) => entry(path)), activePath: "/repos/b" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
 
@@ -31,7 +35,7 @@ describe("useOpenRepos", () => {
     // registry starts empty every launch, so a restored tab whose repo was never actually
     // (re-)opened would render with every fetch permanently failing ("repo not open").
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b"], activePath: "/repos/b" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/b"].map((path) => entry(path)), activePath: "/repos/b" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
 
@@ -43,7 +47,7 @@ describe("useOpenRepos", () => {
 
   it("drops a persisted path that fails to reopen, rather than keeping a permanently broken tab", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/gone"], activePath: "/repos/gone" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/gone"].map((path) => entry(path)), activePath: "/repos/gone" }),
       openRepo: vi.fn().mockImplementation((path: string) =>
         path === "/repos/gone" ? Promise.reject(new Error("not a git repository")) : Promise.resolve(undefined),
       ),
@@ -85,12 +89,12 @@ describe("useOpenRepos", () => {
     expect(client.openRepo).toHaveBeenCalledWith("/repos/new");
     expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/new"]);
     expect(result.current.activePath).toBe("/repos/new");
-    expect(client.persistOpenRepos).toHaveBeenLastCalledWith(["/repos/new"], "/repos/new");
+    expect(client.persistOpenRepos).toHaveBeenLastCalledWith([entry("/repos/new")], "/repos/new");
   });
 
   it("opening an already-open path focuses it instead of duplicating the tab", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b"], activePath: "/repos/a" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/b"].map((path) => entry(path)), activePath: "/repos/a" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -105,7 +109,7 @@ describe("useOpenRepos", () => {
 
   it("closing the active tab focuses the next tab, or the previous one if it was last", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b", "/repos/c"], activePath: "/repos/c" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/b", "/repos/c"].map((path) => entry(path)), activePath: "/repos/c" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -119,7 +123,7 @@ describe("useOpenRepos", () => {
 
   it("derives displayName from the path's final segment", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/widget"], activePath: "/repos/widget" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/widget"].map((path) => entry(path)), activePath: "/repos/widget" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -129,7 +133,7 @@ describe("useOpenRepos", () => {
 
   it("a failed openRepo rejects and does not add a tab or change activePath", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a"], activePath: "/repos/a" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a"].map((path) => entry(path)), activePath: "/repos/a" }),
       // Rejects only the path under test — the mount-time restore of "/repos/a" also calls
       // `openRepo` now (each persisted path is re-opened for real against the fresh backend
       // worker registry) and must succeed so this test can isolate the *later* failed open.
@@ -154,7 +158,7 @@ describe("useOpenRepos", () => {
 
   it("closing the middle tab of three leaves the other two's order and paths untouched, then opening a new repo only appends", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/a", "/repos/b", "/repos/c"], activePath: "/repos/a" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/a", "/repos/b", "/repos/c"].map((path) => entry(path)), activePath: "/repos/a" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -175,7 +179,7 @@ describe("useOpenRepos", () => {
 
   it("closing the last open tab clears activePath, so App falls back to the RepoPicker", async () => {
     const client = fakeClient({
-      listOpenRepos: vi.fn().mockResolvedValue({ paths: ["/repos/only"], activePath: "/repos/only" }),
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: ["/repos/only"].map((path) => entry(path)), activePath: "/repos/only" }),
     });
     const { result } = renderHook(() => useOpenRepos(client));
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -186,5 +190,87 @@ describe("useOpenRepos", () => {
     expect(result.current.openRepos).toEqual([]);
     expect(result.current.activePath).toBeNull();
     expect(client.persistOpenRepos).toHaveBeenLastCalledWith([], null);
+  });
+
+  it("restores a persisted workspaceId onto its tab", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({
+        entries: [entry("/repos/a", "ws-1"), entry("/repos/b")],
+        activePath: "/repos/a",
+      }),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.openRepos[0].workspaceId).toBe("ws-1");
+    expect(result.current.openRepos[1].workspaceId).toBeNull();
+  });
+
+  it("openWorkspace opens every member path, tagging each tab with the workspace id", async () => {
+    const client = fakeClient();
+    const { result } = renderHook(() => useOpenRepos(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openWorkspace({
+        id: "ws-1",
+        name: "Services",
+        rootPath: "/projects",
+        memberPaths: ["/projects/a", "/projects/b"],
+      });
+    });
+
+    expect(client.openRepo).toHaveBeenCalledWith("/projects/a");
+    expect(client.openRepo).toHaveBeenCalledWith("/projects/b");
+    expect(result.current.openRepos.map((r) => [r.path, r.workspaceId])).toEqual([
+      ["/projects/a", "ws-1"],
+      ["/projects/b", "ws-1"],
+    ]);
+    expect(result.current.activePath).toBe("/projects/b");
+    expect(client.persistOpenRepos).toHaveBeenLastCalledWith(
+      [entry("/projects/a", "ws-1"), entry("/projects/b", "ws-1")],
+      "/projects/b",
+    );
+  });
+
+  it("openWorkspace skips a member that fails to open, rather than failing the whole open", async () => {
+    const client = fakeClient({
+      openRepo: vi.fn().mockImplementation((path: string) =>
+        path === "/projects/gone" ? Promise.reject(new Error("not a git repository")) : Promise.resolve(undefined),
+      ),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openWorkspace({
+        id: "ws-1",
+        name: "Services",
+        rootPath: "/projects",
+        memberPaths: ["/projects/a", "/projects/gone"],
+      });
+    });
+
+    expect(result.current.openRepos.map((r) => r.path)).toEqual(["/projects/a"]);
+  });
+
+  it("openWorkspace does not duplicate a member that is already an open tab", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({ entries: [entry("/projects/a")], activePath: "/projects/a" }),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openWorkspace({
+        id: "ws-1",
+        name: "Services",
+        rootPath: "/projects",
+        memberPaths: ["/projects/a", "/projects/b"],
+      });
+    });
+
+    expect(result.current.openRepos.map((r) => r.path)).toEqual(["/projects/a", "/projects/b"]);
   });
 });
