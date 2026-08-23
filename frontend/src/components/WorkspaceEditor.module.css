@@ -1,0 +1,18 @@
+.list {
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}

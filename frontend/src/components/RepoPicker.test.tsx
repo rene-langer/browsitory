@@ -11,6 +11,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   return {
     pickRepoFolder: async () => unimplemented(),
     listRecentRepos: async () => unimplemented(),
+    scanReposInRoot: async () => unimplemented(),
+    listWorkspaces: async () => unimplemented(),
+    saveWorkspace: async () => unimplemented(),
+    updateWorkspace: async () => unimplemented(),
+    deleteWorkspace: async () => unimplemented(),
     openRepo: async () => {},
     closeRepo: async () => unimplemented(),
     listOpenRepos: async () => unimplemented(),
@@ -87,6 +92,18 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   };
 }
 
+function workspaceProps() {
+  return {
+    onOpenWorkspace: vi.fn(),
+    workspaces: [],
+    workspacesLoading: false,
+    workspacesError: null,
+    onCreateWorkspace: vi.fn(),
+    onEditWorkspace: vi.fn(),
+    onDeleteWorkspace: vi.fn(),
+  };
+}
+
 describe("RepoPicker", () => {
   it("renders each recent repo and opens it on click", async () => {
     const client = fakeClient({
@@ -94,7 +111,7 @@ describe("RepoPicker", () => {
     });
     const onOpenRepo = vi.fn();
 
-    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} />);
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
     expect(await screen.findByText("/repo/a")).toBeInTheDocument();
     expect(await screen.findByText("/repo/b")).toBeInTheDocument();
@@ -110,7 +127,7 @@ describe("RepoPicker", () => {
       listRecentRepos: async () => [],
     });
 
-    render(<RepoPicker client={client} onOpenRepo={vi.fn()} />);
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
 
     expect(await screen.findByText("No recent repositories")).toBeInTheDocument();
   });
@@ -122,7 +139,7 @@ describe("RepoPicker", () => {
     });
     const onOpenRepo = vi.fn();
 
-    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} />);
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
     fireEvent.click(screen.getByText("Open Folder"));
 
@@ -138,7 +155,7 @@ describe("RepoPicker", () => {
     });
     const onOpenRepo = vi.fn();
 
-    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} />);
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
     fireEvent.click(screen.getByText("Open Folder"));
 
@@ -154,8 +171,138 @@ describe("RepoPicker", () => {
       },
     });
 
-    render(<RepoPicker client={client} onOpenRepo={vi.fn()} />);
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("config unreadable");
+  });
+});
+
+describe("RepoPicker workspaces", () => {
+  const workspace = {
+    id: "ws-1",
+    name: "Services",
+    rootPath: "/projects",
+    memberPaths: ["/projects/a", "/projects/b"],
+  };
+
+  it("renders each saved workspace by name, with its root path as a tooltip", () => {
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        workspaces={[workspace]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Services")).toBeInTheDocument();
+    expect(screen.getByTitle("/projects")).toBeInTheDocument();
+  });
+
+  it("Open All calls onOpenWorkspace with the workspace", () => {
+    const onOpenWorkspace = vi.fn();
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={onOpenWorkspace}
+        workspaces={[workspace]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open All" }));
+
+    expect(onOpenWorkspace).toHaveBeenCalledWith(workspace);
+  });
+
+  it("Delete asks for confirmation before calling onDeleteWorkspace", async () => {
+    const onDeleteWorkspace = vi.fn().mockResolvedValue(undefined);
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        workspaces={[workspace]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={onDeleteWorkspace}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Services" }));
+    expect(onDeleteWorkspace).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }));
+    await waitFor(() => expect(onDeleteWorkspace).toHaveBeenCalledWith("ws-1"));
+  });
+
+  it("Open Workspace Root shows the WorkspaceEditor in create mode", () => {
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        workspaces={[]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Open Workspace Root"));
+
+    expect(screen.getByText("New Workspace")).toBeInTheDocument();
+  });
+
+  it("opens the selected members with the saved workspace id after creation", async () => {
+    const client = fakeClient({
+      listRecentRepos: async () => [],
+      pickRepoFolder: async () => "/projects/root",
+      scanReposInRoot: async () => ["/projects/root/a", "/projects/root/b"],
+    });
+    const onCreateWorkspace = vi.fn().mockResolvedValue("ws-saved");
+    const onOpenWorkspace = vi.fn();
+    render(
+      <RepoPicker
+        client={client}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={onOpenWorkspace}
+        workspaces={[]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onCreateWorkspace={onCreateWorkspace}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Open Workspace Root"));
+    fireEvent.click(screen.getByText("Choose Root Folder"));
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() =>
+      expect(onOpenWorkspace).toHaveBeenCalledWith({
+        id: "ws-saved",
+        name: "root",
+        rootPath: "/projects/root",
+        memberPaths: ["/projects/root/a", "/projects/root/b"],
+      }),
+    );
+    expect(screen.queryByText("New Workspace")).not.toBeInTheDocument();
   });
 });

@@ -23,6 +23,7 @@ import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
+import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
 
 function RepoWorkspace({
@@ -282,6 +283,11 @@ function RepoWorkspace({
 
 export default function App() {
   const openRepos = useOpenRepos(tauriRepoClient);
+  const workspaces = useWorkspaces(tauriRepoClient);
+  const workspaceNames = useMemo(
+    () => Object.fromEntries(workspaces.workspaces.map((workspace) => [workspace.id, workspace.name])),
+    [workspaces.workspaces],
+  );
   const [theme, setTheme] = useState<Theme>(() =>
     resolveTheme(
       loadStoredTheme(),
@@ -343,7 +349,19 @@ export default function App() {
   // Guards the E2E reconciliation effect below so it only forces a deterministic starting repo
   // once, at launch — not on every later `openRepos.openRepos` change, which would otherwise
   // also fire for (and undo) a tab the test itself opens afterward.
+  // The workspace E2E uses a one-shot local-storage marker before restarting the real app so
+  // that one launch can prove persisted workspace grouping is restored. Normal E2E launches
+  // still reconcile to the single fixture repo, preserving cross-test isolation.
   const e2eReconciledRef = useRef(false);
+  useEffect(() => {
+    if (
+      typeof import.meta.env.VITE_E2E_REPO_PATH === "string" &&
+      window.localStorage.getItem("browsitory-e2e-restore-open-repos-once") === "true"
+    ) {
+      e2eReconciledRef.current = true;
+      window.localStorage.removeItem("browsitory-e2e-restore-open-repos-once");
+    }
+  }, []);
   useEffect(() => {
     // Wait for the persisted-tab restore to settle first: on the mount pass `openRepos` is still
     // the empty initial value, so without this the fixture would be opened concurrently with
@@ -387,8 +405,10 @@ export default function App() {
           openRepos={openRepos.openRepos}
           activePath={openRepos.activePath}
           busyPaths={busyPaths}
+          workspaceNames={workspaceNames}
           onSwitchTo={openRepos.switchTo}
           onClose={openRepos.closeRepo}
+          onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
         />
         {themeToggle}
@@ -404,11 +424,31 @@ export default function App() {
               void openRepoTab(path);
               setPickingRepo(false);
             }}
+            onOpenWorkspace={(workspace) => {
+              void openRepos.openWorkspace(workspace);
+              setPickingRepo(false);
+            }}
+            workspaces={workspaces.workspaces}
+            workspacesLoading={workspaces.loading}
+            workspacesError={workspaces.error}
+            onCreateWorkspace={workspaces.createWorkspace}
+            onEditWorkspace={workspaces.editWorkspace}
+            onDeleteWorkspace={workspaces.deleteWorkspace}
           />
         </Overlay>
       )}
       {openRepos.openRepos.length === 0 ? (
-        <RepoPicker client={tauriRepoClient} onOpenRepo={openRepoTab} />
+        <RepoPicker
+          client={tauriRepoClient}
+          onOpenRepo={openRepoTab}
+          onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
+          workspaces={workspaces.workspaces}
+          workspacesLoading={workspaces.loading}
+          workspacesError={workspaces.error}
+          onCreateWorkspace={workspaces.createWorkspace}
+          onEditWorkspace={workspaces.editWorkspace}
+          onDeleteWorkspace={workspaces.deleteWorkspace}
+        />
       ) : (
         openRepos.openRepos.map((repo) => (
           <RepoWorkspace
