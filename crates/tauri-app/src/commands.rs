@@ -134,6 +134,53 @@ impl From<git_core::worktree::WorktreeInfo> for WorktreeInfoDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub name: String,
+    pub root_path: String,
+    pub member_paths: Vec<String>,
+}
+
+impl From<config::Workspace> for WorkspaceDto {
+    fn from(workspace: config::Workspace) -> Self {
+        Self {
+            id: workspace.id,
+            name: workspace.name,
+            root_path: workspace.root_path.to_string_lossy().into_owned(),
+            member_paths: workspace
+                .member_paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRepoEntryDto {
+    pub path: String,
+    pub workspace_id: Option<String>,
+}
+
+impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
+    fn from(entry: config::OpenRepoEntry) -> Self {
+        Self {
+            path: entry.path.to_string_lossy().into_owned(),
+            workspace_id: entry.workspace_id,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRepoEntryInput {
+    pub path: String,
+    pub workspace_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubmoduleInfoDto {
     pub path: String,
     pub url: Option<String>,
@@ -720,24 +767,28 @@ pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
-pub fn list_open_repos() -> Result<(Vec<String>, Option<String>), String> {
-    let (paths, active) = config::list_open_repos().map_err(|e| e.to_string())?;
+pub fn list_open_repos() -> Result<(Vec<OpenRepoEntryDto>, Option<String>), String> {
+    let (entries, active) = config::list_open_repos().map_err(|e| e.to_string())?;
     Ok((
-        paths
-            .into_iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect(),
+        entries.into_iter().map(OpenRepoEntryDto::from).collect(),
         active.map(|p| p.to_string_lossy().into_owned()),
     ))
 }
 
 #[tauri::command]
-pub fn persist_open_repos(paths: Vec<String>, active_path: Option<String>) -> Result<(), String> {
-    config::set_open_repos(
-        &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
-        active_path.as_deref().map(Path::new),
-    )
-    .map_err(|e| e.to_string())
+pub fn persist_open_repos(
+    entries: Vec<OpenRepoEntryInput>,
+    active_path: Option<String>,
+) -> Result<(), String> {
+    let entries = entries
+        .into_iter()
+        .map(|entry| config::OpenRepoEntry {
+            path: PathBuf::from(entry.path),
+            workspace_id: entry.workspace_id,
+        })
+        .collect::<Vec<_>>();
+    config::set_open_repos(&entries, active_path.as_deref().map(Path::new))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -746,6 +797,50 @@ pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
         .file()
         .blocking_pick_folder()
         .map(|path| path.to_string())
+}
+
+#[tauri::command]
+pub fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
+    config::scan_repos_in_root(Path::new(&root))
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_workspaces() -> Result<Vec<WorkspaceDto>, String> {
+    config::list_workspaces()
+        .map(|workspaces| workspaces.into_iter().map(WorkspaceDto::from).collect())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn save_workspace(name: String, root: String, members: Vec<String>) -> Result<String, String> {
+    config::save_workspace(
+        &name,
+        Path::new(&root),
+        &members.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn update_workspace(id: String, name: String, members: Vec<String>) -> Result<(), String> {
+    config::update_workspace(
+        &id,
+        &name,
+        &members.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn delete_workspace(id: String) -> Result<(), String> {
+    config::delete_workspace(&id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1491,6 +1586,7 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
 mod tests {
     use std::path::PathBuf;
 
+    use config::{OpenRepoEntry, Workspace};
     use git_core::diff::DiffLineOrigin;
     use git_core::reflog::ReflogEntry;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
@@ -1501,9 +1597,61 @@ mod tests {
     use crate::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, ForgeProviderDto, PullOutcomeDto, ReflogEntryDto,
-        RemoteAuthModeDto, SubmoduleInfoDto, WorktreeInfoDto,
+        transfer_event_payload, ForgeProviderDto, OpenRepoEntryDto, OpenRepoEntryInput,
+        PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto, WorkspaceDto,
+        WorktreeInfoDto,
     };
+
+    #[test]
+    fn workspace_dto_serializes_camel_case_paths() {
+        let dto = WorkspaceDto::from(Workspace {
+            id: "workspace-1".into(),
+            name: "Project Suite".into(),
+            root_path: PathBuf::from("/repos/suite"),
+            member_paths: vec![
+                PathBuf::from("/repos/suite/api"),
+                PathBuf::from("/repos/suite/web"),
+            ],
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "id": "workspace-1",
+                "name": "Project Suite",
+                "rootPath": "/repos/suite",
+                "memberPaths": ["/repos/suite/api", "/repos/suite/web"],
+            })
+        );
+    }
+
+    #[test]
+    fn open_repo_entry_dto_serializes_camel_case_workspace_id() {
+        let dto = OpenRepoEntryDto::from(OpenRepoEntry {
+            path: PathBuf::from("/repos/suite/api"),
+            workspace_id: Some("workspace-1".into()),
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "path": "/repos/suite/api",
+                "workspaceId": "workspace-1",
+            })
+        );
+    }
+
+    #[test]
+    fn open_repo_entry_input_deserializes_camel_case_workspace_id() {
+        let input: OpenRepoEntryInput = serde_json::from_value(serde_json::json!({
+            "path": "/repos/suite/api",
+            "workspaceId": "workspace-1",
+        }))
+        .unwrap();
+
+        assert_eq!(input.path, "/repos/suite/api");
+        assert_eq!(input.workspace_id, Some("workspace-1".into()));
+    }
 
     #[test]
     fn worktree_info_dto_serializes_camel_case_fields() {

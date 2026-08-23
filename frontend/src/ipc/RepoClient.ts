@@ -202,13 +202,30 @@ export interface PullRequestList {
   truncated: boolean;
 }
 
+export interface OpenRepoEntry {
+  path: string;
+  workspaceId: string | null;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  rootPath: string;
+  memberPaths: string[];
+}
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
   openRepo(path: string): Promise<void>;
   closeRepo(repoPath: string): Promise<void>;
-  listOpenRepos(): Promise<{ paths: string[]; activePath: string | null }>;
-  persistOpenRepos(paths: string[], activePath: string | null): Promise<void>;
+  listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;
+  persistOpenRepos(entries: OpenRepoEntry[], activePath: string | null): Promise<void>;
+  scanReposInRoot(root: string): Promise<string[]>;
+  listWorkspaces(): Promise<Workspace[]>;
+  saveWorkspace(name: string, root: string, members: string[]): Promise<string>;
+  updateWorkspace(id: string, name: string, members: string[]): Promise<void>;
+  deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
   getCommitGraph(repoPath: string, limit: number): Promise<GraphCommit[]>;
   getWorkingDiff(repoPath: string, path: string, staged: boolean): Promise<DiffHunk[]>;

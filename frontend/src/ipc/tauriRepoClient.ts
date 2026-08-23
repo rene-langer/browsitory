@@ -11,6 +11,7 @@ import type {
   ForgeRepository,
   GraphCommit,
   MergeOutcome,
+  OpenRepoEntry,
   PullOutcome,
   PullRequest,
   PullRequestList,
@@ -27,6 +28,7 @@ import type {
   TagInfo,
   TransferProgress,
   UpstreamInfo,
+  Workspace,
   WorktreeInfo,
 } from "./RepoClient";
 
@@ -38,9 +40,19 @@ export const tauriRepoClient: RepoClient = {
   openRepo: (path: string) => invoke("open_repo", { path }),
   closeRepo: (repoPath: string) => invoke("close_repo", { repoPath }),
   listOpenRepos: () =>
-    invoke<[string[], string | null]>("list_open_repos").then(([paths, activePath]) => ({ paths, activePath })),
-  persistOpenRepos: (paths: string[], activePath: string | null) =>
-    invoke("persist_open_repos", { paths, activePath }),
+    invoke<[OpenRepoEntry[], string | null]>("list_open_repos").then(([entries, activePath]) => ({
+      entries,
+      activePath,
+    })),
+  persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
+    invoke("persist_open_repos", { entries, activePath }),
+  scanReposInRoot: (root: string) => invoke<string[]>("scan_repos_in_root", { root }),
+  listWorkspaces: () => invoke<Workspace[]>("list_workspaces"),
+  saveWorkspace: (name: string, root: string, members: string[]) =>
+    invoke<string>("save_workspace", { name, root, members }),
+  updateWorkspace: (id: string, name: string, members: string[]) =>
+    invoke("update_workspace", { id, name, members }),
+  deleteWorkspace: (id: string) => invoke("delete_workspace", { id }),
   getStatus: (repoPath: string) => invoke<StatusEntry[]>("get_status", { repoPath }),
   getCommitGraph: (repoPath: string, limit: number) =>
     invoke<GraphCommit[]>("get_commit_graph", { repoPath, limit }),
