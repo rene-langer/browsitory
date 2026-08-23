@@ -10,6 +10,8 @@ cargo test --workspace                            # run all Rust tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check                        # format check (CI)
 cargo tauri dev                                    # run the desktop app (from crates/tauri-app)
+scripts/build-dist.sh                              # build standalone distributable (Linux/macOS)
+scripts\build-dist.ps1                             # build standalone distributable (Windows)
 ```
 
 ```bash
@@ -71,6 +73,16 @@ primitives (`Panel`, `SplitView`, `Toolbar`, `ListRow`) under
 core commit-review loop (`CommitBox`, `CommitGraph`, `DiffPane`/`DiffView`/`BlameView`).
 Remaining: the rollout of that system to every other component, and a new app icon —
 see `docs/superpowers/specs/2026-08-18-browsitory-phase5-design.md` and its plans.
+
+## Versioning & releases
+
+Semantic versioning (`MAJOR.MINOR.PATCH`). Pushing a `release/MAJOR.MINOR.PATCH` tag (no `v`
+prefix) triggers `.github/workflows/release.yml`, which builds standalone distributables for
+Linux/macOS/Windows (via `tauri-apps/tauri-action`, same underlying build as
+`scripts/build-dist.*`) and publishes them as a draft GitHub Release. The workflow stamps that
+version into `crates/tauri-app/tauri.conf.json` at build time — no manual version bump needed
+before tagging. `cargo test --workspace` and the frontend test suite must pass on the tagged
+commit before the platform builds run.
 
 ## Architecture
 
