@@ -9,6 +9,7 @@
     "frontendDist": "../../frontend/dist"
   },
   "app": {
+    "enableGTKAppId": true,
     "windows": [
       {
         "title": "Browsitory",
