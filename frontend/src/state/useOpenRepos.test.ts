@@ -280,4 +280,34 @@ describe("useOpenRepos", () => {
       "/projects/b",
     );
   });
+
+  it("openWorkspace keeps all members contiguous when an existing member precedes an unrelated tab", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockResolvedValue({
+        entries: [entry("/projects/a"), entry("/repos/unrelated")],
+        activePath: "/repos/unrelated",
+      }),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.openWorkspace({
+        id: "ws-1",
+        name: "Services",
+        rootPath: "/projects",
+        memberPaths: ["/projects/a", "/projects/b"],
+      });
+    });
+
+    expect(result.current.openRepos.map((repo) => [repo.path, repo.workspaceId])).toEqual([
+      ["/projects/a", "ws-1"],
+      ["/projects/b", "ws-1"],
+      ["/repos/unrelated", null],
+    ]);
+    expect(client.persistOpenRepos).toHaveBeenLastCalledWith(
+      [entry("/projects/a", "ws-1"), entry("/projects/b", "ws-1"), entry("/repos/unrelated")],
+      "/projects/b",
+    );
+  });
 });
