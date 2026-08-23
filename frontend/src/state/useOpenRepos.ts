@@ -118,14 +118,21 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
       if (opened.length === 0) return;
       setOpenRepos((prev) => {
         const openedPaths = new Set(opened);
-        const existingPaths = new Set(prev.map((repo) => repo.path));
-        const tagged = prev.map((repo) =>
-          openedPaths.has(repo.path) ? { ...repo, workspaceId: workspace.id } : repo,
-        );
-        const added = opened
-          .filter((path) => !existingPaths.has(path))
-          .map((path) => ({ path, displayName: displayNameFor(path), workspaceId: workspace.id }));
-        const next = [...tagged, ...added];
+        const existingByPath = new Map(prev.map((repo) => [repo.path, repo] as const));
+        const workspaceRepos = opened.map((path) => {
+          const existing = existingByPath.get(path);
+          return existing === undefined
+            ? { path, displayName: displayNameFor(path), workspaceId: workspace.id }
+            : { ...existing, workspaceId: workspace.id };
+        });
+        const firstExistingMemberIndex = prev.findIndex((repo) => openedPaths.has(repo.path));
+        const remaining = prev.filter((repo) => !openedPaths.has(repo.path));
+        const insertionIndex = firstExistingMemberIndex === -1 ? remaining.length : firstExistingMemberIndex;
+        const next = [
+          ...remaining.slice(0, insertionIndex),
+          ...workspaceRepos,
+          ...remaining.slice(insertionIndex),
+        ];
         persist(next, opened[opened.length - 1]);
         return next;
       });

@@ -112,7 +112,11 @@ export function WorkspaceEditor({
             />
           </label>
           <div className={styles.actions}>
-            <button type="button" disabled={selected.size === 0 || name.trim() === ""} onClick={handleSave}>
+            <button
+              type="button"
+              disabled={candidates === null || selected.size === 0 || name.trim() === ""}
+              onClick={handleSave}
+            >
               Save
             </button>
             <button type="button" onClick={onCancel}>

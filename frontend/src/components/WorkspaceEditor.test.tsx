@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { WorkspaceEditor } from "./WorkspaceEditor";
@@ -88,6 +88,40 @@ describe("WorkspaceEditor", () => {
       rootPath: "/projects/root",
       memberPaths: ["/projects/root/a"],
     };
+
+    it("keeps save disabled until the explicit scan removes vanished saved members", async () => {
+      let resolveScan!: (paths: string[]) => void;
+      const scanReposInRoot = vi.fn().mockReturnValue(
+        new Promise<string[]>((resolve) => {
+          resolveScan = resolve;
+        }),
+      );
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <WorkspaceEditor
+          client={fakeClient({ scanReposInRoot })}
+          existing={{
+            ...existing,
+            memberPaths: ["/projects/root/a", "/projects/root/vanished"],
+          }}
+          onSave={onSave}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      const saveButton = screen.getByRole("button", { name: "Save" });
+      expect(saveButton).toBeDisabled();
+      fireEvent.click(saveButton);
+      expect(onSave).not.toHaveBeenCalled();
+
+      await act(async () => resolveScan(["/projects/root/a"]));
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+
+      await waitFor(() =>
+        expect(onSave).toHaveBeenCalledWith("Services", "/projects/root", ["/projects/root/a"]),
+      );
+    });
 
     it("scans the existing root immediately, pre-checking current members and leaving new finds unchecked", async () => {
       const scanReposInRoot = vi.fn().mockResolvedValue(["/projects/root/a", "/projects/root/c"]);
