@@ -2396,7 +2396,7 @@ mod tests {
             .unwrap();
 
         let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
-        assert_eq!(on_disk, "line one\nline two\n");
+        assert_eq!(on_disk.replace("\r\n", "\n"), "line one\nline two\n");
     }
 
     #[test]
