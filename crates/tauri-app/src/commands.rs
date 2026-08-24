@@ -799,16 +799,35 @@ pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
         .map(|path| path.to_string())
 }
 
+// Async + `spawn_blocking`, unlike this file's other `config`-crate commands (`list_workspaces`,
+// `save_workspace`, etc.), which stay plain `fn` because they're a single small TOML read/write.
+// This one walks a directory and `stat`s every entry in it (`config::scan_repos_in_root`), and a
+// plain `fn` `#[tauri::command]` runs *inline*, on whatever thread hands it the IPC message —
+// there's no threadpool dispatch for the non-async case (verified against the vendored
+// `tauri-macros` 2.6.3 `body_blocking` codegen: it's a direct call, not a `spawn`/
+// `spawn_blocking`). Reproduced locally: injecting an artificial delay into this command's body
+// measurably froze the whole webview's WebDriver responsiveness for the delay's full duration,
+// not just this command's own response — confirming that thread is shared with the webview's
+// own event loop. On a resource-constrained CI runner (this project's e2e job has separately
+// been observed taking ~30s just to cold-spawn the app process — see
+// `e2e/specs/workspaces.spec.ts`'s comment on the Edit-modal wait), a slow directory scan can
+// stall in the same place and eat into or exceed a UI-side wait budget that has nothing to do
+// with this command's own logic. Offloading it here removes that class of failure at the root
+// rather than papering over it with a bigger frontend-side timeout.
 #[tauri::command]
-pub fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
-    config::scan_repos_in_root(Path::new(&root))
-        .map(|paths| {
-            paths
-                .into_iter()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect()
-        })
-        .map_err(|error| error.to_string())
+pub async fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        config::scan_repos_in_root(Path::new(&root))
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect()
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "scan task stopped".to_string())?
 }
 
 #[tauri::command]
