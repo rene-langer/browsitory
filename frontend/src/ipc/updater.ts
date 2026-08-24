@@ -3,7 +3,8 @@ import { relaunch } from "@tauri-apps/plugin-process";
 
 export interface UpdateInfo {
   version: string;
-  install: () => Promise<void>;
+  download: () => Promise<void>;
+  installAndRelaunch: () => Promise<void>;
 }
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
@@ -12,7 +13,14 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     if (update === null) return null;
     return {
       version: update.version,
-      install: () => update.downloadAndInstall(),
+      download: () => update.download(),
+      installAndRelaunch: async () => {
+        await update.install();
+        // On Windows, `install()` exits the process itself, so this line
+        // never runs. On macOS/Linux it typically doesn't, so relaunch
+        // explicitly as a fallback to complete the restart flow there too.
+        await relaunch();
+      },
     };
   } catch (error) {
     console.error("Update check failed", error);
