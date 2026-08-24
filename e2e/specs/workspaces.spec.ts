@@ -78,18 +78,40 @@ describe("Browsitory multi-repo workspaces", () => {
     await editButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), editButton);
 
-    // This is the first `scan_repos_in_root` invocation anywhere in this spec's session, and
-    // this session was itself just created a moment ago via the previous test's
-    // `browser.reloadSession()` (a full app-process restart to prove workspace persistence).
-    // On CI that restart's own process spawn has been observed taking ~30s (vs. sub-second
-    // locally) before the webview responds at all — see the 2026-08-24 CI run
-    // (32726464369) that failed here with a 10s timeout despite every other post-restart
-    // wait in this file (branch list, tab titles, Edit button) resolving in under 200ms. Those
-    // waits only need already-restored/cached data; this one needs a fresh IPC round trip on a
-    // freshly-restarted, still-cold process, so it gets a larger, evidence-based budget rather
-    // than the file's usual 10s.
+    // TEMPORARY DIAGNOSTIC (2026-08-24): this wait has now timed out twice on real CI (10s,
+    // then 30s after converting `scan_repos_in_root` to an async spawn_blocking command) despite
+    // the scan itself being a trivial non-recursive `read_dir` over 3 tiny directories — too
+    // cheap to plausibly cost multiple seconds, let alone 30. Rather than guess a third timeout
+    // value blindly, poll and log the DOM's actual intermediate state once a second so the next
+    // CI run's log tells us exactly which stage is stuck: does the root path `<p>` (confirms
+    // `WorkspaceEditor` mounted with `root` already set), any checkbox at all (confirms
+    // `scanReposInRoot` resolved with *something*), or an alert `<p role="alert">` (confirms it
+    // rejected) ever appear, and when.
+    const editDiagnosticDeadline = Date.now() + 45000;
+    let editDiagnosticFound = false;
+    while (Date.now() < editDiagnosticDeadline) {
+      const elapsedMs = 45000 - (editDiagnosticDeadline - Date.now());
+      const rootParagraphCount = (await $$('p[title]')).length;
+      const checkboxCount = (await $$('input[type="checkbox"]')).length;
+      const alertText = (await $('p[role="alert"]').isExisting())
+        ? await $('p[role="alert"]').getText()
+        : null;
+      const repoCExists = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`).isExisting();
+      // eslint-disable-next-line no-console
+      console.log(
+        `[diagnostic t=${elapsedMs}ms] rootParagraphs=${rootParagraphCount} checkboxes=${checkboxCount} repoCExists=${repoCExists} alert=${JSON.stringify(alertText)}`,
+      );
+      if (repoCExists) {
+        editDiagnosticFound = true;
+        break;
+      }
+      await browser.pause(1000);
+    }
+    if (!editDiagnosticFound) {
+      throw new Error("diagnostic: repo-c checkbox never appeared within 45s — see [diagnostic t=...] log lines above for where it stalled");
+    }
+
     const repoCCheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
-    await repoCCheckbox.waitForExist({ timeout: 30000 });
     expect(await repoCCheckbox.isSelected()).toBe(false);
 
     const repoACheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_A}"]`);
