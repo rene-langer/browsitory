@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/plugin-process", () => ({
 describe("checkForUpdate", () => {
   beforeEach(() => {
     vi.mocked(check).mockReset();
+    vi.mocked(relaunch).mockReset();
   });
 
   it("returns null when no update is available", async () => {
@@ -24,18 +25,39 @@ describe("checkForUpdate", () => {
     expect(result).toBeNull();
   });
 
-  it("returns version and an install function when an update is found", async () => {
-    const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
+  it("returns version, download, and installAndRelaunch functions when an update is found", async () => {
+    const download = vi.fn().mockResolvedValue(undefined);
+    const install = vi.fn().mockResolvedValue(undefined);
     vi.mocked(check).mockResolvedValue({
       version: "1.2.3",
-      downloadAndInstall,
+      download,
+      install,
     } as never);
 
     const result = await checkForUpdate();
 
     expect(result?.version).toBe("1.2.3");
-    await result?.install();
-    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+
+    await result?.download();
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it("installAndRelaunch installs the update and relaunches", async () => {
+    const download = vi.fn().mockResolvedValue(undefined);
+    const install = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(check).mockResolvedValue({
+      version: "1.2.3",
+      download,
+      install,
+    } as never);
+    vi.mocked(relaunch).mockResolvedValue(undefined);
+
+    const result = await checkForUpdate();
+    await result?.installAndRelaunch();
+
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(relaunch).toHaveBeenCalledTimes(1);
   });
 
   it("returns null when the check rejects", async () => {
