@@ -56,3 +56,38 @@
   background: var(--color-danger);
   border-color: var(--color-danger-text);
 }
+
+.primaryButton {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--color-accent);
+  opacity: 0.9;
+}
+
+.fieldError {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger-text);
+  font-size: var(--text-sm);
+}
+
+.emptyState {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+}
+
+.disclosure {
+  flex-basis: 100%;
+}
+
+.disclosure summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

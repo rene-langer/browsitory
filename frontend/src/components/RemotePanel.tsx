@@ -4,6 +4,16 @@ import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
+function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
+  if (!existingNames.includes("origin")) return "origin";
+  const withoutGitSuffix = fetchUrl.replace(/\.git\/?$/, "");
+  const slug = withoutGitSuffix
+    .split(/[/:]/)
+    .filter((part) => part !== "")
+    .pop();
+  return slug ?? "";
+}
+
 export function RemotePanel({
   remotes,
   upstream,
@@ -58,6 +68,8 @@ export function RemotePanel({
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
   const [newPushUrl, setNewPushUrl] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [showPushUrl, setShowPushUrl] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editFetchUrl, setEditFetchUrl] = useState("");
@@ -71,13 +83,18 @@ export function RemotePanel({
 
   const submitAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    const name = newName.trim();
+    setAddError(null);
     const fetchUrl = newFetchUrl.trim();
+    const name = (newName.trim() || deriveRemoteName(fetchUrl, remotes.map((remote) => remote.name))).trim();
     if (name === "" || fetchUrl === "") return;
-    await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
-    setNewName("");
-    setNewFetchUrl("");
-    setNewPushUrl("");
+    try {
+      await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
+      setNewName("");
+      setNewFetchUrl("");
+      setNewPushUrl("");
+    } catch (err) {
+      setAddError(String(err));
+    }
   };
 
   const beginEdit = (remote: RemoteInfo) => {
@@ -153,7 +170,7 @@ export function RemotePanel({
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes">
       {remotes.length === 0 ? (
-        <p>No remotes configured.</p>
+        <p className={styles.emptyState}>Add a remote below to push and pull.</p>
       ) : (
         <ul className={styles.list}>
           {remotes.map((remote) => (
@@ -246,10 +263,57 @@ export function RemotePanel({
 
       <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
         <h3 className={styles.formHeading}>Add remote</h3>
-        <label className={styles.label}>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
-        <label className={styles.label}>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
-        <label className={styles.label}>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
-        <button type="submit" disabled={fetchDisabled}>Add remote</button>
+        <label className={styles.label}>
+          Remote name
+          <input placeholder="origin" value={newName} onChange={(event) => setNewName(event.target.value)} />
+        </label>
+        <label className={styles.label}>
+          Fetch URL
+          <input
+            data-testid="add-remote-fetch-url"
+            placeholder="git@github.com:user/repo.git"
+            value={newFetchUrl}
+            onChange={(event) => {
+              const value = event.target.value;
+              setNewFetchUrl(value);
+              if (newName === "") {
+                setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
+              }
+            }}
+          />
+        </label>
+        {addError !== null && (
+          <p role="alert" className={styles.fieldError}>
+            {addError}
+          </p>
+        )}
+        <details
+          className={styles.disclosure}
+          open={showPushUrl}
+          onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
+        >
+          <summary
+            onClick={(event) => {
+              event.preventDefault();
+              setShowPushUrl((open) => !open);
+            }}
+          >
+            Push URL (optional)
+          </summary>
+          {showPushUrl && (
+            <label className={styles.label}>
+              Push URL
+              <input
+                placeholder="git@github.com:user/repo.git"
+                value={newPushUrl}
+                onChange={(event) => setNewPushUrl(event.target.value)}
+              />
+            </label>
+          )}
+        </details>
+        <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
+          Add remote
+        </button>
       </form>
 
       <section aria-labelledby="upstream-heading">
