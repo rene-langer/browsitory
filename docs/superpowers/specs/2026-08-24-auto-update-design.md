@@ -68,33 +68,53 @@ built by this project's CI, not an arbitrary file placed at the update URL.
 
 ## Frontend
 
-New `frontend/src/components/UpdateBanner.tsx` (or similar), mounted once near
-the app root:
+`frontend/eslint.config.js` bars any file under `src/components/**` or
+`src/state/**` from importing `@tauri-apps/*` directly (`no-restricted-imports`,
+enforced today to keep those directories on `RepoClient`). This feature is
+intentionally *not* routed through `RepoClient` (it's app-lifecycle, not
+repo-data — see rationale below), so it needs its own thin wrapper module,
+the same shape `tauriRepoClient.ts` already gives `@tauri-apps/api`:
 
-- On mount: call `check()` from `@tauri-apps/plugin-updater`.
-- Re-check on a timer every 6 hours while the app stays open (covers
-  long-running sessions).
-- If `check()` finds an update: call `update.downloadAndInstall()`
-  immediately (no user prompt before download — download is automatic per
-  design decision).
-- Once downloaded: show a persistent, dismissable-but-reappearing banner —
-  "Update v{version} ready — Restart to update" — with a button that calls
-  `relaunch()` from `@tauri-apps/plugin-process`.
-- Any error from `check()` or `downloadAndInstall()` (offline, no release
-  published yet, network failure) is caught and swallowed — logged to console,
-  no user-facing error. A failed background check is not actionable by the
-  user and shouldn't interrupt them.
-- This module talks to Tauri plugins directly and is **not** routed through
-  `RepoClient` — it's app-lifecycle concerned, not repo-data, so it sits outside
-  that interface's scope the same way window-chrome or menu code would.
+- **`frontend/src/ipc/updater.ts`** (new, not part of the `RepoClient`
+  interface — just a plain module living alongside it): exports
+  `checkForUpdate()`, `downloadAndInstallUpdate(update)`, and `relaunchApp()`,
+  each a thin wrapper around `@tauri-apps/plugin-updater`'s `check()` /
+  `update.downloadAndInstall()` and `@tauri-apps/plugin-process`'s
+  `relaunch()`. This is the only file that imports those two plugins.
+- **`frontend/src/components/UpdateBanner.tsx`** (new), mounted once near the
+  app root, imports only `../ipc/updater`:
+  - On mount: call `checkForUpdate()`.
+  - Re-check on a timer every 6 hours while the app stays open (covers
+    long-running sessions).
+  - If an update is found: call `downloadAndInstallUpdate()` immediately (no
+    user prompt before download — download is automatic per design decision).
+  - Once downloaded: show a persistent banner — "Update v{version} ready —
+    Restart to update" — with a button that calls `relaunchApp()`.
+  - Any error from either call (offline, no release published yet, network
+    failure) is caught and swallowed — logged to console, no user-facing
+    error. A failed background check is not actionable by the user and
+    shouldn't interrupt them.
+
+Why not through `RepoClient`: that interface exists so `src/components` and
+`src/state` work unmodified against a future VSCode-webview backend (see
+`docs/ARCHITECTURE.md`'s "`RepoClient`: why it exists"). A VSCode extension
+would use VSCode's own built-in auto-update, not this plugin — so putting
+updater calls behind `RepoClient` would model a capability that doesn't
+port. `ipc/updater.ts` is therefore a Tauri-only module the desktop app's
+`UpdateBanner` depends on directly; a future webview build simply wouldn't
+render that component.
 
 ## Testing
 
-- Frontend: unit test `UpdateBanner` with `@tauri-apps/plugin-updater` and
-  `@tauri-apps/plugin-process` mocked (`vi.mock`), covering: no update found →
-  no banner; update found → auto-download called → banner shown after
-  download resolves; restart button → `relaunch()` called; check/download
-  rejection → banner stays hidden, no thrown error.
+- Frontend: `frontend/src/ipc/updater.test.ts` mocks `@tauri-apps/plugin-updater`
+  and `@tauri-apps/plugin-process` directly (`vi.mock`, same pattern as
+  `tauriRepoClient.test.ts`), verifying each wrapper calls through correctly.
+  `frontend/src/components/UpdateBanner.test.tsx` mocks `../ipc/updater`
+  instead (component-level tests mock the seam they depend on, not the Tauri
+  plugin two layers down), covering: no update found → no banner; update
+  found → `downloadAndInstallUpdate` called → banner shown after it resolves;
+  restart button → `relaunchApp` called; rejection from either call → banner
+  stays hidden, no thrown error.
 - No new Rust tests — this phase is plugin configuration and wiring, not new
   `git-core`/`Worker` logic.
 - No E2E coverage — exercising a real update requires a second signed,
