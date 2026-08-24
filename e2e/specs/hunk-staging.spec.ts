@@ -35,7 +35,9 @@ describe("Browsitory hunk staging", () => {
   it("stages a single hunk, commits it, and leaves the other hunk's edit unstaged", async () => {
     const fileRow = await $(`li*=${HUNK_FIXTURE_FILE}`);
     await fileRow.waitForExist({ timeout: 10000 });
-    await browser.execute((el) => (el as HTMLElement).click(), await $(`button=${HUNK_FIXTURE_FILE} (Modified)`));
+    // The row's `{path} ({kind})` text lives in a `<span>` inside `<li role="option">` (see
+    // `DiffPane.tsx`'s `FileListRow`), not in a `<button>`; the click bubbles to the `<li>`.
+    await browser.execute((el) => (el as HTMLElement).click(), await $(`span=${HUNK_FIXTURE_FILE} (Modified)`));
 
     const stageHunkButtons = await $$("button=Stage Hunk");
     await expect(stageHunkButtons).toBeElementsArrayOfSize(2);

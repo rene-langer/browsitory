@@ -80,9 +80,11 @@ describe("Browsitory screenshots (docs)", () => {
   });
 
   it("captures staging an unstaged change with a commit message typed", async () => {
-    const unstagedFileButton = await $("button*=src.txt (Modified)");
-    await unstagedFileButton.waitForExist({ timeout: 10000 });
-    await browser.execute((el) => (el as HTMLElement).click(), unstagedFileButton);
+    // The row's `{path} ({kind})` text lives in a `<span>` inside `<li role="option">` (see
+    // `DiffPane.tsx`'s `FileListRow`); the click bubbles to the `<li>`'s own onClick.
+    const unstagedFileRow = await $("span*=src.txt (Modified)");
+    await unstagedFileRow.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), unstagedFileRow);
     await $(".diff-line-add").waitForExist({ timeout: 10000 });
 
     const commitMessageInput = await $("textarea[placeholder='Commit message']");

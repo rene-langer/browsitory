@@ -6,6 +6,14 @@ import { expect } from "@wdio/globals";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BLAME_FIXTURE_FILE = "blame-fixture.txt";
+// Spec-unique name on purpose. `commit-graph.spec.ts` needs the same "write a throwaway file,
+// stage+commit it through the UI to force a `useAppState` refresh" trick, and both specs used to
+// call theirs `prime.txt`. That only works because `wdio.conf.ts`'s `beforeSession` re-clones the
+// fixture repo and WebdriverIO starts a fresh worker (and therefore a fresh session) per spec
+// file — the moment two specs share a worker, the second one's write is byte-identical to what
+// the first already committed, which is no working-tree change at all: no file row, and no stage
+// control to click. Distinct names make that impossible to trip over.
+const PRIME_FILE = "blame-prime.txt";
 
 describe("Browsitory blame", () => {
   before(() => {
@@ -24,7 +32,7 @@ describe("Browsitory blame", () => {
       stdio: "inherit",
     });
 
-    fs.writeFileSync(path.join(E2E_REPO_PATH, "prime.txt"), "prime\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, PRIME_FILE), "prime\n");
   });
 
   it("shows per-line blame for a historic commit and jumps history selection on a line click", async () => {
@@ -33,8 +41,13 @@ describe("Browsitory blame", () => {
 
     // Stage+commit the throwaway prime file through the real UI — the only way to make
     // useAppState refetch, which is what makes the two git-CLI commits above show up below.
-    const stageButton = await $("button=Stage");
-    await stageButton.scrollIntoView({ block: "center" });
+    // The per-row stage control is icon-only (aria-label only, no visible text) since the
+    // file-list migration to `ListRow` — target the throwaway prime file written above.
+    const stageButton = await $(`button[aria-label="Stage ${PRIME_FILE}"]`);
+    await stageButton.waitForExist({ timeout: 10000 });
+    // `opacity: 0` until the row is hovered/focused — see `first-flow.spec.ts`'s note on why
+    // both the scroll and the click go through `browser.execute`.
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");
