@@ -307,4 +307,10 @@ describe("RemotePanel", () => {
 
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", false);
   });
+
+  it("styles the Remove button with the danger variant", () => {
+    renderPanel({});
+
+    expect(screen.getByRole("button", { name: "Remove origin" })).toHaveClass("danger");
+  });
 });

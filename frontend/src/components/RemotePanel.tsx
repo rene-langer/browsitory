@@ -185,7 +185,13 @@ export function RemotePanel({
                     <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
                     <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
                     <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
-                    <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
+                    <button
+                      type="button"
+                      className={`${styles.dangerButton} danger`}
+                      onClick={() => requestRemove(remote)}
+                    >
+                      Remove {remote.name}
+                    </button>
                   </Toolbar>
                 </>
               )}
