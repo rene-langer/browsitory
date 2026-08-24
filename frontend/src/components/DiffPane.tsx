@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { AlertTriangle, ArrowRightLeft, FileDiff, FileMinus, FilePlus, Pencil, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
   FileConflictChoice,
   RepoClient,
   StatusEntry,
+  StatusKind,
 } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
@@ -12,7 +14,75 @@ import { CommitBox } from "./CommitBox";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { ListRow } from "./primitives/ListRow";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
+
+const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
+  New: FilePlus,
+  Modified: Pencil,
+  Deleted: FileMinus,
+  Renamed: ArrowRightLeft,
+  TypeChange: FileDiff,
+  Conflicted: AlertTriangle,
+};
+
+function FileListRow({
+  entry,
+  selected,
+  onSelect,
+  onBlame,
+  onStageFile,
+  onUnstageFile,
+}: {
+  entry: StatusEntry;
+  selected: boolean;
+  onSelect: () => void;
+  onBlame: () => void;
+  onStageFile: (path: string) => void;
+  onUnstageFile: (path: string) => void;
+}) {
+  const Icon = STATUS_ICONS[entry.kind];
+  return (
+    <ListRow selected={selected} onClick={onSelect} className={styles.fileRow}>
+      <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
+      <span className={styles.path}>
+        {entry.path} ({entry.kind})
+      </span>
+      <div className={styles.rowActions}>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onBlame();
+          }}
+        >
+          Blame
+        </button>
+        {entry.staged ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onUnstageFile(entry.path);
+            }}
+          >
+            Unstage
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onStageFile(entry.path);
+            }}
+          >
+            Stage
+          </button>
+        )}
+      </div>
+    </ListRow>
+  );
+}
 
 export function DiffPane({
   repoPath,
@@ -222,35 +292,96 @@ function UncommittedDiffPane({
   const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
   const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
 
+  const stagedEntries = status.filter((entry) => entry.staged);
+  const unstagedEntries = status.filter((entry) => !entry.staged);
+
+  const isEntrySelected = (entry: StatusEntry) =>
+    selected !== null && selected.path === entry.path && selected.staged === entry.staged;
+
+  const selectEntry = (entry: StatusEntry) => {
+    setSelected({ path: entry.path, staged: entry.staged });
+    setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
+  };
+
+  const blameEntry = (entry: StatusEntry) => {
+    setSelected({ path: entry.path, staged: entry.staged });
+    setViewMode("blame");
+  };
+
+  const navigateGroup = (entries: StatusEntry[], direction: 1 | -1) => {
+    if (entries.length === 0) return;
+    const currentIndex = entries.findIndex(
+      (entry) => selected !== null && entry.path === selected.path && entry.staged === selected.staged,
+    );
+    const nextIndex =
+      currentIndex === -1 ? 0 : Math.min(Math.max(currentIndex + direction, 0), entries.length - 1);
+    selectEntry(entries[nextIndex]);
+  };
+
+  const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.key === "ArrowDown" || event.key === "j") {
+      event.preventDefault();
+      navigateGroup(entries, 1);
+    } else if (event.key === "ArrowUp" || event.key === "k") {
+      event.preventDefault();
+      navigateGroup(entries, -1);
+    }
+  };
+
   return (
     <div>
-      <ul className={styles.fileList}>
-        {status.map((entry) => (
-          <li key={`${entry.staged}:${entry.path}`}>
-            <button
-              onClick={() => {
-                setSelected({ path: entry.path, staged: entry.staged });
-                setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
-              }}
-            >
-              {entry.path} ({entry.kind})
-            </button>
-            <button
-              onClick={() => {
-                setSelected({ path: entry.path, staged: entry.staged });
-                setViewMode("blame");
-              }}
-            >
-              Blame
-            </button>
-            {entry.staged ? (
-              <button onClick={() => onUnstageFile(entry.path)}>Unstage</button>
-            ) : (
-              <button onClick={() => onStageFile(entry.path)}>Stage</button>
-            )}
-          </li>
-        ))}
-      </ul>
+      {unstagedEntries.length > 0 && (
+        <div>
+          <div className={styles.groupHeading}>
+            <span>Changes ({unstagedEntries.length})</span>
+          </div>
+          <ul
+            className={styles.fileList}
+            role="listbox"
+            aria-label="Unstaged changes"
+            tabIndex={0}
+            onKeyDown={handleGroupKeyDown(unstagedEntries)}
+          >
+            {unstagedEntries.map((entry) => (
+              <FileListRow
+                key={`${entry.staged}:${entry.path}`}
+                entry={entry}
+                selected={isEntrySelected(entry)}
+                onSelect={() => selectEntry(entry)}
+                onBlame={() => blameEntry(entry)}
+                onStageFile={onStageFile}
+                onUnstageFile={onUnstageFile}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+      {stagedEntries.length > 0 && (
+        <div>
+          <div className={styles.groupHeading}>
+            <span>Staged ({stagedEntries.length})</span>
+          </div>
+          <ul
+            className={styles.fileList}
+            role="listbox"
+            aria-label="Staged changes"
+            tabIndex={0}
+            onKeyDown={handleGroupKeyDown(stagedEntries)}
+          >
+            {stagedEntries.map((entry) => (
+              <FileListRow
+                key={`${entry.staged}:${entry.path}`}
+                entry={entry}
+                selected={isEntrySelected(entry)}
+                onSelect={() => selectEntry(entry)}
+                onBlame={() => blameEntry(entry)}
+                onStageFile={onStageFile}
+                onUnstageFile={onUnstageFile}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       {viewMode === "blame" ? (
         <>
           {error !== null ? (

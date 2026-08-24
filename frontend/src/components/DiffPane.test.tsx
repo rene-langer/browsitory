@@ -1080,6 +1080,146 @@ describe("DiffPane", () => {
       expect(commitButton).toBeDisabled();
     });
 
+    it("groups unstaged and staged entries under labelled headings with counts", () => {
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Changes (1)")).toBeInTheDocument();
+      expect(screen.getByText("Staged (1)")).toBeInTheDocument();
+    });
+
+    it("marks the selected file's row as aria-selected", async () => {
+      const client = fakeClient({ getWorkingDiff: async () => [] });
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      const row = screen.getByText("a.txt (Modified)").closest('[role="option"]');
+      expect(row).toHaveAttribute("aria-selected", "false");
+
+      fireEvent.click(screen.getByText("a.txt (Modified)"));
+      await screen.findByText(/no changes/i).catch(() => {});
+
+      expect(row).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("renders a status-kind icon for each file row", () => {
+      const client = fakeClient({});
+
+      const { container } = render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      // One status icon per file row (2 entries in `status`).
+      expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("navigates the unstaged group with ArrowDown/ArrowUp and updates the diff", async () => {
+      const twoUnstaged: StatusEntry[] = [
+        { path: "a.txt", staged: false, kind: "Modified" },
+        { path: "c.txt", staged: false, kind: "New" },
+      ];
+      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => [
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Context" as const, content: path }] },
+      ]);
+      const client = fakeClient({ getWorkingDiff });
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={twoUnstaged}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByText("a.txt (Modified)"));
+      await screen.findByText("a.txt");
+
+      fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "ArrowDown" });
+
+      expect(await screen.findByText("c.txt")).toBeInTheDocument();
+    });
+
     it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
       const client = fakeClient({});
 
