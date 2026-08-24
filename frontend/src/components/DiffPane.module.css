@@ -36,3 +36,18 @@
   gap: var(--space-1);
   margin-left: auto;
 }
+
+.stageToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.fileRow:hover .stageToggle,
+.fileRow:focus-within .stageToggle,
+.stageToggle:focus-visible {
+  opacity: 1;
+}
