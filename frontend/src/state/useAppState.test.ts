@@ -948,6 +948,85 @@ describe("useAppState", () => {
     expect(result.current.state.status).toEqual([]);
   });
 
+  // DiffPane's "Stage all" used to loop the per-file `stageFile`, and every one of those is its
+  // own `runMutation` — so an N-file batch cost N stage calls *plus* N full `refresh()` rounds
+  // (~13 IPC reads each, plus one per remote), all serialized through the single per-repo worker
+  // thread. The bulk variants still make one IPC call per path (there is no bulk backend op) but
+  // do it inside a single mutation, so the whole batch refreshes once.
+  it("stageAllFiles stages every path but refreshes only once for the whole batch", async () => {
+    const stagedPaths: string[] = [];
+    let getStatusCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        getStatusCalls += 1;
+        return [];
+      },
+      stageFile: async (_repoPath: string, path: string) => {
+        stagedPaths.push(path);
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const refreshesBefore = getStatusCalls;
+
+    await act(() => result.current.stageAllFiles(["a.txt", "b.txt", "c.txt"]));
+
+    expect(stagedPaths).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(getStatusCalls - refreshesBefore).toBe(1);
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("unstageAllFiles unstages every path but refreshes only once for the whole batch", async () => {
+    const unstagedPaths: string[] = [];
+    let getStatusCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        getStatusCalls += 1;
+        return [];
+      },
+      unstageFile: async (_repoPath: string, path: string) => {
+        unstagedPaths.push(path);
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const refreshesBefore = getStatusCalls;
+
+    await act(() => result.current.unstageAllFiles(["a.txt", "b.txt"]));
+
+    expect(unstagedPaths).toEqual(["a.txt", "b.txt"]);
+    expect(getStatusCalls - refreshesBefore).toBe(1);
+  });
+
+  // `RemotePanel` renders the failure inline next to the Fetch URL field and keeps the typed
+  // values, so it needs a per-call signal. A plain `runMutation` gives it none: it swallows the
+  // error into `state.error` and always resolves.
+  it("addRemote resolves to null on success and to the failure message on failure", async () => {
+    const client = transferClient({
+      addRemote: async (_repoPath: string, name: string) => {
+        if (name === "bad") throw new Error("invalid fetch URL");
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: string | null = "not set";
+    await act(async () => {
+      outcome = await result.current.addRemote("good", "../good.git", null);
+    });
+    expect(outcome).toBeNull();
+
+    await act(async () => {
+      outcome = await result.current.addRemote("bad", "not-a-url", null);
+    });
+    // No leaked `"Error: "` prefix — this string is rendered to the user verbatim.
+    expect(outcome).toBe("invalid fetch URL");
+    expect(result.current.state.error).toBe("invalid fetch URL");
+    expect(result.current.state.pending).toBe(false);
+  });
+
   it("stageHunk calls client.stageHunk then refreshes status", async () => {
     const entryA: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
     let getStatusCalls = 0;

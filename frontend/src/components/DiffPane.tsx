@@ -95,6 +95,8 @@ export function DiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageAllFiles,
+  onUnstageAllFiles,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
@@ -115,6 +117,8 @@ export function DiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageAllFiles: (paths: string[]) => void;
+  onUnstageAllFiles: (paths: string[]) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
@@ -137,6 +141,8 @@ export function DiffPane({
         status={status}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
+        onStageAllFiles={onStageAllFiles}
+        onUnstageAllFiles={onUnstageAllFiles}
         onStageHunk={onStageHunk}
         onUnstageHunk={onUnstageHunk}
         onDiscardHunk={onDiscardHunk}
@@ -170,6 +176,8 @@ function UncommittedDiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageAllFiles,
+  onUnstageAllFiles,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
@@ -189,6 +197,8 @@ function UncommittedDiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageAllFiles: (paths: string[]) => void;
+  onUnstageAllFiles: (paths: string[]) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
@@ -292,12 +302,20 @@ function UncommittedDiffPane({
     }
   }, [viewMode, selected, status]);
 
-  const stagedCount = status.filter((entry) => entry.staged).length;
   const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
   const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
 
   const stagedEntries = status.filter((entry) => entry.staged);
   const unstagedEntries = status.filter((entry) => !entry.staged);
+  const stagedCount = stagedEntries.length;
+  // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
+  // "Changes" group — but staging a conflicted path is what *marks the conflict resolved*, with
+  // whatever happens to be in the working tree. One "Stage all" click would silently resolve
+  // every outstanding conflict, so the bulk action skips them. The per-row Stage control on a
+  // conflicted file is left alone: that's a deliberate, one-file-at-a-time action.
+  const stageAllPaths = unstagedEntries
+    .filter((entry) => entry.kind !== "Conflicted")
+    .map((entry) => entry.path);
 
   const isEntrySelected = (entry: StatusEntry) =>
     selected !== null && selected.path === entry.path && selected.staged === entry.staged;
@@ -322,6 +340,26 @@ function UncommittedDiffPane({
     selectEntry(entries[nextIndex]);
   };
 
+  // The per-row Stage/Unstage controls are `<button>`s nested inside a `role="option"` row. That
+  // keeps them reachable by mouse and by plain Tab, but ARIA's listbox/option pattern treats an
+  // option's children as content contributing to the option's name, not as independent widgets —
+  // so assistive tech arrowing through this listbox does not reliably surface them. `s` is the
+  // keyboard equivalent, on the container that already owns navigation (`j`/`k`/arrows), so the
+  // whole stage/unstage flow is doable without ever reaching those buttons. See
+  // `primitives/ListRow.tsx`'s doc comment for why the buttons weren't moved out of the row.
+  const toggleStageSelected = (entries: StatusEntry[]) => {
+    const entry = entries.find(
+      (candidate) =>
+        selected !== null && candidate.path === selected.path && candidate.staged === selected.staged,
+    );
+    if (entry === undefined) return;
+    if (entry.staged) {
+      onUnstageFile(entry.path);
+    } else {
+      onStageFile(entry.path);
+    }
+  };
+
   const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
@@ -329,19 +367,18 @@ function UncommittedDiffPane({
     } else if (event.key === "ArrowUp" || event.key === "k") {
       event.preventDefault();
       navigateGroup(entries, -1);
+    } else if (event.key === "s") {
+      event.preventDefault();
+      toggleStageSelected(entries);
     }
   };
 
   const handleStageAll = () => {
-    for (const entry of unstagedEntries) {
-      onStageFile(entry.path);
-    }
+    onStageAllFiles(stageAllPaths);
   };
 
   const handleUnstageAll = () => {
-    for (const entry of stagedEntries) {
-      onUnstageFile(entry.path);
-    }
+    onUnstageAllFiles(stagedEntries.map((entry) => entry.path));
   };
 
   return (
@@ -350,7 +387,9 @@ function UncommittedDiffPane({
         <div>
           <div className={styles.groupHeading}>
             <span>Changes ({unstagedEntries.length})</span>
-            <button type="button" onClick={handleStageAll}>
+            {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
+                that still costs a full refresh. */}
+            <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
               Stage all
             </button>
           </div>
@@ -358,6 +397,7 @@ function UncommittedDiffPane({
             className={styles.fileList}
             role="listbox"
             aria-label="Unstaged changes"
+            aria-keyshortcuts="s"
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(unstagedEntries)}
           >
@@ -387,6 +427,7 @@ function UncommittedDiffPane({
             className={styles.fileList}
             role="listbox"
             aria-label="Staged changes"
+            aria-keyshortcuts="s"
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(stagedEntries)}
           >

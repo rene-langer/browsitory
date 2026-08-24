@@ -42,7 +42,9 @@ export function RemotePanel({
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
   remoteUpstreams: Record<string, UpstreamInfo[]>;
-  onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
+  // `null` = added; a string = the failure message to show inline. See `useAppState.ts`'s
+  // `addRemote` for why this isn't a rejecting promise.
+  onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<string | null>;
   onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
   onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
@@ -69,6 +71,12 @@ export function RemotePanel({
   const [newFetchUrl, setNewFetchUrl] = useState("");
   const [newPushUrl, setNewPushUrl] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
+  // Whether the user has typed in the Remote-name field themselves. Auto-derivation is gated on
+  // this rather than on `newName === ""`: real typing fires one `onChange` per keystroke, so the
+  // first character of the URL would derive a one-character name and every later keystroke would
+  // then see a non-empty `newName` and stop deriving. Only a paste (a single `change` carrying
+  // the whole URL) ever worked under the old guard.
+  const [nameTouched, setNameTouched] = useState(false);
   const [showPushUrl, setShowPushUrl] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -87,14 +95,18 @@ export function RemotePanel({
     const fetchUrl = newFetchUrl.trim();
     const name = (newName.trim() || deriveRemoteName(fetchUrl, remotes.map((remote) => remote.name))).trim();
     if (name === "" || fetchUrl === "") return;
-    try {
-      await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
-      setNewName("");
-      setNewFetchUrl("");
-      setNewPushUrl("");
-    } catch (err) {
-      setAddError(String(err));
+    // Branching on the resolved value, not a `catch`: `onAddRemote` is `useAppState`'s
+    // `addRemote`, which never rejects (it reports failure by resolving to the message).
+    const failure = await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
+    if (failure !== null) {
+      setAddError(failure);
+      return;
     }
+    setNewName("");
+    setNewFetchUrl("");
+    setNewPushUrl("");
+    setNameTouched(false);
+    setShowPushUrl(false);
   };
 
   const beginEdit = (remote: RemoteInfo) => {
@@ -265,7 +277,14 @@ export function RemotePanel({
         <h3 className={styles.formHeading}>Add remote</h3>
         <label className={styles.label}>
           Remote name
-          <input placeholder="origin" value={newName} onChange={(event) => setNewName(event.target.value)} />
+          <input
+            placeholder="origin"
+            value={newName}
+            onChange={(event) => {
+              setNameTouched(true);
+              setNewName(event.target.value);
+            }}
+          />
         </label>
         <label className={styles.label}>
           Fetch URL
@@ -276,7 +295,10 @@ export function RemotePanel({
             onChange={(event) => {
               const value = event.target.value;
               setNewFetchUrl(value);
-              if (newName === "") {
+              // Editing the offending field clears the inline failure — leaving it up until the
+              // next submit makes a stale message sit next to freshly corrected input.
+              setAddError(null);
+              if (!nameTouched) {
                 setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
               }
             }}

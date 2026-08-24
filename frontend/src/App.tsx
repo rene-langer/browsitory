@@ -247,6 +247,8 @@ function RepoWorkspace({
                 status={appState.state.status}
                 onStageFile={appState.stageFile}
                 onUnstageFile={appState.unstageFile}
+                onStageAllFiles={appState.stageAllFiles}
+                onUnstageAllFiles={appState.unstageAllFiles}
                 onStageHunk={appState.stageHunk}
                 onUnstageHunk={appState.unstageHunk}
                 onDiscardHunk={appState.discardHunk}
