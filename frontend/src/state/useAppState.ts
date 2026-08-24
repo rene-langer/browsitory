@@ -42,7 +42,11 @@ function transferFailureMessage(progress: TransferProgress): string {
 }
 
 function credentialFailureMessage(error: unknown): string {
-  const message = String(error);
+  // `Error`s are unwrapped rather than stringified: `String(new Error("x"))` is `"Error: x"`, and
+  // that literal prefix is now user-visible — `RemotePanel` renders this message inline under the
+  // Fetch URL field, not just in the generic error banner. Tauri's `invoke` rejects with a bare
+  // string, so the `String` branch stays the common production path.
+  const message = error instanceof Error ? error.message : String(error);
   if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
   if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
   if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";
@@ -96,6 +100,14 @@ export interface UseAppStateResult {
   selectRow(row: SelectedRow): void;
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
+  // Bulk variants for DiffPane's "Stage all"/"Unstage all". There is no bulk backend op (and
+  // none is planned) — these still make one `client.stageFile`/`unstageFile` IPC call per path,
+  // but wrap the whole loop in a *single* `runMutation`, so a batch costs one `pending`/
+  // `refresh()` cycle instead of one per file. `refresh()` alone is ~13 IPC reads plus one per
+  // remote, all serialized through the single per-repo worker thread, so looping the per-file
+  // action from the UI locked the app up on a large changeset.
+  stageAllFiles(paths: string[]): Promise<void>;
+  unstageAllFiles(paths: string[]): Promise<void>;
   stageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
@@ -111,7 +123,14 @@ export interface UseAppStateResult {
   updateSubmodule(path: string, recursive: boolean): Promise<void>;
   selectReflogReference(reference: string): Promise<void>;
   restoreReflogEntry(reference: string, newId: string): Promise<void>;
-  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
+  // Resolves to `null` on success, or the failure message on failure — `RemotePanel` renders
+  // that message inline next to the Fetch URL field and keeps the typed values. A plain
+  // `runMutation` can't serve that: it swallows the error into `state.error` and *always*
+  // resolves, so a `try`/`catch` around this call in the panel would be dead code and its
+  // success path would wipe the user's input on a failed add. Returning the message (rather
+  // than `renameRemote`'s `boolean`) keeps the panel off global `state.error`, which isn't
+  // scoped to this action and can hold a stale message from an unrelated mutation.
+  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<string | null>;
   renameRemote(oldName: string, newName: string): Promise<boolean>;
   updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
   removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
@@ -325,6 +344,27 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
     [client, runMutation, repoPath],
   );
+  // See the `stageAllFiles`/`unstageAllFiles` note in `UseAppStateResult`: one `runMutation`
+  // for the whole batch, not one per path. Sequential rather than `Promise.all` because every
+  // call lands on the same worker thread anyway, and index writes must not interleave.
+  const stageAllFiles = useCallback(
+    (paths: string[]) =>
+      runMutation(async () => {
+        for (const path of paths) {
+          await client.stageFile(repoPath, path);
+        }
+      }),
+    [client, runMutation, repoPath],
+  );
+  const unstageAllFiles = useCallback(
+    (paths: string[]) =>
+      runMutation(async () => {
+        for (const path of paths) {
+          await client.unstageFile(repoPath, path);
+        }
+      }),
+    [client, runMutation, repoPath],
+  );
   const stageHunk = useCallback(
     (path: string, oldStart: number, newStart: number) =>
       runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart)),
@@ -432,9 +472,23 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [client, runMutation, repoPath],
   );
 
+  // Same pending/refresh/`state.error` behaviour as `runMutation`, but resolves to the failure
+  // message instead of swallowing it — see the `addRemote` entry in `UseAppStateResult`.
   const addRemote = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.addRemote(repoPath, name, fetchUrl, pushUrl)),
-    [client, runMutation, repoPath],
+    async (name: string, fetchUrl: string, pushUrl: string | null): Promise<string | null> => {
+      try {
+        setState((prev) => ({ ...prev, pending: true }));
+        await client.addRemote(repoPath, name, fetchUrl, pushUrl);
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return null;
+      } catch (err) {
+        const message = credentialFailureMessage(err);
+        setState((prev) => ({ ...prev, error: message, pending: false }));
+        return message;
+      }
+    },
+    [client, refresh, repoPath],
   );
   const renameRemote = useCallback(
     async (oldName: string, newName: string) => {
@@ -729,6 +783,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     selectRow,
     stageFile,
     unstageFile,
+    stageAllFiles,
+    unstageAllFiles,
     stageHunk,
     unstageHunk,
     discardHunk,

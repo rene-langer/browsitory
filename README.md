@@ -6,6 +6,8 @@
 
 <p align="center">A fast, keyboard-driven Git desktop client.</p>
 
+<p align="center">Open several repositories at once as tabs, and save recurring multi-repo projects as <strong>workspaces</strong> — a folder of repos you open, group, and close together in one action.</p>
+
 ## Quickstart
 
 ```bash

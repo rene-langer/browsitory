@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { AlertTriangle, ArrowRightLeft, FileDiff, FileMinus, FilePlus, Minus, Pencil, Plus, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
   FileConflictChoice,
   RepoClient,
   StatusEntry,
+  StatusKind,
 } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
@@ -12,7 +14,79 @@ import { CommitBox } from "./CommitBox";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { ListRow } from "./primitives/ListRow";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
+
+const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
+  New: FilePlus,
+  Modified: Pencil,
+  Deleted: FileMinus,
+  Renamed: ArrowRightLeft,
+  TypeChange: FileDiff,
+  Conflicted: AlertTriangle,
+};
+
+function FileListRow({
+  entry,
+  selected,
+  onSelect,
+  onBlame,
+  onStageFile,
+  onUnstageFile,
+}: {
+  entry: StatusEntry;
+  selected: boolean;
+  onSelect: () => void;
+  onBlame: () => void;
+  onStageFile: (path: string) => void;
+  onUnstageFile: (path: string) => void;
+}) {
+  const Icon = STATUS_ICONS[entry.kind];
+  return (
+    <ListRow selected={selected} onClick={onSelect} className={styles.fileRow}>
+      <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
+      <span className={styles.path}>
+        {entry.path} ({entry.kind})
+      </span>
+      <div className={styles.rowActions}>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onBlame();
+          }}
+        >
+          Blame
+        </button>
+        {entry.staged ? (
+          <button
+            type="button"
+            className={styles.stageToggle}
+            aria-label={`Unstage ${entry.path}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onUnstageFile(entry.path);
+            }}
+          >
+            <Minus size={14} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={styles.stageToggle}
+            aria-label={`Stage ${entry.path}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onStageFile(entry.path);
+            }}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </ListRow>
+  );
+}
 
 export function DiffPane({
   repoPath,
@@ -21,6 +95,8 @@ export function DiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageAllFiles,
+  onUnstageAllFiles,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
@@ -41,6 +117,8 @@ export function DiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageAllFiles: (paths: string[]) => void;
+  onUnstageAllFiles: (paths: string[]) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
@@ -63,6 +141,8 @@ export function DiffPane({
         status={status}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
+        onStageAllFiles={onStageAllFiles}
+        onUnstageAllFiles={onUnstageAllFiles}
         onStageHunk={onStageHunk}
         onUnstageHunk={onUnstageHunk}
         onDiscardHunk={onDiscardHunk}
@@ -96,6 +176,8 @@ function UncommittedDiffPane({
   status,
   onStageFile,
   onUnstageFile,
+  onStageAllFiles,
+  onUnstageAllFiles,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
@@ -115,6 +197,8 @@ function UncommittedDiffPane({
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageAllFiles: (paths: string[]) => void;
+  onUnstageAllFiles: (paths: string[]) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
@@ -218,39 +302,149 @@ function UncommittedDiffPane({
     }
   }, [viewMode, selected, status]);
 
-  const stagedCount = status.filter((entry) => entry.staged).length;
   const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
   const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
 
+  const stagedEntries = status.filter((entry) => entry.staged);
+  const unstagedEntries = status.filter((entry) => !entry.staged);
+  const stagedCount = stagedEntries.length;
+  // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
+  // "Changes" group — but staging a conflicted path is what *marks the conflict resolved*, with
+  // whatever happens to be in the working tree. One "Stage all" click would silently resolve
+  // every outstanding conflict, so the bulk action skips them. The per-row Stage control on a
+  // conflicted file is left alone: that's a deliberate, one-file-at-a-time action.
+  const stageAllPaths = unstagedEntries
+    .filter((entry) => entry.kind !== "Conflicted")
+    .map((entry) => entry.path);
+
+  const isEntrySelected = (entry: StatusEntry) =>
+    selected !== null && selected.path === entry.path && selected.staged === entry.staged;
+
+  const selectEntry = (entry: StatusEntry) => {
+    setSelected({ path: entry.path, staged: entry.staged });
+    setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
+  };
+
+  const blameEntry = (entry: StatusEntry) => {
+    setSelected({ path: entry.path, staged: entry.staged });
+    setViewMode("blame");
+  };
+
+  const navigateGroup = (entries: StatusEntry[], direction: 1 | -1) => {
+    if (entries.length === 0) return;
+    const currentIndex = entries.findIndex(
+      (entry) => selected !== null && entry.path === selected.path && entry.staged === selected.staged,
+    );
+    const nextIndex =
+      currentIndex === -1 ? 0 : Math.min(Math.max(currentIndex + direction, 0), entries.length - 1);
+    selectEntry(entries[nextIndex]);
+  };
+
+  // The per-row Stage/Unstage controls are `<button>`s nested inside a `role="option"` row. That
+  // keeps them reachable by mouse and by plain Tab, but ARIA's listbox/option pattern treats an
+  // option's children as content contributing to the option's name, not as independent widgets —
+  // so assistive tech arrowing through this listbox does not reliably surface them. `s` is the
+  // keyboard equivalent, on the container that already owns navigation (`j`/`k`/arrows), so the
+  // whole stage/unstage flow is doable without ever reaching those buttons. See
+  // `primitives/ListRow.tsx`'s doc comment for why the buttons weren't moved out of the row.
+  const toggleStageSelected = (entries: StatusEntry[]) => {
+    const entry = entries.find(
+      (candidate) =>
+        selected !== null && candidate.path === selected.path && candidate.staged === selected.staged,
+    );
+    if (entry === undefined) return;
+    if (entry.staged) {
+      onUnstageFile(entry.path);
+    } else {
+      onStageFile(entry.path);
+    }
+  };
+
+  const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.key === "ArrowDown" || event.key === "j") {
+      event.preventDefault();
+      navigateGroup(entries, 1);
+    } else if (event.key === "ArrowUp" || event.key === "k") {
+      event.preventDefault();
+      navigateGroup(entries, -1);
+    } else if (event.key === "s") {
+      event.preventDefault();
+      toggleStageSelected(entries);
+    }
+  };
+
+  const handleStageAll = () => {
+    onStageAllFiles(stageAllPaths);
+  };
+
+  const handleUnstageAll = () => {
+    onUnstageAllFiles(stagedEntries.map((entry) => entry.path));
+  };
+
   return (
     <div>
-      <ul className={styles.fileList}>
-        {status.map((entry) => (
-          <li key={`${entry.staged}:${entry.path}`}>
-            <button
-              onClick={() => {
-                setSelected({ path: entry.path, staged: entry.staged });
-                setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
-              }}
-            >
-              {entry.path} ({entry.kind})
+      {unstagedEntries.length > 0 && (
+        <div>
+          <div className={styles.groupHeading}>
+            <span>Changes ({unstagedEntries.length})</span>
+            {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
+                that still costs a full refresh. */}
+            <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
+              Stage all
             </button>
-            <button
-              onClick={() => {
-                setSelected({ path: entry.path, staged: entry.staged });
-                setViewMode("blame");
-              }}
-            >
-              Blame
+          </div>
+          <ul
+            className={styles.fileList}
+            role="listbox"
+            aria-label="Unstaged changes"
+            aria-keyshortcuts="s"
+            tabIndex={0}
+            onKeyDown={handleGroupKeyDown(unstagedEntries)}
+          >
+            {unstagedEntries.map((entry) => (
+              <FileListRow
+                key={`${entry.staged}:${entry.path}`}
+                entry={entry}
+                selected={isEntrySelected(entry)}
+                onSelect={() => selectEntry(entry)}
+                onBlame={() => blameEntry(entry)}
+                onStageFile={onStageFile}
+                onUnstageFile={onUnstageFile}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+      {stagedEntries.length > 0 && (
+        <div>
+          <div className={styles.groupHeading}>
+            <span>Staged ({stagedEntries.length})</span>
+            <button type="button" onClick={handleUnstageAll}>
+              Unstage all
             </button>
-            {entry.staged ? (
-              <button onClick={() => onUnstageFile(entry.path)}>Unstage</button>
-            ) : (
-              <button onClick={() => onStageFile(entry.path)}>Stage</button>
-            )}
-          </li>
-        ))}
-      </ul>
+          </div>
+          <ul
+            className={styles.fileList}
+            role="listbox"
+            aria-label="Staged changes"
+            aria-keyshortcuts="s"
+            tabIndex={0}
+            onKeyDown={handleGroupKeyDown(stagedEntries)}
+          >
+            {stagedEntries.map((entry) => (
+              <FileListRow
+                key={`${entry.staged}:${entry.path}`}
+                entry={entry}
+                selected={isEntrySelected(entry)}
+                onSelect={() => selectEntry(entry)}
+                onBlame={() => blameEntry(entry)}
+                onStageFile={onStageFile}
+                onUnstageFile={onUnstageFile}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       {viewMode === "blame" ? (
         <>
           {error !== null ? (

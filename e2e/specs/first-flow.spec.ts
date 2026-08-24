@@ -27,10 +27,17 @@ describe("Browsitory first flow", () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
     await commitMessageInput.waitForExist({ timeout: 10000 });
 
-    // Stage the uncommitted file this spec's own `before` hook created.
-    const stageButton = await $("button=Stage");
-    await stageButton.scrollIntoView({ block: "center" });
-
+    // Stage the uncommitted file this spec's own `before` hook created. The per-row stage
+    // control is icon-only now (no "Stage" text) and is identified by its aria-label — which
+    // also makes this target *this* spec's file rather than whichever row happened to come
+    // first, unlike the old `button=Stage` text match.
+    const stageButton = await $('button[aria-label="Stage first-flow-fixture.txt"]');
+    await stageButton.waitForExist({ timeout: 10000 });
+    // The control is `opacity: 0` until its row is hovered/focused (`DiffPane.module.css`'s
+    // `.stageToggle`), so every interaction with it has to go through `browser.execute` —
+    // WebDriver's own element-displayed check (which `scrollIntoView()` and `.click()` both
+    // run) rejects a fully transparent element.
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: first commit"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");

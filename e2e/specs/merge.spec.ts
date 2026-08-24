@@ -56,7 +56,11 @@ describe("Browsitory merge with conflict resolution", () => {
     );
     await mergeButton.click();
 
-    const conflictedRow = await $("button*=shared.txt (Conflicted)");
+    // The uncommitted file list is a `role="listbox"` of `<li role="option">` rows, each holding
+    // a `<span>{path} ({kind})</span>` plus icon-only stage/unstage controls — there is no
+    // per-file `<button>` carrying the path text any more. Clicking the span still selects the
+    // row: the click bubbles to the `<li>`'s own onClick (see `DiffPane.tsx`'s `FileListRow`).
+    const conflictedRow = await $("span*=shared.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
     await conflictedRow.scrollIntoView({ block: "center" });
 
@@ -141,7 +145,8 @@ describe("Browsitory merge with conflict resolution", () => {
     );
     await mergeButton.click();
 
-    const conflictedRow = await $("button*=adddelete.txt (Conflicted)");
+    // See the first test: the row's path text lives in a `<span>` inside `<li role="option">`.
+    const conflictedRow = await $("span*=adddelete.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);

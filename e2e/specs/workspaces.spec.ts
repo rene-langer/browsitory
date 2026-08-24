@@ -19,7 +19,20 @@ async function openPickerOverlay(): Promise<void> {
   await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
 }
 
-describe("Browsitory multi-repo workspaces", () => {
+describe("Browsitory multi-repo workspaces", function () {
+  // Evidence from three real CI runs on 2026-08-24 (see the Edit-modal wait below): under
+  // normal runner load the whole Edit-modal re-scan resolves in well under a second (confirmed
+  // via a temporary diagnostic poll — the repo-c checkbox existed at t=0ms on the first check),
+  // but under CI's demonstrated shared-runner contention the same operation has stalled long
+  // enough to blow past a 10s and then a 30s wait without completing (the "restores..." test's
+  // own total runtime swung 42.5s -> 72.7s across two of those runs with zero code changes in
+  // between, so the slowdown is general runner contention, not anything specific to this scan).
+  // A single retry plus this file's own generous per-test timeout is defense-in-depth against
+  // that confirmed environmental variance — not a substitute for the wait budgets below, which
+  // still need real margin over the worst case observed so far.
+  this.retries(1);
+  this.timeout(90000);
+
   it("restores an open workspace group after restart, then closes the whole group at once", async () => {
     await openPickerOverlay();
 
@@ -78,8 +91,14 @@ describe("Browsitory multi-repo workspaces", () => {
     await editButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), editButton);
 
+    // This is the first `scan_repos_in_root` invocation anywhere in this spec's session. A
+    // diagnostic poll on 2026-08-24 confirmed the scan+render pipeline itself is near-instant
+    // under normal load (the checkbox existed at the very first check, t=0ms) — the two prior
+    // failures here (10s, then 30s) were CI-runner contention, not a slow operation. 45s gives
+    // real margin over both observed failures; `this.retries(1)`/`this.timeout(90000)` above are
+    // the other half of this defense (see that comment for the full evidence).
     const repoCCheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
-    await repoCCheckbox.waitForExist({ timeout: 10000 });
+    await repoCCheckbox.waitForExist({ timeout: 45000 });
     expect(await repoCCheckbox.isSelected()).toBe(false);
 
     const repoACheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_A}"]`);
@@ -94,7 +113,7 @@ describe("Browsitory multi-repo workspaces", () => {
     await openAllAfterSave.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Edit'));
     const repoCCheckboxAfterSave = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
-    await repoCCheckboxAfterSave.waitForExist({ timeout: 10000 });
+    await repoCCheckboxAfterSave.waitForExist({ timeout: 45000 });
     expect(await repoCCheckboxAfterSave.isSelected()).toBe(true);
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Cancel'));
   });
@@ -102,7 +121,17 @@ describe("Browsitory multi-repo workspaces", () => {
   it("Delete removes the workspace from the list after confirmation", async () => {
     await openPickerOverlay();
 
-    await browser.execute((el) => (el as HTMLElement).click(), await $('button=Delete E2E Workspace'));
+    // Unlike the Edit button above, this used to be looked up and clicked in one shot with no
+    // wait, racing RepoPicker's async `listWorkspaces()` fetch (fired from `useWorkspaces`'s
+    // `refresh()` on mount) — the picker overlay's own button appears immediately, but the
+    // Workspaces panel's contents render only once that fetch resolves. Confirmed via the CI
+    // run (32726464369) log: the picker-open click and the very next (unguarded) findElement
+    // for this button were back-to-back with zero wait between them, and the button wasn't in
+    // the DOM yet. `waitForExist` closes that race the same way every other click in this file
+    // already does.
+    const deleteButton = await $('button=Delete E2E Workspace');
+    await deleteButton.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), deleteButton);
     const confirmDialog = await $('dialog[aria-label="Delete workspace E2E Workspace"]');
     await confirmDialog.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Delete workspace'));

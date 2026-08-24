@@ -42,7 +42,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
     remotes: [origin],
     upstream: null,
     remoteUpstreams: { origin: [] },
-    onAddRemote: vi.fn(),
+    onAddRemote: vi.fn().mockResolvedValue(null),
     onRenameRemote: vi.fn().mockResolvedValue(true),
     onUpdateRemoteUrls: vi.fn(),
     onRemoveRemote: vi.fn().mockResolvedValue(undefined),
@@ -225,15 +225,139 @@ describe("RemotePanel", () => {
   });
 
   it("adds a remote using the labelled URL form", () => {
-    const onAddRemote = vi.fn();
+    const onAddRemote = vi.fn().mockResolvedValue(null);
     renderPanel({ onAddRemote });
 
     fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "backup" } });
     fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
-    fireEvent.change(screen.getByLabelText("Push URL (optional)"), { target: { value: "../push-backup.git" } });
+    fireEvent.click(screen.getByText("Push URL (optional)"));
+    fireEvent.change(screen.getByLabelText("Push URL"), { target: { value: "../push-backup.git" } });
     fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
 
     expect(onAddRemote).toHaveBeenCalledWith("backup", "../backup.git", "../push-backup.git");
+  });
+
+  it("shows example placeholder text on the add-remote URL fields", () => {
+    renderPanel({});
+
+    expect(screen.getByLabelText("Fetch URL")).toHaveAttribute(
+      "placeholder",
+      "git@github.com:user/repo.git",
+    );
+  });
+
+  it("auto-derives the remote name as origin when no remote is named origin yet", () => {
+    renderPanel({ remotes: [] });
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), {
+      target: { value: "git@github.com:user/repo.git" },
+    });
+
+    expect(screen.getByLabelText("Remote name")).toHaveValue("origin");
+  });
+
+  it("auto-derives the remote name from the URL slug when origin already exists", () => {
+    renderPanel({});
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), {
+      target: { value: "git@github.com:user/repo.git" },
+    });
+
+    expect(screen.getByLabelText("Remote name")).toHaveValue("repo");
+  });
+
+  // The two tests above paste the whole URL in one `change` event. Real typing fires one
+  // `change` per keystroke, which is what broke the original `newName === ""` guard: the first
+  // keystroke derived a one-character name, and every keystroke after that saw a non-empty name
+  // and stopped deriving.
+  it("keeps deriving the remote name while the URL is typed character by character", () => {
+    renderPanel({});
+
+    const fetchUrl = screen.getByLabelText("Fetch URL");
+    const url = "git@github.com:user/repo.git";
+    for (let length = 1; length <= url.length; length += 1) {
+      fireEvent.change(fetchUrl, { target: { value: url.slice(0, length) } });
+    }
+
+    expect(screen.getByLabelText("Remote name")).toHaveValue("repo");
+  });
+
+  it("does not overwrite a manually entered remote name when the URL changes", () => {
+    renderPanel({});
+
+    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Fetch URL"), {
+      target: { value: "git@github.com:user/repo.git" },
+    });
+
+    expect(screen.getByLabelText("Remote name")).toHaveValue("custom");
+  });
+
+  it("keeps the Push URL field collapsed behind a disclosure by default", () => {
+    renderPanel({});
+
+    expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Push URL (optional)"));
+
+    expect(screen.getByLabelText("Push URL")).toBeInTheDocument();
+  });
+
+  it("gives the Add remote submit button primary styling", () => {
+    renderPanel({});
+
+    expect(screen.getByRole("button", { name: "Add remote" })).toHaveClass("primary");
+  });
+
+  // `useAppState`'s `addRemote` never rejects — it reports failure by *resolving* to the message
+  // (see its comment there). A `mockRejectedValue` here would only exercise a shape the real
+  // wiring can't produce, which is exactly how the panel ended up with a dead `catch` block and
+  // a success path that wiped the user's input on a failed add.
+  it("shows a failed add-remote's message next to the Fetch URL field and keeps the entered values", async () => {
+    const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
+    renderPanel({ onAddRemote });
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("invalid fetch URL");
+    expect(screen.getByLabelText("Fetch URL")).toHaveValue("not-a-url");
+    expect(screen.getByLabelText("Remote name")).toHaveValue("not-a-url");
+  });
+
+  it("clears the add-remote failure message once the Fetch URL is edited again", async () => {
+    const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
+    renderPanel({ onAddRemote });
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+    await screen.findByRole("alert");
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the form and re-collapses the Push URL disclosure after a successful add", async () => {
+    const onAddRemote = vi.fn().mockResolvedValue(null);
+    renderPanel({ onAddRemote });
+
+    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
+    fireEvent.click(screen.getByText("Push URL (optional)"));
+    fireEvent.change(screen.getByLabelText("Push URL"), { target: { value: "../push-backup.git" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Fetch URL")).toHaveValue(""));
+    expect(screen.getByLabelText("Remote name")).toHaveValue("");
+    // A cleared-but-still-open disclosure on the next add is just an empty field taking up
+    // space, so the disclosure resets with the rest of the form.
+    expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
+  });
+
+  it("shows a callout pointing at the Add-remote form when there are no remotes", () => {
+    renderPanel({ remotes: [], remoteUpstreams: {} });
+
+    expect(screen.getByText(/add a remote below to push and pull/i)).toBeInTheDocument();
   });
 
   it("sets the current branch upstream from the selected remote and branch", () => {
@@ -306,5 +430,11 @@ describe("RemotePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
 
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", false);
+  });
+
+  it("styles the Remove button with the danger variant", () => {
+    renderPanel({});
+
+    expect(screen.getByRole("button", { name: "Remove origin" })).toHaveClass("danger");
   });
 });
