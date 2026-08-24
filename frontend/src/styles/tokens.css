@@ -20,6 +20,8 @@
   --color-diff-add-text: #1a7f37;
   --color-diff-remove-bg: #ffeef0;
   --color-diff-remove-text: #b31d28;
+  --color-danger: #ffeef0;
+  --color-danger-text: #b31d28;
   --color-diff-context-text: var(--color-text);
   --color-scrim: rgba(0, 0, 0, 0.4);
 
@@ -72,6 +74,8 @@
     --color-diff-add-text: #4ade80;
     --color-diff-remove-bg: #2b1013;
     --color-diff-remove-text: #f87171;
+    --color-danger: #2b1013;
+    --color-danger-text: #f87171;
     --color-scrim: rgba(0, 0, 0, 0.4);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
@@ -93,6 +97,8 @@
   --color-diff-add-text: #4ade80;
   --color-diff-remove-bg: #2b1013;
   --color-diff-remove-text: #f87171;
+  --color-danger: #2b1013;
+  --color-danger-text: #f87171;
   --color-scrim: rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
