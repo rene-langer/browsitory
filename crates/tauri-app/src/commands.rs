@@ -799,35 +799,40 @@ pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
         .map(|path| path.to_string())
 }
 
-// Async + `spawn_blocking`, unlike this file's other `config`-crate commands (`list_workspaces`,
+// `async fn`, unlike this file's other `config`-crate commands (`list_workspaces`,
 // `save_workspace`, etc.), which stay plain `fn` because they're a single small TOML read/write.
-// This one walks a directory and `stat`s every entry in it (`config::scan_repos_in_root`), and a
-// plain `fn` `#[tauri::command]` runs *inline*, on whatever thread hands it the IPC message —
+// A plain `fn` `#[tauri::command]` runs *inline*, on whatever thread hands it the IPC message —
 // there's no threadpool dispatch for the non-async case (verified against the vendored
 // `tauri-macros` 2.6.3 `body_blocking` codegen: it's a direct call, not a `spawn`/
-// `spawn_blocking`). Reproduced locally: injecting an artificial delay into this command's body
-// measurably froze the whole webview's WebDriver responsiveness for the delay's full duration,
-// not just this command's own response — confirming that thread is shared with the webview's
-// own event loop. On a resource-constrained CI runner (this project's e2e job has separately
-// been observed taking ~30s just to cold-spawn the app process — see
-// `e2e/specs/workspaces.spec.ts`'s comment on the Edit-modal wait), a slow directory scan can
-// stall in the same place and eat into or exceed a UI-side wait budget that has nothing to do
-// with this command's own logic. Offloading it here removes that class of failure at the root
-// rather than papering over it with a bigger frontend-side timeout.
+// `spawn_blocking`), and that thread is shared with the webview's own event loop (reproduced
+// locally: injecting an artificial delay into a plain `fn` command's body measurably froze the
+// whole webview's WebDriver responsiveness for the delay's full duration). `async fn` alone fixes
+// that — Tauri dispatches it onto the async runtime's worker pool instead of inline.
+//
+// Deliberately NOT wrapped in `tauri::async_runtime::spawn_blocking`, unlike a first attempt at
+// this fix: `config::scan_repos_in_root`'s actual work (`fs::read_dir` over a handful of
+// directories, no recursion) is microseconds, and routing microsecond work through
+// `spawn_blocking` trades one latency source for another — Tokio's blocking thread pool creates
+// OS threads lazily and reclaims them after a short idle timeout, so a `spawn_blocking` call
+// separated from the *previous* one by tens of seconds of unrelated UI interaction (exactly
+// `e2e/specs/workspaces.spec.ts`'s Edit-modal flow, which restarts the whole app process via
+// `browser.reloadSession()` and then does ~40-70s of other work before this command's first call
+// in that process's lifetime) can itself cold-start an OS thread under real-world CI scheduling
+// pressure — observed on real CI as this exact command stalling long enough to fail a 45s wait,
+// on both the original attempt and a retry within the same process. Plain async execution on
+// Tokio's own worker threads (created once at runtime startup, never torn down) has no such
+// cold-start variable, which is the more direct fix for microsecond-scale work: block a thread
+// pool only when the work is actually slow enough to need one.
 #[tauri::command]
 pub async fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        config::scan_repos_in_root(Path::new(&root))
-            .map(|paths| {
-                paths
-                    .into_iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect()
-            })
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| "scan task stopped".to_string())?
+    config::scan_repos_in_root(Path::new(&root))
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
