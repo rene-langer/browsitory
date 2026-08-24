@@ -20,6 +20,23 @@ import styles from "./ListRow.module.css";
  *   `role="option"` so `aria-selected` is valid ARIA (it's otherwise meaningless on a plain
  *   `listitem`) — the container must carry a matching `role="listbox"` for this to form a
  *   complete pattern.
+ *
+ * ## Interactive controls inside a `role="option"` row
+ *
+ * ARIA's listbox/option pattern expects an option's children to be content (text, graphics)
+ * that contributes to the option's accessible name — not independent widgets. Nested `<button>`s
+ * stay clickable and Tab-reachable, but assistive tech arrowing through the listbox does not
+ * reliably announce or reach them. `CommitGraph` never hit this (its rows are text and graphics
+ * only); `DiffPane`'s file rows, which carry Blame/Stage/Unstage buttons, are the first.
+ *
+ * The decision there — and the one to copy — was **not** to change this primitive, and not to
+ * lift the controls out of the row (a sibling of an `<li>` inside a `<ul>` has to be another
+ * `<li>`, which breaks the list semantics this pattern depends on). Instead the row's controls
+ * stay as the mouse/direct-Tab affordance they already are, and the *container* gains a key
+ * binding for the same action on the selected row — `s` to stage/unstage in `DiffPane`,
+ * alongside the `j`/`k`/arrow navigation the container already owns (advertised with
+ * `aria-keyshortcuts`). The container is the single tab stop, so that keeps the whole flow
+ * keyboard-reachable without inventing a second focus model inside each row.
  */
 export function ListRow({
   id,

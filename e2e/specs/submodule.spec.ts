@@ -53,7 +53,9 @@ describe("Browsitory submodules", () => {
     execFileSync("git", ["commit", "-m", "e2e: advance child"], { cwd: childPath });
 
     await initializeButton.click();
-    const gitlinkStatus = await $("button=" + E2E_SUBMODULE_PATH + " (Modified)");
+    // The uncommitted file list renders each row's `{path} ({kind})` text in a `<span>` inside
+    // an `<li role="option">` (see `DiffPane.tsx`'s `FileListRow`), not in a `<button>`.
+    const gitlinkStatus = await $("span=" + E2E_SUBMODULE_PATH + " (Modified)");
     await gitlinkStatus.waitForExist({ timeout: 10000 });
     await expect(gitlinkStatus).toBeExisting();
   });

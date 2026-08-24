@@ -4,6 +4,16 @@ import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
+function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
+  if (!existingNames.includes("origin")) return "origin";
+  const withoutGitSuffix = fetchUrl.replace(/\.git\/?$/, "");
+  const slug = withoutGitSuffix
+    .split(/[/:]/)
+    .filter((part) => part !== "")
+    .pop();
+  return slug ?? "";
+}
+
 export function RemotePanel({
   remotes,
   upstream,
@@ -32,7 +42,9 @@ export function RemotePanel({
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
   remoteUpstreams: Record<string, UpstreamInfo[]>;
-  onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
+  // `null` = added; a string = the failure message to show inline. See `useAppState.ts`'s
+  // `addRemote` for why this isn't a rejecting promise.
+  onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<string | null>;
   onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
   onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
@@ -58,6 +70,14 @@ export function RemotePanel({
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
   const [newPushUrl, setNewPushUrl] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  // Whether the user has typed in the Remote-name field themselves. Auto-derivation is gated on
+  // this rather than on `newName === ""`: real typing fires one `onChange` per keystroke, so the
+  // first character of the URL would derive a one-character name and every later keystroke would
+  // then see a non-empty `newName` and stop deriving. Only a paste (a single `change` carrying
+  // the whole URL) ever worked under the old guard.
+  const [nameTouched, setNameTouched] = useState(false);
+  const [showPushUrl, setShowPushUrl] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editFetchUrl, setEditFetchUrl] = useState("");
@@ -71,13 +91,22 @@ export function RemotePanel({
 
   const submitAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    const name = newName.trim();
+    setAddError(null);
     const fetchUrl = newFetchUrl.trim();
+    const name = (newName.trim() || deriveRemoteName(fetchUrl, remotes.map((remote) => remote.name))).trim();
     if (name === "" || fetchUrl === "") return;
-    await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
+    // Branching on the resolved value, not a `catch`: `onAddRemote` is `useAppState`'s
+    // `addRemote`, which never rejects (it reports failure by resolving to the message).
+    const failure = await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
+    if (failure !== null) {
+      setAddError(failure);
+      return;
+    }
     setNewName("");
     setNewFetchUrl("");
     setNewPushUrl("");
+    setNameTouched(false);
+    setShowPushUrl(false);
   };
 
   const beginEdit = (remote: RemoteInfo) => {
@@ -153,7 +182,7 @@ export function RemotePanel({
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes">
       {remotes.length === 0 ? (
-        <p>No remotes configured.</p>
+        <p className={styles.emptyState}>Add a remote below to push and pull.</p>
       ) : (
         <ul className={styles.list}>
           {remotes.map((remote) => (
@@ -185,7 +214,13 @@ export function RemotePanel({
                     <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
                     <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
                     <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
-                    <button type="button" onClick={() => requestRemove(remote)}>Remove {remote.name}</button>
+                    <button
+                      type="button"
+                      className={`${styles.dangerButton} danger`}
+                      onClick={() => requestRemove(remote)}
+                    >
+                      Remove {remote.name}
+                    </button>
                   </Toolbar>
                 </>
               )}
@@ -240,10 +275,67 @@ export function RemotePanel({
 
       <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
         <h3 className={styles.formHeading}>Add remote</h3>
-        <label className={styles.label}>Remote name<input value={newName} onChange={(event) => setNewName(event.target.value)} /></label>
-        <label className={styles.label}>Fetch URL<input data-testid="add-remote-fetch-url" value={newFetchUrl} onChange={(event) => setNewFetchUrl(event.target.value)} /></label>
-        <label className={styles.label}>Push URL (optional)<input value={newPushUrl} onChange={(event) => setNewPushUrl(event.target.value)} /></label>
-        <button type="submit" disabled={fetchDisabled}>Add remote</button>
+        <label className={styles.label}>
+          Remote name
+          <input
+            placeholder="origin"
+            value={newName}
+            onChange={(event) => {
+              setNameTouched(true);
+              setNewName(event.target.value);
+            }}
+          />
+        </label>
+        <label className={styles.label}>
+          Fetch URL
+          <input
+            data-testid="add-remote-fetch-url"
+            placeholder="git@github.com:user/repo.git"
+            value={newFetchUrl}
+            onChange={(event) => {
+              const value = event.target.value;
+              setNewFetchUrl(value);
+              // Editing the offending field clears the inline failure — leaving it up until the
+              // next submit makes a stale message sit next to freshly corrected input.
+              setAddError(null);
+              if (!nameTouched) {
+                setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
+              }
+            }}
+          />
+        </label>
+        {addError !== null && (
+          <p role="alert" className={styles.fieldError}>
+            {addError}
+          </p>
+        )}
+        <details
+          className={styles.disclosure}
+          open={showPushUrl}
+          onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
+        >
+          <summary
+            onClick={(event) => {
+              event.preventDefault();
+              setShowPushUrl((open) => !open);
+            }}
+          >
+            Push URL (optional)
+          </summary>
+          {showPushUrl && (
+            <label className={styles.label}>
+              Push URL
+              <input
+                placeholder="git@github.com:user/repo.git"
+                value={newPushUrl}
+                onChange={(event) => setNewPushUrl(event.target.value)}
+              />
+            </label>
+          )}
+        </details>
+        <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
+          Add remote
+        </button>
       </form>
 
       <section aria-labelledby="upstream-heading">

@@ -799,8 +799,32 @@ pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
         .map(|path| path.to_string())
 }
 
+// `async fn`, unlike this file's other `config`-crate commands (`list_workspaces`,
+// `save_workspace`, etc.), which stay plain `fn` because they're a single small TOML read/write.
+// A plain `fn` `#[tauri::command]` runs *inline*, on whatever thread hands it the IPC message —
+// there's no threadpool dispatch for the non-async case (verified against the vendored
+// `tauri-macros` 2.6.3 `body_blocking` codegen: it's a direct call, not a `spawn`/
+// `spawn_blocking`), and that thread is shared with the webview's own event loop (reproduced
+// locally: injecting an artificial delay into a plain `fn` command's body measurably froze the
+// whole webview's WebDriver responsiveness for the delay's full duration). `async fn` alone fixes
+// that — Tauri dispatches it onto the async runtime's worker pool instead of inline.
+//
+// Deliberately NOT wrapped in `tauri::async_runtime::spawn_blocking`, unlike a first attempt at
+// this fix: `config::scan_repos_in_root`'s actual work (`fs::read_dir` over a handful of
+// directories, no recursion) is microseconds, and routing microsecond work through
+// `spawn_blocking` trades one latency source for another — Tokio's blocking thread pool creates
+// OS threads lazily and reclaims them after a short idle timeout, so a `spawn_blocking` call
+// separated from the *previous* one by tens of seconds of unrelated UI interaction (exactly
+// `e2e/specs/workspaces.spec.ts`'s Edit-modal flow, which restarts the whole app process via
+// `browser.reloadSession()` and then does ~40-70s of other work before this command's first call
+// in that process's lifetime) can itself cold-start an OS thread under real-world CI scheduling
+// pressure — observed on real CI as this exact command stalling long enough to fail a 45s wait,
+// on both the original attempt and a retry within the same process. Plain async execution on
+// Tokio's own worker threads (created once at runtime startup, never torn down) has no such
+// cold-start variable, which is the more direct fix for microsecond-scale work: block a thread
+// pool only when the work is actually slow enough to need one.
 #[tauri::command]
-pub fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
+pub async fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
     config::scan_repos_in_root(Path::new(&root))
         .map(|paths| {
             paths
