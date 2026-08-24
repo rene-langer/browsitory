@@ -112,6 +112,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -146,6 +148,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -183,6 +187,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -221,6 +227,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={onStageHunk}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -255,6 +263,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={onStageFile}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -276,7 +286,10 @@ describe("DiffPane", () => {
       expect(onStageFile).toHaveBeenCalledWith("a.txt");
     });
 
-    it("Stage all calls onStageFile for every unstaged entry", () => {
+    // One bulk call, not one per file: each per-file call is a separate `runMutation` in
+    // `useAppState`, and every `runMutation` ends in a full `refresh()` (~13 IPC reads plus one
+    // per remote), all serialized through the single per-repo worker thread.
+    it("Stage all makes a single bulk call with every unstaged path", () => {
       const threeStatus: StatusEntry[] = [
         { path: "a.txt", staged: false, kind: "Modified" },
         { path: "c.txt", staged: false, kind: "New" },
@@ -284,6 +297,7 @@ describe("DiffPane", () => {
       ];
       const client = fakeClient({});
       const onStageFile = vi.fn();
+      const onStageAllFiles = vi.fn();
 
       render(
         <DiffPane
@@ -293,6 +307,8 @@ describe("DiffPane", () => {
           status={threeStatus}
           onStageFile={onStageFile}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={onStageAllFiles}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -311,14 +327,93 @@ describe("DiffPane", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
 
-      expect(onStageFile).toHaveBeenCalledWith("a.txt");
-      expect(onStageFile).toHaveBeenCalledWith("c.txt");
-      expect(onStageFile).toHaveBeenCalledTimes(2);
+      expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt", "c.txt"]);
+      expect(onStageAllFiles).toHaveBeenCalledTimes(1);
+      expect(onStageFile).not.toHaveBeenCalled();
     });
 
-    it("Unstage all calls onUnstageFile for every staged entry", () => {
+    // Staging a conflicted path is what marks the conflict resolved (with whatever is in the
+    // working tree). One "Stage all" click must not silently resolve an outstanding merge.
+    it("Stage all omits Conflicted entries from the bulk call", () => {
+      const conflictedMix: StatusEntry[] = [
+        { path: "a.txt", staged: false, kind: "Modified" },
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const client = fakeClient({});
+      const onStageAllFiles = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={conflictedMix}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageAllFiles={onStageAllFiles}
+          onUnstageAllFiles={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
+
+      expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt"]);
+      // The conflicted file keeps its own per-row Stage control — only the bulk action skips it.
+      expect(screen.getByRole("button", { name: "Stage shared.txt" })).toBeInTheDocument();
+    });
+
+    it("disables Stage all when every unstaged entry is Conflicted", () => {
+      const conflictsOnly: StatusEntry[] = [
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={conflictsOnly}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
+    });
+
+    it("Unstage all makes a single bulk call with every staged path", () => {
       const client = fakeClient({});
       const onUnstageFile = vi.fn();
+      const onUnstageAllFiles = vi.fn();
 
       render(
         <DiffPane
@@ -328,6 +423,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={onUnstageFile}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={onUnstageAllFiles}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -346,8 +443,9 @@ describe("DiffPane", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Unstage all" }));
 
-      expect(onUnstageFile).toHaveBeenCalledWith("b.txt");
-      expect(onUnstageFile).toHaveBeenCalledTimes(1);
+      expect(onUnstageAllFiles).toHaveBeenCalledWith(["b.txt"]);
+      expect(onUnstageAllFiles).toHaveBeenCalledTimes(1);
+      expect(onUnstageFile).not.toHaveBeenCalled();
     });
 
     it("does not render Stage all when there are no unstaged entries", () => {
@@ -362,6 +460,8 @@ describe("DiffPane", () => {
           status={stagedOnly}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -402,6 +502,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -445,6 +547,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -492,6 +596,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -526,6 +632,8 @@ describe("DiffPane", () => {
           status={refreshedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -559,6 +667,8 @@ describe("DiffPane", () => {
           status={unstagedOnly}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -590,6 +700,8 @@ describe("DiffPane", () => {
           status={stagedOnly}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -627,6 +739,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -658,6 +772,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -690,6 +806,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -720,6 +838,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -754,6 +874,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -784,6 +906,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -825,6 +949,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -870,6 +996,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -907,6 +1035,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -957,6 +1087,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -996,6 +1128,8 @@ describe("DiffPane", () => {
           status={conflictedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1037,6 +1171,8 @@ describe("DiffPane", () => {
           status={conflictedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1066,6 +1202,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1118,6 +1256,8 @@ describe("DiffPane", () => {
           status={twoConflicts}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1165,6 +1305,8 @@ describe("DiffPane", () => {
           status={mixedStatus}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1196,6 +1338,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1227,6 +1371,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1247,9 +1393,8 @@ describe("DiffPane", () => {
       expect(row).toHaveAttribute("aria-selected", "false");
 
       fireEvent.click(screen.getByText("a.txt (Modified)"));
-      await screen.findByText(/no changes/i).catch(() => {});
 
-      expect(row).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(row).toHaveAttribute("aria-selected", "true"));
     });
 
     it("renders a status-kind icon for each file row", () => {
@@ -1263,6 +1408,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1279,8 +1426,9 @@ describe("DiffPane", () => {
         />,
       );
 
-      // One status icon per file row (2 entries in `status`).
-      expect(container.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2);
+      // One status icon per file row (2 entries in `status`). Scoped to the rows so an
+      // unrelated icon elsewhere in the pane can't satisfy this.
+      expect(container.querySelectorAll('li[role="option"] svg').length).toBeGreaterThanOrEqual(2);
     });
 
     it("navigates the unstaged group with ArrowDown/ArrowUp and updates the diff", async () => {
@@ -1301,6 +1449,8 @@ describe("DiffPane", () => {
           status={twoUnstaged}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1325,6 +1475,100 @@ describe("DiffPane", () => {
       expect(await screen.findByText("c.txt")).toBeInTheDocument();
     });
 
+    // The per-row Stage/Unstage buttons live inside a `role="option"` row, where ARIA's
+    // listbox pattern doesn't reliably expose them to assistive tech during arrow-key
+    // navigation (see `primitives/ListRow.tsx`'s doc comment). `s` on the group container —
+    // the listbox's single tab stop, which already owns `j`/`k`/arrow navigation — is the
+    // keyboard-only path to the same action.
+    it("stages the selected unstaged row when 's' is pressed on the group", async () => {
+      const client = fakeClient({ getWorkingDiff: async () => [] });
+      const onStageFile = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={onStageFile}
+          onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      const group = screen.getByRole("listbox", { name: "Unstaged changes" });
+      // Select with the keyboard too, so nothing in this path depends on a pointer.
+      fireEvent.keyDown(group, { key: "ArrowDown" });
+      await waitFor(() =>
+        expect(screen.getByText("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
+          "aria-selected",
+          "true",
+        ),
+      );
+
+      fireEvent.keyDown(group, { key: "s" });
+
+      expect(onStageFile).toHaveBeenCalledWith("a.txt");
+    });
+
+    it("unstages the selected staged row when 's' is pressed on the staged group", async () => {
+      const client = fakeClient({ getWorkingDiff: async () => [] });
+      const onUnstageFile = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={onUnstageFile}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      const group = screen.getByRole("listbox", { name: "Staged changes" });
+      fireEvent.keyDown(group, { key: "ArrowDown" });
+      await waitFor(() =>
+        expect(screen.getByText("b.txt (New)").closest('[role="option"]')).toHaveAttribute(
+          "aria-selected",
+          "true",
+        ),
+      );
+
+      fireEvent.keyDown(group, { key: "s" });
+
+      expect(onUnstageFile).toHaveBeenCalledWith("b.txt");
+    });
+
     it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
       const client = fakeClient({});
 
@@ -1336,6 +1580,8 @@ describe("DiffPane", () => {
           status={status}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1381,6 +1627,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1416,6 +1664,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1449,6 +1699,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1481,6 +1733,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1523,6 +1777,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1569,6 +1825,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}
@@ -1609,6 +1867,8 @@ describe("DiffPane", () => {
           status={[]}
           onStageFile={vi.fn()}
           onUnstageFile={vi.fn()}
+          onStageAllFiles={vi.fn()}
+          onUnstageAllFiles={vi.fn()}
           onStageHunk={vi.fn()}
           onUnstageHunk={vi.fn()}
           onDiscardHunk={vi.fn()}

@@ -62,6 +62,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     selectRow: vi.fn(),
     stageFile: vi.fn(),
     unstageFile: vi.fn(),
+    stageAllFiles: vi.fn(),
+    unstageAllFiles: vi.fn(),
     stageHunk: vi.fn(),
     unstageHunk: vi.fn(),
     discardHunk: vi.fn(),
