@@ -62,6 +62,53 @@ jobs:
       - run: pnpm build
       - run: pnpm test -- --run
 
+  # Builds standalone distributables on every push to main (not PRs) so a build is always
+  # test-drivable without waiting for a release tag. Short-retention CI artifacts, distinct
+  # from release.yml's tag-triggered draft GitHub Release, which is the permanent distribution
+  # path.
+  build-dist:
+    if: github.ref == 'refs/heads/main'
+    needs: [rust, frontend, e2e]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --locked
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build distributable (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: scripts/build-dist.sh ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
+      - name: Build distributable (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: scripts\build-dist.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browsitory-dist-${{ matrix.os }}
+          path: ${{ matrix.os == 'macos-latest' && 'crates/tauri-app/target/universal-apple-darwin/release/bundle/' || 'crates/tauri-app/target/release/bundle/' }}
+          retention-days: 7
+
   e2e:
     runs-on: ubuntu-latest
     # Fixed fixture-repo path the E2E frontend build bakes in via VITE_E2E_REPO_PATH and that
