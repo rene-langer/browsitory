@@ -106,7 +106,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: browsitory-dist-${{ matrix.os }}
-          path: ${{ matrix.os == 'macos-latest' && 'crates/tauri-app/target/universal-apple-darwin/release/bundle/' || 'crates/tauri-app/target/release/bundle/' }}
+          path: ${{ matrix.os == 'macos-latest' && 'target/universal-apple-darwin/release/bundle/' || 'target/release/bundle/' }}
           retention-days: 7
 
   e2e:

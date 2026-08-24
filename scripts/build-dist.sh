@@ -26,4 +26,4 @@ pnpm --dir "$repo_root/frontend" install --frozen-lockfile
 echo "==> Building distributable"
 (cd "$repo_root/crates/tauri-app" && cargo tauri build "$@")
 
-echo "==> Done. Bundles in crates/tauri-app/target/release/bundle/"
+echo "==> Done. Bundles in target/release/bundle/"

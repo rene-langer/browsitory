@@ -29,4 +29,4 @@ try {
     Pop-Location
 }
 
-Write-Host "==> Done. Bundles in crates\tauri-app\target\release\bundle\"
+Write-Host "==> Done. Bundles in target\release\bundle\"
