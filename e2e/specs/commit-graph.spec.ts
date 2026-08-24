@@ -5,6 +5,10 @@ import path from "node:path";
 import { expect } from "@wdio/globals";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
+// Spec-unique name on purpose — see the same constant in `blame-viewer.spec.ts` for why two
+// specs sharing a throwaway `prime.txt` is only safe as long as each spec file gets its own
+// freshly re-cloned fixture repo.
+const PRIME_FILE = "graph-prime.txt";
 
 describe("Browsitory commit graph", () => {
   before(() => {
@@ -34,15 +38,21 @@ describe("Browsitory commit graph", () => {
     });
 
     execFileSync("git", ["checkout", baseBranch], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    fs.writeFileSync(path.join(E2E_REPO_PATH, "prime.txt"), "prime\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, PRIME_FILE), "prime\n");
   });
 
   it("shows commits from every local branch with correct branch labels", async () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
     await commitMessageInput.waitForExist({ timeout: 10000 });
 
-    const stageButton = await $("button=Stage");
-    await stageButton.scrollIntoView({ block: "center" });
+    // The per-row stage control is icon-only (aria-label only, no visible text) since the
+    // file-list migration to `ListRow` — target the throwaway file this spec's `before` hook
+    // wrote for exactly this "prime the refresh" commit.
+    const stageButton = await $(`button[aria-label="Stage ${PRIME_FILE}"]`);
+    await stageButton.waitForExist({ timeout: 10000 });
+    // `opacity: 0` until the row is hovered/focused — see `first-flow.spec.ts`'s note on why
+    // both the scroll and the click go through `browser.execute`.
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
     const commitButton = await $("button=Commit");
