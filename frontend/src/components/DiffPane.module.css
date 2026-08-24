@@ -3,3 +3,36 @@
   margin: 0;
   padding: 0;
 }
+
+.groupHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.fileRow {
+  justify-content: flex-start;
+}
+
+.statusIcon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
