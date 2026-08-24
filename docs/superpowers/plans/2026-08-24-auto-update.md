@@ -566,7 +566,7 @@ git commit -m "feat(frontend): mount UpdateBanner in the app shell"
 - Modify: `.github/workflows/release.yml`
 
 **Interfaces:**
-- Consumes: the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub Actions secrets (added manually by the user in the repo's Settings → Secrets, using the private key file contents and password from Task 1 Step 2 — this step cannot be scripted by the implementer since it requires GitHub repo admin access outside the codebase).
+- Consumes: the `TAURI_SIGNING_PKEY` / `TAURI_SIGNING_PKEY_PASSWORD` GitHub Actions secrets — already created by the user (repo Settings → Secrets), holding the private key file contents and password from Task 1's keygen. Note these secret *names* differ from the env var names `tauri-action` itself reads (`TAURI_SIGNING_PRIVATE_KEY`/`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`); the workflow step below maps one to the other via `env: TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PKEY }}`.
 
 - [ ] **Step 1: Add the secrets to the `tauri-apps/tauri-action` step's `env`**
 
@@ -585,8 +585,8 @@ Change to:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PKEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PKEY_PASSWORD }}
         with:
 ```
 
@@ -602,13 +602,11 @@ git add .github/workflows/release.yml
 git commit -m "ci(release): sign updater artifacts with tauri-action"
 ```
 
-- [ ] **Step 4: Tell the user to add the two GitHub Actions secrets manually**
+- [ ] **Step 4: Confirm the GitHub Actions secrets already exist**
 
-This step has no shell command — it requires the user (with repo admin access) to go to the GitHub repo's Settings → Secrets and variables → Actions, and add:
-- `TAURI_SIGNING_PRIVATE_KEY`: the full contents of the private key file generated in Task 1 Step 2 (e.g. `cat ~/.tauri/browsitory-updater.key`)
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the password chosen in Task 1 Step 2
+The user already created `TAURI_SIGNING_PKEY` and `TAURI_SIGNING_PKEY_PASSWORD` in the repo's Settings → Secrets and variables → Actions, holding the private key file contents and password from Task 1's keygen. No action needed here beyond confirming Step 1's `env:` block references those exact secret names — if the secrets are ever renamed, this workflow step must be updated to match.
 
-The next tag push to `release/*.*.*` will fail at the `tauri-action` step if these are missing (it errors when `plugins.updater` is configured but no signing key is available) — flag this explicitly to the user before ending this task.
+The next tag push to `release/*.*.*` will fail at the `tauri-action` step if these secrets are missing or misnamed (it errors when `plugins.updater` is configured but no signing key is available).
 
 ---
 
