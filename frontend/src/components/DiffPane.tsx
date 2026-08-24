@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRightLeft, FileDiff, FileMinus, FilePlus, Pencil, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, FileDiff, FileMinus, FilePlus, Minus, Pencil, Plus, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
@@ -61,22 +61,26 @@ function FileListRow({
         {entry.staged ? (
           <button
             type="button"
+            className={styles.stageToggle}
+            aria-label={`Unstage ${entry.path}`}
             onClick={(event) => {
               event.stopPropagation();
               onUnstageFile(entry.path);
             }}
           >
-            Unstage
+            <Minus size={14} aria-hidden="true" />
           </button>
         ) : (
           <button
             type="button"
+            className={styles.stageToggle}
+            aria-label={`Stage ${entry.path}`}
             onClick={(event) => {
               event.stopPropagation();
               onStageFile(entry.path);
             }}
           >
-            Stage
+            <Plus size={14} aria-hidden="true" />
           </button>
         )}
       </div>
@@ -328,12 +332,27 @@ function UncommittedDiffPane({
     }
   };
 
+  const handleStageAll = () => {
+    for (const entry of unstagedEntries) {
+      onStageFile(entry.path);
+    }
+  };
+
+  const handleUnstageAll = () => {
+    for (const entry of stagedEntries) {
+      onUnstageFile(entry.path);
+    }
+  };
+
   return (
     <div>
       {unstagedEntries.length > 0 && (
         <div>
           <div className={styles.groupHeading}>
             <span>Changes ({unstagedEntries.length})</span>
+            <button type="button" onClick={handleStageAll}>
+              Stage all
+            </button>
           </div>
           <ul
             className={styles.fileList}
@@ -360,6 +379,9 @@ function UncommittedDiffPane({
         <div>
           <div className={styles.groupHeading}>
             <span>Staged ({stagedEntries.length})</span>
+            <button type="button" onClick={handleUnstageAll}>
+              Unstage all
+            </button>
           </div>
           <ul
             className={styles.fileList}

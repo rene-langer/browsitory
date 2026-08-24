@@ -101,7 +101,7 @@ describe("DiffPane", () => {
       { path: "b.txt", staged: true, kind: "New" },
     ];
 
-    it("renders a Stage button for unstaged entries and Unstage for staged ones", () => {
+    it("renders an icon-only Stage control for unstaged entries and Unstage for staged ones", () => {
       const client = fakeClient({});
 
       render(
@@ -128,8 +128,8 @@ describe("DiffPane", () => {
         />,
       );
 
-      expect(screen.getByText("Stage")).toBeInTheDocument();
-      expect(screen.getByText("Unstage")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stage a.txt" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unstage b.txt" })).toBeInTheDocument();
     });
 
     it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
@@ -243,7 +243,7 @@ describe("DiffPane", () => {
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
     });
 
-    it("clicking Stage calls onStageFile with that path", () => {
+    it("clicking the Stage control calls onStageFile with that path", () => {
       const client = fakeClient({});
       const onStageFile = vi.fn();
 
@@ -271,9 +271,114 @@ describe("DiffPane", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("Stage"));
+      fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
 
       expect(onStageFile).toHaveBeenCalledWith("a.txt");
+    });
+
+    it("Stage all calls onStageFile for every unstaged entry", () => {
+      const threeStatus: StatusEntry[] = [
+        { path: "a.txt", staged: false, kind: "Modified" },
+        { path: "c.txt", staged: false, kind: "New" },
+        { path: "b.txt", staged: true, kind: "New" },
+      ];
+      const client = fakeClient({});
+      const onStageFile = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={threeStatus}
+          onStageFile={onStageFile}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
+
+      expect(onStageFile).toHaveBeenCalledWith("a.txt");
+      expect(onStageFile).toHaveBeenCalledWith("c.txt");
+      expect(onStageFile).toHaveBeenCalledTimes(2);
+    });
+
+    it("Unstage all calls onUnstageFile for every staged entry", () => {
+      const client = fakeClient({});
+      const onUnstageFile = vi.fn();
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          onStageFile={vi.fn()}
+          onUnstageFile={onUnstageFile}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Unstage all" }));
+
+      expect(onUnstageFile).toHaveBeenCalledWith("b.txt");
+      expect(onUnstageFile).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not render Stage all when there are no unstaged entries", () => {
+      const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
+      const client = fakeClient({});
+
+      render(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={stagedOnly}
+          onStageFile={vi.fn()}
+          onUnstageFile={vi.fn()}
+          onStageHunk={vi.fn()}
+          onUnstageHunk={vi.fn()}
+          onDiscardHunk={vi.fn()}
+          onCommit={vi.fn()}
+          onSaveStash={vi.fn()}
+          onSelectRow={vi.fn()}
+          onResolveConflict={vi.fn()}
+          onResolveAddDeleteConflict={vi.fn()}
+          mergeMessage={null}
+          onAbortMerge={vi.fn()}
+          rebaseProgress={null}
+          onRebaseContinue={vi.fn()}
+          onRebaseAbort={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "Stage all" })).not.toBeInTheDocument();
     });
 
     it("clicking a file fetches and renders its working diff", async () => {
