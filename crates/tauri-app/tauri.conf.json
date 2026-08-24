@@ -26,5 +26,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzRjg0Q0Q1MDE3NDlFQTQKUldTa25uUUIxVXo0ZzVJaDdrMVgzZTF1eUprS1NPYW9ydWpRNzFGcXhEWHhPL3ppUnFQYnM1aTUK",
+      "endpoints": [
+        "https://github.com/rene-langer/browsitory/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
