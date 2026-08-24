@@ -7,6 +7,29 @@ A tour of Browsitory's UI and the day-to-day Git workflows it covers.
 On launch, Browsitory shows a repo picker: pick a folder, or reopen one of your
 recently used repositories.
 
+## Multiple repositories
+
+Every repo you open lands in its own tab at the top of the window, and each
+tab keeps its own selection, panel state, and in-flight operations
+independent of the others — switch freely without losing your place. Open
+another via **+** at the end of the tab bar. A tab with an operation still
+running (a push, fetch, or similar) can't be closed until it finishes.
+Reopening Browsitory restores every tab you had open, workspace groupings
+included.
+
+## Workspaces
+
+A **workspace** is a saved group of repositories under a common root
+folder — the multi-repo case most git GUIs don't have an answer for: a
+project split across several repos that you always want open together.
+From the repo picker, **Open Workspace Root** scans a folder for git repos
+and lets you name and save the group; **Open All** reopens every member as
+tabs at once, visually grouped in the tab bar under the workspace's name
+with a single button to close the whole group together. **Edit** re-scans
+the root — so a repo added to the folder later shows up, unchecked, ready
+to add — and lets you change which repos are members; **Delete** removes
+the saved workspace without touching the repos themselves.
+
 ## Overview
 
 Once a repository is open, the window is split into three columns: the
@@ -18,10 +41,12 @@ newest first), and the **working-directory / diff pane** on the right.
 
 ## Staging and committing
 
-The right-hand pane defaults to your working directory: unstaged and staged
-files, each with **Stage**/**Unstage** and **Blame** buttons. Click a file to
-preview its diff, type a commit message, and hit **Commit**. **Stash** sets
-the current changes aside.
+The right-hand pane defaults to your working directory, split into
+**Changes** and **Staged** groups — each with a bulk **Stage all**/**Unstage
+all** action. Hover a file to reveal its stage/unstage toggle, or use
+**Blame** for per-line authorship. Click a file to preview its diff, type a
+commit message, and hit **Commit**. **Stash** sets the current changes
+aside.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
