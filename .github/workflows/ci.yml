@@ -14,7 +14,7 @@ jobs:
         # the Linux validation to keep feedback fast and avoid spending three runner minutes.
         os: ${{ fromJSON(github.ref == 'refs/heads/main' && '["ubuntu-latest", "macos-latest", "windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -48,11 +48,11 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -75,7 +75,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -88,10 +88,10 @@ jobs:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - name: Install tauri-cli
         run: cargo install tauri-cli --locked
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -103,7 +103,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: scripts\build-dist.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: browsitory-dist-${{ matrix.os }}
           path: ${{ matrix.os == 'macos-latest' && 'target/universal-apple-darwin/release/bundle/' || 'target/release/bundle/' }}
@@ -117,7 +117,7 @@ jobs:
     env:
       E2E_REPO_PATH: /tmp/browsitory-e2e-repo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Tauri + tauri-driver system dependencies (Linux)
         run: |
           sudo apt-get update
@@ -129,10 +129,10 @@ jobs:
       - name: Install tauri-driver
         # tauri-driver's version is independent of any other Tauri versions.
         run: cargo install tauri-driver --locked
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
