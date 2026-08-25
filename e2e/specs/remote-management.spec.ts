@@ -24,19 +24,22 @@ describe("Browsitory remote management", () => {
   });
 
   it("clears affected upstreams when removing a remote", async () => {
-    // "Remotes" defaults closed; expand it before its Add remote form exists.
+    // "Remotes" defaults closed; expand it before its Add remote button exists.
     await expandSidebarSection("Remotes");
+
+    // The Add-remote form is gated behind a button — open it before reaching for its fields.
+    await (await $("button=Add remote")).click();
 
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
-    const addRemoteButton = await $("button=Add remote");
+    const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
     await addRemoteButton.waitForEnabled({ timeout: 10000 });
     await remoteNameInput.setValue("origin");
     const fetchUrlInput = await $("[data-testid='add-remote-fetch-url']");
     await fetchUrlInput.setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
-    await browser.waitUntil(async () => await $("button=Remove origin").isExisting(), {
+    await browser.waitUntil(async () => await $("aria/Remove origin").isExisting(), {
       timeout: 10000,
       timeoutMsg: "expected the newly added origin remote to appear",
     });
@@ -51,14 +54,14 @@ describe("Browsitory remote management", () => {
     // actually reflect it, the immediate "Remove origin" click below can race ahead of the
     // mutation (observed as an intermittent failure under load: `requestRemove` reads a stale
     // `remoteUpstreams["origin"]` and skips the "clear upstreams" confirmation entirely, so the
-    // `div[role='alertdialog']` never appears).
+    // confirmation `<dialog>` never appears).
     await browser.waitUntil(
       async () => (await (await $("section[aria-labelledby='upstream-heading']")).getText()).includes("tracks origin/main"),
       { timeout: 10000, timeoutMsg: "expected the upstream to be set before removing its remote" },
     );
 
-    await (await $("button=Remove origin")).click();
-    const blockingDialog = await $("div[role='alertdialog']");
+    await (await $("aria/Remove origin")).click();
+    const blockingDialog = await $("dialog[aria-label='Remove remote confirmation']");
     await blockingDialog.waitForExist({ timeout: 10000 });
     expect(await blockingDialog.getText()).toContain("clear upstreams for");
     await (await blockingDialog.$("button=Confirm remove")).click();
