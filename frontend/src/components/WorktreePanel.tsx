@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderGit2 } from "lucide-react";
+import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
@@ -54,7 +54,7 @@ export function WorktreePanel({
   };
 
   return (
-    <AccordionSection title="Worktrees" storageKey="sidebar-worktrees">
+    <AccordionSection title="Worktrees" storageKey="sidebar-worktrees" icon={GitFork} count={worktrees.length}>
       <form className={styles.form} onSubmit={createWorktree} aria-label="Create worktree">
         <label className={styles.label}>
           Worktree name

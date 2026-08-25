@@ -58,7 +58,7 @@ export function TagPanel({
   };
 
   return (
-    <AccordionSection title="Tags" storageKey="sidebar-tags">
+    <AccordionSection title="Tags" storageKey="sidebar-tags" icon={Tag} count={tags.length}>
       <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
         <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>

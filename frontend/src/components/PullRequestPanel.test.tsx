@@ -355,4 +355,50 @@ describe("PullRequestPanel", () => {
     expect(screen.getByRole("button", { name: "Forget token" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create pull request" })).toBeDisabled();
   });
+
+  it("shows an icon and the total open pull-request count on the outer Pull Requests header", () => {
+    renderPanel({
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
+    const header = screen.getByRole("button", { name: "Pull Requests" });
+    expect(header).toHaveTextContent("1");
+    expect(header.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("scopes roving-tabindex arrow-key navigation to the nested per-repository cards", () => {
+    renderPanel({ forgeRepositories: [githubRepo, bitbucketRepo] });
+
+    const githubHeader = screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i });
+    const bitbucketHeader = screen.getByRole("button", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
+    const outerHeader = screen.getByRole("button", { name: "Pull Requests" });
+
+    // ArrowDown from the last repo card wraps around to the first, proving the nested
+    // AccordionGroup (not some ambient/absent outer one) owns the wrapping.
+    fireEvent.keyDown(bitbucketHeader, { key: "ArrowDown" });
+    expect(githubHeader).toHaveFocus();
+    expect(outerHeader).not.toHaveFocus();
+
+    fireEvent.keyDown(githubHeader, { key: "ArrowUp" });
+    expect(bitbucketHeader).toHaveFocus();
+    expect(outerHeader).not.toHaveFocus();
+  });
+
+  it("lets a repository's own card be collapsed independently without hiding the others", () => {
+    renderPanel({
+      forgeRepositories: [githubRepo, bitbucketRepo],
+      pullRequests: {
+        origin: { pullRequests: [openPullRequest], truncated: false },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
+
+    expect(screen.queryByLabelText("Account")).toBeTruthy();
+    // The GitHub card's own content collapses...
+    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    expect(within(githubSection).queryByRole("button", { name: "List pull requests" })).not.toBeInTheDocument();
+    // ...while the Bitbucket card, untouched, stays open.
+    const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
+    expect(within(bitbucketSection).getByRole("button", { name: "List pull requests" })).toBeInTheDocument();
+  });
 });

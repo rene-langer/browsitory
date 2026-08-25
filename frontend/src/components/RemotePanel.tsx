@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Cloud } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
@@ -180,7 +181,7 @@ export function RemotePanel({
   }, [pendingPull]);
 
   return (
-    <AccordionSection title="Remotes" storageKey="sidebar-remotes">
+    <AccordionSection title="Remotes" storageKey="sidebar-remotes" icon={Cloud} count={remotes.length}>
       {remotes.length === 0 ? (
         <p className={styles.emptyState}>Add a remote below to push and pull.</p>
       ) : (
