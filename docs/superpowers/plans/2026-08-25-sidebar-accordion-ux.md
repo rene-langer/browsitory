@@ -37,13 +37,25 @@
 ```tsx
 // frontend/src/components/primitives/AccordionGroup.test.tsx
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { describe, expect, it } from "vitest";
 import { AccordionGroup, useAccordionGroup, type AccordionGroupHandle } from "./AccordionGroup";
 
 function Header({ label, open, onOpenChange }: { label: string; open: boolean; onOpenChange: (open: boolean) => void }) {
   const ref = useRef<HTMLButtonElement>(null);
   const group = useAccordionGroup();
+
+  useEffect(() => {
+    return group?.register({ ref, setOpen: onOpenChange });
+    // Register once on mount, not on every `[group]` identity change: `AccordionGroup`'s
+    // memoized context value gets a new identity whenever the active header changes (its
+    // `isActive` callback depends on `activeRef` state), so keying this effect on `group` would
+    // unregister/re-register on every focus/arrow-key move, desyncing tabIndex from the actually
+    // active header. `register`/`onHeaderFocus`/`onHeaderKeyDown` are themselves referentially
+    // stable across those identity changes, so capturing them once at mount is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <button
       ref={ref}
@@ -387,8 +399,12 @@ export function AccordionSection({
 
   useEffect(() => {
     return group?.register({ ref: headerRef, setOpen: setOpenState });
+    // Register once on mount, not on every `[group]` identity change — see AccordionGroup.tsx's
+    // `isActive` (depends on `activeRef`, so the memoized context value's identity changes on
+    // every focus/arrow-key move); keying this effect on `group` churns registration on every
+    // such change and desyncs tabIndex from the actually active header.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group]);
+  }, []);
 
   return (
     <section className={styles.section} data-open={open} aria-label={title}>
