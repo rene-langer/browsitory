@@ -216,6 +216,31 @@ export function RemotePanel({
                   <button type="submit">Save remote</button>
                   <button type="button" onClick={() => setEditing(null)}>Cancel</button>
                 </form>
+              ) : credentialRemote === remote.name ? (
+                <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${remote.name}`}>
+                  <h3 className={styles.formHeading}>Credentials for {remote.name}</h3>
+                  <label className={styles.label}>
+                    Authentication for {remote.name}
+                    <select
+                      value={credentialMode}
+                      onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}
+                    >
+                      <option value="HttpsToken">HTTPS token</option>
+                      <option value="SshAgent">SSH agent</option>
+                    </select>
+                  </label>
+                  {credentialMode === "HttpsToken" ? (
+                    <>
+                      <label className={styles.label}>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
+                      <label className={styles.label}>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
+                      <button type="submit">Save HTTPS credential</button>
+                      <button type="button" onClick={() => void onForgetHttpsCredential(remote.name)}>Forget HTTPS credential</button>
+                    </>
+                  ) : (
+                    <button type="submit">Use SSH agent</button>
+                  )}
+                  <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
+                </form>
               ) : (
                 <>
                   <strong>{remote.name}</strong>
@@ -239,33 +264,6 @@ export function RemotePanel({
             </li>
           ))}
         </ul>
-      )}
-
-      {credentialRemote !== null && (
-        <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
-          <h3 className={styles.formHeading}>Credentials for {credentialRemote}</h3>
-          <label className={styles.label}>
-            Authentication for {credentialRemote}
-            <select
-              value={credentialMode}
-              onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}
-            >
-              <option value="HttpsToken">HTTPS token</option>
-              <option value="SshAgent">SSH agent</option>
-            </select>
-          </label>
-          {credentialMode === "HttpsToken" ? (
-            <>
-              <label className={styles.label}>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
-              <label className={styles.label}>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
-              <button type="submit">Save HTTPS credential</button>
-              <button type="button" onClick={() => void onForgetHttpsCredential(credentialRemote)}>Forget HTTPS credential</button>
-            </>
-          ) : (
-            <button type="submit">Use SSH agent</button>
-          )}
-          <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
-        </form>
       )}
 
       {removeConfirmation !== null && (

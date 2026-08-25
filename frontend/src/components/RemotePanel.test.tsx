@@ -138,6 +138,20 @@ describe("RemotePanel", () => {
     expect(screen.getByLabelText("Access token")).toHaveValue("");
   });
 
+  it("renders the credentials form nested under its own row, not another remote's", () => {
+    renderPanel({ remotes: [origin, backup] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+
+    const credentialsForm = screen.getByRole("form", { name: "Credentials for origin" });
+    const originItem = credentialsForm.closest("li");
+    const backupItem = screen.getByText("backup", { selector: "strong" }).closest("li");
+    expect(originItem).not.toBeNull();
+    expect(backupItem).not.toBeNull();
+    expect(originItem).not.toBe(backupItem);
+    expect(within(backupItem!).queryByLabelText("Authentication for origin")).not.toBeInTheDocument();
+  });
+
   it("pushes the current branch to a chosen remote and disables Push during an operation", () => {
     const onPushCurrentBranch = vi.fn();
     renderPanel({ onPushCurrentBranch, pushDisabled: true });
