@@ -375,6 +375,29 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
     Ok(remotes)
 }
 
+pub fn list_remote_branches(
+    repo: &Repository,
+    remote_name: &str,
+) -> Result<Vec<String>, RemoteError> {
+    let prefix = format!("{remote_name}/");
+    let mut branches = Vec::new();
+    for entry in repo.branches(Some(BranchType::Remote))? {
+        let (branch, _) = entry?;
+        let Ok(Some(name)) = branch.name() else {
+            continue;
+        };
+        let Some(branch_name) = name.strip_prefix(prefix.as_str()) else {
+            continue;
+        };
+        if branch_name == "HEAD" {
+            continue;
+        }
+        branches.push(branch_name.to_string());
+    }
+    branches.sort();
+    Ok(branches)
+}
+
 pub fn add_remote(
     repo: &Repository,
     name: &str,

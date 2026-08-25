@@ -33,6 +33,7 @@ const remoteManagementClient = {
   updateWorkspace: async () => {},
   deleteWorkspace: async () => {},
   listRemotes: async () => [remote],
+  listRemoteBranches: async () => unimplemented(),
   getCurrentUpstream: async () => upstream,
   getRemoteUpstreams: async () => [upstream],
   addRemote: async () => unimplemented(),

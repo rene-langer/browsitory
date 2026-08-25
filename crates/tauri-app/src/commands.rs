@@ -1191,6 +1191,15 @@ pub async fn list_remotes(
 }
 
 #[tauri::command]
+pub async fn list_remote_branches(
+    repo_path: String,
+    remote_name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    worker_handle(&state, &repo_path)?.list_remote_branches(remote_name)
+}
+
+#[tauri::command]
 pub async fn get_current_upstream(
     repo_path: String,
     state: State<'_, AppState>,

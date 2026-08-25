@@ -98,6 +98,8 @@ export const tauriRepoClient: RepoClient = {
   restoreReflogEntry: (repoPath: string, reference: string, newId: string) =>
     invoke("restore_reflog_entry", { repoPath, reference, newId }),
   listRemotes: (repoPath: string) => invoke<RemoteInfo[]>("list_remotes", { repoPath }),
+  listRemoteBranches: (repoPath: string, remoteName: string) =>
+    invoke<string[]>("list_remote_branches", { repoPath, remoteName }),
   getCurrentUpstream: (repoPath: string) => invoke<UpstreamInfo | null>("get_current_upstream", { repoPath }),
   getRemoteUpstreams: (repoPath: string, name: string) => invoke<UpstreamInfo[]>("get_remote_upstreams", { repoPath, name }),
   addRemote: (repoPath: string, name: string, fetchUrl: string, pushUrl: string | null) => {

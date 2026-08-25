@@ -54,6 +54,11 @@ const BITBUCKET_CREATE_FIXTURE = {
 };
 
 async function addRemote(name: string, url: string) {
+  // The Add-remote form is gated behind a button and stays open after a successful add, so only
+  // open it when it isn't already showing (the first call in a test, typically).
+  if (!(await $("form[aria-label='Add remote']").isExisting())) {
+    await (await $("button=Add remote")).click();
+  }
   const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
   await remoteNameInput.waitForExist({ timeout: 10000 });
   await remoteNameInput.setValue(name);

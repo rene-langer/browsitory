@@ -70,18 +70,21 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("fetches a configured remote", async () => {
-    // "Remotes" defaults closed; expand it before its Add remote/Fetch controls exist.
+    // "Remotes" defaults closed; expand it before its Add remote button exists.
     await expandSidebarSection("Remotes");
+
+    // The Add-remote form is gated behind a button — open it before reaching for its fields.
+    await (await $("button=Add remote")).click();
 
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
-    const addRemoteButton = await $("button=Add remote");
+    const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
     await addRemoteButton.waitForEnabled({ timeout: 10000 });
     await remoteNameInput.setValue("transfer-origin");
     await (await $("[data-testid='add-remote-fetch-url']")).setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
-    const fetchButton = await $("button=Fetch transfer-origin");
+    const fetchButton = await $("aria/Fetch transfer-origin");
     await fetchButton.waitForExist({ timeout: 10000 });
     await fetchButton.click();
 
@@ -111,13 +114,18 @@ describe("Browsitory remote transfer", () => {
 
     const challenge = await startCredentialChallengeServer();
     try {
+      // Left open by the previous test's successful add (it doesn't auto-close on success); only
+      // open it here if that isn't the case.
+      if (!(await $("form[aria-label='Add remote']").isExisting())) {
+        await (await $("button=Add remote")).click();
+      }
       const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
-      const addRemoteButton = await $("button=Add remote");
+      const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
       await addRemoteButton.waitForEnabled({ timeout: 10000 });
       await remoteNameInput.setValue("credential-origin");
       await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
       await addRemoteButton.click();
-      await (await $("button=Fetch credential-origin")).waitForExist({ timeout: 10000 });
+      await (await $("aria/Fetch credential-origin")).waitForExist({ timeout: 10000 });
 
       // This is the non-secret metadata the UI normally persists before saving a token. No
       // token is saved, so the loopback server invokes the real missing-credential callback.
@@ -130,7 +138,7 @@ describe("Browsitory remote transfer", () => {
         }).trim(),
       ).toBe(challenge.url);
 
-      await (await $("button=Fetch credential-origin")).click();
+      await (await $("aria/Fetch credential-origin")).click();
       await browser.waitUntil(() => challenge.requests() > 0, {
         timeout: 10000,
         timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
@@ -197,7 +205,7 @@ describe("Browsitory remote transfer", () => {
     const localHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
-    const pushBranch = await $("button=Push branch to transfer-origin");
+    const pushBranch = await $("aria/Push branch to transfer-origin");
     await pushBranch.waitForEnabled({ timeout: 10000 });
     await pushBranch.click();
     await browser.waitUntil(
@@ -245,7 +253,7 @@ describe("Browsitory remote transfer", () => {
     // Idempotent re-expand — see the first test's comment.
     await expandSidebarSection("Remotes");
 
-    await (await $("button=Credentials for transfer-origin")).click();
+    await (await $("aria/Credentials for transfer-origin")).click();
     const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
     await credentialsForm.waitForExist({ timeout: 10000 });
     await credentialsForm.$("select").selectByAttribute("value", "SshAgent");

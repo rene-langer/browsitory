@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Cloud } from "lucide-react";
+import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2, Copy } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
@@ -28,6 +28,7 @@ export function RemotePanel({
   onSetRemoteAuthMode,
   onSetUpstream,
   onClearUpstream,
+  onListRemoteBranches,
   onFetchRemote,
   fetchDisabled,
   onPushCurrentBranch,
@@ -54,6 +55,7 @@ export function RemotePanel({
   onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<boolean>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
+  onListRemoteBranches: (remoteName: string) => Promise<string[]>;
   onFetchRemote: (remoteName: string) => Promise<void>;
   fetchDisabled: boolean;
   onPushCurrentBranch: (remoteName: string) => Promise<void>;
@@ -67,6 +69,7 @@ export function RemotePanel({
   onCancelPull: () => void;
 }) {
   const pullDialogRef = useRef<HTMLDialogElement>(null);
+  const removeDialogRef = useRef<HTMLDialogElement>(null);
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
@@ -79,12 +82,15 @@ export function RemotePanel({
   // the whole URL) ever worked under the old guard.
   const [nameTouched, setNameTouched] = useState(false);
   const [showPushUrl, setShowPushUrl] = useState(false);
+  const [showEditPushUrl, setShowEditPushUrl] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editFetchUrl, setEditFetchUrl] = useState("");
   const [editPushUrl, setEditPushUrl] = useState("");
   const [upstreamRemote, setUpstreamRemote] = useState("");
   const [upstreamBranch, setUpstreamBranch] = useState("");
+  const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
   const [credentialRemote, setCredentialRemote] = useState<string | null>(null);
   const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
@@ -110,11 +116,22 @@ export function RemotePanel({
     setShowPushUrl(false);
   };
 
+  const closeAddForm = () => {
+    setShowAddForm(false);
+    setNewName("");
+    setNewFetchUrl("");
+    setNewPushUrl("");
+    setNameTouched(false);
+    setShowPushUrl(false);
+    setAddError(null);
+  };
+
   const beginEdit = (remote: RemoteInfo) => {
     setEditing(remote.name);
     setEditName(remote.name);
     setEditFetchUrl(remote.fetchUrl);
     setEditPushUrl(remote.pushUrl ?? "");
+    setShowEditPushUrl(remote.pushUrl !== null);
   };
 
   const submitEdit = async (event: React.FormEvent, oldName: string) => {
@@ -180,14 +197,27 @@ export function RemotePanel({
     dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
   }, [pendingPull]);
 
+  useEffect(() => {
+    const dialog = removeDialogRef.current;
+    if (removeConfirmation === null || dialog === null) return;
+    if (!dialog.open && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    } else if (!dialog.open) {
+      dialog.setAttribute("open", "");
+    }
+    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
+  }, [removeConfirmation]);
+
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes" icon={Cloud} count={remotes.length}>
       {remotes.length === 0 ? (
         <p className={styles.emptyState}>Add a remote below to push and pull.</p>
       ) : (
         <ul className={styles.list}>
-          {remotes.map((remote) => (
-            <li key={remote.name}>
+          {remotes.map((remote) => {
+            const pushUrl = remote.pushUrl;
+            return (
+              <li key={remote.name}>
               {editing === remote.name ? (
                 <form className={styles.form} onSubmit={(event) => submitEdit(event, remote.name)} aria-label={`Edit ${remote.name}`}>
                   <label className={styles.label}>
@@ -198,67 +228,153 @@ export function RemotePanel({
                     Fetch URL
                     <input value={editFetchUrl} onChange={(event) => setEditFetchUrl(event.target.value)} />
                   </label>
-                  <label className={styles.label}>
-                    Push URL (optional)
-                    <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
-                  </label>
+                  <details
+                    className={styles.disclosure}
+                    open={showEditPushUrl}
+                    onToggle={(event) => setShowEditPushUrl(event.currentTarget.open)}
+                  >
+                    <summary
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setShowEditPushUrl((open) => !open);
+                      }}
+                    >
+                      Push URL (optional)
+                    </summary>
+                    {showEditPushUrl && (
+                      <label className={styles.label}>
+                        Push URL
+                        <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
+                      </label>
+                    )}
+                  </details>
                   <button type="submit">Save remote</button>
                   <button type="button" onClick={() => setEditing(null)}>Cancel</button>
+                </form>
+              ) : credentialRemote === remote.name ? (
+                <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${remote.name}`}>
+                  <h3 className={styles.formHeading}>Credentials for {remote.name}</h3>
+                  <label className={styles.label}>
+                    Authentication for {remote.name}
+                    <select
+                      value={credentialMode}
+                      onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}
+                    >
+                      <option value="HttpsToken">HTTPS token</option>
+                      <option value="SshAgent">SSH agent</option>
+                    </select>
+                  </label>
+                  {credentialMode === "HttpsToken" ? (
+                    <>
+                      <label className={styles.label}>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
+                      <label className={styles.label}>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
+                      <button type="submit">Save HTTPS credential</button>
+                      <button type="button" onClick={() => void onForgetHttpsCredential(remote.name)}>Forget HTTPS credential</button>
+                    </>
+                  ) : (
+                    <>
+                      <p className={styles.helperText}>
+                        Uses your system's SSH agent to authenticate — make sure one is running (for
+                        example via <code>ssh-add</code>) before fetching or pushing.
+                      </p>
+                      <button type="submit">Use SSH agent</button>
+                    </>
+                  )}
+                  <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
                 </form>
               ) : (
                 <>
                   <strong>{remote.name}</strong>
                   <span>Fetch: {remote.fetchUrl}</span>
-                  {remote.pushUrl !== null && <span>Push: {remote.pushUrl}</span>}
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    title={`Copy fetch URL for ${remote.name}`}
+                    aria-label={`Copy fetch URL for ${remote.name}`}
+                    onClick={() => { void navigator.clipboard.writeText(remote.fetchUrl); }}
+                  >
+                    <Copy size={12} aria-hidden="true" />
+                  </button>
+                  {pushUrl !== null && (
+                    <>
+                      <span>Push: {pushUrl}</span>
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        title={`Copy push URL for ${remote.name}`}
+                        aria-label={`Copy push URL for ${remote.name}`}
+                        onClick={() => { void navigator.clipboard.writeText(pushUrl); }}
+                      >
+                        <Copy size={12} aria-hidden="true" />
+                      </button>
+                    </>
+                  )}
                   <Toolbar>
-                    <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
-                    <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
-                    <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
-                    <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
                     <button
                       type="button"
-                      className={`${styles.dangerButton} danger`}
+                      className={styles.iconButton}
+                      disabled={fetchDisabled}
+                      title={`Fetch ${remote.name}`}
+                      aria-label={`Fetch ${remote.name}`}
+                      onClick={() => void onFetchRemote(remote.name)}
+                    >
+                      <RefreshCw size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      disabled={pushDisabled}
+                      title={`Push branch to ${remote.name}`}
+                      aria-label={`Push branch to ${remote.name}`}
+                      onClick={() => void onPushCurrentBranch(remote.name)}
+                    >
+                      <Upload size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      title={`Edit ${remote.name}`}
+                      aria-label={`Edit ${remote.name}`}
+                      onClick={() => beginEdit(remote)}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      title={`Credentials for ${remote.name}`}
+                      aria-label={`Credentials for ${remote.name}`}
+                      onClick={() => beginCredentialEdit(remote)}
+                    >
+                      <KeyRound size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.iconButton} ${styles.dangerButton} danger`}
+                      title={`Remove ${remote.name}`}
+                      aria-label={`Remove ${remote.name}`}
                       onClick={() => requestRemove(remote)}
                     >
-                      Remove {remote.name}
+                      <Trash2 size={14} aria-hidden="true" />
                     </button>
                   </Toolbar>
                 </>
               )}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
-      {credentialRemote !== null && (
-        <form className={styles.form} onSubmit={submitCredential} aria-label={`Credentials for ${credentialRemote}`}>
-          <h3 className={styles.formHeading}>Credentials for {credentialRemote}</h3>
-          <label className={styles.label}>
-            Authentication for {credentialRemote}
-            <select
-              value={credentialMode}
-              onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}
-            >
-              <option value="HttpsToken">HTTPS token</option>
-              <option value="SshAgent">SSH agent</option>
-            </select>
-          </label>
-          {credentialMode === "HttpsToken" ? (
-            <>
-              <label className={styles.label}>HTTPS username<input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" /></label>
-              <label className={styles.label}>Access token<input ref={accessTokenRef} type="password" autoComplete="off" /></label>
-              <button type="submit">Save HTTPS credential</button>
-              <button type="button" onClick={() => void onForgetHttpsCredential(credentialRemote)}>Forget HTTPS credential</button>
-            </>
-          ) : (
-            <button type="submit">Use SSH agent</button>
-          )}
-          <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
-        </form>
-      )}
-
       {removeConfirmation !== null && (
-        <div role="alertdialog" aria-label="Remove remote confirmation">
+        <dialog
+          ref={removeDialogRef}
+          aria-label="Remove remote confirmation"
+          onCancel={(event) => {
+            event.preventDefault();
+            setRemoveConfirmation(null);
+          }}
+        >
           {removeConfirmation.startsWith("clear:") ? (
             <>
               <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?</p>
@@ -270,74 +386,83 @@ export function RemotePanel({
               <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation, false).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
             </>
           )}
-          <button type="button" onClick={() => setRemoveConfirmation(null)}>Cancel</button>
-        </div>
+          <button type="button" data-autofocus onClick={() => setRemoveConfirmation(null)}>Cancel</button>
+        </dialog>
       )}
 
-      <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
-        <h3 className={styles.formHeading}>Add remote</h3>
-        <label className={styles.label}>
-          Remote name
-          <input
-            placeholder="origin"
-            value={newName}
-            onChange={(event) => {
-              setNameTouched(true);
-              setNewName(event.target.value);
-            }}
-          />
-        </label>
-        <label className={styles.label}>
-          Fetch URL
-          <input
-            data-testid="add-remote-fetch-url"
-            placeholder="git@github.com:user/repo.git"
-            value={newFetchUrl}
-            onChange={(event) => {
-              const value = event.target.value;
-              setNewFetchUrl(value);
-              // Editing the offending field clears the inline failure — leaving it up until the
-              // next submit makes a stale message sit next to freshly corrected input.
-              setAddError(null);
-              if (!nameTouched) {
-                setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
-              }
-            }}
-          />
-        </label>
-        {addError !== null && (
-          <p role="alert" className={styles.fieldError}>
-            {addError}
-          </p>
-        )}
-        <details
-          className={styles.disclosure}
-          open={showPushUrl}
-          onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
-        >
-          <summary
-            onClick={(event) => {
-              event.preventDefault();
-              setShowPushUrl((open) => !open);
-            }}
-          >
-            Push URL (optional)
-          </summary>
-          {showPushUrl && (
-            <label className={styles.label}>
-              Push URL
-              <input
-                placeholder="git@github.com:user/repo.git"
-                value={newPushUrl}
-                onChange={(event) => setNewPushUrl(event.target.value)}
-              />
-            </label>
+      {showAddForm ? (
+        <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
+          <h3 className={styles.formHeading}>Add remote</h3>
+          <label className={styles.label}>
+            Remote name
+            <input
+              placeholder="origin"
+              value={newName}
+              onChange={(event) => {
+                setNameTouched(true);
+                setNewName(event.target.value);
+              }}
+            />
+          </label>
+          <label className={styles.label}>
+            Fetch URL
+            <input
+              data-testid="add-remote-fetch-url"
+              placeholder="git@github.com:user/repo.git"
+              value={newFetchUrl}
+              onChange={(event) => {
+                const value = event.target.value;
+                setNewFetchUrl(value);
+                setAddError(null);
+                if (!nameTouched) {
+                  setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
+                }
+              }}
+            />
+          </label>
+          {addError !== null && (
+            <p role="alert" className={styles.fieldError}>
+              {addError}
+            </p>
           )}
-        </details>
-        <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
-          Add remote
-        </button>
-      </form>
+          <details
+            className={styles.disclosure}
+            open={showPushUrl}
+            onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
+          >
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setShowPushUrl((open) => !open);
+              }}
+            >
+              Push URL (optional)
+            </summary>
+            {showPushUrl && (
+              <label className={styles.label}>
+                Push URL
+                <input
+                  placeholder="git@github.com:user/repo.git"
+                  value={newPushUrl}
+                  onChange={(event) => setNewPushUrl(event.target.value)}
+                />
+              </label>
+            )}
+          </details>
+          <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
+            Add remote
+          </button>
+          <button type="button" onClick={closeAddForm}>
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <Toolbar>
+          <button type="button" disabled={fetchDisabled} onClick={() => setShowAddForm(true)}>
+            Add remote
+          </button>
+        </Toolbar>
+      )}
 
       <section aria-labelledby="upstream-heading">
         <h3 id="upstream-heading" className={styles.sectionHeading}>Upstream</h3>
@@ -349,16 +474,45 @@ export function RemotePanel({
         <form className={styles.form} onSubmit={submitUpstream} aria-label="Set upstream">
           <label className={styles.label}>
             Upstream remote
-            <select value={upstreamRemote} onChange={(event) => setUpstreamRemote(event.target.value)}>
+            <select
+              value={upstreamRemote}
+              onChange={(event) => {
+                const remoteName = event.target.value;
+                setUpstreamRemote(remoteName);
+                setRemoteBranchOptions([]);
+                if (remoteName !== "") {
+                  void onListRemoteBranches(remoteName)
+                    .then(setRemoteBranchOptions)
+                    .catch(() => setRemoteBranchOptions([]));
+                }
+              }}
+            >
               <option value="">Choose a remote</option>
               {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
             </select>
           </label>
-          <label className={styles.label}>Upstream branch<input value={upstreamBranch} onChange={(event) => setUpstreamBranch(event.target.value)} /></label>
+          <label className={styles.label}>
+            Upstream branch
+            <input
+              list="upstream-branch-options"
+              value={upstreamBranch}
+              onChange={(event) => setUpstreamBranch(event.target.value)}
+            />
+          </label>
           <button type="submit">Set upstream</button>
         </form>
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
       </section>
+      {/* Outside the section (not nested in the label above): a `<datalist>` only needs to share
+          an id with its `<input list=...>`, and keeping it out of `section[aria-labelledby=...]`
+          avoids a WebKitWebDriver bug where that section's `getText()` throws "Cannot check the
+          displayedness of a non-Element argument" once a `<datalist>`/`<option>` sits inside it —
+          hit by e2e/specs/remote-management.spec.ts's polling assertion on this exact section. */}
+      <datalist id="upstream-branch-options">
+        {remoteBranchOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {pendingPull !== null && (
         <dialog
           ref={pullDialogRef}
