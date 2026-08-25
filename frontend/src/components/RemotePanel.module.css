@@ -97,3 +97,9 @@
   justify-content: center;
   padding: var(--space-1);
 }
+.helperText {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

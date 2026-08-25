@@ -133,6 +133,17 @@ describe("RemotePanel", () => {
     expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
   });
 
+  it("explains what the SSH agent option does", () => {
+    renderPanel({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Credentials for origin" }));
+    fireEvent.change(screen.getByLabelText("Authentication for origin"), {
+      target: { value: "SshAgent" },
+    });
+
+    expect(screen.getByText(/uses your system's ssh agent/i)).toBeInTheDocument();
+  });
+
   it("clears the token after a failed credential save", async () => {
     const onSaveHttpsCredential = vi.fn().mockRejectedValue(new Error("keychain unavailable"));
     renderPanel({ onSaveHttpsCredential });

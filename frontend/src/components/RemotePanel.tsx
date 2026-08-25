@@ -269,7 +269,13 @@ export function RemotePanel({
                       <button type="button" onClick={() => void onForgetHttpsCredential(remote.name)}>Forget HTTPS credential</button>
                     </>
                   ) : (
-                    <button type="submit">Use SSH agent</button>
+                    <>
+                      <p className={styles.helperText}>
+                        Uses your system's SSH agent to authenticate — make sure one is running (for
+                        example via <code>ssh-add</code>) before fetching or pushing.
+                      </p>
+                      <button type="submit">Use SSH agent</button>
+                    </>
                   )}
                   <button type="button" onClick={() => { if (accessTokenRef.current !== null) accessTokenRef.current.value = ""; setCredentialRemote(null); }}>Cancel credentials</button>
                 </form>
