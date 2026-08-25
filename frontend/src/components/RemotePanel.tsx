@@ -498,16 +498,21 @@ export function RemotePanel({
               value={upstreamBranch}
               onChange={(event) => setUpstreamBranch(event.target.value)}
             />
-            <datalist id="upstream-branch-options">
-              {remoteBranchOptions.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
           </label>
           <button type="submit">Set upstream</button>
         </form>
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
       </section>
+      {/* Outside the section (not nested in the label above): a `<datalist>` only needs to share
+          an id with its `<input list=...>`, and keeping it out of `section[aria-labelledby=...]`
+          avoids a WebKitWebDriver bug where that section's `getText()` throws "Cannot check the
+          displayedness of a non-Element argument" once a `<datalist>`/`<option>` sits inside it —
+          hit by e2e/specs/remote-management.spec.ts's polling assertion on this exact section. */}
+      <datalist id="upstream-branch-options">
+        {remoteBranchOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {pendingPull !== null && (
         <dialog
           ref={pullDialogRef}
