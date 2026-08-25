@@ -12,16 +12,20 @@ import {
   type RefObject,
 } from "react";
 
+// `RefObject<HTMLButtonElement | null>`, not `RefObject<HTMLButtonElement>`: this is what
+// `useRef<HTMLButtonElement>(null)` actually returns (a ref to a DOM node is null before mount
+// and after unmount), and every caller (`AccordionSection`, `AccordionGroup.test.tsx`) creates
+// its ref that way.
 interface RegisteredHeader {
-  ref: RefObject<HTMLButtonElement>;
+  ref: RefObject<HTMLButtonElement | null>;
   setOpen: (open: boolean) => void;
 }
 
 export interface AccordionGroupContextValue {
-  isActive: (ref: RefObject<HTMLButtonElement>) => boolean;
+  isActive: (ref: RefObject<HTMLButtonElement | null>) => boolean;
   register: (header: RegisteredHeader) => () => void;
-  onHeaderFocus: (ref: RefObject<HTMLButtonElement>) => void;
-  onHeaderKeyDown: (event: KeyboardEvent<HTMLButtonElement>, ref: RefObject<HTMLButtonElement>) => void;
+  onHeaderFocus: (ref: RefObject<HTMLButtonElement | null>) => void;
+  onHeaderKeyDown: (event: KeyboardEvent<HTMLButtonElement>, ref: RefObject<HTMLButtonElement | null>) => void;
 }
 
 const AccordionGroupContext = createContext<AccordionGroupContextValue | null>(null);
@@ -46,7 +50,7 @@ export function AccordionGroup({
   groupRef?: MutableRefObject<AccordionGroupHandle | null>;
 }) {
   const headersRef = useRef<RegisteredHeader[]>([]);
-  const [activeRef, setActiveRefState] = useState<RefObject<HTMLButtonElement> | null>(null);
+  const [activeRef, setActiveRefState] = useState<RefObject<HTMLButtonElement | null> | null>(null);
 
   const register = useCallback((header: RegisteredHeader) => {
     headersRef.current = [...headersRef.current, header];
@@ -57,9 +61,9 @@ export function AccordionGroup({
     };
   }, []);
 
-  const isActive = useCallback((ref: RefObject<HTMLButtonElement>) => activeRef === ref, [activeRef]);
+  const isActive = useCallback((ref: RefObject<HTMLButtonElement | null>) => activeRef === ref, [activeRef]);
 
-  const onHeaderFocus = useCallback((ref: RefObject<HTMLButtonElement>) => {
+  const onHeaderFocus = useCallback((ref: RefObject<HTMLButtonElement | null>) => {
     setActiveRefState(ref);
   }, []);
 
@@ -73,7 +77,7 @@ export function AccordionGroup({
   }, []);
 
   const onHeaderKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLButtonElement>, ref: RefObject<HTMLButtonElement>) => {
+    (event: KeyboardEvent<HTMLButtonElement>, ref: RefObject<HTMLButtonElement | null>) => {
       const headers = headersRef.current;
       const index = headers.findIndex((entry) => entry.ref === ref);
       if (index === -1) return;
