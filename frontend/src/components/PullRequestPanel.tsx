@@ -6,8 +6,8 @@ import type {
   ForgeRepository,
   PullRequestList,
 } from "../ipc/RepoClient";
+import { AccordionGroup } from "./primitives/AccordionGroup";
 import { AccordionSection } from "./primitives/AccordionSection";
-import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./PullRequestPanel.module.css";
 
@@ -141,7 +141,12 @@ function ForgeRepositorySection({
   const visibleRows = tokenForgotten ? null : (pullRequests?.pullRequests ?? null);
 
   return (
-    <Panel title={sectionLabel} ariaLabel={sectionLabel} headingLevel={3}>
+    <AccordionSection
+      title={sectionLabel}
+      storageKey={`sidebar-pr-${repository.remoteName}`}
+      headingLevel={3}
+      defaultOpen
+    >
       <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
         <label className={styles.label}>
           Account
@@ -214,7 +219,7 @@ function ForgeRepositorySection({
           <button type="submit" disabled={operationDisabled || creating}>Create pull request</button>
         </Toolbar>
       </form>
-    </Panel>
+    </AccordionSection>
   );
 }
 
@@ -243,31 +248,44 @@ export function PullRequestPanel({
 }) {
   if (forgeRepositories.length === 0) {
     return (
-      <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests">
+      <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
         <p>No supported GitHub or Bitbucket remotes detected.</p>
       </AccordionSection>
     );
   }
 
-  // The inner Panel per forge repository is intentional: each one is a card titled with its
-  // own provider/owner/remote, nested inside this section's AccordionSection body.
+  const totalPullRequests = forgeRepositories.reduce(
+    (sum, repository) => sum + (pullRequests[repository.remoteName]?.pullRequests.length ?? 0),
+    0,
+  );
+
+  // The inner AccordionSection per forge repository is intentional: each one is a card titled
+  // with its own provider/owner/remote, nested inside this section's AccordionSection body, in
+  // its own AccordionGroup so its roving-tabindex nav stays scoped to just the repo cards.
   return (
-    <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests">
-      <div className={styles.sections}>
-        {forgeRepositories.map((repository) => (
-          <ForgeRepositorySection
-            key={repository.remoteName}
-            repository={repository}
-            pullRequests={pullRequests[repository.remoteName]}
-            onListPullRequests={onListPullRequests}
-            onForgetForgeToken={onForgetForgeToken}
-            onSaveForgeToken={onSaveForgeToken}
-            onCreatePullRequest={onCreatePullRequest}
-            onOpenExternalUrl={onOpenExternalUrl}
-            operationDisabled={operationDisabled}
-          />
-        ))}
-      </div>
+    <AccordionSection
+      title="Pull Requests"
+      storageKey="sidebar-pull-requests"
+      icon={GitPullRequest}
+      count={totalPullRequests}
+    >
+      <AccordionGroup>
+        <div className={styles.sections}>
+          {forgeRepositories.map((repository) => (
+            <ForgeRepositorySection
+              key={repository.remoteName}
+              repository={repository}
+              pullRequests={pullRequests[repository.remoteName]}
+              onListPullRequests={onListPullRequests}
+              onForgetForgeToken={onForgetForgeToken}
+              onSaveForgeToken={onSaveForgeToken}
+              onCreatePullRequest={onCreatePullRequest}
+              onOpenExternalUrl={onOpenExternalUrl}
+              operationDisabled={operationDisabled}
+            />
+          ))}
+        </div>
+      </AccordionGroup>
     </AccordionSection>
   );
 }
