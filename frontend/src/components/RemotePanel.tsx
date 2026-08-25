@@ -28,6 +28,7 @@ export function RemotePanel({
   onSetRemoteAuthMode,
   onSetUpstream,
   onClearUpstream,
+  onListRemoteBranches,
   onFetchRemote,
   fetchDisabled,
   onPushCurrentBranch,
@@ -54,6 +55,7 @@ export function RemotePanel({
   onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<boolean>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
+  onListRemoteBranches: (remoteName: string) => Promise<string[]>;
   onFetchRemote: (remoteName: string) => Promise<void>;
   fetchDisabled: boolean;
   onPushCurrentBranch: (remoteName: string) => Promise<void>;
@@ -88,6 +90,7 @@ export function RemotePanel({
   const [editPushUrl, setEditPushUrl] = useState("");
   const [upstreamRemote, setUpstreamRemote] = useState("");
   const [upstreamBranch, setUpstreamBranch] = useState("");
+  const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
   const [credentialRemote, setCredentialRemote] = useState<string | null>(null);
   const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
@@ -471,12 +474,36 @@ export function RemotePanel({
         <form className={styles.form} onSubmit={submitUpstream} aria-label="Set upstream">
           <label className={styles.label}>
             Upstream remote
-            <select value={upstreamRemote} onChange={(event) => setUpstreamRemote(event.target.value)}>
+            <select
+              value={upstreamRemote}
+              onChange={(event) => {
+                const remoteName = event.target.value;
+                setUpstreamRemote(remoteName);
+                setRemoteBranchOptions([]);
+                if (remoteName !== "") {
+                  void onListRemoteBranches(remoteName)
+                    .then(setRemoteBranchOptions)
+                    .catch(() => setRemoteBranchOptions([]));
+                }
+              }}
+            >
               <option value="">Choose a remote</option>
               {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
             </select>
           </label>
-          <label className={styles.label}>Upstream branch<input value={upstreamBranch} onChange={(event) => setUpstreamBranch(event.target.value)} /></label>
+          <label className={styles.label}>
+            Upstream branch
+            <input
+              list="upstream-branch-options"
+              value={upstreamBranch}
+              onChange={(event) => setUpstreamBranch(event.target.value)}
+            />
+            <datalist id="upstream-branch-options">
+              {remoteBranchOptions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </label>
           <button type="submit">Set upstream</button>
         </form>
         {upstream !== null && <button type="button" onClick={() => void onClearUpstream()}>Clear upstream</button>}
