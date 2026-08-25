@@ -464,8 +464,18 @@ describe("RemotePanel", () => {
     expect(screen.getByText(/clear upstreams for main, topic/i)).toBeInTheDocument();
     expect(onRemoveRemote).not.toHaveBeenCalled();
 
-    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Remove remote confirmation" })).getByRole("button", { name: "Confirm remove" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Remove remote confirmation" })).getByRole("button", { name: "Confirm remove" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", true);
+  });
+
+  it("focuses Cancel when the remove-remote confirmation opens", async () => {
+    renderPanel({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove origin" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove remote confirmation" });
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    });
   });
 
   it("removes a remote after explicit confirmation when it has no upstream", () => {

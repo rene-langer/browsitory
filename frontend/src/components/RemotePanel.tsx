@@ -67,6 +67,7 @@ export function RemotePanel({
   onCancelPull: () => void;
 }) {
   const pullDialogRef = useRef<HTMLDialogElement>(null);
+  const removeDialogRef = useRef<HTMLDialogElement>(null);
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
@@ -191,6 +192,17 @@ export function RemotePanel({
     dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
   }, [pendingPull]);
 
+  useEffect(() => {
+    const dialog = removeDialogRef.current;
+    if (removeConfirmation === null || dialog === null) return;
+    if (!dialog.open && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    } else if (!dialog.open) {
+      dialog.setAttribute("open", "");
+    }
+    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
+  }, [removeConfirmation]);
+
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes" icon={Cloud} count={remotes.length}>
       {remotes.length === 0 ? (
@@ -267,7 +279,14 @@ export function RemotePanel({
       )}
 
       {removeConfirmation !== null && (
-        <div role="alertdialog" aria-label="Remove remote confirmation">
+        <dialog
+          ref={removeDialogRef}
+          aria-label="Remove remote confirmation"
+          onCancel={(event) => {
+            event.preventDefault();
+            setRemoveConfirmation(null);
+          }}
+        >
           {removeConfirmation.startsWith("clear:") ? (
             <>
               <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?</p>
@@ -279,8 +298,8 @@ export function RemotePanel({
               <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation, false).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
             </>
           )}
-          <button type="button" onClick={() => setRemoveConfirmation(null)}>Cancel</button>
-        </div>
+          <button type="button" data-autofocus onClick={() => setRemoveConfirmation(null)}>Cancel</button>
+        </dialog>
       )}
 
       {showAddForm ? (
