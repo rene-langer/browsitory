@@ -8,6 +8,7 @@
 
 .section[data-open="true"] {
   flex: 1 1 0%;
+  min-height: 12rem;
 }
 
 /* The heading only carries the role; the button inside owns all the spacing. */
