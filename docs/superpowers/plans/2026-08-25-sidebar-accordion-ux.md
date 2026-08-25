@@ -733,6 +733,7 @@ git commit -m "feat(frontend): add expand/collapse-all toolbar and space-sharing
 
 **Files:**
 - Modify: `frontend/src/components/BranchSwitcher.tsx:97`
+- Modify: `frontend/src/components/BranchSwitcher.test.tsx` (delete the now-invalid unconditional header-open click in `renderSwitcher`)
 - Modify: `frontend/src/components/WorktreePanel.tsx:1-6,57`
 - Modify: `frontend/src/components/SubmodulePanel.tsx:32`
 - Modify: `frontend/src/components/ReflogPanel.tsx:30`
@@ -742,9 +743,9 @@ git commit -m "feat(frontend): add expand/collapse-all toolbar and space-sharing
 **Interfaces:**
 - Consumes: `AccordionSection`'s `icon`/`count`/`defaultOpen` props from Task 2. No new exports produced — this task is purely call-site wiring, covered by Task 2's own icon/count rendering tests plus each panel's existing test suite (which must stay green unchanged, since the header's accessible name doesn't change — see Global Constraints).
 
-This task has no new tests of its own: the generic icon/count/defaultOpen rendering behavior is already covered by `AccordionSection.test.tsx` (Task 2), and per-call-site prop wiring doesn't need duplicate coverage (same rationale CLAUDE.md gives for not testing thin pass-through Tauri commands separately from the logic they call). Each step below is a direct, complete diff — after each file, run that file's existing test to confirm no regression.
+This task has no new tests of its own for 5 of the 6 files: the generic icon/count rendering behavior is already covered by `AccordionSection.test.tsx` (Task 2), and per-call-site prop wiring doesn't need duplicate coverage (same rationale CLAUDE.md gives for not testing thin pass-through Tauri commands separately from the logic they call). `BranchSwitcher.tsx` is the one exception — see Step 1 below, its `defaultOpen` addition requires a one-line test fix, since its own test's `renderSwitcher` helper unconditionally clicks the header open on the assumption it starts closed. Each step below is a direct, complete diff — after each file, run that file's existing test to confirm no regression.
 
-- [ ] **Step 1: `BranchSwitcher.tsx`** — add the icon/count/defaultOpen (this is the one section that opens by default, per Global Constraints)
+- [ ] **Step 1: `BranchSwitcher.tsx`** — add the icon/count/defaultOpen (this is the one section that opens by default, per Global Constraints), and fix its test's now-invalid assumption that the section starts closed
 
 ```tsx
 // frontend/src/components/BranchSwitcher.tsx — change line 97 only
@@ -753,8 +754,10 @@ This task has no new tests of its own: the generic icon/count/defaultOpen render
 
 `GitBranch` is already imported at the top of the file (line 2) for the branch-switcher button icon — reused here, no new import needed.
 
+`BranchSwitcher.test.tsx`'s `renderSwitcher` helper (around line 34) unconditionally does `fireEvent.click(screen.getByRole("button", { name: "Branches" }))` right after render, on the assumption the accordion starts closed and needs opening. With `defaultOpen` added, the section renders already open (its own `localStorage.removeItem("sidebar-branches")` on line 12 guarantees no stale stored state overrides that), so this click would instead *close* it and break every downstream assertion. Delete that line — it's the only place in the file that clicks the accordion header; every other assertion operates on content inside the section body (the "Branch switcher" toggle, branch list, stash list, create-branch form), which is visible as soon as the section starts open.
+
 Run: `cd frontend && pnpm vitest run src/components/BranchSwitcher.test.tsx`
-Expected: PASS (unchanged)
+Expected: PASS
 
 - [ ] **Step 2: `WorktreePanel.tsx`** — add a `GitFork` import and wire icon/count
 
