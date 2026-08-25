@@ -76,6 +76,32 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
 }
 
 describe("RemotePanel", () => {
+  it("copies the fetch URL to the clipboard", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderPanel({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy fetch URL for origin" }));
+
+    expect(writeText).toHaveBeenCalledWith("../origin.git");
+  });
+
+  it("copies the push URL to the clipboard when one is set", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderPanel({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy push URL for origin" }));
+
+    expect(writeText).toHaveBeenCalledWith("../push-origin.git");
+  });
+
+  it("does not render a push-URL copy button when the remote has no push URL", () => {
+    renderPanel({ remotes: [{ ...origin, pushUrl: null }] });
+
+    expect(screen.queryByRole("button", { name: "Copy push URL for origin" })).not.toBeInTheDocument();
+  });
+
   it("submits the token only to the save callback and clears the input", async () => {
     const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onSaveHttpsCredential });

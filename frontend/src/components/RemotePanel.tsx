@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2 } from "lucide-react";
+import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2, Copy } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
@@ -209,8 +209,10 @@ export function RemotePanel({
         <p className={styles.emptyState}>Add a remote below to push and pull.</p>
       ) : (
         <ul className={styles.list}>
-          {remotes.map((remote) => (
-            <li key={remote.name}>
+          {remotes.map((remote) => {
+            const pushUrl = remote.pushUrl;
+            return (
+              <li key={remote.name}>
               {editing === remote.name ? (
                 <form className={styles.form} onSubmit={(event) => submitEdit(event, remote.name)} aria-label={`Edit ${remote.name}`}>
                   <label className={styles.label}>
@@ -257,7 +259,29 @@ export function RemotePanel({
                 <>
                   <strong>{remote.name}</strong>
                   <span>Fetch: {remote.fetchUrl}</span>
-                  {remote.pushUrl !== null && <span>Push: {remote.pushUrl}</span>}
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    title={`Copy fetch URL for ${remote.name}`}
+                    aria-label={`Copy fetch URL for ${remote.name}`}
+                    onClick={() => { void navigator.clipboard.writeText(remote.fetchUrl); }}
+                  >
+                    <Copy size={12} aria-hidden="true" />
+                  </button>
+                  {pushUrl !== null && (
+                    <>
+                      <span>Push: {pushUrl}</span>
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        title={`Copy push URL for ${remote.name}`}
+                        aria-label={`Copy push URL for ${remote.name}`}
+                        onClick={() => { void navigator.clipboard.writeText(pushUrl); }}
+                      >
+                        <Copy size={12} aria-hidden="true" />
+                      </button>
+                    </>
+                  )}
                   <Toolbar>
                     <button
                       type="button"
@@ -309,8 +333,9 @@ export function RemotePanel({
                   </Toolbar>
                 </>
               )}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
