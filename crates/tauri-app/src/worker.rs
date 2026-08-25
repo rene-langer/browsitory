@@ -181,6 +181,10 @@ pub(crate) enum Command {
     ListRemotes {
         reply: Sender<Result<Vec<RemoteInfo>, String>>,
     },
+    ListRemoteBranches {
+        remote_name: String,
+        reply: Sender<Result<Vec<String>, String>>,
+    },
     GetCurrentUpstream {
         reply: Sender<Result<Option<UpstreamInfo>, String>>,
     },
@@ -668,6 +672,11 @@ impl Worker {
                     Command::ListRemotes { reply } => {
                         let result =
                             git_core::remote::list_remotes(&repo).map_err(|e| e.to_string());
+                        let _ = reply.send(result);
+                    }
+                    Command::ListRemoteBranches { remote_name, reply } => {
+                        let result = git_core::remote::list_remote_branches(&repo, &remote_name)
+                            .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::GetCurrentUpstream { reply } => {
@@ -1639,6 +1648,19 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ListRemotes { reply: reply_tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        reply_rx
+            .recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, String> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(Command::ListRemoteBranches {
+                remote_name,
+                reply: reply_tx,
+            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
@@ -2782,6 +2804,24 @@ mod tests {
                 error: Some(TransferErrorKind::TransferFailed),
             }) if id == &operation_id
         ));
+    }
+
+    #[test]
+    fn lists_remote_tracking_branches_after_a_fetch() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+        let (event_tx, event_rx) = mpsc::channel();
+        handle
+            .fetch_remote("origin".into(), event_tx)
+            .expect("start fetch");
+        let _events: Vec<_> = event_rx.iter().collect();
+
+        let branches = handle
+            .list_remote_branches("origin".into())
+            .expect("list remote branches");
+
+        assert_eq!(branches.len(), 1);
     }
 
     #[test]

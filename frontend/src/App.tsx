@@ -184,6 +184,7 @@ function RepoWorkspace({
               onSetRemoteAuthMode={appState.setRemoteAuthMode}
               onSetUpstream={appState.setCurrentUpstream}
               onClearUpstream={appState.clearCurrentUpstream}
+              onListRemoteBranches={appState.listRemoteBranches}
               onFetchRemote={appState.fetchRemote}
               fetchDisabled={repositoryOperationDisabled}
               onPushCurrentBranch={appState.pushCurrentBranch}

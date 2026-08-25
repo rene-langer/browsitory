@@ -139,6 +139,7 @@ export interface UseAppStateResult {
   setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<boolean>;
   setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(): Promise<void>;
+  listRemoteBranches(remoteName: string): Promise<string[]>;
   fetchRemote(remoteName: string): Promise<void>;
   createTag(name: string, message: string | null): Promise<void>;
   deleteTag(name: string): Promise<void>;
@@ -577,6 +578,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName)),
     [client, startTransfer, repoPath],
   );
+  const listRemoteBranches = useCallback(
+    (remoteName: string) => client.listRemoteBranches(repoPath, remoteName),
+    [client, repoPath],
+  );
 
   const createTag = useCallback(
     (name: string, message: string | null) => runMutation(() => client.createTag(repoPath, name, message)),
@@ -810,6 +815,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setCurrentUpstream,
     clearCurrentUpstream,
     fetchRemote,
+    listRemoteBranches,
     createTag,
     deleteTag,
     pushCurrentBranch,

@@ -253,6 +253,7 @@ export interface RepoClient {
   getReflog(repoPath: string, reference: string): Promise<ReflogEntry[]>;
   restoreReflogEntry(repoPath: string, reference: string, newId: string): Promise<void>;
   listRemotes(repoPath: string): Promise<RemoteInfo[]>;
+  listRemoteBranches(repoPath: string, remoteName: string): Promise<string[]>;
   getCurrentUpstream(repoPath: string): Promise<UpstreamInfo | null>;
   getRemoteUpstreams(repoPath: string, name: string): Promise<UpstreamInfo[]>;
   addRemote(repoPath: string, name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
