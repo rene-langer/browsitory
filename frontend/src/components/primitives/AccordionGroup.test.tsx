@@ -10,12 +10,16 @@ function Header({ label, open, onOpenChange }: { label: string; open: boolean; o
     return group?.register({ ref, setOpen: onOpenChange });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // `isActive` compares ref identity only; it never dereferences `.current`, so reading it
+  // during render is safe. `react-hooks/refs` can't verify that statically.
+  // eslint-disable-next-line react-hooks/refs
+  const tabIndex = group === null ? 0 : group.isActive(ref) ? 0 : -1;
   return (
     <button
       ref={ref}
       type="button"
       aria-expanded={open}
-      tabIndex={group === null ? 0 : group.isActive(ref) ? 0 : -1}
+      tabIndex={tabIndex}
       onFocus={() => group?.onHeaderFocus(ref)}
       onKeyDown={(event) => group?.onHeaderKeyDown(event, ref)}
       onClick={() => onOpenChange(!open)}
