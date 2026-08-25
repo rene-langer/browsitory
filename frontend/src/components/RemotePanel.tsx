@@ -79,6 +79,7 @@ export function RemotePanel({
   // the whole URL) ever worked under the old guard.
   const [nameTouched, setNameTouched] = useState(false);
   const [showPushUrl, setShowPushUrl] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editFetchUrl, setEditFetchUrl] = useState("");
@@ -108,6 +109,16 @@ export function RemotePanel({
     setNewPushUrl("");
     setNameTouched(false);
     setShowPushUrl(false);
+  };
+
+  const closeAddForm = () => {
+    setShowAddForm(false);
+    setNewName("");
+    setNewFetchUrl("");
+    setNewPushUrl("");
+    setNameTouched(false);
+    setShowPushUrl(false);
+    setAddError(null);
   };
 
   const beginEdit = (remote: RemoteInfo) => {
@@ -274,70 +285,79 @@ export function RemotePanel({
         </div>
       )}
 
-      <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
-        <h3 className={styles.formHeading}>Add remote</h3>
-        <label className={styles.label}>
-          Remote name
-          <input
-            placeholder="origin"
-            value={newName}
-            onChange={(event) => {
-              setNameTouched(true);
-              setNewName(event.target.value);
-            }}
-          />
-        </label>
-        <label className={styles.label}>
-          Fetch URL
-          <input
-            data-testid="add-remote-fetch-url"
-            placeholder="git@github.com:user/repo.git"
-            value={newFetchUrl}
-            onChange={(event) => {
-              const value = event.target.value;
-              setNewFetchUrl(value);
-              // Editing the offending field clears the inline failure — leaving it up until the
-              // next submit makes a stale message sit next to freshly corrected input.
-              setAddError(null);
-              if (!nameTouched) {
-                setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
-              }
-            }}
-          />
-        </label>
-        {addError !== null && (
-          <p role="alert" className={styles.fieldError}>
-            {addError}
-          </p>
-        )}
-        <details
-          className={styles.disclosure}
-          open={showPushUrl}
-          onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
-        >
-          <summary
-            onClick={(event) => {
-              event.preventDefault();
-              setShowPushUrl((open) => !open);
-            }}
-          >
-            Push URL (optional)
-          </summary>
-          {showPushUrl && (
-            <label className={styles.label}>
-              Push URL
-              <input
-                placeholder="git@github.com:user/repo.git"
-                value={newPushUrl}
-                onChange={(event) => setNewPushUrl(event.target.value)}
-              />
-            </label>
+      {showAddForm ? (
+        <form className={styles.form} onSubmit={submitAdd} aria-label="Add remote">
+          <h3 className={styles.formHeading}>Add remote</h3>
+          <label className={styles.label}>
+            Remote name
+            <input
+              placeholder="origin"
+              value={newName}
+              onChange={(event) => {
+                setNameTouched(true);
+                setNewName(event.target.value);
+              }}
+            />
+          </label>
+          <label className={styles.label}>
+            Fetch URL
+            <input
+              data-testid="add-remote-fetch-url"
+              placeholder="git@github.com:user/repo.git"
+              value={newFetchUrl}
+              onChange={(event) => {
+                const value = event.target.value;
+                setNewFetchUrl(value);
+                setAddError(null);
+                if (!nameTouched) {
+                  setNewName(deriveRemoteName(value, remotes.map((remote) => remote.name)));
+                }
+              }}
+            />
+          </label>
+          {addError !== null && (
+            <p role="alert" className={styles.fieldError}>
+              {addError}
+            </p>
           )}
-        </details>
-        <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
-          Add remote
-        </button>
-      </form>
+          <details
+            className={styles.disclosure}
+            open={showPushUrl}
+            onToggle={(event) => setShowPushUrl(event.currentTarget.open)}
+          >
+            <summary
+              onClick={(event) => {
+                event.preventDefault();
+                setShowPushUrl((open) => !open);
+              }}
+            >
+              Push URL (optional)
+            </summary>
+            {showPushUrl && (
+              <label className={styles.label}>
+                Push URL
+                <input
+                  placeholder="git@github.com:user/repo.git"
+                  value={newPushUrl}
+                  onChange={(event) => setNewPushUrl(event.target.value)}
+                />
+              </label>
+            )}
+          </details>
+          <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
+            Add remote
+          </button>
+          <button type="button" onClick={closeAddForm}>
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <Toolbar>
+          <button type="button" disabled={fetchDisabled} onClick={() => setShowAddForm(true)}>
+            Add remote
+          </button>
+        </Toolbar>
+      )}
 
       <section aria-labelledby="upstream-heading">
         <h3 id="upstream-heading" className={styles.sectionHeading}>Upstream</h3>

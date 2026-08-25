@@ -228,6 +228,7 @@ describe("RemotePanel", () => {
     const onAddRemote = vi.fn().mockResolvedValue(null);
     renderPanel({ onAddRemote });
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "backup" } });
     fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
     fireEvent.click(screen.getByText("Push URL (optional)"));
@@ -240,6 +241,7 @@ describe("RemotePanel", () => {
   it("shows example placeholder text on the add-remote URL fields", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     expect(screen.getByLabelText("Fetch URL")).toHaveAttribute(
       "placeholder",
       "git@github.com:user/repo.git",
@@ -249,6 +251,7 @@ describe("RemotePanel", () => {
   it("auto-derives the remote name as origin when no remote is named origin yet", () => {
     renderPanel({ remotes: [] });
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Fetch URL"), {
       target: { value: "git@github.com:user/repo.git" },
     });
@@ -259,6 +262,7 @@ describe("RemotePanel", () => {
   it("auto-derives the remote name from the URL slug when origin already exists", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Fetch URL"), {
       target: { value: "git@github.com:user/repo.git" },
     });
@@ -273,6 +277,7 @@ describe("RemotePanel", () => {
   it("keeps deriving the remote name while the URL is typed character by character", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     const fetchUrl = screen.getByLabelText("Fetch URL");
     const url = "git@github.com:user/repo.git";
     for (let length = 1; length <= url.length; length += 1) {
@@ -285,6 +290,7 @@ describe("RemotePanel", () => {
   it("does not overwrite a manually entered remote name when the URL changes", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "custom" } });
     fireEvent.change(screen.getByLabelText("Fetch URL"), {
       target: { value: "git@github.com:user/repo.git" },
@@ -296,6 +302,7 @@ describe("RemotePanel", () => {
   it("keeps the Push URL field collapsed behind a disclosure by default", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Push URL (optional)"));
@@ -306,6 +313,7 @@ describe("RemotePanel", () => {
   it("gives the Add remote submit button primary styling", () => {
     renderPanel({});
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     expect(screen.getByRole("button", { name: "Add remote" })).toHaveClass("primary");
   });
 
@@ -317,6 +325,7 @@ describe("RemotePanel", () => {
     const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
     renderPanel({ onAddRemote });
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
     fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
 
@@ -329,6 +338,7 @@ describe("RemotePanel", () => {
     const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
     renderPanel({ onAddRemote });
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
     fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     await screen.findByRole("alert");
@@ -342,6 +352,7 @@ describe("RemotePanel", () => {
     const onAddRemote = vi.fn().mockResolvedValue(null);
     renderPanel({ onAddRemote });
 
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
     fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
     fireEvent.click(screen.getByText("Push URL (optional)"));
     fireEvent.change(screen.getByLabelText("Push URL"), { target: { value: "../push-backup.git" } });
@@ -352,6 +363,28 @@ describe("RemotePanel", () => {
     // A cleared-but-still-open disclosure on the next add is just an empty field taking up
     // space, so the disclosure resets with the rest of the form.
     expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Add-remote form collapsed until its button is clicked", () => {
+    renderPanel({});
+
+    expect(screen.queryByLabelText("Fetch URL")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+
+    expect(screen.getByLabelText("Fetch URL")).toBeInTheDocument();
+  });
+
+  it("collapses the Add-remote form again on Cancel without adding a remote", () => {
+    const onAddRemote = vi.fn().mockResolvedValue(null);
+    renderPanel({ onAddRemote });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Fetch URL")).not.toBeInTheDocument();
+    expect(onAddRemote).not.toHaveBeenCalled();
   });
 
   it("shows a callout pointing at the Add-remote form when there are no remotes", () => {
