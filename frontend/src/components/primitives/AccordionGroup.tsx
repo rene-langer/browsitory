@@ -111,6 +111,9 @@ export function AccordionGroup({
   return <AccordionGroupContext.Provider value={value}>{children}</AccordionGroupContext.Provider>;
 }
 
+// Small utility hook colocated with its provider component; splitting it into a separate file
+// isn't warranted for one hook.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAccordionGroup(): AccordionGroupContextValue | null {
   return useContext(AccordionGroupContext);
 }

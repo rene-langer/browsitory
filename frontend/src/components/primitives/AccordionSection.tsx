@@ -45,6 +45,11 @@ export function AccordionSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // `isActive` compares ref identity only; it never dereferences `.current`, so reading it
+  // during render is safe. `react-hooks/refs` can't verify that statically.
+  // eslint-disable-next-line react-hooks/refs
+  const headerTabIndex = group === null ? 0 : group.isActive(headerRef) ? 0 : -1;
+
   return (
     <section className={styles.section} data-open={open} aria-label={title}>
       {/* WAI-ARIA APG accordion pattern: a heading wrapping the trigger button (so the section
@@ -61,7 +66,7 @@ export function AccordionSection({
           className={styles.header}
           aria-expanded={open}
           aria-label={title}
-          tabIndex={group === null ? 0 : group.isActive(headerRef) ? 0 : -1}
+          tabIndex={headerTabIndex}
           onFocus={() => group?.onHeaderFocus(headerRef)}
           onKeyDown={(event) => group?.onHeaderKeyDown(event, headerRef)}
           onClick={() => setOpenState(!open)}
