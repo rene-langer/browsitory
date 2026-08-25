@@ -27,7 +27,12 @@ export function ReflogPanel({
   );
 
   return (
-    <AccordionSection title="Reflog" storageKey="sidebar-reflog" icon={History} count={entries.length}>
+    <AccordionSection
+      title="Reflog"
+      storageKey="sidebar-reflog"
+      icon={History}
+      count={selectedReference === null ? undefined : entries.length}
+    >
       <label>
         Reflog reference
         <select
