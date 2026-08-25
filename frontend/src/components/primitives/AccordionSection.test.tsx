@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { GitBranch } from "lucide-react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AccordionSection } from "./AccordionSection";
 
@@ -72,5 +73,48 @@ describe("AccordionSection", () => {
     const heading = screen.getByRole("heading", { level: 2, name: "Branches" });
     expect(heading).toBeInTheDocument();
     expect(heading).toContainElement(screen.getByRole("button", { name: "Branches" }));
+  });
+
+  it("renders an icon and count when provided, both hidden from the accessible tree", () => {
+    render(
+      <AccordionSection title="Branches" storageKey="test-branches-6" icon={GitBranch} count={3}>
+        <div>branch list</div>
+      </AccordionSection>,
+    );
+    const button = screen.getByRole("button", { name: "Branches" });
+    expect(button).toHaveTextContent("3");
+    expect(button.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("keeps the header's accessible name equal to the title even with icon and count set", () => {
+    render(
+      <AccordionSection title="Remotes" storageKey="test-remotes-2" icon={GitBranch} count={12}>
+        <div>remote list</div>
+      </AccordionSection>,
+    );
+    expect(screen.getByRole("button", { name: "Remotes" })).toBeInTheDocument();
+  });
+
+  it("renders the title at the requested heading level", () => {
+    render(
+      <AccordionSection title="Nested" storageKey="test-nested" headingLevel={3}>
+        <div>nested body</div>
+      </AccordionSection>,
+    );
+    expect(screen.getByRole("heading", { level: 3, name: "Nested" })).toBeInTheDocument();
+  });
+
+  it("rotates the chevron open/closed via a single icon rather than swapping elements", () => {
+    render(
+      <AccordionSection title="Branches" storageKey="test-branches-7">
+        <div>branch list</div>
+      </AccordionSection>,
+    );
+    const button = screen.getByRole("button", { name: "Branches" });
+    const chevron = button.querySelector("svg");
+    expect(chevron).not.toBeNull();
+    fireEvent.click(button);
+    // Same SVG node stays mounted (rotated via CSS class), not swapped for a different icon.
+    expect(button.querySelector("svg")).toBe(chevron);
   });
 });
