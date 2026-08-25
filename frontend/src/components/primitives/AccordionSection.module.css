@@ -1,10 +1,19 @@
 .section {
   border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.section[data-open="true"] {
+  flex: 1 1 0%;
 }
 
 /* The heading only carries the role; the button inside owns all the spacing. */
 .heading {
   margin: 0;
+  flex: 0 0 auto;
 }
 
 .header {
@@ -28,10 +37,56 @@
   background: var(--color-selected-bg);
 }
 
+.chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.icon {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
 .title {
   flex: 1 1 auto;
 }
 
+.count {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
 .body {
   padding: 0 var(--space-3) var(--space-3);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  animation: accordion-body-in 120ms ease;
+}
+
+@keyframes accordion-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+
+  .body {
+    animation: none;
+  }
 }
