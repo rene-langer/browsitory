@@ -869,7 +869,7 @@ Add to `frontend/src/components/PullRequestPanel.test.tsx` (all 18 existing test
 
     fireEvent.click(screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
 
-    expect(screen.queryByLabelText("Account", { selector: `[aria-label="Account"]` })).toBeTruthy();
+    expect(screen.queryByLabelText("Account")).toBeTruthy();
     // The GitHub card's own content collapses...
     const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
     expect(within(githubSection).queryByRole("button", { name: "List pull requests" })).not.toBeInTheDocument();
