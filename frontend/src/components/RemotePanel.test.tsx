@@ -51,6 +51,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
     onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
     onSetUpstream: vi.fn(),
     onClearUpstream: vi.fn(),
+    onListRemoteBranches: vi.fn().mockResolvedValue([]),
     onFetchRemote: vi.fn(),
     fetchDisabled: false,
     onPushCurrentBranch: vi.fn(),
@@ -453,6 +454,26 @@ describe("RemotePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set upstream" }));
 
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "main");
+  });
+
+  it("offers branch suggestions from the selected remote for the upstream-branch field", async () => {
+    const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "develop"]);
+    renderPanel({ onListRemoteBranches });
+
+    fireEvent.change(screen.getByLabelText("Upstream remote"), { target: { value: "origin" } });
+
+    await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledWith("origin"));
+    const branchInput = screen.getByLabelText("Upstream branch");
+    const datalistId = branchInput.getAttribute("list");
+    expect(datalistId).not.toBeNull();
+    const datalist = document.getElementById(datalistId!);
+    expect(datalist).not.toBeNull();
+    // `<option>` inside a `<datalist>` (unlike inside a `<select>`) has no accessible ARIA role
+    // in jsdom/Testing Library, so this reads the DOM directly rather than via `getByRole`.
+    const optionValues = Array.from(datalist!.querySelectorAll("option")).map((option) =>
+      option.getAttribute("value"),
+    );
+    expect(optionValues).toEqual(["main", "develop"]);
   });
 
   it("does not update an existing remote's URLs when rename fails", async () => {

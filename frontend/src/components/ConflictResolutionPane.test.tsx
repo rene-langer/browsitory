@@ -40,6 +40,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getReflog: async () => [],
     restoreReflogEntry: async () => unused(),
     listRemotes: async () => unused(),
+    listRemoteBranches: async () => unused(),
     getCurrentUpstream: async () => null,
     getRemoteUpstreams: async () => [],
     addRemote: async () => unused(),
