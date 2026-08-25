@@ -355,4 +355,32 @@ describe("PullRequestPanel", () => {
     expect(screen.getByRole("button", { name: "Forget token" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create pull request" })).toBeDisabled();
   });
+
+  it("shows an icon and the total open pull-request count on the outer Pull Requests header", () => {
+    renderPanel({
+      pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
+    });
+    const header = screen.getByRole("button", { name: "Pull Requests" });
+    expect(header).toHaveTextContent("1");
+    expect(header.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("lets a repository's own card be collapsed independently without hiding the others", () => {
+    renderPanel({
+      forgeRepositories: [githubRepo, bitbucketRepo],
+      pullRequests: {
+        origin: { pullRequests: [openPullRequest], truncated: false },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
+
+    expect(screen.queryByLabelText("Account")).toBeTruthy();
+    // The GitHub card's own content collapses...
+    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    expect(within(githubSection).queryByRole("button", { name: "List pull requests" })).not.toBeInTheDocument();
+    // ...while the Bitbucket card, untouched, stays open.
+    const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
+    expect(within(bitbucketSection).getByRole("button", { name: "List pull requests" })).toBeInTheDocument();
+  });
 });
