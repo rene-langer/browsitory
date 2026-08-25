@@ -94,7 +94,7 @@ export function BranchSwitcher({
   };
 
   return (
-    <AccordionSection title="Branches" storageKey="sidebar-branches">
+    <AccordionSection title="Branches" storageKey="sidebar-branches" icon={GitBranch} count={branches.length} defaultOpen>
       <button
         aria-label="Branch switcher"
         className={styles.select}

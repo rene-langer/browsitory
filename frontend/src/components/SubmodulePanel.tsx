@@ -29,7 +29,7 @@ export function SubmodulePanel({
   };
 
   return (
-    <AccordionSection title="Submodules" storageKey="sidebar-submodules">
+    <AccordionSection title="Submodules" storageKey="sidebar-submodules" icon={Package} count={submodules.length}>
       <label>
         <input
           type="checkbox"
