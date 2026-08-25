@@ -104,4 +104,7 @@ jobs:
           releaseName: "Browsitory ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          # tauri.release.conf.json only sets bundle.createUpdaterArtifacts: true — kept out of
+          # the main tauri.conf.json so ci.yml's plain build-dist smoke-test job (which has no
+          # signing secrets) doesn't also try to sign an updater manifest on every push to main.
+          args: ${{ matrix.args }} --config tauri.release.conf.json
