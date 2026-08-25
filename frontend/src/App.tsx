@@ -17,6 +17,7 @@ import { RemotePanel } from "./components/RemotePanel";
 import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { tauriRepoClient } from "./ipc/tauriRepoClient";
 import { buildCommands } from "./lib/commands";
@@ -401,6 +402,7 @@ export default function App() {
 
   return (
     <main>
+      <UpdateBanner />
       <header className={styles.headerRow}>
         <h1>Browsitory</h1>
         <RepoTabs
