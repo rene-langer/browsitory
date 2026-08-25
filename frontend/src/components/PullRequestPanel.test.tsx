@@ -365,6 +365,24 @@ describe("PullRequestPanel", () => {
     expect(header.querySelector("svg")).toBeInTheDocument();
   });
 
+  it("scopes roving-tabindex arrow-key navigation to the nested per-repository cards", () => {
+    renderPanel({ forgeRepositories: [githubRepo, bitbucketRepo] });
+
+    const githubHeader = screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i });
+    const bitbucketHeader = screen.getByRole("button", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
+    const outerHeader = screen.getByRole("button", { name: "Pull Requests" });
+
+    // ArrowDown from the last repo card wraps around to the first, proving the nested
+    // AccordionGroup (not some ambient/absent outer one) owns the wrapping.
+    fireEvent.keyDown(bitbucketHeader, { key: "ArrowDown" });
+    expect(githubHeader).toHaveFocus();
+    expect(outerHeader).not.toHaveFocus();
+
+    fireEvent.keyDown(githubHeader, { key: "ArrowUp" });
+    expect(bitbucketHeader).toHaveFocus();
+    expect(outerHeader).not.toHaveFocus();
+  });
+
   it("lets a repository's own card be collapsed independently without hiding the others", () => {
     renderPanel({
       forgeRepositories: [githubRepo, bitbucketRepo],
