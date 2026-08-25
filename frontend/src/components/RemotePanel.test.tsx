@@ -494,4 +494,12 @@ describe("RemotePanel", () => {
 
     expect(screen.getByRole("button", { name: "Remove origin" })).toHaveClass("danger");
   });
+
+  it("renders remote row actions as icon buttons without repeating the remote name as visible text", () => {
+    renderPanel({});
+
+    const fetchButton = screen.getByRole("button", { name: "Fetch origin" });
+    expect(fetchButton).not.toHaveTextContent("Fetch origin");
+    expect(fetchButton.querySelector("svg")).not.toBeNull();
+  });
 });

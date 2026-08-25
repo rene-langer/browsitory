@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Cloud } from "lucide-react";
+import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2 } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { Toolbar } from "./primitives/Toolbar";
@@ -259,16 +259,52 @@ export function RemotePanel({
                   <span>Fetch: {remote.fetchUrl}</span>
                   {remote.pushUrl !== null && <span>Push: {remote.pushUrl}</span>}
                   <Toolbar>
-                    <button type="button" disabled={fetchDisabled} onClick={() => void onFetchRemote(remote.name)}>Fetch {remote.name}</button>
-                    <button type="button" disabled={pushDisabled} onClick={() => void onPushCurrentBranch(remote.name)}>Push branch to {remote.name}</button>
-                    <button type="button" onClick={() => beginEdit(remote)}>Edit {remote.name}</button>
-                    <button type="button" onClick={() => beginCredentialEdit(remote)}>Credentials for {remote.name}</button>
                     <button
                       type="button"
-                      className={`${styles.dangerButton} danger`}
+                      className={styles.iconButton}
+                      disabled={fetchDisabled}
+                      title={`Fetch ${remote.name}`}
+                      aria-label={`Fetch ${remote.name}`}
+                      onClick={() => void onFetchRemote(remote.name)}
+                    >
+                      <RefreshCw size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      disabled={pushDisabled}
+                      title={`Push branch to ${remote.name}`}
+                      aria-label={`Push branch to ${remote.name}`}
+                      onClick={() => void onPushCurrentBranch(remote.name)}
+                    >
+                      <Upload size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      title={`Edit ${remote.name}`}
+                      aria-label={`Edit ${remote.name}`}
+                      onClick={() => beginEdit(remote)}
+                    >
+                      <Pencil size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      title={`Credentials for ${remote.name}`}
+                      aria-label={`Credentials for ${remote.name}`}
+                      onClick={() => beginCredentialEdit(remote)}
+                    >
+                      <KeyRound size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.iconButton} ${styles.dangerButton} danger`}
+                      title={`Remove ${remote.name}`}
+                      aria-label={`Remove ${remote.name}`}
                       onClick={() => requestRemove(remote)}
                     >
-                      Remove {remote.name}
+                      <Trash2 size={14} aria-hidden="true" />
                     </button>
                   </Toolbar>
                 </>

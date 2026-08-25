@@ -91,3 +91,9 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+}
