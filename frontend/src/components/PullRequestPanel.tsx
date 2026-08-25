@@ -146,6 +146,8 @@ function ForgeRepositorySection({
       storageKey={`sidebar-pr-${repository.remoteName}`}
       headingLevel={3}
       defaultOpen
+      icon={GitPullRequest}
+      count={pullRequests?.pullRequests.length}
     >
       <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
         <label className={styles.label}>
@@ -267,7 +269,11 @@ export function PullRequestPanel({
       title="Pull Requests"
       storageKey="sidebar-pull-requests"
       icon={GitPullRequest}
-      count={totalPullRequests}
+      count={
+        forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
+          ? totalPullRequests
+          : undefined
+      }
     >
       <AccordionGroup>
         <div className={styles.sections}>
