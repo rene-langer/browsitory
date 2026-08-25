@@ -15,7 +15,7 @@ export function Sidebar({ children }: { children: ReactNode }) {
           aria-label="Expand all sections"
           onClick={() => groupRef.current?.expandAll()}
         >
-          <ChevronsDownUp size={14} aria-hidden="true" />
+          <ChevronsUpDown size={14} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -23,7 +23,7 @@ export function Sidebar({ children }: { children: ReactNode }) {
           aria-label="Collapse all sections"
           onClick={() => groupRef.current?.collapseAll()}
         >
-          <ChevronsUpDown size={14} aria-hidden="true" />
+          <ChevronsDownUp size={14} aria-hidden="true" />
         </button>
       </div>
       <AccordionGroup groupRef={groupRef}>
