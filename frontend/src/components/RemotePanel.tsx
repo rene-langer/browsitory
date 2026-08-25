@@ -80,6 +80,7 @@ export function RemotePanel({
   // the whole URL) ever worked under the old guard.
   const [nameTouched, setNameTouched] = useState(false);
   const [showPushUrl, setShowPushUrl] = useState(false);
+  const [showEditPushUrl, setShowEditPushUrl] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -127,6 +128,7 @@ export function RemotePanel({
     setEditName(remote.name);
     setEditFetchUrl(remote.fetchUrl);
     setEditPushUrl(remote.pushUrl ?? "");
+    setShowEditPushUrl(remote.pushUrl !== null);
   };
 
   const submitEdit = async (event: React.FormEvent, oldName: string) => {
@@ -223,10 +225,26 @@ export function RemotePanel({
                     Fetch URL
                     <input value={editFetchUrl} onChange={(event) => setEditFetchUrl(event.target.value)} />
                   </label>
-                  <label className={styles.label}>
-                    Push URL (optional)
-                    <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
-                  </label>
+                  <details
+                    className={styles.disclosure}
+                    open={showEditPushUrl}
+                    onToggle={(event) => setShowEditPushUrl(event.currentTarget.open)}
+                  >
+                    <summary
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setShowEditPushUrl((open) => !open);
+                      }}
+                    >
+                      Push URL (optional)
+                    </summary>
+                    {showEditPushUrl && (
+                      <label className={styles.label}>
+                        Push URL
+                        <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
+                      </label>
+                    )}
+                  </details>
                   <button type="submit">Save remote</button>
                   <button type="button" onClick={() => setEditing(null)}>Cancel</button>
                 </form>

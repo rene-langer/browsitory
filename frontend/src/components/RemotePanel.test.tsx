@@ -457,7 +457,7 @@ describe("RemotePanel", () => {
     fireEvent.change(within(editForm).getByLabelText("Fetch URL"), {
       target: { value: "../replacement.git" },
     });
-    fireEvent.change(within(editForm).getByLabelText("Push URL (optional)"), {
+    fireEvent.change(within(editForm).getByLabelText("Push URL"), {
       target: { value: "../replacement-push.git" },
     });
     fireEvent.click(within(editForm).getByRole("button", { name: "Save remote" }));
@@ -468,6 +468,22 @@ describe("RemotePanel", () => {
     expect(backupItem).not.toBeNull();
     expect(within(backupItem!).getByText("Fetch: ../backup.git")).toBeInTheDocument();
     expect(within(backupItem!).getByText("Push: ../push-backup.git")).toBeInTheDocument();
+  });
+
+  it("opens the Edit form's Push URL disclosure by default when the remote already has one", () => {
+    renderPanel({});
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit origin" }));
+
+    expect(within(screen.getByRole("form", { name: "Edit origin" })).getByLabelText("Push URL")).toBeInTheDocument();
+  });
+
+  it("keeps the Edit form's Push URL disclosure collapsed by default when the remote has none", () => {
+    renderPanel({ remotes: [{ ...origin, pushUrl: null }] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit origin" }));
+
+    expect(within(screen.getByRole("form", { name: "Edit origin" })).queryByLabelText("Push URL")).not.toBeInTheDocument();
   });
 
   it("shows the explicit all-branch removal route for a remote with upstreams", async () => {
