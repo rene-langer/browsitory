@@ -88,6 +88,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     setRemoteAuthMode: vi.fn(),
     setCurrentUpstream: vi.fn(),
     clearCurrentUpstream: vi.fn(),
+    listRemoteBranches: vi.fn(),
     fetchRemote: vi.fn(),
     createTag: vi.fn(),
     deleteTag: vi.fn(),

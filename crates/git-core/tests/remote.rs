@@ -2,11 +2,12 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_tag, fetch_remote, list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_current_branch,
-    push_tags, remote_upstreams, remove_remote, remove_remote_and_clear_upstreams, rename_remote,
-    set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
-    PullOutcome, RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
-    TransferProgress, TransferReporter,
+    delete_tag, fetch_remote, list_remote_branches, list_remotes, list_tags, pull_after_fetch,
+    push_current_branch, push_tags, remote_upstreams, remove_remote,
+    remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
+    set_remote_auth_profile, update_remote_urls, CredentialProvider, PullOutcome, RemoteAuthMode,
+    RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
+    TransferReporter,
 };
 
 #[derive(Default)]
