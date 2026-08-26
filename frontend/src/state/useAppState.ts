@@ -297,7 +297,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     client,
     repoPath,
     runMutation,
-    runMutationWithMessage,
     runOptimisticMutation,
     runOptimisticMutationWithMessage,
     setState,
