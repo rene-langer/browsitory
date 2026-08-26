@@ -27,6 +27,7 @@ use crate::pull_requests::{
 };
 
 mod branch;
+mod merge;
 mod reflog;
 mod stash;
 mod submodule;
@@ -758,44 +759,23 @@ impl Worker {
                     Command::ApplyStash { index, reply } => stash::apply(&mut repo, index, reply),
                     Command::DropStash { index, reply } => stash::drop(&mut repo, index, reply),
                     Command::StartMerge { branch_name, reply } => {
-                        let result = git_core::merge::start_merge(&repo, &branch_name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        merge::start(&repo, branch_name, reply)
                     }
                     Command::GetConflictHunks { path, reply } => {
-                        let result = git_core::merge::conflict_hunks(&repo, &path)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        merge::conflict_hunks(&repo, path, reply)
                     }
                     Command::ResolveConflict {
                         path,
                         resolved_content,
                         reply,
-                    } => {
-                        let result =
-                            git_core::merge::resolve_conflict(&repo, &path, &resolved_content)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::AbortMerge { reply } => {
-                        let result = git_core::merge::abort_merge(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::GetMergeMessage { reply } => {
-                        let result: Result<Option<String>, String> =
-                            Ok(git_core::merge::merge_message(&repo));
-                        let _ = reply.send(result);
-                    }
+                    } => merge::resolve(&repo, path, resolved_content, reply),
+                    Command::AbortMerge { reply } => merge::abort(&repo, reply),
+                    Command::GetMergeMessage { reply } => merge::message(&repo, reply),
                     Command::ResolveAddDeleteConflict {
                         path,
                         choice,
                         reply,
-                    } => {
-                        let result =
-                            git_core::merge::resolve_add_delete_conflict(&repo, &path, choice)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => merge::resolve_add_delete(&repo, path, choice, reply),
                     Command::CommitsSince { onto, reply } => {
                         let result = git_core::rebase::commits_since(&repo, &onto)
                             .map_err(|e| e.to_string());
@@ -1517,89 +1497,6 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ClearCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn start_merge(&self, branch_name: String) -> Result<MergeOutcome, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::StartMerge {
-                branch_name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetConflictHunks {
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn resolve_conflict(&self, path: String, resolved_content: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ResolveConflict {
-                path,
-                resolved_content,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn abort_merge(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::AbortMerge { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn get_merge_message(&self) -> Result<Option<String>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetMergeMessage { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn resolve_add_delete_conflict(
-        &self,
-        path: String,
-        choice: FileConflictChoice,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ResolveAddDeleteConflict {
-                path,
-                choice,
-                reply: reply_tx,
-            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
