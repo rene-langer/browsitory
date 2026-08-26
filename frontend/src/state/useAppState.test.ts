@@ -1160,6 +1160,113 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(false);
   });
 
+  it("addRemote adds the remote to state before the backend call resolves", async () => {
+    let resolveAdd: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [],
+      addRemote: async () => new Promise<void>((resolve) => { resolveAdd = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let addPromise!: Promise<string | null>;
+    act(() => {
+      addPromise = result.current.addRemote("upstream", "../upstream.git", null);
+    });
+
+    expect(result.current.state.remotes).toEqual([
+      { name: "upstream", fetchUrl: "../upstream.git", pushUrl: null, authMode: null, authUsername: null },
+    ]);
+
+    await act(async () => {
+      resolveAdd?.();
+      await addPromise;
+    });
+  });
+
+  it("removeRemote removes the remote from state before the backend call resolves, restores it on failure", async () => {
+    const remoteA: RemoteInfo = { name: "upstream", fetchUrl: "../upstream.git", pushUrl: null, authMode: null, authUsername: null };
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      removeRemote: async () => {
+        throw new Error("remove failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.removeRemote("upstream", false));
+
+    expect(result.current.state.remotes).toEqual([remoteA]);
+    expect(result.current.state.error).toBe("remove failed");
+  });
+
+  it("renameRemote renames the remote in state before the backend call resolves, resolves true on success", async () => {
+    const remoteA: RemoteInfo = { name: "old", fetchUrl: "../r.git", pushUrl: null, authMode: null, authUsername: null };
+    let resolveRename: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      renameRemote: async () => new Promise<void>((resolve) => { resolveRename = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let renamePromise!: Promise<boolean>;
+    act(() => {
+      renamePromise = result.current.renameRemote("old", "new");
+    });
+
+    expect(result.current.state.remotes[0].name).toBe("new");
+
+    let succeeded!: boolean;
+    await act(async () => {
+      resolveRename?.();
+      succeeded = await renamePromise;
+    });
+    expect(succeeded).toBe(true);
+  });
+
+  it("renameRemote resolves false and restores the original name on failure", async () => {
+    const remoteA: RemoteInfo = { name: "old", fetchUrl: "../r.git", pushUrl: null, authMode: null, authUsername: null };
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      renameRemote: async () => {
+        throw new Error("rename failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    const succeeded = await act(() => result.current.renameRemote("old", "new"));
+
+    expect(succeeded).toBe(false);
+    expect(result.current.state.remotes).toEqual([remoteA]);
+  });
+
+  it("updateRemoteUrls updates the URLs in state before the backend call resolves", async () => {
+    const remoteA: RemoteInfo = { name: "origin", fetchUrl: "../old.git", pushUrl: null, authMode: null, authUsername: null };
+    let resolveUpdate: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      updateRemoteUrls: async () => new Promise<void>((resolve) => { resolveUpdate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let updatePromise!: Promise<void>;
+    act(() => {
+      updatePromise = result.current.updateRemoteUrls("origin", "../new.git", "../push.git");
+    });
+
+    expect(result.current.state.remotes[0].fetchUrl).toBe("../new.git");
+    expect(result.current.state.remotes[0].pushUrl).toBe("../push.git");
+
+    await act(async () => {
+      resolveUpdate?.();
+      await updatePromise;
+    });
+  });
+
   // Same `Promise<string | null>` contract as `addRemote` above, for the same reason:
   // `BranchSwitcher`, `WorktreePanel`, and `TagPanel` each render their create-form's failure
   // inline next to the form rather than routing it through the shared banner (issue #30/UX-002).

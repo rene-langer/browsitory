@@ -66,11 +66,11 @@ export function useRemoteTransferActions(
   repoPath: string,
   refresh: () => Promise<void>,
   runMutation: RunMutation,
-  runMutationWithMessage: RunMutationWithMessage,
+  _runMutationWithMessage: RunMutationWithMessage,
   runMutationWithOutcome: RunMutationWithOutcome,
   runOptimisticMutation: RunOptimisticMutation,
   runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
-  _runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
+  runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): RemoteTransferActions {
   const activeTransferId = useRef<string | null>(null);
@@ -115,27 +115,44 @@ export function useRemoteTransferActions(
 
   const addRemote = useCallback(
     (name: string, fetchUrl: string, pushUrl: string | null) =>
-      runMutationWithMessage(() => client.addRemote(repoPath, name, fetchUrl, pushUrl)),
-    [client, runMutationWithMessage, repoPath],
+      runOptimisticMutationWithMessage(
+        (prev) => ({
+          ...prev,
+          remotes: [...prev.remotes, { name, fetchUrl, pushUrl, authMode: null, authUsername: null }],
+        }),
+        () => client.addRemote(repoPath, name, fetchUrl, pushUrl),
+      ),
+    [client, runOptimisticMutationWithMessage, repoPath],
   );
   const renameRemote = useCallback(
-    async (oldName: string, newName: string) => {
-      let renamed = false;
-      await runMutation(async () => {
-        await client.renameRemote(repoPath, oldName, newName);
-        renamed = true;
-      });
-      return renamed;
-    },
-    [client, runMutation, repoPath],
+    (oldName: string, newName: string) =>
+      runOptimisticMutationWithOutcome(
+        (prev) => ({
+          ...prev,
+          remotes: prev.remotes.map((remote) => (remote.name === oldName ? { ...remote, name: newName } : remote)),
+        }),
+        () => client.renameRemote(repoPath, oldName, newName),
+      ),
+    [client, runOptimisticMutationWithOutcome, repoPath],
   );
   const updateRemoteUrls = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl)),
-    [client, runMutation, repoPath],
+    (name: string, fetchUrl: string, pushUrl: string | null) =>
+      runOptimisticMutation(
+        (prev) => ({
+          ...prev,
+          remotes: prev.remotes.map((remote) => (remote.name === name ? { ...remote, fetchUrl, pushUrl } : remote)),
+        }),
+        () => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const removeRemote = useCallback(
-    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(repoPath, name, clearUpstreams)),
-    [client, runMutation, repoPath],
+    (name: string, clearUpstreams: boolean) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, remotes: prev.remotes.filter((remote) => remote.name !== name) }),
+        () => client.removeRemote(repoPath, name, clearUpstreams),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const saveHttpsCredential = useCallback(
     (remoteName: string, username: string, token: string) =>
