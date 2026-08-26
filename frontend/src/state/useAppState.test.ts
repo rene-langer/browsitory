@@ -2084,6 +2084,49 @@ describe("useAppState", () => {
     expect(dropStashArg).toBe(0);
   });
 
+  it("dropStash removes the stash from state before the backend call resolves, restores it on failure", async () => {
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    const client = transferClient({
+      listStashes: async () => [stashA],
+      dropStash: async () => {
+        throw new Error("drop failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.dropStash(0));
+
+    expect(result.current.state.stashes).toEqual([stashA]);
+    expect(result.current.state.error).toBe("drop failed");
+  });
+
+  it("dropStash clears the selected row optimistically when dropping the currently-selected stash", async () => {
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    let resolveDrop: (() => void) | null = null;
+    const client = transferClient({
+      listStashes: async () => [stashA],
+      dropStash: async () => new Promise<void>((resolve) => { resolveDrop = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    act(() => result.current.selectRow({ commitId: "abc" }));
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc" });
+
+    let dropPromise!: Promise<void>;
+    act(() => {
+      dropPromise = result.current.dropStash(0);
+    });
+
+    expect(result.current.state.stashes).toEqual([]);
+    expect(result.current.state.selectedRow).toBe("uncommitted");
+
+    await act(async () => {
+      resolveDrop?.();
+      await dropPromise;
+    });
+  });
+
   it("dropStash resets selectedRow to uncommitted when dropping the currently selected stash", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     let listStashesCalls = 0;

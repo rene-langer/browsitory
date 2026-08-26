@@ -356,8 +356,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     repoPath,
     runMutation,
     runOptimisticMutation,
-    state,
-    setState,
   );
 
   const {
