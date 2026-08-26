@@ -4,8 +4,36 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Catches newly-disclosed advisories against dependencies already on main, independent of
+    # any PR activity — see SEC-003 (issue #24).
+    - cron: "0 6 * * 1"
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: cargo audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: pnpm audit
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm audit --prod
+      - name: License compliance doc is in sync
+        run: python3 scripts/check-license-compliance.py
+
   rust:
     runs-on: ${{ matrix.os }}
     strategy:

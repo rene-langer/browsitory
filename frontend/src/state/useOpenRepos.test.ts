@@ -77,6 +77,19 @@ describe("useOpenRepos", () => {
     expect(result.current.restoreError).toContain("config.toml is unreadable");
   });
 
+  it("dismissRestoreError clears restoreError", async () => {
+    const client = fakeClient({
+      listOpenRepos: vi.fn().mockRejectedValue(new Error("config.toml is unreadable")),
+    });
+    const { result } = renderHook(() => useOpenRepos(client));
+
+    await waitFor(() => expect(result.current.restoreError).not.toBeNull());
+
+    act(() => result.current.dismissRestoreError());
+
+    expect(result.current.restoreError).toBeNull();
+  });
+
   it("opening a new path calls client.openRepo, adds a tab, and focuses it", async () => {
     const client = fakeClient();
     const { result } = renderHook(() => useOpenRepos(client));

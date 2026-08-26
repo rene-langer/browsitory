@@ -14,6 +14,7 @@ import { CommitBox } from "./CommitBox";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
@@ -448,7 +449,7 @@ function UncommittedDiffPane({
       {viewMode === "blame" ? (
         <>
           {error !== null ? (
-            <p role="alert">{error}</p>
+            <InlineError message={error} onDismiss={() => setError(null)} />
           ) : (
             <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
           )}
@@ -466,7 +467,7 @@ function UncommittedDiffPane({
           onResolveAddDelete={onResolveAddDeleteConflict}
         />
       ) : error !== null ? (
-        <p role="alert">{error}</p>
+        <InlineError message={error} onDismiss={() => setError(null)} />
       ) : (
         <DiffView
           hunks={displayedHunks}
@@ -634,14 +635,14 @@ function CommitDiffPane({
       {viewMode === "blame" ? (
         <>
           {error !== null ? (
-            <p role="alert">{error}</p>
+            <InlineError message={error} onDismiss={() => setError(null)} />
           ) : (
             <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
           )}
           <button onClick={() => setViewMode("diff")}>Back to Diff</button>
         </>
       ) : error !== null ? (
-        <p role="alert">{error}</p>
+        <InlineError message={error} onDismiss={() => setError(null)} />
       ) : (
         <DiffView hunks={displayedHunks} />
       )}

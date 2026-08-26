@@ -9,6 +9,7 @@ import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { InlineError } from "./components/primitives/InlineError";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -79,6 +80,24 @@ function RepoWorkspace({
     appState.state.mergeMessage !== null ||
     appState.state.rebaseProgress !== null;
 
+  // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
+  // — threaded into the sidebar mutation panels (`RemotePanel`, `WorktreePanel`, `TagPanel`,
+  // `PullRequestPanel`, `BranchSwitcher`) so their disabled buttons carry a `title` explaining the
+  // block instead of just going inert with no explanation (issue #31/UX-003). First-match-wins,
+  // in the same order `repositoryOperationDisabled` checks them; `null` when nothing is blocking.
+  // Deliberately not a fine-grained per-panel lock (e.g. "only disable panels that actually
+  // conflict with a rebase") — that's the "Large" effort option the issue explicitly calls out as
+  // out of scope for this pass.
+  const operationDisabledReason: string | null = appState.state.pending
+    ? "Another action is in progress."
+    : appState.state.transfer !== null
+      ? "A transfer is in progress."
+      : appState.state.mergeMessage !== null
+        ? "A merge is in progress."
+        : appState.state.rebaseProgress !== null
+          ? "A rebase is in progress."
+          : null;
+
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
   // rule that already disables every other mutating action while this is true.
@@ -93,7 +112,9 @@ function RepoWorkspace({
     // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
     // actually looking at.
     <div style={{ display: active ? "contents" : "none" }} data-active-repo={active ? "true" : "false"}>
-      {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
+      {appState.state.error !== null && (
+        <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+      )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
           outside the dialog) even when this wrapper is `display: none` — so a backgrounded tab
@@ -143,6 +164,7 @@ function RepoWorkspace({
               isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
               stashes={appState.state.stashes}
               onSelectRow={appState.selectRow}
               onApplyStash={appState.applyStash}
@@ -158,6 +180,7 @@ function RepoWorkspace({
               onRemoveWorktree={appState.removeWorktree}
               onPruneWorktrees={appState.pruneWorktrees}
               operationDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
             />
             <SubmodulePanel
               submodules={appState.state.submodules}
@@ -193,6 +216,7 @@ function RepoWorkspace({
               pushDisabled={repositoryOperationDisabled}
               onPull={appState.pullCurrentUpstream}
               pullDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
               pendingPull={appState.state.pendingPull}
               pullOutcome={appState.state.pullOutcome}
               onMergePull={async (upstreamRef) => {
@@ -212,6 +236,7 @@ function RepoWorkspace({
               onDelete={appState.deleteTag}
               onPush={appState.pushTags}
               pushDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
             />
             <PullRequestPanel
               forgeRepositories={appState.state.forgeRepositories}
@@ -222,6 +247,7 @@ function RepoWorkspace({
               onCreatePullRequest={appState.createPullRequest}
               onOpenExternalUrl={appState.openExternalUrl}
               operationDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
             />
           </Sidebar>
         }
@@ -423,8 +449,10 @@ export default function App() {
         {themeToggle}
       </header>
       <LaneBraid />
-      {openRepos.restoreError !== null && <p role="alert">{openRepos.restoreError}</p>}
-      {openError !== null && <p role="alert">{openError}</p>}
+      {openRepos.restoreError !== null && (
+        <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+      )}
+      {openError !== null && <InlineError message={openError} onDismiss={() => setOpenError(null)} />}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
@@ -440,6 +468,7 @@ export default function App() {
             workspaces={workspaces.workspaces}
             workspacesLoading={workspaces.loading}
             workspacesError={workspaces.error}
+            onDismissWorkspacesError={workspaces.dismissError}
             onCreateWorkspace={workspaces.createWorkspace}
             onEditWorkspace={workspaces.editWorkspace}
             onDeleteWorkspace={workspaces.deleteWorkspace}
@@ -454,6 +483,7 @@ export default function App() {
           workspaces={workspaces.workspaces}
           workspacesLoading={workspaces.loading}
           workspacesError={workspaces.error}
+          onDismissWorkspacesError={workspaces.dismissError}
           onCreateWorkspace={workspaces.createWorkspace}
           onEditWorkspace={workspaces.editWorkspace}
           onDeleteWorkspace={workspaces.deleteWorkspace}

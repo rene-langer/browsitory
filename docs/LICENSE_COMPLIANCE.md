@@ -24,6 +24,8 @@ completion (not the full transitive tree).
 | serde_json | MIT OR Apache-2.0 | `tauri-app` |
 | directories | MIT OR Apache-2.0 | `config` |
 | toml | MIT OR Apache-2.0 | `config` |
+| tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |
+| tauri-plugin-process 2 | Apache-2.0 OR MIT | `tauri-app` — restarts the app to apply a downloaded update. Source: [crates.io](https://crates.io/crates/tauri-plugin-process); verified with `cargo info tauri-plugin-process` on 2026-08-26. |
 
 ## JavaScript (`npm info <package> license`)
 
@@ -50,6 +52,8 @@ completion (not the full transitive tree).
 | @types/node | MIT | dev only |
 | @types/react | MIT | dev only |
 | @types/react-dom | MIT | dev only |
+| @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
+| @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
@@ -84,3 +88,8 @@ here.
 Before adding a new dependency: run `cargo info <crate>` or `npm info <package> license`,
 confirm it's permissive, and add a row to the relevant table above in the same commit that
 adds the dependency.
+
+CI's `audit` job runs `scripts/check-license-compliance.py`, which fails the build if any
+direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, or `e2e/package.json` has
+no matching row here — it checks presence, not the license value itself, so the manual
+`cargo info`/`npm info` step above still applies.

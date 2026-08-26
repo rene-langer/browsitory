@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2, Copy } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
@@ -40,6 +42,7 @@ export function RemotePanel({
   onMergePull,
   onRebasePull,
   onCancelPull,
+  operationDisabledReason,
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
@@ -67,9 +70,12 @@ export function RemotePanel({
   onMergePull: (upstreamRef: string) => Promise<void>;
   onRebasePull: (upstreamRef: string) => void;
   onCancelPull: () => void;
+  // Human-readable reason `fetchDisabled`/`pushDisabled`/`pullDisabled` are true (they're all
+  // driven by the same repository-operation gate), shown as a `title` on the buttons they
+  // disable (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   const pullDialogRef = useRef<HTMLDialogElement>(null);
-  const removeDialogRef = useRef<HTMLDialogElement>(null);
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
@@ -197,17 +203,6 @@ export function RemotePanel({
     dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
   }, [pendingPull]);
 
-  useEffect(() => {
-    const dialog = removeDialogRef.current;
-    if (removeConfirmation === null || dialog === null) return;
-    if (!dialog.open && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else if (!dialog.open) {
-      dialog.setAttribute("open", "");
-    }
-    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
-  }, [removeConfirmation]);
-
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes" icon={Cloud} count={remotes.length}>
       {remotes.length === 0 ? (
@@ -314,7 +309,7 @@ export function RemotePanel({
                       type="button"
                       className={styles.iconButton}
                       disabled={fetchDisabled}
-                      title={`Fetch ${remote.name}`}
+                      title={fetchDisabled ? (operationDisabledReason ?? `Fetch ${remote.name}`) : `Fetch ${remote.name}`}
                       aria-label={`Fetch ${remote.name}`}
                       onClick={() => void onFetchRemote(remote.name)}
                     >
@@ -324,7 +319,11 @@ export function RemotePanel({
                       type="button"
                       className={styles.iconButton}
                       disabled={pushDisabled}
-                      title={`Push branch to ${remote.name}`}
+                      title={
+                        pushDisabled
+                          ? (operationDisabledReason ?? `Push branch to ${remote.name}`)
+                          : `Push branch to ${remote.name}`
+                      }
                       aria-label={`Push branch to ${remote.name}`}
                       onClick={() => void onPushCurrentBranch(remote.name)}
                     >
@@ -351,7 +350,8 @@ export function RemotePanel({
                     <button
                       type="button"
                       className={`${styles.iconButton} ${styles.dangerButton} danger`}
-                      title={`Remove ${remote.name}`}
+                      disabled={fetchDisabled}
+                      title={fetchDisabled ? (operationDisabledReason ?? `Remove ${remote.name}`) : `Remove ${remote.name}`}
                       aria-label={`Remove ${remote.name}`}
                       onClick={() => requestRemove(remote)}
                     >
@@ -367,27 +367,25 @@ export function RemotePanel({
       )}
 
       {removeConfirmation !== null && (
-        <dialog
-          ref={removeDialogRef}
-          aria-label="Remove remote confirmation"
-          onCancel={(event) => {
-            event.preventDefault();
-            setRemoveConfirmation(null);
-          }}
-        >
-          {removeConfirmation.startsWith("clear:") ? (
-            <>
+        <ConfirmDialog
+          ariaLabel="Remove remote confirmation"
+          message={
+            removeConfirmation.startsWith("clear:") ? (
               <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?</p>
-              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation.slice(6), true).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
-            </>
-          ) : (
-            <>
+            ) : (
               <p>Remove remote {removeConfirmation}?</p>
-              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation, false).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
-            </>
-          )}
-          <button type="button" data-autofocus onClick={() => setRemoveConfirmation(null)}>Cancel</button>
-        </dialog>
+            )
+          }
+          confirmLabel="Confirm remove"
+          confirmDisabled={fetchDisabled}
+          confirmTitle={fetchDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          onConfirm={() => {
+            const target = removeConfirmation.startsWith("clear:") ? removeConfirmation.slice(6) : removeConfirmation;
+            const clearUpstreams = removeConfirmation.startsWith("clear:");
+            void onRemoveRemote(target, clearUpstreams).then(() => setRemoveConfirmation(null));
+          }}
+          onCancel={() => setRemoveConfirmation(null)}
+        />
       )}
 
       {showAddForm ? (
@@ -421,9 +419,7 @@ export function RemotePanel({
             />
           </label>
           {addError !== null && (
-            <p role="alert" className={styles.fieldError}>
-              {addError}
-            </p>
+            <InlineError message={addError} onDismiss={() => setAddError(null)} className={styles.fieldError} />
           )}
           <details
             className={styles.disclosure}
@@ -449,7 +445,12 @@ export function RemotePanel({
               </label>
             )}
           </details>
-          <button type="submit" className={`${styles.primaryButton} primary`} disabled={fetchDisabled}>
+          <button
+            type="submit"
+            className={`${styles.primaryButton} primary`}
+            disabled={fetchDisabled}
+            title={fetchDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
             Add remote
           </button>
           <button type="button" onClick={closeAddForm}>
@@ -458,7 +459,12 @@ export function RemotePanel({
         </form>
       ) : (
         <Toolbar>
-          <button type="button" disabled={fetchDisabled} onClick={() => setShowAddForm(true)}>
+          <button
+            type="button"
+            disabled={fetchDisabled}
+            title={fetchDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => setShowAddForm(true)}
+          >
             Add remote
           </button>
         </Toolbar>
@@ -467,7 +473,12 @@ export function RemotePanel({
       <section aria-labelledby="upstream-heading">
         <h3 id="upstream-heading" className={styles.sectionHeading}>Upstream</h3>
         {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
-        <button type="button" disabled={pullDisabled || upstream === null || pendingPull !== null} onClick={() => void onPull()}>
+        <button
+          type="button"
+          disabled={pullDisabled || upstream === null || pendingPull !== null}
+          title={pullDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          onClick={() => void onPull()}
+        >
           Pull
         </button>
         {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
@@ -523,8 +534,22 @@ export function RemotePanel({
           }}
         >
           <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
-          <button type="button" disabled={pullDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>Merge</button>
-          <button type="button" disabled={pullDisabled} onClick={() => onRebasePull(pendingPull.upstreamRef)}>Rebase</button>
+          <button
+            type="button"
+            disabled={pullDisabled}
+            title={pullDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onMergePull(pendingPull.upstreamRef)}
+          >
+            Merge
+          </button>
+          <button
+            type="button"
+            disabled={pullDisabled}
+            title={pullDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => onRebasePull(pendingPull.upstreamRef)}
+          >
+            Rebase
+          </button>
           <button type="button" data-autofocus onClick={onCancelPull}>Cancel</button>
         </dialog>
       )}

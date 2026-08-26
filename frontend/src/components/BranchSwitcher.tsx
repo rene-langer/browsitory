@@ -3,6 +3,8 @@ import { GitBranch } from "lucide-react";
 import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
@@ -20,6 +22,7 @@ export function BranchSwitcher({
   isMerging,
   isRebasing,
   operationDisabled,
+  operationDisabledReason,
   stashes,
   onSelectRow,
   onApplyStash,
@@ -30,7 +33,9 @@ export function BranchSwitcher({
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
   onSwitchBranch: (name: string) => void;
-  onCreateBranch: (name: string, startPoint: string) => void;
+  // `null` = created; a string = the failure message to show inline next to the draft form. See
+  // `useAppState.ts`'s `createBranch` (issue #30/UX-002).
+  onCreateBranch: (name: string, startPoint: string) => Promise<string | null>;
   onDeleteBranch: (name: string, force: boolean) => Promise<void>;
   onRenameBranch: (oldName: string, newName: string) => void;
   onOpenCreateBranchDraft: (startPoint: string) => void;
@@ -44,6 +49,10 @@ export function BranchSwitcher({
   // drifted — this just stops the user from getting there.
   isRebasing: boolean;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true (e.g. "A rebase is in progress."), shown
+  // as a `title` on the buttons it disables so they don't just go inert with no explanation
+  // (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
   stashes: StashEntry[];
   onSelectRow: (row: SelectedRow) => void;
   onApplyStash: (index: number) => void;
@@ -58,6 +67,7 @@ export function BranchSwitcher({
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const current = branches.find((b) => b.isCurrent);
 
@@ -72,12 +82,17 @@ export function BranchSwitcher({
     setRenameValue("");
   };
 
-  const submitCreate = () => {
+  const submitCreate = async () => {
     if (newBranchName.trim() === "" || createBranchDraft === null) {
       return;
     }
-    onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
+    const failure = await onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
     setNewBranchName("");
+    setCreateError(null);
   };
 
   const handleDeleteClick = async (name: string) => {
@@ -163,6 +178,7 @@ export function BranchSwitcher({
                   {!b.isCurrent && (
                     <button
                       disabled={isMerging || isRebasing || operationDisabled}
+                      title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                       onClick={() => {
                         onMergeBranch(b.name);
                         closePopoverState();
@@ -171,22 +187,23 @@ export function BranchSwitcher({
                       Merge into current branch
                     </button>
                   )}
-                  {pendingForceFor === b.name ? (
-                    <button
-                      disabled={isRebasing}
-                      onClick={() => {
-                        onDeleteBranch(b.name, true);
-                        setPendingForceFor(null);
-                      }}
-                    >
-                      Force Delete
-                    </button>
-                  ) : (
-                    <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
-                      Delete
-                    </button>
-                  )}
+                  <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
+                    Delete
+                  </button>
                 </Toolbar>
+                {pendingForceFor === b.name && (
+                  <ConfirmDialog
+                    ariaLabel={`Force delete ${b.name}`}
+                    message={<p>Force delete "{b.name}"? This discards any unmerged commits and cannot be undone.</p>}
+                    confirmLabel="Force Delete"
+                    confirmDisabled={isRebasing}
+                    onConfirm={() => {
+                      onDeleteBranch(b.name, true);
+                      setPendingForceFor(null);
+                    }}
+                    onCancel={() => setPendingForceFor(null)}
+                  />
+                )}
               </li>
             ))}
           </ul>
@@ -201,18 +218,31 @@ export function BranchSwitcher({
         <div className={styles.draftForm}>
           <input
             value={newBranchName}
-            onChange={(event) => setNewBranchName(event.target.value)}
+            onChange={(event) => {
+              setNewBranchName(event.target.value);
+              setCreateError(null);
+            }}
             placeholder="New branch name"
             onKeyDown={(event) => {
               if (event.key === "Enter") {
-                submitCreate();
+                void submitCreate();
               }
             }}
           />
-          <button onClick={submitCreate} disabled={newBranchName.trim() === "" || isRebasing}>
+          <button onClick={() => void submitCreate()} disabled={newBranchName.trim() === "" || isRebasing}>
             Create
           </button>
-          <button onClick={onCloseCreateBranchDraft}>Cancel</button>
+          <button
+            onClick={() => {
+              setCreateError(null);
+              onCloseCreateBranchDraft();
+            }}
+          >
+            Cancel
+          </button>
+          {createError !== null && (
+            <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+          )}
         </div>
       )}
       {stashes.length > 0 && (
@@ -222,6 +252,7 @@ export function BranchSwitcher({
               <span className={styles.stashMessage}>{stash.message}</span>
               <button
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation();
                   onApplyStash(stash.index);
@@ -231,6 +262,7 @@ export function BranchSwitcher({
               </button>
               <button
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation();
                   onDropStash(stash.index);

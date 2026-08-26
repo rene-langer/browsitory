@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
+import { InlineError } from "./primitives/InlineError";
 import { Panel } from "./primitives/Panel";
 import styles from "./WorkspaceEditor.module.css";
 
@@ -72,7 +73,7 @@ export function WorkspaceEditor({
 
   return (
     <Panel title={existing === undefined ? "New Workspace" : "Edit Workspace"}>
-      {error !== null && <p role="alert">{error}</p>}
+      {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
       {root === null ? (
         <div className={styles.actions}>
           <button type="button" onClick={handleChooseRoot}>

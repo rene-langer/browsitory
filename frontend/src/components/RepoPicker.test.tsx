@@ -101,6 +101,7 @@ function workspaceProps() {
     workspaces: [],
     workspacesLoading: false,
     workspacesError: null,
+    onDismissWorkspacesError: vi.fn(),
     onCreateWorkspace: vi.fn(),
     onEditWorkspace: vi.fn(),
     onDeleteWorkspace: vi.fn(),
@@ -197,6 +198,7 @@ describe("RepoPicker workspaces", () => {
         workspaces={[workspace]}
         workspacesLoading={false}
         workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
         onCreateWorkspace={vi.fn()}
         onEditWorkspace={vi.fn()}
         onDeleteWorkspace={vi.fn()}
@@ -217,6 +219,7 @@ describe("RepoPicker workspaces", () => {
         workspaces={[workspace]}
         workspacesLoading={false}
         workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
         onCreateWorkspace={vi.fn()}
         onEditWorkspace={vi.fn()}
         onDeleteWorkspace={vi.fn()}
@@ -238,6 +241,7 @@ describe("RepoPicker workspaces", () => {
         workspaces={[workspace]}
         workspacesLoading={false}
         workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
         onCreateWorkspace={vi.fn()}
         onEditWorkspace={vi.fn()}
         onDeleteWorkspace={onDeleteWorkspace}
@@ -260,6 +264,7 @@ describe("RepoPicker workspaces", () => {
         workspaces={[]}
         workspacesLoading={false}
         workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
         onCreateWorkspace={vi.fn()}
         onEditWorkspace={vi.fn()}
         onDeleteWorkspace={vi.fn()}
@@ -287,6 +292,7 @@ describe("RepoPicker workspaces", () => {
         workspaces={[]}
         workspacesLoading={false}
         workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
         onCreateWorkspace={onCreateWorkspace}
         onEditWorkspace={vi.fn()}
         onDeleteWorkspace={vi.fn()}

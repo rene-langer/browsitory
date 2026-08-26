@@ -35,10 +35,11 @@ function renderPanel(
       worktrees={[mainWorktree, linkedWorktree]}
       branches={branches}
       onOpenWorktree={vi.fn()}
-      onCreateWorktree={vi.fn().mockResolvedValue(undefined)}
+      onCreateWorktree={vi.fn().mockResolvedValue(null)}
       onRemoveWorktree={vi.fn().mockResolvedValue(undefined)}
       onPruneWorktrees={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
+      operationDisabledReason={null}
       {...overrides}
     />,
   );
@@ -60,8 +61,26 @@ describe("WorktreePanel", () => {
     ).toBeEnabled();
   });
 
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why its controls are disabled via their title", () => {
+    renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+
+    expect(screen.getByRole("button", { name: "Create worktree" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Open /repos/project" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Prune worktrees" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+  });
+
   it("forwards the name, path, branch, and start point supplied by the creation form", async () => {
-    const onCreateWorktree = vi.fn().mockResolvedValue(undefined);
+    const onCreateWorktree = vi.fn().mockResolvedValue(null);
     renderPanel({ onCreateWorktree });
 
     fireEvent.change(screen.getByLabelText("Worktree name"), {
@@ -84,6 +103,36 @@ describe("WorktreePanel", () => {
       "feature-tree",
       "main",
     );
+  });
+
+  // `useAppState`'s `createWorktree` never rejects — it reports failure by resolving to the
+  // message, the same contract `RemotePanel`'s `addRemote` established. See issue #30/UX-002.
+  it("shows a failed create-worktree's message inline and keeps the entered values", async () => {
+    const onCreateWorktree = vi.fn().mockResolvedValue("worktree path already exists");
+    renderPanel({ onCreateWorktree });
+
+    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
+    fireEvent.change(screen.getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
+    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "feature-tree" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("worktree path already exists");
+    expect(screen.getByLabelText("Worktree name")).toHaveValue("feature-tree");
+  });
+
+  it("clears the create-worktree failure message once the name is edited again", async () => {
+    const onCreateWorktree = vi.fn().mockResolvedValue("worktree path already exists");
+    renderPanel({ onCreateWorktree });
+
+    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
+    fireEvent.change(screen.getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
+    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "feature-tree" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    await screen.findByRole("alert");
+
+    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree-2" } });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("requires an explicit dialog confirmation before removing the selected worktree", async () => {

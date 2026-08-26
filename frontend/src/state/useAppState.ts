@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   BranchInfo,
   CreatePullRequest,
@@ -6,11 +6,9 @@ import type {
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
-  MergeOutcome,
   PullOutcome,
   PullRequestList,
   RebasePlanEntry,
-  RebaseStepResult,
   RemoteAuthMode,
   RemoteInfo,
   ReflogEntry,
@@ -23,35 +21,16 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
-
-function transferFailureMessage(progress: TransferProgress): string {
-  if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
-  if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
-  if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
-  const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
-  if (isPush && progress.errorKind === "NonFastForward") {
-    return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
-  }
-  if (isPush && progress.errorKind === "RejectedRemoteRef") {
-    return "The remote rejected the pushed reference.";
-  }
-  if (isPush) return "Push failed";
-  if (progress.operation === "Pull") return "Pull failed";
-  if (progress.operation === "Fetch") return "Fetch failed";
-  return "Transfer failed";
-}
-
-function credentialFailureMessage(error: unknown): string {
-  // `Error`s are unwrapped rather than stringified: `String(new Error("x"))` is `"Error: x"`, and
-  // that literal prefix is now user-visible — `RemotePanel` renders this message inline under the
-  // Fetch URL field, not just in the generic error banner. Tauri's `invoke` rejects with a bare
-  // string, so the `String` branch stays the common production path.
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
-  if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
-  if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";
-  return message;
-}
+import { useMutationRunner } from "./useMutationRunner";
+import { useBranchActions } from "./useBranchActions";
+import { useForgeActions } from "./useForgeActions";
+import { useMergeRebaseActions } from "./useMergeRebaseActions";
+import { useReflogActions } from "./useReflogActions";
+import { useRemoteTransferActions } from "./useRemoteTransferActions";
+import { useStagingActions } from "./useStagingActions";
+import { useStashActions } from "./useStashActions";
+import { useSubmoduleActions } from "./useSubmoduleActions";
+import { useWorktreeActions } from "./useWorktreeActions";
 
 const GRAPH_LIMIT = 300;
 
@@ -118,11 +97,17 @@ export interface UseAppStateResult {
   unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   commit(message: string): Promise<void>;
-  createBranch(name: string, startPoint: string): Promise<void>;
+  // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
+  // below. Naming a new branch is the one create-form action here with an obvious single trigger
+  // point (the "New Branch…" draft form), so its failure surfaces next to that form instead of
+  // the shared banner (issue #30/UX-002).
+  createBranch(name: string, startPoint: string): Promise<string | null>;
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
-  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
+  // `Promise<string | null>` for the same reason as `createBranch` above — the "Create worktree"
+  // form is its own natural trigger point.
+  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<string | null>;
   removeWorktree(name: string): Promise<void>;
   pruneWorktrees(): Promise<void>;
   initSubmodule(path: string): Promise<void>;
@@ -147,7 +132,8 @@ export interface UseAppStateResult {
   clearCurrentUpstream(): Promise<void>;
   listRemoteBranches(remoteName: string): Promise<string[]>;
   fetchRemote(remoteName: string): Promise<void>;
-  createTag(name: string, message: string | null): Promise<void>;
+  // `Promise<string | null>` for the same reason as `createBranch`/`createWorktree` above.
+  createTag(name: string, message: string | null): Promise<string | null>;
   deleteTag(name: string): Promise<void>;
   pushCurrentBranch(remoteName: string): Promise<void>;
   pushTags(remoteName: string, names: string[]): Promise<void>;
@@ -180,6 +166,9 @@ export interface UseAppStateResult {
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   refresh(): Promise<void>;
+  // Clears `state.error` without waiting for the next successful action of the same kind — the
+  // global banner's dismiss control (issue #30/UX-002). See `App.tsx`'s `RepoWorkspace`.
+  dismissError(): void;
 }
 
 export function useAppState(client: RepoClient, repoPath: string): UseAppStateResult {
@@ -275,533 +264,95 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     }
   }, [client, repoPath]);
 
-  const activeTransferId = useRef<string | null>(null);
-  const transferRequestPending = useRef(false);
+  const { runMutation, runMutationWithOutcome, runMutationWithMessage } = useMutationRunner(refresh, setState);
 
-  useEffect(() => {
-    return client.subscribeTransferProgress((progress) => {
-      if (progress.phase === "Starting") {
-        if (!transferRequestPending.current || activeTransferId.current !== null) return;
-        activeTransferId.current = progress.operationId;
-        setState((prev) => ({ ...prev, transfer: progress }));
-        return;
-      }
+  const {
+    selectRow,
+    stageFile,
+    unstageFile,
+    stageAllFiles,
+    unstageAllFiles,
+    stageHunk,
+    unstageHunk,
+    discardHunk,
+    commit,
+  } = useStagingActions(client, repoPath, runMutation, setState);
 
-      if (progress.operationId !== activeTransferId.current) return;
-
-      if (progress.phase === "Completed") {
-        transferRequestPending.current = false;
-        void refresh().finally(() => {
-          if (activeTransferId.current !== progress.operationId) return;
-          activeTransferId.current = null;
-          setState((prev) => ({ ...prev, transfer: null, pending: false }));
-        });
-        return;
-      }
-
-      if (progress.phase === "Failed") {
-        transferRequestPending.current = false;
-        activeTransferId.current = null;
-        setState((prev) => ({
-          ...prev,
-          transfer: null,
-          error: transferFailureMessage(progress),
-          pending: false,
-        }));
-        return;
-      }
-
-      setState((prev) => ({ ...prev, transfer: progress }));
-    });
-  }, [client, refresh, repoPath]);
-
-  const runMutation = useCallback(
-    async (mutate: () => Promise<void>) => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await mutate();
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-      } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
-      }
-    },
-    [refresh],
+  const {
+    createBranch,
+    switchBranch,
+    deleteBranch,
+    renameBranch,
+    openCreateBranchDraft,
+    closeCreateBranchDraft,
+    setGraphBranchSelection,
+  } = useBranchActions(client, repoPath, runMutation, runMutationWithMessage, setState);
+  const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
+    client,
+    repoPath,
+    runMutation,
+    runMutationWithMessage,
   );
 
-  const runMutationWithOutcome = useCallback(
-    async (mutate: () => Promise<void>): Promise<boolean> => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await mutate();
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-        return true;
-      } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
-        return false;
-      }
-    },
-    [refresh],
+  const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
+
+  const { selectReflogReference, restoreReflogEntry } = useReflogActions(
+    client,
+    repoPath,
+    runMutation,
+    setState,
+    selectedReflogReference,
+    reflogRequestGeneration,
   );
 
-  const selectRow = useCallback((row: SelectedRow) => {
-    setState((prev) => ({ ...prev, selectedRow: row }));
+  const {
+    addRemote,
+    renameRemote,
+    updateRemoteUrls,
+    removeRemote,
+    saveHttpsCredential,
+    forgetHttpsCredential,
+    setRemoteAuthMode,
+    setCurrentUpstream,
+    clearCurrentUpstream,
+    listRemoteBranches,
+    fetchRemote,
+    createTag,
+    deleteTag,
+    pushCurrentBranch,
+    pushTags,
+    pullCurrentUpstream,
+    clearPendingPull,
+  } = useRemoteTransferActions(
+    client,
+    repoPath,
+    refresh,
+    runMutation,
+    runMutationWithMessage,
+    runMutationWithOutcome,
+    setState,
+  );
+
+  const { saveStash, applyStash, dropStash } = useStashActions(client, repoPath, runMutation, state, setState);
+
+  const {
+    mergeBranch,
+    resolveConflict,
+    resolveAddDeleteConflict,
+    abortMerge,
+    openRebasePlanner,
+    openSquashPlanner,
+    closeRebasePlanner,
+    startRebase,
+    rebaseContinue,
+    abortRebase,
+  } = useMergeRebaseActions(client, repoPath, runMutation, setState);
+
+  const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
+    useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const dismissError = useCallback(() => {
+    setState((prev) => ({ ...prev, error: null }));
   }, []);
-
-  const stageFile = useCallback(
-    (path: string) => runMutation(() => client.stageFile(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  const unstageFile = useCallback(
-    (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  // See the `stageAllFiles`/`unstageAllFiles` note in `UseAppStateResult`: one `runMutation`
-  // for the whole batch, not one per path. Sequential rather than `Promise.all` because every
-  // call lands on the same worker thread anyway, and index writes must not interleave.
-  const stageAllFiles = useCallback(
-    (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.stageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
-  );
-  const unstageAllFiles = useCallback(
-    (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.unstageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
-  );
-  const stageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const unstageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const discardHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const commit = useCallback(
-    (message: string) => runMutation(() => client.commit(repoPath, message)),
-    [client, runMutation, repoPath],
-  );
-
-  const createBranch = useCallback(
-    (name: string, startPoint: string) =>
-      runMutation(async () => {
-        await client.createBranch(repoPath, name, startPoint);
-        setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const switchBranch = useCallback(
-    (name: string) =>
-      runMutation(async () => {
-        await client.switchBranch(repoPath, name);
-        setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const deleteBranch = useCallback(
-    (name: string, force: boolean) => runMutation(() => client.deleteBranch(repoPath, name, force)),
-    [client, runMutation, repoPath],
-  );
-  const renameBranch = useCallback(
-    (oldName: string, newName: string) => runMutation(() => client.renameBranch(repoPath, oldName, newName)),
-    [client, runMutation, repoPath],
-  );
-  const createWorktree = useCallback(
-    (name: string, path: string, branch: string, startPoint: string | null) =>
-      runMutation(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
-    [client, runMutation, repoPath],
-  );
-  const removeWorktree = useCallback(
-    (name: string) => runMutation(() => client.removeWorktree(repoPath, name)),
-    [client, runMutation, repoPath],
-  );
-  const pruneWorktrees = useCallback(
-    () => runMutation(() => client.pruneWorktrees(repoPath)),
-    [client, runMutation, repoPath],
-  );
-
-  const initSubmodule = useCallback(
-    (path: string) => runMutation(() => client.initSubmodule(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  const updateSubmodule = useCallback(
-    (path: string, recursive: boolean) =>
-      runMutation(() => client.updateSubmodule(repoPath, path, recursive)),
-    [client, runMutation, repoPath],
-  );
-
-  const selectReflogReference = useCallback(
-    async (reference: string) => {
-      const requestGeneration = ++reflogRequestGeneration.current;
-      try {
-        selectedReflogReference.current = reference;
-        const reflog = await client.getReflog(repoPath, reference);
-        if (
-          requestGeneration !== reflogRequestGeneration.current ||
-          selectedReflogReference.current !== reference
-        ) {
-          return;
-        }
-        setState((prev) => ({
-          ...prev,
-          selectedReflogReference: reference,
-          reflog,
-          error: null,
-        }));
-      } catch (err) {
-        if (
-          requestGeneration === reflogRequestGeneration.current &&
-          selectedReflogReference.current === reference
-        ) {
-          setState((prev) => ({ ...prev, error: String(err) }));
-        }
-      }
-    },
-    [client, repoPath],
-  );
-  const restoreReflogEntry = useCallback(
-    (reference: string, newId: string) => {
-      selectedReflogReference.current = reference;
-      reflogRequestGeneration.current += 1;
-      setState((prev) => ({ ...prev, selectedReflogReference: reference }));
-      return runMutation(() => client.restoreReflogEntry(repoPath, reference, newId));
-    },
-    [client, runMutation, repoPath],
-  );
-
-  // Same pending/refresh/`state.error` behaviour as `runMutation`, but resolves to the failure
-  // message instead of swallowing it — see the `addRemote` entry in `UseAppStateResult`.
-  const addRemote = useCallback(
-    async (name: string, fetchUrl: string, pushUrl: string | null): Promise<string | null> => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await client.addRemote(repoPath, name, fetchUrl, pushUrl);
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-        return null;
-      } catch (err) {
-        const message = credentialFailureMessage(err);
-        setState((prev) => ({ ...prev, error: message, pending: false }));
-        return message;
-      }
-    },
-    [client, refresh, repoPath],
-  );
-  const renameRemote = useCallback(
-    async (oldName: string, newName: string) => {
-      let renamed = false;
-      await runMutation(async () => {
-        await client.renameRemote(repoPath, oldName, newName);
-        renamed = true;
-      });
-      return renamed;
-    },
-    [client, runMutation, repoPath],
-  );
-  const updateRemoteUrls = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) => runMutation(() => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl)),
-    [client, runMutation, repoPath],
-  );
-  const removeRemote = useCallback(
-    (name: string, clearUpstreams: boolean) => runMutation(() => client.removeRemote(repoPath, name, clearUpstreams)),
-    [client, runMutation, repoPath],
-  );
-  const saveHttpsCredential = useCallback(
-    (remoteName: string, username: string, token: string) =>
-      runMutation(() => client.saveHttpsCredential(repoPath, remoteName, username, token)),
-    [client, runMutation, repoPath],
-  );
-  const forgetHttpsCredential = useCallback(
-    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(repoPath, remoteName)),
-    [client, runMutation, repoPath],
-  );
-  const setRemoteAuthMode = useCallback(
-    (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
-      runMutationWithOutcome(() => client.setRemoteAuthMode(repoPath, remoteName, mode, username)),
-    [client, runMutationWithOutcome, repoPath],
-  );
-  const setCurrentUpstream = useCallback(
-    (remoteName: string, remoteBranch: string) =>
-      runMutation(async () => {
-        await client.setCurrentUpstream(repoPath, remoteName, remoteBranch);
-        setState((prev) => ({ ...prev, pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const clearCurrentUpstream = useCallback(
-    () =>
-      runMutation(async () => {
-        await client.clearCurrentUpstream(repoPath);
-        setState((prev) => ({ ...prev, pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const startTransfer = useCallback(
-    async (operation: TransferProgress["operation"], start: () => Promise<string>) => {
-      try {
-        transferRequestPending.current = true;
-        activeTransferId.current = null;
-        setState((prev) => ({ ...prev, pending: true, error: null }));
-        const operationId = await start();
-        if (transferRequestPending.current && activeTransferId.current === null) {
-          activeTransferId.current = operationId;
-          setState((prev) => ({
-            ...prev,
-            transfer: {
-              operationId,
-              operation,
-              phase: "Starting",
-              errorKind: null,
-              current: 0,
-              total: 0,
-              receivedBytes: 0,
-              message: null,
-            },
-          }));
-        }
-      } catch (err) {
-        const message = String(err);
-        if (operation === "Fetch" && (message === "Fetch failed" || message.endsWith(": Fetch failed"))) return;
-        transferRequestPending.current = false;
-        activeTransferId.current = null;
-        setState((prev) => ({ ...prev, error: message, pending: false }));
-      }
-    },
-    [],
-  );
-
-  const fetchRemote = useCallback(
-    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName)),
-    [client, startTransfer, repoPath],
-  );
-  const listRemoteBranches = useCallback(
-    (remoteName: string) => client.listRemoteBranches(repoPath, remoteName),
-    [client, repoPath],
-  );
-
-  const createTag = useCallback(
-    (name: string, message: string | null) => runMutation(() => client.createTag(repoPath, name, message)),
-    [client, runMutation, repoPath],
-  );
-  const deleteTag = useCallback(
-    (name: string) => runMutation(() => client.deleteTag(repoPath, name)),
-    [client, runMutation, repoPath],
-  );
-  const pushCurrentBranch = useCallback(
-    (remoteName: string) =>
-      startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName)),
-    [client, startTransfer, repoPath],
-  );
-  const pushTags = useCallback(
-    (remoteName: string, names: string[]) =>
-      startTransfer("PushTags", () => client.pushTags(repoPath, remoteName, names)),
-    [client, startTransfer, repoPath],
-  );
-
-  const pullCurrentUpstream = useCallback(async () => {
-    try {
-      transferRequestPending.current = true;
-      activeTransferId.current = null;
-      setState((prev) => ({
-        ...prev,
-        pending: true,
-        error: null,
-        pendingPull: null,
-        pullOutcome: null,
-      }));
-      const outcome: PullOutcome = await client.pullCurrentUpstream(repoPath);
-      if (outcome.kind === "Diverged") {
-        setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
-        return;
-      }
-      await refresh();
-      setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
-    } catch (err) {
-      const message = String(err);
-      if (message === "pull failed" || message.endsWith(": pull failed")) return;
-      transferRequestPending.current = false;
-      activeTransferId.current = null;
-      setState((prev) => ({
-        ...prev,
-        transfer: null,
-        pending: false,
-        pendingPull: null,
-        pullOutcome: null,
-        error: message.includes("cannot pull with a dirty worktree")
-          ? "Commit or stash your changes before pulling."
-          : message,
-      }));
-    }
-  }, [client, refresh, repoPath]);
-  const clearPendingPull = useCallback(() => {
-    setState((prev) => ({ ...prev, pendingPull: null }));
-  }, []);
-
-  const openCreateBranchDraft = useCallback((startPoint: string) => {
-    setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
-  }, []);
-  const closeCreateBranchDraft = useCallback(() => {
-    setState((prev) => ({ ...prev, createBranchDraft: null }));
-  }, []);
-
-  const saveStash = useCallback(
-    () => runMutation(() => client.saveStash(repoPath)),
-    [client, runMutation, repoPath],
-  );
-  const applyStash = useCallback(
-    (index: number) => runMutation(() => client.applyStash(repoPath, index)),
-    [client, runMutation, repoPath],
-  );
-  const dropStash = useCallback(
-    (index: number) =>
-      runMutation(async () => {
-        // Read the about-to-be-dropped stash's commitId before calling the client: if it's
-        // the one currently selected, `DiffPane` would otherwise keep showing a diff for a
-        // commit that's about to become unreachable until GC.
-        const droppedCommitId = state.stashes[index]?.commitId;
-        const dropsSelectedStash =
-          droppedCommitId !== undefined &&
-          typeof state.selectedRow === "object" &&
-          state.selectedRow.commitId === droppedCommitId;
-        await client.dropStash(repoPath, index);
-        if (dropsSelectedStash) {
-          setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
-        }
-      }),
-    [client, runMutation, state, repoPath],
-  );
-
-  const mergeBranch = useCallback(
-    (branchName: string): Promise<void> =>
-      runMutation(async () => {
-        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName);
-        void outcome;
-      }),
-    [client, runMutation, repoPath],
-  );
-  const resolveConflict = useCallback(
-    (path: string, resolvedContent: string) =>
-      runMutation(() => client.resolveConflict(repoPath, path, resolvedContent)),
-    [client, runMutation, repoPath],
-  );
-  const resolveAddDeleteConflict = useCallback(
-    (path: string, choice: FileConflictChoice) =>
-      runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice)),
-    [client, runMutation, repoPath],
-  );
-  const abortMerge = useCallback(
-    () => runMutation(() => client.abortMerge(repoPath)),
-    [client, runMutation, repoPath],
-  );
-
-  const openRebasePlanner = useCallback((commitId: string) => {
-    setState((prev) => ({ ...prev, rebaseOnto: commitId, squashPreset: null }));
-  }, []);
-  const openSquashPlanner = useCallback((ontoId: string, squashIds: string[]) => {
-    setState((prev) => ({ ...prev, rebaseOnto: ontoId, squashPreset: new Set(squashIds) }));
-  }, []);
-  const closeRebasePlanner = useCallback(() => {
-    setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
-  }, []);
-
-  const startRebase = useCallback(
-    (onto: string, plan: RebasePlanEntry[]): Promise<void> =>
-      runMutation(async () => {
-        const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
-        void result;
-        setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const rebaseContinue = useCallback(
-    (): Promise<void> =>
-      runMutation(async () => {
-        const result: RebaseStepResult = await client.rebaseContinue(repoPath);
-        void result;
-      }),
-    [client, runMutation, repoPath],
-  );
-  const abortRebase = useCallback(
-    () => runMutation(() => client.abortRebase(repoPath)),
-    [client, runMutation, repoPath],
-  );
-
-  const listPullRequests = useCallback(
-    async (remoteName: string, account: string) => {
-      try {
-        const result = await client.listPullRequests(repoPath, remoteName, account);
-        setState((prev) => ({
-          ...prev,
-          pullRequests: { ...prev.pullRequests, [remoteName]: result },
-          error: null,
-        }));
-      } catch (err) {
-        // Drop this remote's entry (rather than leaving whatever was there before) so a failed
-        // re-list can't leave stale, possibly-successful-looking rows on screen under this
-        // remote's heading. Other remotes' entries are untouched — a failure listing remote B
-        // must never affect what's shown for remote A.
-        setState((prev) => {
-          const rest = { ...prev.pullRequests };
-          delete rest[remoteName];
-          return { ...prev, pullRequests: rest, error: String(err) };
-        });
-      }
-    },
-    [client, repoPath],
-  );
-  const saveForgeToken = useCallback(
-    (provider: ForgeProvider, account: string, token: string) =>
-      runMutation(() => client.saveForgeToken(repoPath, provider, account, token)),
-    [client, runMutation, repoPath],
-  );
-  const forgetForgeToken = useCallback(
-    (provider: ForgeProvider, account: string) =>
-      runMutation(() => client.forgetForgeToken(repoPath, provider, account)),
-    [client, runMutation, repoPath],
-  );
-  const createPullRequest = useCallback(
-    (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
-      runMutationWithOutcome(async () => {
-        const created = await client.createPullRequest(repoPath, remoteName, account, pullRequest);
-        setState((prev) => {
-          const existing = prev.pullRequests[remoteName];
-          const updated: PullRequestList = {
-            pullRequests: [created, ...(existing?.pullRequests ?? [])],
-            truncated: existing?.truncated ?? false,
-          };
-          return {
-            ...prev,
-            pullRequests: { ...prev.pullRequests, [remoteName]: updated },
-          };
-        });
-      }),
-    [client, runMutationWithOutcome, repoPath],
-  );
-  const openExternalUrl = useCallback(
-    (url: string) => client.openExternalUrl(url),
-    [client],
-  );
-  const setGraphBranchSelection = useCallback(
-    (selectedBranches: string[]) =>
-      runMutation(() => client.setGraphBranchSelection(repoPath, selectedBranches)),
-    [client, runMutation, repoPath],
-  );
 
   return {
     state,
@@ -864,5 +415,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openExternalUrl,
     setGraphBranchSelection,
     refresh,
+    dismissError,
   };
 }

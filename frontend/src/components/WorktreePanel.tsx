@@ -2,6 +2,8 @@ import { useState } from "react";
 import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
 
@@ -13,36 +15,48 @@ export function WorktreePanel({
   onRemoveWorktree,
   onPruneWorktrees,
   operationDisabled,
+  operationDisabledReason,
 }: {
   worktrees: WorktreeInfo[];
   branches: BranchInfo[];
   onOpenWorktree: (path: string) => Promise<void>;
+  // `null` = created; a string = the failure message to show inline next to the form. See
+  // `useAppState.ts`'s `createWorktree` (issue #30/UX-002).
   onCreateWorktree: (
     name: string,
     path: string,
     branch: string,
     startPoint: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   onRemoveWorktree: (name: string) => Promise<void>;
   onPruneWorktrees: () => Promise<void>;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
+  // disables (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [branch, setBranch] = useState("");
   const [startPoint, setStartPoint] = useState("");
   const [removeConfirmation, setRemoveConfirmation] = useState<WorktreeInfo | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const createWorktree = async (event: React.FormEvent) => {
     event.preventDefault();
     const values = [name.trim(), path.trim(), branch.trim()];
     if (values.some((value) => value === "")) return;
-    await onCreateWorktree(
+    const failure = await onCreateWorktree(
       values[0],
       values[1],
       values[2],
       startPoint.trim() || null,
     );
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
+    setCreateError(null);
     setName("");
     setPath("");
     setBranch("");
@@ -60,7 +74,10 @@ export function WorktreePanel({
           Worktree name
           <input
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              setCreateError(null);
+            }}
           />
         </label>
         <label className={styles.label}>
@@ -90,8 +107,15 @@ export function WorktreePanel({
             onChange={(event) => setStartPoint(event.target.value)}
           />
         </label>
+        {createError !== null && (
+          <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+        )}
         <Toolbar>
-          <button type="submit" disabled={operationDisabled}>
+          <button
+            type="submit"
+            disabled={operationDisabled}
+            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
             Create worktree
           </button>
         </Toolbar>
@@ -109,6 +133,7 @@ export function WorktreePanel({
               <button
                 type="button"
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={() => void onOpenWorktree(worktree.path)}
               >
                 Open {worktree.path}
@@ -116,6 +141,7 @@ export function WorktreePanel({
               <button
                 type="button"
                 disabled={operationDisabled || worktree.isMain}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={() => removeWorktree(worktree)}
               >
                 Remove {worktree.path}
@@ -128,25 +154,22 @@ export function WorktreePanel({
         <button
           type="button"
           disabled={operationDisabled}
+          title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
           onClick={() => void onPruneWorktrees()}
         >
           Prune worktrees
         </button>
       </Toolbar>
       {removeConfirmation !== null && (
-        <dialog open aria-label={`Remove worktree ${removeConfirmation.path}`}>
-          <p>Remove worktree at {removeConfirmation.path}?</p>
-          <button
-            type="button"
-            disabled={operationDisabled}
-            onClick={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
-          >
-            Remove worktree
-          </button>
-          <button type="button" onClick={() => setRemoveConfirmation(null)}>
-            Cancel
-          </button>
-        </dialog>
+        <ConfirmDialog
+          ariaLabel={`Remove worktree ${removeConfirmation.path}`}
+          message={<p>Remove worktree at {removeConfirmation.path}?</p>}
+          confirmLabel="Remove worktree"
+          confirmDisabled={operationDisabled}
+          confirmTitle={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          onConfirm={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
+          onCancel={() => setRemoveConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./TagPanel.module.css";
 
@@ -12,13 +14,19 @@ export function TagPanel({
   onDelete,
   onPush,
   pushDisabled,
+  operationDisabledReason,
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
-  onCreate: (name: string, message: string | null) => Promise<void>;
+  // `null` = created; a string = the failure message to show inline next to the form. See
+  // `useAppState.ts`'s `createTag` (issue #30/UX-002).
+  onCreate: (name: string, message: string | null) => Promise<string | null>;
   onDelete: (name: string) => Promise<void>;
   onPush: (remoteName: string, names: string[]) => Promise<void>;
   pushDisabled: boolean;
+  // Human-readable reason `pushDisabled` is true, shown as a `title` on the buttons it disables
+  // (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"lightweight" | "annotated">("lightweight");
@@ -28,6 +36,7 @@ export function TagPanel({
   const [previousRemotes, setPreviousRemotes] = useState(remotes);
   const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   if (previousRemotes !== remotes) {
     setPreviousRemotes(remotes);
@@ -46,7 +55,12 @@ export function TagPanel({
     const trimmedName = name.trim();
     const trimmedMessage = message.trim();
     if (trimmedName === "" || (kind === "annotated" && trimmedMessage === "")) return;
-    await onCreate(trimmedName, kind === "annotated" ? trimmedMessage : null);
+    const failure = await onCreate(trimmedName, kind === "annotated" ? trimmedMessage : null);
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
+    setCreateError(null);
     setName("");
     setMessage("");
   };
@@ -60,11 +74,14 @@ export function TagPanel({
   return (
     <AccordionSection title="Tags" storageKey="sidebar-tags" icon={Tag} count={tags.length}>
       <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
-        <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label className={styles.label}>Tag name<input value={name} onChange={(event) => { setName(event.target.value); setCreateError(null); }} /></label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
         {kind === "annotated" && <label className={styles.label}>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
-        <button type="submit" disabled={pushDisabled}>Create tag</button>
+        {createError !== null && (
+          <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+        )}
+        <button type="submit" disabled={pushDisabled} title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}>Create tag</button>
       </form>
 
       {tags.length === 0 ? <p>No local tags.</p> : (
@@ -75,7 +92,14 @@ export function TagPanel({
               <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
               <Toolbar>
-                <button type="button" disabled={pushDisabled} onClick={() => setDeleteConfirmation(tag.name)}>Delete {tag.name}</button>
+                <button
+                  type="button"
+                  disabled={pushDisabled}
+                  title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  onClick={() => setDeleteConfirmation(tag.name)}
+                >
+                  Delete {tag.name}
+                </button>
               </Toolbar>
             </li>
           ))}
@@ -86,22 +110,45 @@ export function TagPanel({
         <h3 id="push-tags-heading" className={styles.sectionHeading}>Push tags</h3>
         <label className={styles.label}>
           Remote
-          <select value={remoteName} onChange={(event) => setRemoteName(event.target.value)} disabled={pushDisabled || remotes.length === 0}>
+          <select
+            value={remoteName}
+            onChange={(event) => setRemoteName(event.target.value)}
+            disabled={pushDisabled || remotes.length === 0}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
             {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
           </select>
         </label>
         <Toolbar>
-          <button type="button" disabled={pushDisabled || remoteName === "" || selected.length === 0} onClick={() => void onPush(remoteName, selected)}>Push selected tags</button>
-          <button type="button" disabled={pushDisabled || remoteName === ""} onClick={() => void onPush(remoteName, [])}>Push all tags</button>
+          <button
+            type="button"
+            disabled={pushDisabled || remoteName === "" || selected.length === 0}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onPush(remoteName, selected)}
+          >
+            Push selected tags
+          </button>
+          <button
+            type="button"
+            disabled={pushDisabled || remoteName === ""}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onPush(remoteName, [])}
+          >
+            Push all tags
+          </button>
         </Toolbar>
       </section>
 
       {deleteConfirmation !== null && (
-        <dialog open aria-label={`Delete local tag ${deleteConfirmation}`}>
-          <p>Delete local tag {deleteConfirmation}?</p>
-          <button type="button" disabled={pushDisabled} onClick={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}>Delete tag</button>
-          <button type="button" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
-        </dialog>
+        <ConfirmDialog
+          ariaLabel={`Delete local tag ${deleteConfirmation}`}
+          message={`Delete local tag ${deleteConfirmation}?`}
+          confirmLabel="Delete tag"
+          confirmDisabled={pushDisabled}
+          confirmTitle={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          onConfirm={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
+          onCancel={() => setDeleteConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );
