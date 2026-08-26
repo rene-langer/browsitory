@@ -75,7 +75,7 @@ would expand this pass well beyond "make predictable mutations feel instant."
 | `useBranchActions` | `createBranch`, `deleteBranch`, `renameBranch` |
 | `useWorktreeActions` | `createWorktree`, `removeWorktree` |
 | `useRemoteTransferActions` | `addRemote`, `removeRemote`, `renameRemote`, `updateRemoteUrls`, `setCurrentUpstream`, `clearCurrentUpstream` |
-| `useStashActions` | `saveStash`, `dropStash` |
+| `useStashActions` | `dropStash` |
 | `useRemoteTransferActions` (tags) | `createTag`, `deleteTag` |
 
 **Tier 2 — status toggle** (flip `StatusEntry.staged` on an existing entry in `state.status`):
@@ -95,6 +95,12 @@ no caller-facing signature changes.
   update, but stash *apply*'s effect on `state.status` (and potentially conflicts) is unknown
   until the backend actually applies it. Only a true no-op-if-wrong optimistic slice is worth
   doing; faking the status-list result isn't.
+- **`saveStash`** — unlike every other Tier-1 create action, there's no way to construct a
+  non-misleading placeholder `StashEntry`: `message` is backend-auto-generated (not a user
+  input, unlike `createTag`'s message) and `commitId` (used as `BranchSwitcher`'s React `key` for
+  the row) is a brand-new commit oid the backend computes — both entirely unknowable
+  client-side. `dropStash` stays in scope since it only needs the already-known `index` to
+  filter the existing entry out, no synthesis required.
 - **Hunk-level `stageHunk`/`unstageHunk`/`discardHunk`** — diff content isn't held in `AppState`
   at all; `DiffPane` fetches hunks on demand via IPC. An optimistic hunk change would need new
   local state in `DiffPane` (or lifting diffs into shared state), not the
