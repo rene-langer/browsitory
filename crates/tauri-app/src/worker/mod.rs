@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -21,7 +20,7 @@ use git_core::worktree::WorktreeInfo;
 
 #[cfg(not(feature = "forge-fixture-override"))]
 use crate::credentials::KeyringCredentialStore;
-use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialProvider};
+use crate::credentials::{CredentialService, CredentialStore};
 use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
@@ -31,13 +30,12 @@ mod forge;
 mod merge;
 mod rebase;
 mod reflog;
+mod remote;
 mod stash;
 mod status;
 mod submodule;
 mod tag;
 mod worktree;
-
-static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TransferEvent {
@@ -51,22 +49,6 @@ pub(crate) enum TransferEvent {
         operation: TransferOperation,
         error: Option<TransferErrorKind>,
     },
-}
-
-struct ChannelReporter {
-    events: Sender<TransferEvent>,
-    operation_id: String,
-}
-
-impl git_core::remote::TransferReporter for ChannelReporter {
-    fn report(&mut self, progress: git_core::remote::TransferProgress) {
-        let _ = self.events.send(TransferEvent::Progress(
-            git_core::remote::TransferProgress {
-                operation_id: self.operation_id.clone(),
-                ..progress
-            },
-        ));
-    }
 }
 
 pub(crate) enum Command {
@@ -538,158 +520,67 @@ impl Worker {
                         new_id,
                         reply,
                     } => reflog::restore(&repo, reference, new_id, reply),
-                    Command::ListRemotes { reply } => {
-                        let result =
-                            git_core::remote::list_remotes(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListRemotes { reply } => remote::list(&repo, reply),
                     Command::ListRemoteBranches { remote_name, reply } => {
-                        let result = git_core::remote::list_remote_branches(&repo, &remote_name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        remote::list_branches(&repo, remote_name, reply)
                     }
-                    Command::GetCurrentUpstream { reply } => {
-                        let result =
-                            git_core::remote::current_upstream(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::GetCurrentUpstream { reply } => remote::current_upstream(&repo, reply),
                     Command::AddRemote {
                         name,
                         fetch_url,
                         push_url,
                         reply,
-                    } => {
-                        let result = git_core::remote::add_remote(
-                            &repo,
-                            &name,
-                            &fetch_url,
-                            push_url.as_deref(),
-                        )
-                        .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => remote::add(&repo, name, fetch_url, push_url, reply),
                     Command::RenameRemote {
                         old_name,
                         new_name,
                         reply,
-                    } => {
-                        let result = git_core::remote::rename_remote(&repo, &old_name, &new_name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => remote::rename(&repo, old_name, new_name, reply),
                     Command::UpdateRemoteUrls {
                         name,
                         fetch_url,
                         push_url,
                         reply,
-                    } => {
-                        let result = git_core::remote::update_remote_urls(
-                            &repo,
-                            &name,
-                            &fetch_url,
-                            push_url.as_deref(),
-                        )
-                        .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => remote::update_urls(&repo, name, fetch_url, push_url, reply),
                     Command::GetRemoteUpstreams { name, reply } => {
-                        let result = git_core::remote::remote_upstreams(&repo, &name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        remote::upstreams(&repo, name, reply)
                     }
                     Command::GetRemoteAuthMode { name, reply } => {
-                        let result =
-                            git_core::remote::remote_auth_profile(&repo, &name).map_err(|_| {
-                                "could not read remote authentication settings".to_string()
-                            });
-                        let _ = reply.send(result);
+                        remote::auth_mode(&repo, name, reply)
                     }
                     Command::SaveHttpsCredential {
                         remote_name,
                         username,
                         token,
                         reply,
-                    } => {
-                        let result = git_core::remote::list_remotes(&repo)
-                            .map_err(|_| "could not find remote".to_string())
-                            .and_then(|remotes| {
-                                remotes
-                                    .into_iter()
-                                    .find(|remote| remote.name == remote_name)
-                                    .ok_or_else(|| "could not find remote".to_string())
-                            })
-                            .and_then(|remote| {
-                                credential_service
-                                    .save_https(&remote.fetch_url, &username, &token)
-                                    .map_err(|_| "credential keychain failure".to_string())
-                            });
-                        let _ = reply.send(result);
-                    }
+                    } => remote::save_https(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        username,
+                        token,
+                        reply,
+                    ),
                     Command::ForgetHttpsCredential { remote_name, reply } => {
-                        let result = (|| {
-                            let profile =
-                                git_core::remote::remote_auth_profile(&repo, &remote_name)
-                                    .map_err(|_| {
-                                        "could not read remote authentication settings".to_string()
-                                    })?;
-                            let Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) =
-                                profile
-                            else {
-                                return Ok(());
-                            };
-                            let remote = git_core::remote::list_remotes(&repo)
-                                .map_err(|_| "could not find remote".to_string())?
-                                .into_iter()
-                                .find(|remote| remote.name == remote_name)
-                                .ok_or_else(|| "could not find remote".to_string())?;
-                            credential_service
-                                .forget_https(&remote.fetch_url, &username)
-                                .map_err(|_| "credential keychain failure".to_string())
-                        })();
-                        let _ = reply.send(result);
+                        remote::forget_https(&repo, &credential_service, remote_name, reply)
                     }
                     Command::SetRemoteAuthMode {
                         remote_name,
                         mode,
                         reply,
-                    } => {
-                        let result =
-                            git_core::remote::set_remote_auth_profile(&repo, &remote_name, mode)
-                                .map_err(|_| {
-                                    "could not configure remote authentication".to_string()
-                                });
-                        let _ = reply.send(result);
-                    }
+                    } => remote::set_auth_mode(&repo, remote_name, mode, reply),
                     Command::RemoveRemote {
                         name,
                         clear_upstreams,
                         reply,
-                    } => {
-                        let result = (if clear_upstreams {
-                            git_core::remote::remove_remote_and_clear_upstreams(&repo, &name)
-                        } else {
-                            git_core::remote::remove_remote(&repo, &name)
-                        })
-                        .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => remote::remove(&repo, name, clear_upstreams, reply),
                     Command::SetCurrentUpstream {
                         remote_name,
                         remote_branch,
                         reply,
-                    } => {
-                        let result = git_core::remote::set_current_upstream(
-                            &repo,
-                            &remote_name,
-                            &remote_branch,
-                        )
-                        .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => remote::set_current_upstream(&repo, remote_name, remote_branch, reply),
                     Command::ClearCurrentUpstream { reply } => {
-                        let result = git_core::remote::clear_current_upstream(&repo)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        remote::clear_current_upstream(&repo, reply)
                     }
                     Command::ListTags { reply } => tag::list(&repo, reply),
                     Command::CreateTag {
@@ -738,149 +629,47 @@ impl Worker {
                         operation_id,
                         events,
                         reply,
-                    } => {
-                        let _ = events.send(TransferEvent::Started {
-                            operation_id: operation_id.clone(),
-                            operation: TransferOperation::Fetch,
-                        });
-                        let _ = reply.send(Ok(operation_id.clone()));
-
-                        let profile = git_core::remote::remote_auth_profile(&repo, &remote_name);
-                        let mut reporter = ChannelReporter {
-                            events: events.clone(),
-                            operation_id: operation_id.clone(),
-                        };
-                        let result = profile.and_then(|profile| {
-                            let mut credentials =
-                                RemoteCredentialProvider::new(&credential_service, profile);
-                            git_core::remote::fetch_remote(
-                                &repo,
-                                &remote_name,
-                                operation_id.clone(),
-                                &mut credentials,
-                                &mut reporter,
-                            )
-                        });
-                        let _ = events.send(TransferEvent::Completed {
-                            operation_id,
-                            operation: TransferOperation::Fetch,
-                            error: result.err().map(|error| error.transfer_error_kind()),
-                        });
-                    }
+                    } => remote::fetch(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        operation_id,
+                        events,
+                        reply,
+                    ),
                     Command::PullCurrentUpstream {
                         operation_id,
                         events,
                         reply,
-                    } => {
-                        let _ = events.send(TransferEvent::Started {
-                            operation_id: operation_id.clone(),
-                            operation: TransferOperation::Pull,
-                        });
-                        let result = (|| -> Result<PullOutcome, git_core::remote::RemoteError> {
-                            let upstream = git_core::remote::current_upstream(&repo)?
-                                .ok_or(git_core::remote::RemoteError::NoUpstream)?;
-                            let mut reporter = ChannelReporter {
-                                events: events.clone(),
-                                operation_id: operation_id.clone(),
-                            };
-                            let profile = git_core::remote::remote_auth_profile(
-                                &repo,
-                                &upstream.remote_name,
-                            )?;
-                            let mut credentials =
-                                RemoteCredentialProvider::new(&credential_service, profile);
-                            git_core::remote::fetch_remote(
-                                &repo,
-                                &upstream.remote_name,
-                                operation_id.clone(),
-                                &mut credentials,
-                                &mut reporter,
-                            )?;
-                            let upstream = git_core::remote::current_upstream(&repo)?
-                                .ok_or(git_core::remote::RemoteError::NoUpstream)?;
-                            git_core::remote::pull_after_fetch(
-                                &repo,
-                                &upstream.remote_name,
-                                &upstream.remote_branch,
-                            )
-                        })();
-                        let completed_error = result
-                            .as_ref()
-                            .err()
-                            .map(|error| error.transfer_error_kind());
-                        let _ = reply.send(result.map_err(|_| "pull failed".to_string()));
-                        let _ = events.send(TransferEvent::Completed {
-                            operation_id,
-                            operation: TransferOperation::Pull,
-                            error: completed_error,
-                        });
-                    }
+                    } => remote::pull(&repo, &credential_service, operation_id, events, reply),
                     Command::PushCurrentBranch {
                         remote_name,
                         operation_id,
                         events,
                         reply,
-                    } => {
-                        let _ = events.send(TransferEvent::Started {
-                            operation_id: operation_id.clone(),
-                            operation: TransferOperation::PushBranch,
-                        });
-                        let _ = reply.send(Ok(operation_id.clone()));
-                        let mut reporter = ChannelReporter {
-                            events: events.clone(),
-                            operation_id: operation_id.clone(),
-                        };
-                        let result = git_core::remote::remote_auth_profile(&repo, &remote_name)
-                            .and_then(|profile| {
-                                let mut credentials =
-                                    RemoteCredentialProvider::new(&credential_service, profile);
-                                git_core::remote::push_current_branch(
-                                    &repo,
-                                    &remote_name,
-                                    &mut credentials,
-                                    &mut reporter,
-                                )
-                            });
-                        let _ = events.send(TransferEvent::Completed {
-                            operation_id,
-                            operation: TransferOperation::PushBranch,
-                            error: result.err().map(|error| error.transfer_error_kind()),
-                        });
-                    }
+                    } => remote::push_branch(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        operation_id,
+                        events,
+                        reply,
+                    ),
                     Command::PushTags {
                         remote_name,
                         names,
                         operation_id,
                         events,
                         reply,
-                    } => {
-                        let _ = events.send(TransferEvent::Started {
-                            operation_id: operation_id.clone(),
-                            operation: TransferOperation::PushTags,
-                        });
-                        let _ = reply.send(Ok(operation_id.clone()));
-                        let mut reporter = ChannelReporter {
-                            events: events.clone(),
-                            operation_id: operation_id.clone(),
-                        };
-                        let result = git_core::remote::remote_auth_profile(&repo, &remote_name)
-                            .and_then(|profile| {
-                                let mut credentials =
-                                    RemoteCredentialProvider::new(&credential_service, profile);
-                                git_core::remote::push_tags(
-                                    &repo,
-                                    &remote_name,
-                                    &names,
-                                    &mut credentials,
-                                    &mut reporter,
-                                )
-                            });
-                        let _ = events.send(TransferEvent::Completed {
-                            operation_id,
-                            operation: TransferOperation::PushTags,
-                            error: result.err().map(|error| error.transfer_error_kind()),
-                        });
-                    }
+                    } => remote::push_tags(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        names,
+                        operation_id,
+                        events,
+                        reply,
+                    ),
                     Command::DetectForgeRepository { reply } => forge::detect(&repo, reply),
                     Command::SaveForgeToken {
                         provider,
@@ -931,296 +720,6 @@ impl Worker {
         WorkerHandle {
             tx: self.tx.clone(),
         }
-    }
-}
-
-impl WorkerHandle {
-    pub(crate) fn fetch_remote(
-        &self,
-        remote_name: String,
-        events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        let operation_id = format!("fetch-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
-        self.tx
-            .send(Command::FetchRemote {
-                remote_name,
-                operation_id,
-                events,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub(crate) fn pull_current_upstream(
-        &self,
-        events: Sender<TransferEvent>,
-    ) -> Result<PullOutcome, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        let operation_id = format!("pull-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
-        self.tx
-            .send(Command::PullCurrentUpstream {
-                operation_id,
-                events,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub(crate) fn push_current_branch(
-        &self,
-        remote_name: String,
-        events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
-        self.tx
-            .send(Command::PushCurrentBranch {
-                remote_name,
-                operation_id,
-                events,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub(crate) fn push_tags(
-        &self,
-        remote_name: String,
-        names: Vec<String>,
-        events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
-        self.tx
-            .send(Command::PushTags {
-                remote_name,
-                names,
-                operation_id,
-                events,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListRemotes { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListRemoteBranches {
-                remote_name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetRemoteUpstreams {
-                name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_remote_auth_mode(
-        &self,
-        name: String,
-    ) -> Result<Option<git_core::remote::RemoteAuthMode>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetRemoteAuthMode {
-                name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn save_https_credential(
-        &self,
-        remote_name: String,
-        username: String,
-        token: String,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SaveHttpsCredential {
-                remote_name,
-                username,
-                token,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn forget_https_credential(&self, remote_name: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ForgetHttpsCredential {
-                remote_name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn set_remote_auth_mode(
-        &self,
-        remote_name: String,
-        mode: git_core::remote::RemoteAuthMode,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SetRemoteAuthMode {
-                remote_name,
-                mode,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn add_remote(
-        &self,
-        name: String,
-        fetch_url: String,
-        push_url: Option<String>,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::AddRemote {
-                name,
-                fetch_url,
-                push_url,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn rename_remote(&self, old_name: String, new_name: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RenameRemote {
-                old_name,
-                new_name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn update_remote_urls(
-        &self,
-        name: String,
-        fetch_url: String,
-        push_url: Option<String>,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::UpdateRemoteUrls {
-                name,
-                fetch_url,
-                push_url,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn remove_remote(&self, name: String, clear_upstreams: bool) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RemoveRemote {
-                name,
-                clear_upstreams,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn set_current_upstream(
-        &self,
-        remote_name: String,
-        remote_branch: String,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SetCurrentUpstream {
-                remote_name,
-                remote_branch,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn clear_current_upstream(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ClearCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 }
 
