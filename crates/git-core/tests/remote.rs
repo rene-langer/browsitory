@@ -437,6 +437,63 @@ fn fetch_updates_tracking_ref_and_reports_owned_progress() {
 }
 
 #[test]
+fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
+    // A bad transport must surface as an error, not panic or silently create refs.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let missing_dir = tempfile::TempDir::new().unwrap();
+    let missing_path = missing_dir.path().join("does-not-exist");
+    repo.remote("origin", missing_path.to_str().unwrap())
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    let result = fetch_remote(
+        &repo,
+        "origin",
+        "fetch-unreachable".to_string(),
+        &mut NoCredentials,
+        &mut reporter,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert!(repo.find_reference("refs/remotes/origin/main").is_err());
+}
+
+#[test]
+fn push_to_an_unreachable_remote_fails_without_moving_local_head() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let missing_dir = tempfile::TempDir::new().unwrap();
+    let missing_path = missing_dir.path().join("does-not-exist");
+    repo.remote("origin", missing_path.to_str().unwrap())
+        .unwrap();
+    let local_head = repo.head().unwrap().target();
+    let mut reporter = VecReporter::default();
+
+    let result = push_current_branch(&repo, "origin", &mut NoCredentials, &mut reporter);
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert_eq!(repo.head().unwrap().target(), local_head);
+}
+
+#[test]
+fn pull_fails_when_the_remote_branch_was_never_fetched() {
+    // No refs/remotes/origin/main exists yet, so there is nothing to compare against.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    add_remote(&repo, "origin", "file:///tmp/does-not-matter.git", None).unwrap();
+    let local_head = repo.head().unwrap().target();
+
+    let result = pull_after_fetch(&repo, "origin", "main");
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert_eq!(repo.head().unwrap().target(), local_head);
+}
+
+#[test]
 fn remote_crud_and_upstream_round_trip() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "README.md", "initial commit\n");

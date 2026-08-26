@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -24,6 +24,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       isMerging={false}
       isRebasing={false}
       operationDisabled={false}
+      operationDisabledReason={null}
       stashes={[]}
       onSelectRow={vi.fn()}
       onApplyStash={vi.fn()}
@@ -63,8 +64,8 @@ describe("BranchSwitcher", () => {
     expect(onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
-  it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", () => {
-    const onCreateBranch = vi.fn();
+  it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue(null);
     renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
 
     fireEvent.change(screen.getByPlaceholderText("New branch name"), {
@@ -73,6 +74,55 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByText("Create"));
 
     expect(onCreateBranch).toHaveBeenCalledWith("my-feature", "abc123");
+    await waitFor(() => expect(screen.getByPlaceholderText("New branch name")).toHaveValue(""));
+  });
+
+  // `useAppState`'s `createBranch` never rejects — it reports failure by resolving to the
+  // message (see its comment there), the same contract `RemotePanel`'s `addRemote` already
+  // established. See issue #30/UX-002.
+  it("shows a failed create-branch's message next to the draft form and keeps the entered name", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("branch already exists");
+    expect(screen.getByPlaceholderText("New branch name")).toHaveValue("feature");
+  });
+
+  it("clears the create-branch failure message once the name is edited again", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await screen.findByRole("alert");
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature-2" },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("dismissing the create-branch failure message clears it", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("Cancel in the create form calls onCloseCreateBranchDraft", () => {
@@ -117,7 +167,7 @@ describe("BranchSwitcher", () => {
     expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feature"]);
   });
 
-  it("clicking Delete once calls onDeleteBranch with force=false; a second click (still listed) forces it", async () => {
+  it("clicking Delete once calls onDeleteBranch with force=false; confirming the force-delete dialog forces it", async () => {
     const onDeleteBranch = vi.fn().mockResolvedValue(undefined);
     renderSwitcher({ onDeleteBranch });
 
@@ -129,10 +179,28 @@ describe("BranchSwitcher", () => {
     expect(onDeleteBranch).toHaveBeenCalledWith("feature", false);
 
     // Since `branches` prop is unchanged (delete didn't actually remove it, as this fixture's
-    // parent never updates the prop), the row now shows "Force Delete" instead of "Delete".
-    fireEvent.click(await screen.findByText("Force Delete"));
+    // parent never updates the prop), a force-delete confirmation dialog opens for "feature".
+    const dialog = await screen.findByRole("dialog", { name: "Force delete feature" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Force Delete" }));
 
     expect(onDeleteBranch).toHaveBeenCalledWith("feature", true);
+  });
+
+  it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
+    const onDeleteBranch = vi.fn().mockResolvedValue(undefined);
+    renderSwitcher({ onDeleteBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    fireEvent.click(screen.getAllByText("Delete")[1]);
+    await Promise.resolve();
+
+    const dialog = await screen.findByRole("dialog", { name: "Force delete feature" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(onDeleteBranch).toHaveBeenCalledTimes(1);
+    expect(onDeleteBranch).not.toHaveBeenCalledWith("feature", true);
+    expect(screen.queryByRole("dialog", { name: "Force delete feature" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Delete").length).toBe(2);
   });
 
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {
@@ -234,6 +302,18 @@ describe("BranchSwitcher", () => {
     expect(screen.getByText("Merge into current branch")).toBeDisabled();
   });
 
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why the merge action is disabled via its title", () => {
+    renderSwitcher({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByText("Merge into current branch")).toHaveAttribute(
+      "title",
+      "A rebase is in progress.",
+    );
+  });
+
   it("disables every branch-mutating action while a rebase is in progress", () => {
     // A rebase runs on a detached HEAD and only moves the original branch ref at the very end,
     // so switching/creating/deleting/renaming a branch mid-pause silently retargets an unrelated
@@ -322,6 +402,17 @@ describe("BranchSwitcher", () => {
     }
     for (const button of screen.getAllByText("Drop")) {
       expect(button).toBeDisabled();
+    }
+  });
+
+  it("explains why the stash Apply/Drop buttons are disabled via their title", () => {
+    renderSwitcher({ stashes, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+
+    for (const button of screen.getAllByText("Apply")) {
+      expect(button).toHaveAttribute("title", "A transfer is in progress.");
+    }
+    for (const button of screen.getAllByText("Drop")) {
+      expect(button).toHaveAttribute("title", "A transfer is in progress.");
     }
   });
 });
