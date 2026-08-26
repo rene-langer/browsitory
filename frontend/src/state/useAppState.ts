@@ -23,6 +23,7 @@ import type {
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { useBranchActions } from "./useBranchActions";
+import { useForgeActions } from "./useForgeActions";
 import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useStagingActions } from "./useStagingActions";
@@ -530,61 +531,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     abortRebase,
   } = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const listPullRequests = useCallback(
-    async (remoteName: string, account: string) => {
-      try {
-        const result = await client.listPullRequests(repoPath, remoteName, account);
-        setState((prev) => ({
-          ...prev,
-          pullRequests: { ...prev.pullRequests, [remoteName]: result },
-          error: null,
-        }));
-      } catch (err) {
-        // Drop this remote's entry (rather than leaving whatever was there before) so a failed
-        // re-list can't leave stale, possibly-successful-looking rows on screen under this
-        // remote's heading. Other remotes' entries are untouched — a failure listing remote B
-        // must never affect what's shown for remote A.
-        setState((prev) => {
-          const rest = { ...prev.pullRequests };
-          delete rest[remoteName];
-          return { ...prev, pullRequests: rest, error: String(err) };
-        });
-      }
-    },
-    [client, repoPath],
-  );
-  const saveForgeToken = useCallback(
-    (provider: ForgeProvider, account: string, token: string) =>
-      runMutation(() => client.saveForgeToken(repoPath, provider, account, token)),
-    [client, runMutation, repoPath],
-  );
-  const forgetForgeToken = useCallback(
-    (provider: ForgeProvider, account: string) =>
-      runMutation(() => client.forgetForgeToken(repoPath, provider, account)),
-    [client, runMutation, repoPath],
-  );
-  const createPullRequest = useCallback(
-    (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
-      runMutationWithOutcome(async () => {
-        const created = await client.createPullRequest(repoPath, remoteName, account, pullRequest);
-        setState((prev) => {
-          const existing = prev.pullRequests[remoteName];
-          const updated: PullRequestList = {
-            pullRequests: [created, ...(existing?.pullRequests ?? [])],
-            truncated: existing?.truncated ?? false,
-          };
-          return {
-            ...prev,
-            pullRequests: { ...prev.pullRequests, [remoteName]: updated },
-          };
-        });
-      }),
-    [client, runMutationWithOutcome, repoPath],
-  );
-  const openExternalUrl = useCallback(
-    (url: string) => client.openExternalUrl(url),
-    [client],
-  );
+  const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
+    useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const dismissError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
