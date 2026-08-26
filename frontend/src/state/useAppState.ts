@@ -23,6 +23,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
+import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 
 function transferFailureMessage(progress: TransferProgress): string {
   if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
@@ -39,18 +40,6 @@ function transferFailureMessage(progress: TransferProgress): string {
   if (progress.operation === "Pull") return "Pull failed";
   if (progress.operation === "Fetch") return "Fetch failed";
   return "Transfer failed";
-}
-
-function credentialFailureMessage(error: unknown): string {
-  // `Error`s are unwrapped rather than stringified: `String(new Error("x"))` is `"Error: x"`, and
-  // that literal prefix is now user-visible — `RemotePanel` renders this message inline under the
-  // Fetch URL field, not just in the generic error banner. Tauri's `invoke` rejects with a bare
-  // string, so the `String` branch stays the common production path.
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
-  if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
-  if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";
-  return message;
 }
 
 const GRAPH_LIMIT = 300;
@@ -325,57 +314,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     });
   }, [client, refresh, repoPath]);
 
-  const runMutation = useCallback(
-    async (mutate: () => Promise<void>) => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await mutate();
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-      } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
-      }
-    },
-    [refresh],
-  );
-
-  const runMutationWithOutcome = useCallback(
-    async (mutate: () => Promise<void>): Promise<boolean> => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await mutate();
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-        return true;
-      } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
-        return false;
-      }
-    },
-    [refresh],
-  );
-
-  // Same pending/refresh/`state.error` behaviour as `runMutation`, but resolves to the failure
-  // message instead of swallowing it — the shared shape behind `addRemote`, `createBranch`,
-  // `createWorktree`, and `createTag`'s inline-error results (see each of those in
-  // `UseAppStateResult` for why: a create-form has one obvious trigger point to show its own
-  // failure next to, per issue #30/UX-002).
-  const runMutationWithMessage = useCallback(
-    async (mutate: () => Promise<void>): Promise<string | null> => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await mutate();
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-        return null;
-      } catch (err) {
-        const message = credentialFailureMessage(err);
-        setState((prev) => ({ ...prev, error: message, pending: false }));
-        return message;
-      }
-    },
-    [refresh],
-  );
+  const { runMutation, runMutationWithOutcome, runMutationWithMessage } = useMutationRunner(refresh, setState);
 
   const selectRow = useCallback((row: SelectedRow) => {
     setState((prev) => ({ ...prev, selectedRow: row }));
