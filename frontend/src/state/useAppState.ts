@@ -24,6 +24,8 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { useSubmoduleActions } from "./useSubmoduleActions";
+import { useWorktreeActions } from "./useWorktreeActions";
 
 function transferFailureMessage(progress: TransferProgress): string {
   if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
@@ -393,29 +395,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     (oldName: string, newName: string) => runMutation(() => client.renameBranch(repoPath, oldName, newName)),
     [client, runMutation, repoPath],
   );
-  const createWorktree = useCallback(
-    (name: string, path: string, branch: string, startPoint: string | null) =>
-      runMutationWithMessage(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
-    [client, runMutationWithMessage, repoPath],
-  );
-  const removeWorktree = useCallback(
-    (name: string) => runMutation(() => client.removeWorktree(repoPath, name)),
-    [client, runMutation, repoPath],
-  );
-  const pruneWorktrees = useCallback(
-    () => runMutation(() => client.pruneWorktrees(repoPath)),
-    [client, runMutation, repoPath],
+  const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
+    client,
+    repoPath,
+    runMutation,
+    runMutationWithMessage,
   );
 
-  const initSubmodule = useCallback(
-    (path: string) => runMutation(() => client.initSubmodule(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  const updateSubmodule = useCallback(
-    (path: string, recursive: boolean) =>
-      runMutation(() => client.updateSubmodule(repoPath, path, recursive)),
-    [client, runMutation, repoPath],
-  );
+  const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
 
   const selectReflogReference = useCallback(
     async (reference: string) => {
