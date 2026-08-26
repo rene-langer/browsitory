@@ -6,11 +6,9 @@ import type {
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
-  MergeOutcome,
   PullOutcome,
   PullRequestList,
   RebasePlanEntry,
-  RebaseStepResult,
   RemoteAuthMode,
   RemoteInfo,
   ReflogEntry,
@@ -25,8 +23,10 @@ import type {
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { useBranchActions } from "./useBranchActions";
+import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useStagingActions } from "./useStagingActions";
+import { useStashActions } from "./useStashActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
 
@@ -515,87 +515,20 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setState((prev) => ({ ...prev, pendingPull: null }));
   }, []);
 
-  const saveStash = useCallback(
-    () => runMutation(() => client.saveStash(repoPath)),
-    [client, runMutation, repoPath],
-  );
-  const applyStash = useCallback(
-    (index: number) => runMutation(() => client.applyStash(repoPath, index)),
-    [client, runMutation, repoPath],
-  );
-  const dropStash = useCallback(
-    (index: number) =>
-      runMutation(async () => {
-        // Read the about-to-be-dropped stash's commitId before calling the client: if it's
-        // the one currently selected, `DiffPane` would otherwise keep showing a diff for a
-        // commit that's about to become unreachable until GC.
-        const droppedCommitId = state.stashes[index]?.commitId;
-        const dropsSelectedStash =
-          droppedCommitId !== undefined &&
-          typeof state.selectedRow === "object" &&
-          state.selectedRow.commitId === droppedCommitId;
-        await client.dropStash(repoPath, index);
-        if (dropsSelectedStash) {
-          setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
-        }
-      }),
-    [client, runMutation, state, repoPath],
-  );
+  const { saveStash, applyStash, dropStash } = useStashActions(client, repoPath, runMutation, state, setState);
 
-  const mergeBranch = useCallback(
-    (branchName: string): Promise<void> =>
-      runMutation(async () => {
-        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName);
-        void outcome;
-      }),
-    [client, runMutation, repoPath],
-  );
-  const resolveConflict = useCallback(
-    (path: string, resolvedContent: string) =>
-      runMutation(() => client.resolveConflict(repoPath, path, resolvedContent)),
-    [client, runMutation, repoPath],
-  );
-  const resolveAddDeleteConflict = useCallback(
-    (path: string, choice: FileConflictChoice) =>
-      runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice)),
-    [client, runMutation, repoPath],
-  );
-  const abortMerge = useCallback(
-    () => runMutation(() => client.abortMerge(repoPath)),
-    [client, runMutation, repoPath],
-  );
-
-  const openRebasePlanner = useCallback((commitId: string) => {
-    setState((prev) => ({ ...prev, rebaseOnto: commitId, squashPreset: null }));
-  }, []);
-  const openSquashPlanner = useCallback((ontoId: string, squashIds: string[]) => {
-    setState((prev) => ({ ...prev, rebaseOnto: ontoId, squashPreset: new Set(squashIds) }));
-  }, []);
-  const closeRebasePlanner = useCallback(() => {
-    setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
-  }, []);
-
-  const startRebase = useCallback(
-    (onto: string, plan: RebasePlanEntry[]): Promise<void> =>
-      runMutation(async () => {
-        const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
-        void result;
-        setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const rebaseContinue = useCallback(
-    (): Promise<void> =>
-      runMutation(async () => {
-        const result: RebaseStepResult = await client.rebaseContinue(repoPath);
-        void result;
-      }),
-    [client, runMutation, repoPath],
-  );
-  const abortRebase = useCallback(
-    () => runMutation(() => client.abortRebase(repoPath)),
-    [client, runMutation, repoPath],
-  );
+  const {
+    mergeBranch,
+    resolveConflict,
+    resolveAddDeleteConflict,
+    abortMerge,
+    openRebasePlanner,
+    openSquashPlanner,
+    closeRebasePlanner,
+    startRebase,
+    rebaseContinue,
+    abortRebase,
+  } = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
   const listPullRequests = useCallback(
     async (remoteName: string, account: string) => {
