@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::worker::{TransferEvent, Worker};
 
 mod branch;
+mod merge;
 mod reflog;
 mod stash;
 mod submodule;
@@ -18,6 +19,10 @@ mod tag;
 mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
+pub use merge::{
+    abort_merge, get_conflict_hunks, get_merge_message, resolve_add_delete_conflict,
+    resolve_conflict, start_merge,
+};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use submodule::{init_submodule, list_submodules, update_submodule};
@@ -1252,59 +1257,6 @@ pub async fn pull_current_upstream(
             .map_err(|_| "pull worker task stopped".to_string())??
             .into(),
     )
-}
-
-#[tauri::command]
-pub async fn start_merge(
-    repo_path: String,
-    branch_name: String,
-    state: State<'_, AppState>,
-) -> Result<MergeOutcomeDto, String> {
-    let outcome = worker_handle(&state, &repo_path)?.start_merge(branch_name)?;
-    Ok(MergeOutcomeDto::from(outcome))
-}
-
-#[tauri::command]
-pub async fn get_conflict_hunks(
-    repo_path: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<ConflictSegmentDto>, String> {
-    let segments = worker_handle(&state, &repo_path)?.get_conflict_hunks(path)?;
-    Ok(segments.into_iter().map(ConflictSegmentDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn resolve_conflict(
-    repo_path: String,
-    path: String,
-    resolved_content: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.resolve_conflict(path, resolved_content)
-}
-
-#[tauri::command]
-pub async fn abort_merge(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.abort_merge()
-}
-
-#[tauri::command]
-pub async fn get_merge_message(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
-    worker_handle(&state, &repo_path)?.get_merge_message()
-}
-
-#[tauri::command]
-pub async fn resolve_add_delete_conflict(
-    repo_path: String,
-    path: String,
-    choice: FileConflictChoiceDto,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.resolve_add_delete_conflict(path, choice.into())
 }
 
 #[tauri::command]
