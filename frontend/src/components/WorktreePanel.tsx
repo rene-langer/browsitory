@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
 
@@ -134,19 +135,14 @@ export function WorktreePanel({
         </button>
       </Toolbar>
       {removeConfirmation !== null && (
-        <dialog open aria-label={`Remove worktree ${removeConfirmation.path}`}>
-          <p>Remove worktree at {removeConfirmation.path}?</p>
-          <button
-            type="button"
-            disabled={operationDisabled}
-            onClick={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
-          >
-            Remove worktree
-          </button>
-          <button type="button" onClick={() => setRemoveConfirmation(null)}>
-            Cancel
-          </button>
-        </dialog>
+        <ConfirmDialog
+          ariaLabel={`Remove worktree ${removeConfirmation.path}`}
+          message={<p>Remove worktree at {removeConfirmation.path}?</p>}
+          confirmLabel="Remove worktree"
+          confirmDisabled={operationDisabled}
+          onConfirm={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
+          onCancel={() => setRemoveConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );

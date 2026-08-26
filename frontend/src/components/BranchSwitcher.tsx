@@ -3,6 +3,7 @@ import { GitBranch } from "lucide-react";
 import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
@@ -171,22 +172,23 @@ export function BranchSwitcher({
                       Merge into current branch
                     </button>
                   )}
-                  {pendingForceFor === b.name ? (
-                    <button
-                      disabled={isRebasing}
-                      onClick={() => {
-                        onDeleteBranch(b.name, true);
-                        setPendingForceFor(null);
-                      }}
-                    >
-                      Force Delete
-                    </button>
-                  ) : (
-                    <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
-                      Delete
-                    </button>
-                  )}
+                  <button disabled={isRebasing} onClick={() => handleDeleteClick(b.name)}>
+                    Delete
+                  </button>
                 </Toolbar>
+                {pendingForceFor === b.name && (
+                  <ConfirmDialog
+                    ariaLabel={`Force delete ${b.name}`}
+                    message={<p>Force delete "{b.name}"? This discards any unmerged commits and cannot be undone.</p>}
+                    confirmLabel="Force Delete"
+                    confirmDisabled={isRebasing}
+                    onConfirm={() => {
+                      onDeleteBranch(b.name, true);
+                      setPendingForceFor(null);
+                    }}
+                    onCancel={() => setPendingForceFor(null)}
+                  />
+                )}
               </li>
             ))}
           </ul>

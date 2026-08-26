@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -117,7 +117,7 @@ describe("BranchSwitcher", () => {
     expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feature"]);
   });
 
-  it("clicking Delete once calls onDeleteBranch with force=false; a second click (still listed) forces it", async () => {
+  it("clicking Delete once calls onDeleteBranch with force=false; confirming the force-delete dialog forces it", async () => {
     const onDeleteBranch = vi.fn().mockResolvedValue(undefined);
     renderSwitcher({ onDeleteBranch });
 
@@ -129,10 +129,28 @@ describe("BranchSwitcher", () => {
     expect(onDeleteBranch).toHaveBeenCalledWith("feature", false);
 
     // Since `branches` prop is unchanged (delete didn't actually remove it, as this fixture's
-    // parent never updates the prop), the row now shows "Force Delete" instead of "Delete".
-    fireEvent.click(await screen.findByText("Force Delete"));
+    // parent never updates the prop), a force-delete confirmation dialog opens for "feature".
+    const dialog = await screen.findByRole("dialog", { name: "Force delete feature" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Force Delete" }));
 
     expect(onDeleteBranch).toHaveBeenCalledWith("feature", true);
+  });
+
+  it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
+    const onDeleteBranch = vi.fn().mockResolvedValue(undefined);
+    renderSwitcher({ onDeleteBranch });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    fireEvent.click(screen.getAllByText("Delete")[1]);
+    await Promise.resolve();
+
+    const dialog = await screen.findByRole("dialog", { name: "Force delete feature" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(onDeleteBranch).toHaveBeenCalledTimes(1);
+    expect(onDeleteBranch).not.toHaveBeenCalledWith("feature", true);
+    expect(screen.queryByRole("dialog", { name: "Force delete feature" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Delete").length).toBe(2);
   });
 
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {

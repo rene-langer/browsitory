@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2, Copy } from "lucide-react";
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
@@ -69,7 +70,6 @@ export function RemotePanel({
   onCancelPull: () => void;
 }) {
   const pullDialogRef = useRef<HTMLDialogElement>(null);
-  const removeDialogRef = useRef<HTMLDialogElement>(null);
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const [newName, setNewName] = useState("");
   const [newFetchUrl, setNewFetchUrl] = useState("");
@@ -196,17 +196,6 @@ export function RemotePanel({
     }
     dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
   }, [pendingPull]);
-
-  useEffect(() => {
-    const dialog = removeDialogRef.current;
-    if (removeConfirmation === null || dialog === null) return;
-    if (!dialog.open && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else if (!dialog.open) {
-      dialog.setAttribute("open", "");
-    }
-    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
-  }, [removeConfirmation]);
 
   return (
     <AccordionSection title="Remotes" storageKey="sidebar-remotes" icon={Cloud} count={remotes.length}>
@@ -367,27 +356,23 @@ export function RemotePanel({
       )}
 
       {removeConfirmation !== null && (
-        <dialog
-          ref={removeDialogRef}
-          aria-label="Remove remote confirmation"
-          onCancel={(event) => {
-            event.preventDefault();
-            setRemoveConfirmation(null);
-          }}
-        >
-          {removeConfirmation.startsWith("clear:") ? (
-            <>
+        <ConfirmDialog
+          ariaLabel="Remove remote confirmation"
+          message={
+            removeConfirmation.startsWith("clear:") ? (
               <p>Remove {removeConfirmation.slice(6)} and clear upstreams for {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?</p>
-              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation.slice(6), true).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
-            </>
-          ) : (
-            <>
+            ) : (
               <p>Remove remote {removeConfirmation}?</p>
-              <button type="button" onClick={() => { void onRemoveRemote(removeConfirmation, false).then(() => setRemoveConfirmation(null)); }}>Confirm remove</button>
-            </>
-          )}
-          <button type="button" data-autofocus onClick={() => setRemoveConfirmation(null)}>Cancel</button>
-        </dialog>
+            )
+          }
+          confirmLabel="Confirm remove"
+          onConfirm={() => {
+            const target = removeConfirmation.startsWith("clear:") ? removeConfirmation.slice(6) : removeConfirmation;
+            const clearUpstreams = removeConfirmation.startsWith("clear:");
+            void onRemoveRemote(target, clearUpstreams).then(() => setRemoveConfirmation(null));
+          }}
+          onCancel={() => setRemoveConfirmation(null)}
+        />
       )}
 
       {showAddForm ? (
