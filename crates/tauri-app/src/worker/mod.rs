@@ -28,6 +28,7 @@ use crate::pull_requests::{
 
 mod branch;
 mod merge;
+mod rebase;
 mod reflog;
 mod stash;
 mod submodule;
@@ -777,46 +778,18 @@ impl Worker {
                         reply,
                     } => merge::resolve_add_delete(&repo, path, choice, reply),
                     Command::CommitsSince { onto, reply } => {
-                        let result = git_core::rebase::commits_since(&repo, &onto)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        rebase::commits_since(&repo, onto, reply)
                     }
                     Command::StartRebase { onto, plan, reply } => {
-                        let result = git_core::rebase::start_rebase(&repo, &onto, plan)
-                            .map_err(|e| e.to_string())
-                            .map(|(state, step)| {
-                                if !matches!(step, RebaseStepResult::Done) {
-                                    rebase_state = Some(state);
-                                }
-                                step
-                            });
-                        let _ = reply.send(result);
+                        rebase::start(&repo, onto, plan, &mut rebase_state, reply)
                     }
                     Command::RebaseContinue { reply } => {
-                        let result = match rebase_state.as_mut() {
-                            Some(state) => git_core::rebase::rebase_continue(&repo, state)
-                                .map_err(|e| e.to_string()),
-                            None => Err("no rebase is currently in progress".to_string()),
-                        };
-                        if matches!(result, Ok(RebaseStepResult::Done)) {
-                            rebase_state = None;
-                        }
-                        let _ = reply.send(result);
+                        rebase::continue_rebase(&repo, &mut rebase_state, reply)
                     }
                     Command::AbortRebase { reply } => {
-                        let result = match rebase_state.take() {
-                            Some(state) => git_core::rebase::abort_rebase(&repo, state)
-                                .map_err(|e| e.to_string()),
-                            None => Err("no rebase is currently in progress".to_string()),
-                        };
-                        let _ = reply.send(result);
+                        rebase::abort(&repo, &mut rebase_state, reply)
                     }
-                    Command::GetRebaseProgress { reply } => {
-                        let progress = rebase_state
-                            .as_ref()
-                            .map(|s| (s.current_step(), s.total_steps()));
-                        let _ = reply.send(Ok(progress));
-                    }
+                    Command::GetRebaseProgress { reply } => rebase::progress(&rebase_state, reply),
                     Command::FetchRemote {
                         remote_name,
                         operation_id,
@@ -1497,72 +1470,6 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ClearCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::CommitsSince {
-                onto,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn start_rebase(
-        &self,
-        onto: String,
-        plan: Vec<RebasePlanEntry>,
-    ) -> Result<RebaseStepResult, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::StartRebase {
-                onto,
-                plan,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn rebase_continue(&self) -> Result<RebaseStepResult, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RebaseContinue { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn abort_rebase(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::AbortRebase { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn get_rebase_progress(&self) -> Result<Option<(usize, usize)>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetRebaseProgress { reply: reply_tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()

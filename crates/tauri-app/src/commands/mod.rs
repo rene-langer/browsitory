@@ -12,6 +12,7 @@ use crate::worker::{TransferEvent, Worker};
 
 mod branch;
 mod merge;
+mod rebase;
 mod reflog;
 mod stash;
 mod submodule;
@@ -23,6 +24,7 @@ pub use merge::{
     abort_merge, get_conflict_hunks, get_merge_message, resolve_add_delete_conflict,
     resolve_conflict, start_merge,
 };
+pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use submodule::{init_submodule, list_submodules, update_submodule};
@@ -1256,56 +1258,6 @@ pub async fn pull_current_upstream(
             .await
             .map_err(|_| "pull worker task stopped".to_string())??
             .into(),
-    )
-}
-
-#[tauri::command]
-pub async fn commits_since(
-    repo_path: String,
-    onto: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<RebasePlanCommitDto>, String> {
-    let commits = worker_handle(&state, &repo_path)?.commits_since(onto)?;
-    Ok(commits.into_iter().map(RebasePlanCommitDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn start_rebase(
-    repo_path: String,
-    onto: String,
-    plan: Vec<RebasePlanEntryDto>,
-    state: State<'_, AppState>,
-) -> Result<RebaseStepResultDto, String> {
-    let plan = plan.into_iter().map(Into::into).collect();
-    let result = worker_handle(&state, &repo_path)?.start_rebase(onto, plan)?;
-    Ok(RebaseStepResultDto::from(result))
-}
-
-#[tauri::command]
-pub async fn rebase_continue(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<RebaseStepResultDto, String> {
-    let result = worker_handle(&state, &repo_path)?.rebase_continue()?;
-    Ok(RebaseStepResultDto::from(result))
-}
-
-#[tauri::command]
-pub async fn abort_rebase(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.abort_rebase()
-}
-
-#[tauri::command]
-pub async fn get_rebase_progress(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<Option<RebaseProgressDto>, String> {
-    let progress = worker_handle(&state, &repo_path)?.get_rebase_progress()?;
-    Ok(
-        progress.map(|(current_step, total_steps)| RebaseProgressDto {
-            current_step,
-            total_steps,
-        }),
     )
 }
 
