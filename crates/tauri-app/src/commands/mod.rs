@@ -16,6 +16,7 @@ mod merge;
 mod rebase;
 mod reflog;
 mod stash;
+mod status;
 mod submodule;
 mod tag;
 mod worktree;
@@ -32,6 +33,11 @@ pub use merge::{
 pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
+pub use status::{
+    commit, discard_hunk, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
+    get_graph_branch_selection, get_status, get_working_diff, set_graph_branch_selection,
+    stage_file, stage_hunk, unstage_file, unstage_hunk,
+};
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
@@ -917,149 +923,6 @@ fn worker_handle(
         .get(repo_path)
         .map(Worker::handle)
         .ok_or_else(|| format!("repo not open: {repo_path}"))
-}
-
-#[tauri::command]
-pub async fn get_status(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<StatusEntryDto>, String> {
-    let entries = worker_handle(&state, &repo_path)?.get_status()?;
-    Ok(entries
-        .into_iter()
-        .map(|e| StatusEntryDto {
-            path: e.path,
-            staged: e.staged,
-            kind: format!("{:?}", e.kind),
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub async fn get_commit_graph(
-    repo_path: String,
-    limit: usize,
-    selected_branches: Option<Vec<String>>,
-    state: State<'_, AppState>,
-) -> Result<Vec<GraphCommitDto>, String> {
-    let commits = worker_handle(&state, &repo_path)?.get_commit_graph(limit, selected_branches)?;
-    Ok(commits.into_iter().map(GraphCommitDto::from).collect())
-}
-
-#[tauri::command]
-pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
-    config::get_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn set_graph_branch_selection(
-    repo_path: String,
-    selected_branches: Vec<String>,
-) -> Result<(), String> {
-    config::set_graph_branch_selection(Path::new(&repo_path), &selected_branches)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn get_working_diff(
-    repo_path: String,
-    path: String,
-    staged: bool,
-    state: State<'_, AppState>,
-) -> Result<Vec<DiffHunkDto>, String> {
-    let hunks = worker_handle(&state, &repo_path)?.get_working_diff(path, staged)?;
-    Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn get_commit_diff(
-    repo_path: String,
-    commit_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<DiffHunkDto>, String> {
-    let hunks = worker_handle(&state, &repo_path)?.get_commit_diff(commit_id, path)?;
-    Ok(hunks.into_iter().map(DiffHunkDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn get_commit_files(
-    repo_path: String,
-    commit_id: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
-    worker_handle(&state, &repo_path)?.get_commit_files(commit_id)
-}
-
-#[tauri::command]
-pub async fn get_blame(
-    repo_path: String,
-    commit_id: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<BlameLineDto>, String> {
-    let lines = worker_handle(&state, &repo_path)?.get_blame(commit_id, path)?;
-    Ok(lines.into_iter().map(BlameLineDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn stage_file(
-    repo_path: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_file(path)
-}
-
-#[tauri::command]
-pub async fn unstage_file(
-    repo_path: String,
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_file(path)
-}
-
-#[tauri::command]
-pub async fn stage_hunk(
-    repo_path: String,
-    path: String,
-    old_start: u32,
-    new_start: u32,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start)
-}
-
-#[tauri::command]
-pub async fn unstage_hunk(
-    repo_path: String,
-    path: String,
-    old_start: u32,
-    new_start: u32,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start)
-}
-
-#[tauri::command]
-pub async fn discard_hunk(
-    repo_path: String,
-    path: String,
-    old_start: u32,
-    new_start: u32,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start)
-}
-
-#[tauri::command]
-pub async fn commit(
-    repo_path: String,
-    message: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    worker_handle(&state, &repo_path)?.commit(message)
 }
 
 #[tauri::command]

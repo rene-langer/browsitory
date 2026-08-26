@@ -32,6 +32,7 @@ mod merge;
 mod rebase;
 mod reflog;
 mod stash;
+mod status;
 mod submodule;
 mod tag;
 mod worktree;
@@ -439,100 +440,53 @@ impl Worker {
             let pull_request_service = PullRequestService::new(forge_api);
             for command in rx {
                 match command {
-                    Command::GetStatus { reply } => {
-                        let result = git_core::status::status(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::GetStatus { reply } => status::get_status(&repo, reply),
                     Command::GetCommitGraph {
                         limit,
                         selected_branches,
                         reply,
-                    } => {
-                        let result =
-                            git_core::graph::graph_log(&repo, limit, selected_branches.as_deref())
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::get_commit_graph(&repo, limit, selected_branches, reply),
                     Command::GetWorkingDiff {
                         path,
                         staged,
                         reply,
-                    } => {
-                        let result = git_core::diff::working_diff(&repo, &path, staged)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::get_working_diff(&repo, path, staged, reply),
                     Command::GetCommitDiff {
                         commit_id,
                         path,
                         reply,
-                    } => {
-                        let result = git_core::diff::commit_diff(&repo, &commit_id, &path)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::get_commit_diff(&repo, commit_id, path, reply),
                     Command::GetCommitFiles { commit_id, reply } => {
-                        let result = git_core::diff::commit_files(&repo, &commit_id)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        status::get_commit_files(&repo, commit_id, reply)
                     }
                     Command::GetBlame {
                         commit_id,
                         path,
                         reply,
-                    } => {
-                        let result = git_core::blame::blame_file(&repo, &commit_id, &path)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::StageFile { path, reply } => {
-                        let result =
-                            git_core::stage::stage_file(&repo, &path).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::get_blame(&repo, commit_id, path, reply),
+                    Command::StageFile { path, reply } => status::stage_file(&repo, path, reply),
                     Command::UnstageFile { path, reply } => {
-                        let result =
-                            git_core::stage::unstage_file(&repo, &path).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        status::unstage_file(&repo, path, reply)
                     }
                     Command::StageHunk {
                         path,
                         old_start,
                         new_start,
                         reply,
-                    } => {
-                        let result =
-                            git_core::stage::stage_hunk(&repo, &path, old_start, new_start)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::stage_hunk(&repo, path, old_start, new_start, reply),
                     Command::UnstageHunk {
                         path,
                         old_start,
                         new_start,
                         reply,
-                    } => {
-                        let result =
-                            git_core::stage::unstage_hunk(&repo, &path, old_start, new_start)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::unstage_hunk(&repo, path, old_start, new_start, reply),
                     Command::DiscardHunk {
                         path,
                         old_start,
                         new_start,
                         reply,
-                    } => {
-                        let result =
-                            git_core::stage::discard_hunk(&repo, &path, old_start, new_start)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::Commit { message, reply } => {
-                        let result = git_core::commit::commit(&mut repo, &message)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => status::discard_hunk(&repo, path, old_start, new_start, reply),
+                    Command::Commit { message, reply } => status::commit(&mut repo, message, reply),
                     Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
                         name,
@@ -1053,177 +1007,6 @@ impl WorkerHandle {
                 names,
                 operation_id,
                 events,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_status(&self) -> Result<Vec<StatusEntry>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetStatus { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_commit_graph(
-        &self,
-        limit: usize,
-        selected_branches: Option<Vec<String>>,
-    ) -> Result<Vec<GraphCommit>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetCommitGraph {
-                limit,
-                selected_branches,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_working_diff(&self, path: String, staged: bool) -> Result<Vec<DiffHunk>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetWorkingDiff {
-                path,
-                staged,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_commit_diff(
-        &self,
-        commit_id: String,
-        path: String,
-    ) -> Result<Vec<DiffHunk>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetCommitDiff {
-                commit_id,
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetCommitFiles {
-                commit_id,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetBlame {
-                commit_id,
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn stage_file(&self, path: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::StageFile {
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn unstage_file(&self, path: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::UnstageFile {
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn stage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::StageHunk {
-                path,
-                old_start,
-                new_start,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn unstage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::UnstageHunk {
-                path,
-                old_start,
-                new_start,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn discard_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::DiscardHunk {
-                path,
-                old_start,
-                new_start,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn commit(&self, message: String) -> Result<String, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::Commit {
-                message,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
