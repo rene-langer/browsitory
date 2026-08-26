@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
-import type { RunMutation } from "./useMutationRunner";
+import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 
 export interface StagingActions {
   selectRow(row: SelectedRow): void;
@@ -25,6 +25,7 @@ export function useStagingActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
+  _runOptimisticMutation: RunOptimisticMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): StagingActions {
   const selectRow = useCallback(

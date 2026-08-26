@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { PullOutcome, RemoteAuthMode, RepoClient, TransferProgress } from "../ipc/RepoClient";
 import { credentialFailureMessage } from "./useMutationRunner";
-import type { RunMutation, RunMutationWithMessage, RunMutationWithOutcome } from "./useMutationRunner";
+import type {
+  RunMutation,
+  RunMutationWithMessage,
+  RunMutationWithOutcome,
+  RunOptimisticMutation,
+  RunOptimisticMutationWithMessage,
+  RunOptimisticMutationWithOutcome,
+} from "./useMutationRunner";
 import type { AppState } from "./useAppState";
 
 function transferFailureMessage(progress: TransferProgress): string {
@@ -61,6 +68,9 @@ export function useRemoteTransferActions(
   runMutation: RunMutation,
   runMutationWithMessage: RunMutationWithMessage,
   runMutationWithOutcome: RunMutationWithOutcome,
+  _runOptimisticMutation: RunOptimisticMutation,
+  _runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
+  _runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): RemoteTransferActions {
   const activeTransferId = useRef<string | null>(null);

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import type { RunMutation } from "./useMutationRunner";
+import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 
 export interface StashActions {
   saveStash(): Promise<void>;
@@ -13,6 +13,7 @@ export function useStashActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
+  _runOptimisticMutation: RunOptimisticMutation,
   state: AppState,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): StashActions {
