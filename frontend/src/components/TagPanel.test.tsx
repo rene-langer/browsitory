@@ -38,6 +38,7 @@ function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {
       onDelete={vi.fn().mockResolvedValue(undefined)}
       onPush={vi.fn()}
       pushDisabled={false}
+      operationDisabledReason={null}
       {...overrides}
     />,
   );
@@ -134,6 +135,7 @@ describe("TagPanel", () => {
         onDelete={vi.fn()}
         onPush={onPush}
         pushDisabled={false}
+        operationDisabledReason={null}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Push all tags" }));
@@ -154,6 +156,7 @@ describe("TagPanel", () => {
         onDelete={vi.fn()}
         onPush={onPush}
         pushDisabled={false}
+        operationDisabledReason={null}
       />,
     );
 
@@ -165,6 +168,24 @@ describe("TagPanel", () => {
 
     expect(screen.getByRole("button", { name: "Push selected tags" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Push all tags" })).toBeDisabled();
+  });
+
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why the push controls are disabled via their title", () => {
+    renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
+
+    expect(screen.getByRole("button", { name: "Create tag" })).toHaveAttribute(
+      "title",
+      "A transfer is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Push selected tags" })).toHaveAttribute(
+      "title",
+      "A transfer is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Push all tags" })).toHaveAttribute(
+      "title",
+      "A transfer is in progress.",
+    );
   });
 
   it("deletes only after the local-delete confirmation", async () => {

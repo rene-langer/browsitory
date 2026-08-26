@@ -24,6 +24,7 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       isMerging={false}
       isRebasing={false}
       operationDisabled={false}
+      operationDisabledReason={null}
       stashes={[]}
       onSelectRow={vi.fn()}
       onApplyStash={vi.fn()}
@@ -301,6 +302,18 @@ describe("BranchSwitcher", () => {
     expect(screen.getByText("Merge into current branch")).toBeDisabled();
   });
 
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why the merge action is disabled via its title", () => {
+    renderSwitcher({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByText("Merge into current branch")).toHaveAttribute(
+      "title",
+      "A rebase is in progress.",
+    );
+  });
+
   it("disables every branch-mutating action while a rebase is in progress", () => {
     // A rebase runs on a detached HEAD and only moves the original branch ref at the very end,
     // so switching/creating/deleting/renaming a branch mid-pause silently retargets an unrelated
@@ -389,6 +402,17 @@ describe("BranchSwitcher", () => {
     }
     for (const button of screen.getAllByText("Drop")) {
       expect(button).toBeDisabled();
+    }
+  });
+
+  it("explains why the stash Apply/Drop buttons are disabled via their title", () => {
+    renderSwitcher({ stashes, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+
+    for (const button of screen.getAllByText("Apply")) {
+      expect(button).toHaveAttribute("title", "A transfer is in progress.");
+    }
+    for (const button of screen.getAllByText("Drop")) {
+      expect(button).toHaveAttribute("title", "A transfer is in progress.");
     }
   });
 });

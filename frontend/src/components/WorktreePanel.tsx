@@ -15,6 +15,7 @@ export function WorktreePanel({
   onRemoveWorktree,
   onPruneWorktrees,
   operationDisabled,
+  operationDisabledReason,
 }: {
   worktrees: WorktreeInfo[];
   branches: BranchInfo[];
@@ -30,6 +31,9 @@ export function WorktreePanel({
   onRemoveWorktree: (name: string) => Promise<void>;
   onPruneWorktrees: () => Promise<void>;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
+  // disables (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -107,7 +111,11 @@ export function WorktreePanel({
           <InlineError message={createError} onDismiss={() => setCreateError(null)} />
         )}
         <Toolbar>
-          <button type="submit" disabled={operationDisabled}>
+          <button
+            type="submit"
+            disabled={operationDisabled}
+            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
             Create worktree
           </button>
         </Toolbar>
@@ -125,6 +133,7 @@ export function WorktreePanel({
               <button
                 type="button"
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={() => void onOpenWorktree(worktree.path)}
               >
                 Open {worktree.path}
@@ -132,6 +141,7 @@ export function WorktreePanel({
               <button
                 type="button"
                 disabled={operationDisabled || worktree.isMain}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={() => removeWorktree(worktree)}
               >
                 Remove {worktree.path}
@@ -144,6 +154,7 @@ export function WorktreePanel({
         <button
           type="button"
           disabled={operationDisabled}
+          title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
           onClick={() => void onPruneWorktrees()}
         >
           Prune worktrees
@@ -155,6 +166,7 @@ export function WorktreePanel({
           message={<p>Remove worktree at {removeConfirmation.path}?</p>}
           confirmLabel="Remove worktree"
           confirmDisabled={operationDisabled}
+          confirmTitle={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
           onConfirm={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
           onCancel={() => setRemoveConfirmation(null)}
         />

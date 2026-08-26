@@ -20,6 +20,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   confirmDisabled = false,
+  confirmTitle,
 }: {
   /** Accessible name for the dialog (`aria-label`). */
   ariaLabel: string;
@@ -30,6 +31,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
   confirmDisabled?: boolean;
+  /** `title` for the confirm button — e.g. explaining why it's disabled (issue #31/UX-003). */
+  confirmTitle?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -56,7 +59,13 @@ export function ConfirmDialog({
     >
       <div className={styles.message}>{message}</div>
       <div className={styles.actions}>
-        <button type="button" className={styles.confirmButton} disabled={confirmDisabled} onClick={onConfirm}>
+        <button
+          type="button"
+          className={styles.confirmButton}
+          disabled={confirmDisabled}
+          title={confirmTitle}
+          onClick={onConfirm}
+        >
           {confirmLabel}
         </button>
         <button type="button" data-autofocus onClick={onCancel}>

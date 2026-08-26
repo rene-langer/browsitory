@@ -13,6 +13,7 @@ export function TagPanel({
   onDelete,
   onPush,
   pushDisabled,
+  operationDisabledReason,
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
@@ -22,6 +23,9 @@ export function TagPanel({
   onDelete: (name: string) => Promise<void>;
   onPush: (remoteName: string, names: string[]) => Promise<void>;
   pushDisabled: boolean;
+  // Human-readable reason `pushDisabled` is true, shown as a `title` on the buttons it disables
+  // (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"lightweight" | "annotated">("lightweight");
@@ -76,7 +80,7 @@ export function TagPanel({
         {createError !== null && (
           <InlineError message={createError} onDismiss={() => setCreateError(null)} />
         )}
-        <button type="submit" disabled={pushDisabled}>Create tag</button>
+        <button type="submit" disabled={pushDisabled} title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}>Create tag</button>
       </form>
 
       {tags.length === 0 ? <p>No local tags.</p> : (
@@ -87,7 +91,14 @@ export function TagPanel({
               <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
               <Toolbar>
-                <button type="button" disabled={pushDisabled} onClick={() => setDeleteConfirmation(tag.name)}>Delete {tag.name}</button>
+                <button
+                  type="button"
+                  disabled={pushDisabled}
+                  title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  onClick={() => setDeleteConfirmation(tag.name)}
+                >
+                  Delete {tag.name}
+                </button>
               </Toolbar>
             </li>
           ))}
@@ -98,20 +109,46 @@ export function TagPanel({
         <h3 id="push-tags-heading" className={styles.sectionHeading}>Push tags</h3>
         <label className={styles.label}>
           Remote
-          <select value={remoteName} onChange={(event) => setRemoteName(event.target.value)} disabled={pushDisabled || remotes.length === 0}>
+          <select
+            value={remoteName}
+            onChange={(event) => setRemoteName(event.target.value)}
+            disabled={pushDisabled || remotes.length === 0}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
             {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
           </select>
         </label>
         <Toolbar>
-          <button type="button" disabled={pushDisabled || remoteName === "" || selected.length === 0} onClick={() => void onPush(remoteName, selected)}>Push selected tags</button>
-          <button type="button" disabled={pushDisabled || remoteName === ""} onClick={() => void onPush(remoteName, [])}>Push all tags</button>
+          <button
+            type="button"
+            disabled={pushDisabled || remoteName === "" || selected.length === 0}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onPush(remoteName, selected)}
+          >
+            Push selected tags
+          </button>
+          <button
+            type="button"
+            disabled={pushDisabled || remoteName === ""}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onPush(remoteName, [])}
+          >
+            Push all tags
+          </button>
         </Toolbar>
       </section>
 
       {deleteConfirmation !== null && (
         <dialog open aria-label={`Delete local tag ${deleteConfirmation}`}>
           <p>Delete local tag {deleteConfirmation}?</p>
-          <button type="button" disabled={pushDisabled} onClick={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}>Delete tag</button>
+          <button
+            type="button"
+            disabled={pushDisabled}
+            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
+          >
+            Delete tag
+          </button>
           <button type="button" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
         </dialog>
       )}

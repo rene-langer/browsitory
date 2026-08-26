@@ -39,6 +39,7 @@ function renderPanel(
       onRemoveWorktree={vi.fn().mockResolvedValue(undefined)}
       onPruneWorktrees={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
+      operationDisabledReason={null}
       {...overrides}
     />,
   );
@@ -58,6 +59,24 @@ describe("WorktreePanel", () => {
     expect(
       screen.getByRole("button", { name: "Remove /repos/project-feature" }),
     ).toBeEnabled();
+  });
+
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why its controls are disabled via their title", () => {
+    renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+
+    expect(screen.getByRole("button", { name: "Create worktree" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Open /repos/project" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Prune worktrees" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
   });
 
   it("forwards the name, path, branch, and start point supplied by the creation form", async () => {
