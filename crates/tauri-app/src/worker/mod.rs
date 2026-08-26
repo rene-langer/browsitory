@@ -26,6 +26,7 @@ use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
+mod branch;
 mod reflog;
 mod stash;
 mod submodule;
@@ -541,39 +542,21 @@ impl Worker {
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::ListBranches { reply } => {
-                        let result =
-                            git_core::branch::list_branches(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
                         name,
                         start_point,
                         reply,
-                    } => {
-                        let result = git_core::branch::create_branch(&repo, &name, &start_point)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::SwitchBranch { name, reply } => {
-                        let result = git_core::branch::switch_branch(&repo, &name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => branch::create(&repo, name, start_point, reply),
+                    Command::SwitchBranch { name, reply } => branch::switch(&repo, name, reply),
                     Command::DeleteBranch { name, force, reply } => {
-                        let result = git_core::branch::delete_branch(&repo, &name, force)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
+                        branch::delete(&repo, name, force, reply)
                     }
                     Command::RenameBranch {
                         old_name,
                         new_name,
                         reply,
-                    } => {
-                        let result = git_core::branch::rename_branch(&repo, &old_name, &new_name)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => branch::rename(&repo, old_name, new_name, reply),
                     Command::ListWorktrees { reply } => worktree::list(&repo, reply),
                     Command::CreateWorktree {
                         name,
@@ -1324,71 +1307,6 @@ impl WorkerHandle {
         self.tx
             .send(Command::Commit {
                 message,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_branches(&self) -> Result<Vec<BranchInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListBranches { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn create_branch(&self, name: String, start_point: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::CreateBranch {
-                name,
-                start_point,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn switch_branch(&self, name: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SwitchBranch {
-                name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn delete_branch(&self, name: String, force: bool) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::DeleteBranch {
-                name,
-                force,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn rename_branch(&self, old_name: String, new_name: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RenameBranch {
-                old_name,
-                new_name,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
