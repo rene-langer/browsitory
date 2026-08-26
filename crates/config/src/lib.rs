@@ -34,6 +34,12 @@ pub struct Workspace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphBranchSelection {
+    pub repo_path: PathBuf,
+    pub selected_branches: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenRepoEntry {
     pub path: PathBuf,
     #[serde(default)]
@@ -111,6 +117,8 @@ struct ConfigFile {
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
     workspaces: Vec<Workspace>,
+    #[serde(default)]
+    graph_branch_selections: Vec<GraphBranchSelection>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -251,6 +259,45 @@ pub fn set_open_repos_at(
     let mut config = read_config(config_file)?;
     config.open_repos = entries.to_vec();
     config.active_repo = active.map(|p| p.to_path_buf());
+    write_config(config_file, &config)
+}
+
+pub fn get_graph_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>>, ConfigError> {
+    get_graph_branch_selection_at(&config_file_path()?, repo_path)
+}
+
+pub fn set_graph_branch_selection(
+    repo_path: &Path,
+    selected_branches: &[String],
+) -> Result<(), ConfigError> {
+    set_graph_branch_selection_at(&config_file_path()?, repo_path, selected_branches)
+}
+
+pub fn get_graph_branch_selection_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<Option<Vec<String>>, ConfigError> {
+    let config = read_config(config_file)?;
+    Ok(config
+        .graph_branch_selections
+        .into_iter()
+        .find(|s| s.repo_path == repo_path)
+        .map(|s| s.selected_branches))
+}
+
+pub fn set_graph_branch_selection_at(
+    config_file: &Path,
+    repo_path: &Path,
+    selected_branches: &[String],
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config
+        .graph_branch_selections
+        .retain(|s| s.repo_path != repo_path);
+    config.graph_branch_selections.push(GraphBranchSelection {
+        repo_path: repo_path.to_path_buf(),
+        selected_branches: selected_branches.to_vec(),
+    });
     write_config(config_file, &config)
 }
 

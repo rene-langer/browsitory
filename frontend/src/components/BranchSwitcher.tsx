@@ -24,6 +24,8 @@ export function BranchSwitcher({
   onSelectRow,
   onApplyStash,
   onDropStash,
+  graphBranchSelection,
+  onSetGraphBranchSelection,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -46,6 +48,10 @@ export function BranchSwitcher({
   onSelectRow: (row: SelectedRow) => void;
   onApplyStash: (index: number) => void;
   onDropStash: (index: number) => void;
+  // `null` means no filter is saved — every branch shows in CommitGraph (see `graph_log` in
+  // `git-core` and `useAppState`'s `AppState.graphBranchSelection`).
+  graphBranchSelection: string[] | null;
+  onSetGraphBranchSelection: (selectedBranches: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -83,6 +89,12 @@ export function BranchSwitcher({
     setPendingForceFor(name);
   };
 
+  const toggleGraphBranch = (name: string) => {
+    const shown = graphBranchSelection ?? branches.map((b) => b.name);
+    const next = shown.includes(name) ? shown.filter((n) => n !== name) : [...shown, name];
+    onSetGraphBranchSelection(next);
+  };
+
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>, oldName: string) => {
     if (event.key === "Enter") {
       if (renameValue.trim() === "") {
@@ -115,6 +127,12 @@ export function BranchSwitcher({
             {branches.map((b) => (
               <li key={b.name}>
                 <Toolbar>
+                  <input
+                    type="checkbox"
+                    aria-label={`Show ${b.name} in graph`}
+                    checked={(graphBranchSelection ?? branches.map((br) => br.name)).includes(b.name)}
+                    onChange={() => toggleGraphBranch(b.name)}
+                  />
                   {renaming === b.name ? (
                     <input
                       value={renameValue}

@@ -15,6 +15,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       selectedRow: "uncommitted",
       status: [],
       commits: [],
+      graphBranchSelection: null,
       branches: [
         { name: "main", isCurrent: true },
         { name: "feature", isCurrent: false },
@@ -117,6 +118,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     forgetForgeToken: vi.fn(),
     createPullRequest: vi.fn(),
     openExternalUrl: vi.fn(),
+    setGraphBranchSelection: vi.fn(),
     refresh: vi.fn(),
   };
 }

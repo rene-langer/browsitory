@@ -69,6 +69,8 @@ const remoteManagementClient = {
   listPullRequests: async () => unimplemented(),
   createPullRequest: async () => unimplemented(),
   openExternalUrl: async () => unimplemented(),
+  getGraphBranchSelection: async () => null,
+  setGraphBranchSelection: async () => {},
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -180,6 +182,45 @@ describe("useAppState", () => {
 
     await act(() => result.current.deleteTag("v1.0.0"));
     expect(result.current.state.tags).toEqual([]);
+  });
+
+  it("refresh loads the saved branch selection and passes it to getCommitGraph", async () => {
+    let receivedSelection: string[] | null | undefined;
+    const client = transferClient({
+      getGraphBranchSelection: async () => ["main"],
+      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
+        receivedSelection = selectedBranches;
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+
+    expect(receivedSelection).toEqual(["main"]);
+    expect(result.current.state.graphBranchSelection).toEqual(["main"]);
+  });
+
+  it("setGraphBranchSelection persists the selection and refreshes the graph with it", async () => {
+    let saved: string[] | undefined;
+    let selectionForGraph: string[] | null | undefined;
+    const client = transferClient({
+      setGraphBranchSelection: async (_repoPath, branches) => {
+        saved = branches;
+      },
+      getGraphBranchSelection: async () => saved ?? null,
+      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
+        selectionForGraph = selectedBranches;
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.setGraphBranchSelection(["feature"]));
+
+    expect(saved).toEqual(["feature"]);
+    expect(selectionForGraph).toEqual(["feature"]);
+    expect(result.current.state.graphBranchSelection).toEqual(["feature"]);
   });
 
   it.each(["create", "remove", "prune"] as const)(

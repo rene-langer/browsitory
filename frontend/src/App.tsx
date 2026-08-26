@@ -147,6 +147,8 @@ function RepoWorkspace({
               onSelectRow={appState.selectRow}
               onApplyStash={appState.applyStash}
               onDropStash={appState.dropStash}
+              graphBranchSelection={appState.state.graphBranchSelection}
+              onSetGraphBranchSelection={appState.setGraphBranchSelection}
             />
             <WorktreePanel
               worktrees={appState.state.worktrees}

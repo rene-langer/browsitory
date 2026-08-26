@@ -62,6 +62,9 @@ export interface AppState {
   selectedRow: SelectedRow;
   status: StatusEntry[];
   commits: GraphCommit[];
+  // `null` means "no filter saved" — every local branch is walked (see `graph_log` in
+  // `git-core`). Non-null is the persisted subset CommitGraph currently shows.
+  graphBranchSelection: string[] | null;
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
   submodules: SubmoduleInfo[];
@@ -175,6 +178,7 @@ export interface UseAppStateResult {
   // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern below.
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
+  setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -184,6 +188,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     selectedRow: "uncommitted",
     status: [],
     commits: [],
+    graphBranchSelection: null,
     worktrees: [],
     submodules: [],
     reflogRefs: [],
@@ -214,10 +219,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const refresh = useCallback(async () => {
     try {
+      const graphBranchSelection = await client.getGraphBranchSelection(repoPath);
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
         await Promise.all([
           client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, GRAPH_LIMIT),
+          client.getCommitGraph(repoPath, GRAPH_LIMIT, graphBranchSelection),
           client.listBranches(repoPath),
           client.listWorktrees(repoPath),
           client.listSubmodules(repoPath),
@@ -247,6 +253,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         ...prev,
         status,
         commits,
+        graphBranchSelection,
         branches,
         worktrees,
         submodules,
@@ -790,6 +797,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     (url: string) => client.openExternalUrl(url),
     [client],
   );
+  const setGraphBranchSelection = useCallback(
+    (selectedBranches: string[]) =>
+      runMutation(() => client.setGraphBranchSelection(repoPath, selectedBranches)),
+    [client, runMutation, repoPath],
+  );
 
   return {
     state,
@@ -850,6 +862,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     forgetForgeToken,
     createPullRequest,
     openExternalUrl,
+    setGraphBranchSelection,
     refresh,
   };
 }
