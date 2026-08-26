@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./TagPanel.module.css";
 
@@ -15,7 +16,9 @@ export function TagPanel({
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
-  onCreate: (name: string, message: string | null) => Promise<void>;
+  // `null` = created; a string = the failure message to show inline next to the form. See
+  // `useAppState.ts`'s `createTag` (issue #30/UX-002).
+  onCreate: (name: string, message: string | null) => Promise<string | null>;
   onDelete: (name: string) => Promise<void>;
   onPush: (remoteName: string, names: string[]) => Promise<void>;
   pushDisabled: boolean;
@@ -28,6 +31,7 @@ export function TagPanel({
   const [previousRemotes, setPreviousRemotes] = useState(remotes);
   const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   if (previousRemotes !== remotes) {
     setPreviousRemotes(remotes);
@@ -46,7 +50,12 @@ export function TagPanel({
     const trimmedName = name.trim();
     const trimmedMessage = message.trim();
     if (trimmedName === "" || (kind === "annotated" && trimmedMessage === "")) return;
-    await onCreate(trimmedName, kind === "annotated" ? trimmedMessage : null);
+    const failure = await onCreate(trimmedName, kind === "annotated" ? trimmedMessage : null);
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
+    setCreateError(null);
     setName("");
     setMessage("");
   };
@@ -60,10 +69,13 @@ export function TagPanel({
   return (
     <AccordionSection title="Tags" storageKey="sidebar-tags" icon={Tag} count={tags.length}>
       <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
-        <label className={styles.label}>Tag name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label className={styles.label}>Tag name<input value={name} onChange={(event) => { setName(event.target.value); setCreateError(null); }} /></label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
         <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
         {kind === "annotated" && <label className={styles.label}>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
+        {createError !== null && (
+          <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+        )}
         <button type="submit" disabled={pushDisabled}>Create tag</button>
       </form>
 

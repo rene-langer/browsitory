@@ -118,11 +118,17 @@ export interface UseAppStateResult {
   unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
   commit(message: string): Promise<void>;
-  createBranch(name: string, startPoint: string): Promise<void>;
+  // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
+  // below. Naming a new branch is the one create-form action here with an obvious single trigger
+  // point (the "New Branch…" draft form), so its failure surfaces next to that form instead of
+  // the shared banner (issue #30/UX-002).
+  createBranch(name: string, startPoint: string): Promise<string | null>;
   switchBranch(name: string): Promise<void>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
-  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<void>;
+  // `Promise<string | null>` for the same reason as `createBranch` above — the "Create worktree"
+  // form is its own natural trigger point.
+  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<string | null>;
   removeWorktree(name: string): Promise<void>;
   pruneWorktrees(): Promise<void>;
   initSubmodule(path: string): Promise<void>;
@@ -147,7 +153,8 @@ export interface UseAppStateResult {
   clearCurrentUpstream(): Promise<void>;
   listRemoteBranches(remoteName: string): Promise<string[]>;
   fetchRemote(remoteName: string): Promise<void>;
-  createTag(name: string, message: string | null): Promise<void>;
+  // `Promise<string | null>` for the same reason as `createBranch`/`createWorktree` above.
+  createTag(name: string, message: string | null): Promise<string | null>;
   deleteTag(name: string): Promise<void>;
   pushCurrentBranch(remoteName: string): Promise<void>;
   pushTags(remoteName: string, names: string[]): Promise<void>;
@@ -180,6 +187,9 @@ export interface UseAppStateResult {
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   refresh(): Promise<void>;
+  // Clears `state.error` without waiting for the next successful action of the same kind — the
+  // global banner's dismiss control (issue #30/UX-002). See `App.tsx`'s `RepoWorkspace`.
+  dismissError(): void;
 }
 
 export function useAppState(client: RepoClient, repoPath: string): UseAppStateResult {
@@ -345,6 +355,28 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [refresh],
   );
 
+  // Same pending/refresh/`state.error` behaviour as `runMutation`, but resolves to the failure
+  // message instead of swallowing it — the shared shape behind `addRemote`, `createBranch`,
+  // `createWorktree`, and `createTag`'s inline-error results (see each of those in
+  // `UseAppStateResult` for why: a create-form has one obvious trigger point to show its own
+  // failure next to, per issue #30/UX-002).
+  const runMutationWithMessage = useCallback(
+    async (mutate: () => Promise<void>): Promise<string | null> => {
+      try {
+        setState((prev) => ({ ...prev, pending: true }));
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return null;
+      } catch (err) {
+        const message = credentialFailureMessage(err);
+        setState((prev) => ({ ...prev, error: message, pending: false }));
+        return message;
+      }
+    },
+    [refresh],
+  );
+
   const selectRow = useCallback((row: SelectedRow) => {
     setState((prev) => ({ ...prev, selectedRow: row }));
   }, []);
@@ -400,11 +432,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
-      runMutation(async () => {
+      runMutationWithMessage(async () => {
         await client.createBranch(repoPath, name, startPoint);
         setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
       }),
-    [client, runMutation, repoPath],
+    [client, runMutationWithMessage, repoPath],
   );
   const switchBranch = useCallback(
     (name: string) =>
@@ -424,8 +456,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   );
   const createWorktree = useCallback(
     (name: string, path: string, branch: string, startPoint: string | null) =>
-      runMutation(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
-    [client, runMutation, repoPath],
+      runMutationWithMessage(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
+    [client, runMutationWithMessage, repoPath],
   );
   const removeWorktree = useCallback(
     (name: string) => runMutation(() => client.removeWorktree(repoPath, name)),
@@ -485,23 +517,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [client, runMutation, repoPath],
   );
 
-  // Same pending/refresh/`state.error` behaviour as `runMutation`, but resolves to the failure
-  // message instead of swallowing it — see the `addRemote` entry in `UseAppStateResult`.
   const addRemote = useCallback(
-    async (name: string, fetchUrl: string, pushUrl: string | null): Promise<string | null> => {
-      try {
-        setState((prev) => ({ ...prev, pending: true }));
-        await client.addRemote(repoPath, name, fetchUrl, pushUrl);
-        await refresh();
-        setState((prev) => ({ ...prev, pending: false }));
-        return null;
-      } catch (err) {
-        const message = credentialFailureMessage(err);
-        setState((prev) => ({ ...prev, error: message, pending: false }));
-        return message;
-      }
-    },
-    [client, refresh, repoPath],
+    (name: string, fetchUrl: string, pushUrl: string | null) =>
+      runMutationWithMessage(() => client.addRemote(repoPath, name, fetchUrl, pushUrl)),
+    [client, runMutationWithMessage, repoPath],
   );
   const renameRemote = useCallback(
     async (oldName: string, newName: string) => {
@@ -596,8 +615,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   );
 
   const createTag = useCallback(
-    (name: string, message: string | null) => runMutation(() => client.createTag(repoPath, name, message)),
-    [client, runMutation, repoPath],
+    (name: string, message: string | null) => runMutationWithMessage(() => client.createTag(repoPath, name, message)),
+    [client, runMutationWithMessage, repoPath],
   );
   const deleteTag = useCallback(
     (name: string) => runMutation(() => client.deleteTag(repoPath, name)),
@@ -803,6 +822,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [client, runMutation, repoPath],
   );
 
+  const dismissError = useCallback(() => {
+    setState((prev) => ({ ...prev, error: null }));
+  }, []);
+
   return {
     state,
     selectRow,
@@ -864,5 +887,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openExternalUrl,
     setGraphBranchSelection,
     refresh,
+    dismissError,
   };
 }

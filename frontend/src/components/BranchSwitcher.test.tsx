@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -63,8 +63,8 @@ describe("BranchSwitcher", () => {
     expect(onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
-  it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", () => {
-    const onCreateBranch = vi.fn();
+  it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue(null);
     renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
 
     fireEvent.change(screen.getByPlaceholderText("New branch name"), {
@@ -73,6 +73,55 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByText("Create"));
 
     expect(onCreateBranch).toHaveBeenCalledWith("my-feature", "abc123");
+    await waitFor(() => expect(screen.getByPlaceholderText("New branch name")).toHaveValue(""));
+  });
+
+  // `useAppState`'s `createBranch` never rejects — it reports failure by resolving to the
+  // message (see its comment there), the same contract `RemotePanel`'s `addRemote` already
+  // established. See issue #30/UX-002.
+  it("shows a failed create-branch's message next to the draft form and keeps the entered name", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("branch already exists");
+    expect(screen.getByPlaceholderText("New branch name")).toHaveValue("feature");
+  });
+
+  it("clears the create-branch failure message once the name is edited again", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await screen.findByRole("alert");
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature-2" },
+    });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("dismissing the create-branch failure message clears it", async () => {
+    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
+    renderSwitcher({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
+
+    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
+      target: { value: "feature" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await screen.findByRole("alert");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("Cancel in the create form calls onCloseCreateBranchDraft", () => {

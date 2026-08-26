@@ -3,6 +3,7 @@ import { Cloud, RefreshCw, Upload, Pencil, KeyRound, Trash2, Copy } from "lucide
 import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
@@ -406,9 +407,7 @@ export function RemotePanel({
             />
           </label>
           {addError !== null && (
-            <p role="alert" className={styles.fieldError}>
-              {addError}
-            </p>
+            <InlineError message={addError} onDismiss={() => setAddError(null)} className={styles.fieldError} />
           )}
           <details
             className={styles.disclosure}

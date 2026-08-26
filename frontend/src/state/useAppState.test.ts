@@ -254,12 +254,16 @@ describe("useAppState", () => {
       const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
       await act(() => result.current.refresh());
-      await act(() => {
+      await act(async () => {
         if (operation === "create") {
-          return result.current.createWorktree("feature", "/repo-feature", "feature", "main");
+          await result.current.createWorktree("feature", "/repo-feature", "feature", "main");
+          return;
         }
-        if (operation === "remove") return result.current.removeWorktree("feature");
-        return result.current.pruneWorktrees();
+        if (operation === "remove") {
+          await result.current.removeWorktree("feature");
+          return;
+        }
+        await result.current.pruneWorktrees();
       });
 
       expect(statusCalls).toBe(2);
@@ -1088,6 +1092,91 @@ describe("useAppState", () => {
     expect(outcome).toBe("invalid fetch URL");
     expect(result.current.state.error).toBe("invalid fetch URL");
     expect(result.current.state.pending).toBe(false);
+  });
+
+  // Same `Promise<string | null>` contract as `addRemote` above, for the same reason:
+  // `BranchSwitcher`, `WorktreePanel`, and `TagPanel` each render their create-form's failure
+  // inline next to the form rather than routing it through the shared banner (issue #30/UX-002).
+  it("createBranch resolves to null on success and to the failure message on failure", async () => {
+    const client = transferClient({
+      createBranch: async (_repoPath, name) => {
+        if (name === "bad") throw new Error("branch already exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: string | null = "not set";
+    await act(async () => {
+      outcome = await result.current.createBranch("good", "HEAD");
+    });
+    expect(outcome).toBeNull();
+
+    await act(async () => {
+      outcome = await result.current.createBranch("bad", "HEAD");
+    });
+    expect(outcome).toBe("branch already exists");
+    expect(result.current.state.error).toBe("branch already exists");
+  });
+
+  it("createWorktree resolves to null on success and to the failure message on failure", async () => {
+    const client = transferClient({
+      createWorktree: async (_repoPath, name) => {
+        if (name === "bad") throw new Error("worktree path already exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: string | null = "not set";
+    await act(async () => {
+      outcome = await result.current.createWorktree("good", "/repo-good", "good", null);
+    });
+    expect(outcome).toBeNull();
+
+    await act(async () => {
+      outcome = await result.current.createWorktree("bad", "/repo-bad", "bad", null);
+    });
+    expect(outcome).toBe("worktree path already exists");
+    expect(result.current.state.error).toBe("worktree path already exists");
+  });
+
+  it("createTag resolves to null on success and to the failure message on failure", async () => {
+    const client = transferClient({
+      createTag: async (_repoPath, name) => {
+        if (name === "bad") throw new Error("tag already exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: string | null = "not set";
+    await act(async () => {
+      outcome = await result.current.createTag("good", null);
+    });
+    expect(outcome).toBeNull();
+
+    await act(async () => {
+      outcome = await result.current.createTag("bad", null);
+    });
+    expect(outcome).toBe("tag already exists");
+    expect(result.current.state.error).toBe("tag already exists");
+  });
+
+  // The global banner's dismiss control (issue #30/UX-002): without it, `state.error` only ever
+  // clears on the next successful action of the same kind, so a user who moves on to a different
+  // panel is left with a stale-looking banner indefinitely.
+  it("dismissError clears state.error without waiting for another action", async () => {
+    const client = transferClient({
+      createTag: async () => {
+        throw new Error("tag already exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.createTag("bad", null));
+    expect(result.current.state.error).toBe("tag already exists");
+
+    act(() => result.current.dismissError());
+
+    expect(result.current.state.error).toBeNull();
   });
 
   it("stageHunk calls client.stageHunk then refreshes status", async () => {

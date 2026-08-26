@@ -9,6 +9,7 @@ import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { InlineError } from "./components/primitives/InlineError";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -93,7 +94,9 @@ function RepoWorkspace({
     // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
     // actually looking at.
     <div style={{ display: active ? "contents" : "none" }} data-active-repo={active ? "true" : "false"}>
-      {appState.state.error !== null && <p role="alert">{appState.state.error}</p>}
+      {appState.state.error !== null && (
+        <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+      )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
           outside the dialog) even when this wrapper is `display: none` — so a backgrounded tab
@@ -423,8 +426,10 @@ export default function App() {
         {themeToggle}
       </header>
       <LaneBraid />
-      {openRepos.restoreError !== null && <p role="alert">{openRepos.restoreError}</p>}
-      {openError !== null && <p role="alert">{openError}</p>}
+      {openRepos.restoreError !== null && (
+        <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+      )}
+      {openError !== null && <InlineError message={openError} onDismiss={() => setOpenError(null)} />}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
@@ -440,6 +445,7 @@ export default function App() {
             workspaces={workspaces.workspaces}
             workspacesLoading={workspaces.loading}
             workspacesError={workspaces.error}
+            onDismissWorkspacesError={workspaces.dismissError}
             onCreateWorkspace={workspaces.createWorkspace}
             onEditWorkspace={workspaces.editWorkspace}
             onDeleteWorkspace={workspaces.deleteWorkspace}
@@ -454,6 +460,7 @@ export default function App() {
           workspaces={workspaces.workspaces}
           workspacesLoading={workspaces.loading}
           workspacesError={workspaces.error}
+          onDismissWorkspacesError={workspaces.dismissError}
           onCreateWorkspace={workspaces.createWorkspace}
           onEditWorkspace={workspaces.editWorkspace}
           onDeleteWorkspace={workspaces.deleteWorkspace}

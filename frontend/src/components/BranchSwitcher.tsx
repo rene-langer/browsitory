@@ -4,6 +4,7 @@ import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
@@ -31,7 +32,9 @@ export function BranchSwitcher({
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
   onSwitchBranch: (name: string) => void;
-  onCreateBranch: (name: string, startPoint: string) => void;
+  // `null` = created; a string = the failure message to show inline next to the draft form. See
+  // `useAppState.ts`'s `createBranch` (issue #30/UX-002).
+  onCreateBranch: (name: string, startPoint: string) => Promise<string | null>;
   onDeleteBranch: (name: string, force: boolean) => Promise<void>;
   onRenameBranch: (oldName: string, newName: string) => void;
   onOpenCreateBranchDraft: (startPoint: string) => void;
@@ -59,6 +62,7 @@ export function BranchSwitcher({
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const current = branches.find((b) => b.isCurrent);
 
@@ -73,12 +77,17 @@ export function BranchSwitcher({
     setRenameValue("");
   };
 
-  const submitCreate = () => {
+  const submitCreate = async () => {
     if (newBranchName.trim() === "" || createBranchDraft === null) {
       return;
     }
-    onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
+    const failure = await onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
     setNewBranchName("");
+    setCreateError(null);
   };
 
   const handleDeleteClick = async (name: string) => {
@@ -203,18 +212,31 @@ export function BranchSwitcher({
         <div className={styles.draftForm}>
           <input
             value={newBranchName}
-            onChange={(event) => setNewBranchName(event.target.value)}
+            onChange={(event) => {
+              setNewBranchName(event.target.value);
+              setCreateError(null);
+            }}
             placeholder="New branch name"
             onKeyDown={(event) => {
               if (event.key === "Enter") {
-                submitCreate();
+                void submitCreate();
               }
             }}
           />
-          <button onClick={submitCreate} disabled={newBranchName.trim() === "" || isRebasing}>
+          <button onClick={() => void submitCreate()} disabled={newBranchName.trim() === "" || isRebasing}>
             Create
           </button>
-          <button onClick={onCloseCreateBranchDraft}>Cancel</button>
+          <button
+            onClick={() => {
+              setCreateError(null);
+              onCloseCreateBranchDraft();
+            }}
+          >
+            Cancel
+          </button>
+          {createError !== null && (
+            <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+          )}
         </div>
       )}
       {stashes.length > 0 && (
