@@ -78,6 +78,20 @@ pub fn update_submodule(
 ) -> Result<(), SubmoduleError> {
     let mut submodule = find_submodule(repo, path)?;
 
+    // Validated unconditionally, not just on the recursive path: `submodule.update` below fetches
+    // straight from this configured URL via libgit2's own native update when the submodule isn't
+    // yet checked out, with no protocol check of its own — the recursive-only preflight
+    // (`ensure_recursive_update_is_safe`) doesn't run for a plain non-recursive update, which was
+    // the actual common case (the frontend defaults to non-recursive) SEC-002 initially missed.
+    // Reads the local `submodule.<name>.url` config key, same as `ensure_recursive_update_is_safe`
+    // does below, since that (not `Submodule::url()`, which reflects `.gitmodules` and ignores a
+    // local override) is what `submodule.update` actually fetches from once initialized.
+    if let Ok(name) = submodule.name() {
+        if let Ok(url) = repo.config()?.get_string(&format!("submodule.{name}.url")) {
+            validate_remote_url_scheme(&url)?;
+        }
+    }
+
     if recursive {
         ensure_recursive_update_is_safe(repo, &submodule)?;
     }

@@ -142,6 +142,29 @@ fn updates_only_the_requested_submodule_when_recursion_is_disabled() {
 }
 
 #[test]
+fn non_recursive_update_rejects_a_top_level_submodule_configured_with_a_file_url() {
+    // The non-recursive path is the frontend's default (`SubmodulePanel.tsx`'s "Update" button
+    // without "Update recursively" checked) — the recursive-only preflight in
+    // `ensure_recursive_update_is_safe` never runs here, so the scheme check must be enforced
+    // unconditionally in `update_submodule` itself, not just on the recursive branch.
+    let (_dir, parent, _child_url, _) = configured_submodule_checkout();
+    init_submodule(&parent, "deps/child").unwrap();
+    parent
+        .config()
+        .unwrap()
+        .set_str("submodule.deps/child.url", "file:///etc/passwd")
+        .unwrap();
+
+    let result = update_submodule(&parent, "deps/child", false);
+
+    assert!(matches!(
+        result,
+        Err(SubmoduleError::DisallowedUrlScheme(url)) if url == "file:///etc/passwd"
+    ));
+    assert_eq!(list_submodules(&parent).unwrap()[0].head_id, None);
+}
+
+#[test]
 fn recursive_update_rejects_a_top_level_submodule_configured_with_a_file_url() {
     let (_dir, parent, _child_url, _) = configured_submodule_checkout();
     init_submodule(&parent, "deps/child").unwrap();
