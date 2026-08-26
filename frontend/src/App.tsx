@@ -239,6 +239,7 @@ function RepoWorkspace({
                 onSelectRow={appState.selectRow}
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
+                onSquashCommits={appState.openSquashPlanner}
               />
             }
             right={
@@ -278,6 +279,7 @@ function RepoWorkspace({
             onStartRebase={appState.startRebase}
             onCancel={appState.closeRebasePlanner}
             operationDisabled={repositoryOperationDisabled}
+            presetSquashIds={appState.state.squashPreset ?? undefined}
           />
         </Overlay>
       )}

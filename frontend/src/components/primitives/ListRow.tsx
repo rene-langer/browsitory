@@ -43,13 +43,17 @@ export function ListRow({
   selected,
   onClick,
   onContextMenu,
+  onMouseEnter,
+  onMouseLeave,
   className,
   children,
 }: {
   id?: string;
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (event?: MouseEvent) => void;
   onContextMenu?: (event: MouseEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   className?: string;
   children: ReactNode;
 }) {
@@ -79,6 +83,8 @@ export function ListRow({
       onClick={onClick}
       onKeyDown={standalone ? handleKeyDown : undefined}
       onContextMenu={onContextMenu}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {children}
     </li>

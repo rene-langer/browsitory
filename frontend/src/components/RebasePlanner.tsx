@@ -124,6 +124,7 @@ export function RebasePlanner({
   onStartRebase,
   onCancel,
   operationDisabled = false,
+  presetSquashIds,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -131,6 +132,10 @@ export function RebasePlanner({
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
   onCancel: () => void;
   operationDisabled?: boolean;
+  // Commit ids to default to "Squash" instead of "Pick" — used when the plan is opened from a
+  // multi-select "Squash N commits" action in the commit graph, so the picked range arrives
+  // already grouped instead of the user re-marking every row by hand.
+  presetSquashIds?: ReadonlySet<string>;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
 
@@ -138,20 +143,19 @@ export function RebasePlanner({
     let ignore = false;
     client.commitsSince(repoPath, onto).then((commits) => {
       if (!ignore) {
-        setRows(
-          commits.map((commit) => ({
-            commit,
-            actionKind: "Pick",
-            rewordMessage: commit.summary,
-            combinedMessage: null,
-          })),
-        );
+        const initialRows = commits.map((commit) => ({
+          commit,
+          actionKind: (presetSquashIds?.has(commit.id) ? "Squash" : "Pick") as ActionKind,
+          rewordMessage: commit.summary,
+          combinedMessage: null,
+        }));
+        setRows(recomputeGroupLeaders(initialRows, initialRows));
       }
     });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, onto]);
+  }, [repoPath, client, onto, presetSquashIds]);
 
   const moveRow = (index: number, direction: -1 | 1) => {
     const target = index + direction;
