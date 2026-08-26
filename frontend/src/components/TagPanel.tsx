@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./TagPanel.module.css";
@@ -139,18 +140,15 @@ export function TagPanel({
       </section>
 
       {deleteConfirmation !== null && (
-        <dialog open aria-label={`Delete local tag ${deleteConfirmation}`}>
-          <p>Delete local tag {deleteConfirmation}?</p>
-          <button
-            type="button"
-            disabled={pushDisabled}
-            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
-            onClick={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
-          >
-            Delete tag
-          </button>
-          <button type="button" onClick={() => setDeleteConfirmation(null)}>Cancel</button>
-        </dialog>
+        <ConfirmDialog
+          ariaLabel={`Delete local tag ${deleteConfirmation}`}
+          message={`Delete local tag ${deleteConfirmation}?`}
+          confirmLabel="Delete tag"
+          confirmDisabled={pushDisabled}
+          confirmTitle={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          onConfirm={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
+          onCancel={() => setDeleteConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );
