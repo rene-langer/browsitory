@@ -24,6 +24,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { useReflogActions } from "./useReflogActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
 
@@ -404,43 +405,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
 
-  const selectReflogReference = useCallback(
-    async (reference: string) => {
-      const requestGeneration = ++reflogRequestGeneration.current;
-      try {
-        selectedReflogReference.current = reference;
-        const reflog = await client.getReflog(repoPath, reference);
-        if (
-          requestGeneration !== reflogRequestGeneration.current ||
-          selectedReflogReference.current !== reference
-        ) {
-          return;
-        }
-        setState((prev) => ({
-          ...prev,
-          selectedReflogReference: reference,
-          reflog,
-          error: null,
-        }));
-      } catch (err) {
-        if (
-          requestGeneration === reflogRequestGeneration.current &&
-          selectedReflogReference.current === reference
-        ) {
-          setState((prev) => ({ ...prev, error: String(err) }));
-        }
-      }
-    },
-    [client, repoPath],
-  );
-  const restoreReflogEntry = useCallback(
-    (reference: string, newId: string) => {
-      selectedReflogReference.current = reference;
-      reflogRequestGeneration.current += 1;
-      setState((prev) => ({ ...prev, selectedReflogReference: reference }));
-      return runMutation(() => client.restoreReflogEntry(repoPath, reference, newId));
-    },
-    [client, runMutation, repoPath],
+  const { selectReflogReference, restoreReflogEntry } = useReflogActions(
+    client,
+    repoPath,
+    runMutation,
+    setState,
+    selectedReflogReference,
+    reflogRequestGeneration,
   );
 
   const addRemote = useCallback(
