@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
+import { credentialFailureMessage, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
 
 export interface ForgeActions {
   listPullRequests(remoteName: string, account: string): Promise<void>;
@@ -40,7 +40,7 @@ export function useForgeActions(
         setState((prev) => {
           const rest = { ...prev.pullRequests };
           delete rest[remoteName];
-          return { ...prev, pullRequests: rest, error: String(err) };
+          return { ...prev, pullRequests: rest, error: credentialFailureMessage(err) };
         });
       }
     },
