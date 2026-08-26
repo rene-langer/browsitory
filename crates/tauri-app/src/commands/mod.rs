@@ -10,11 +10,13 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::worker::{TransferEvent, Worker};
 
+mod reflog;
 mod stash;
 mod submodule;
 mod tag;
 mod worktree;
 
+pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -1053,37 +1055,6 @@ pub async fn list_branches(
 ) -> Result<Vec<BranchInfoDto>, String> {
     let branches = worker_handle(&state, &repo_path)?.list_branches()?;
     Ok(branches.into_iter().map(BranchInfoDto::from).collect())
-}
-
-#[tauri::command]
-pub async fn list_reflog_refs(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
-    worker_handle(&state, &repo_path)?.list_reflog_refs()
-}
-
-#[tauri::command]
-pub async fn get_reflog(
-    repo_path: String,
-    reference: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<ReflogEntryDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_reflog(reference)?
-        .into_iter()
-        .map(ReflogEntryDto::from)
-        .collect())
-}
-
-#[tauri::command]
-pub async fn restore_reflog_entry(
-    repo_path: String,
-    reference: String,
-    new_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.restore_reflog_entry(reference, new_id)
 }
 
 #[tauri::command]

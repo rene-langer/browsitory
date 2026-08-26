@@ -26,6 +26,7 @@ use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
+mod reflog;
 mod stash;
 mod submodule;
 mod tag;
@@ -580,11 +581,21 @@ impl Worker {
                         branch,
                         start_point,
                         reply,
-                    } => worktree::create(&repo_path, &mut repo, name, path, branch, start_point, reply),
+                    } => worktree::create(
+                        &repo_path,
+                        &mut repo,
+                        name,
+                        path,
+                        branch,
+                        start_point,
+                        reply,
+                    ),
                     Command::RemoveWorktree { name, reply } => {
                         worktree::remove(&repo_path, &mut repo, name, reply)
                     }
-                    Command::PruneWorktrees { reply } => worktree::prune(&repo_path, &mut repo, reply),
+                    Command::PruneWorktrees { reply } => {
+                        worktree::prune(&repo_path, &mut repo, reply)
+                    }
                     Command::ListSubmodules { reply } => submodule::list(&repo, reply),
                     Command::InitSubmodule { path, reply } => submodule::init(&repo, path, reply),
                     Command::UpdateSubmodule {
@@ -592,26 +603,13 @@ impl Worker {
                         recursive,
                         reply,
                     } => submodule::update(&repo, path, recursive, reply),
-                    Command::ListReflogRefs { reply } => {
-                        let result =
-                            git_core::reflog::list_reflog_refs(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::GetReflog { reference, reply } => {
-                        let result = git_core::reflog::read_reflog(&repo, &reference)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListReflogRefs { reply } => reflog::list_refs(&repo, reply),
+                    Command::GetReflog { reference, reply } => reflog::get(&repo, reference, reply),
                     Command::RestoreReflogEntry {
                         reference,
                         new_id,
                         reply,
-                    } => {
-                        let result =
-                            git_core::reflog::restore_reflog_entry(&repo, &reference, &new_id)
-                                .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => reflog::restore(&repo, reference, new_id, reply),
                     Command::ListRemotes { reply } => {
                         let result =
                             git_core::remote::list_remotes(&repo).map_err(|e| e.to_string());
@@ -1391,43 +1389,6 @@ impl WorkerHandle {
             .send(Command::RenameBranch {
                 old_name,
                 new_name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_reflog_refs(&self) -> Result<Vec<String>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListReflogRefs { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn get_reflog(&self, reference: String) -> Result<Vec<ReflogEntry>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::GetReflog {
-                reference,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn restore_reflog_entry(&self, reference: String, new_id: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RestoreReflogEntry {
-                reference,
-                new_id,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
