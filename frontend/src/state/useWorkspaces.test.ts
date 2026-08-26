@@ -41,6 +41,17 @@ describe("useWorkspaces", () => {
     expect(result.current.error).toContain("config unreadable");
   });
 
+  it("dismissError clears error", async () => {
+    const client = fakeClient({ listWorkspaces: vi.fn().mockRejectedValue(new Error("config unreadable")) });
+    const { result } = renderHook(() => useWorkspaces(client));
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    act(() => result.current.dismissError());
+
+    expect(result.current.error).toBeNull();
+  });
+
   it("createWorkspace calls saveWorkspace and refreshes the list", async () => {
     const client = fakeClient({
       saveWorkspace: vi.fn().mockResolvedValue("ws-new"),

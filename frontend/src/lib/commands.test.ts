@@ -120,6 +120,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openExternalUrl: vi.fn(),
     setGraphBranchSelection: vi.fn(),
     refresh: vi.fn(),
+    dismissError: vi.fn(),
   };
 }
 

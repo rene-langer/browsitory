@@ -5,6 +5,9 @@ export interface UseWorkspacesResult {
   workspaces: Workspace[];
   loading: boolean;
   error: string | null;
+  // Clears `error` without waiting for the next successful refresh — its dismiss control
+  // (issue #30/UX-002).
+  dismissError(): void;
   createWorkspace(name: string, root: string, members: string[]): Promise<string>;
   editWorkspace(id: string, name: string, members: string[]): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
@@ -56,5 +59,9 @@ export function useWorkspaces(client: RepoClient): UseWorkspacesResult {
     [client, refresh],
   );
 
-  return { workspaces, loading, error, createWorkspace, editWorkspace, deleteWorkspace };
+  const dismissError = useCallback(() => {
+    setError(null);
+  }, []);
+
+  return { workspaces, loading, error, dismissError, createWorkspace, editWorkspace, deleteWorkspace };
 }

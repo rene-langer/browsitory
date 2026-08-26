@@ -15,6 +15,9 @@ export interface UseOpenReposResult {
   // `App` renders it next to its own `openError`, so a failed restore is visible rather than
   // silently indistinguishable from "no tabs were persisted".
   restoreError: string | null;
+  // Clears `restoreError` without waiting for anything else to happen — its dismiss control
+  // (issue #30/UX-002).
+  dismissRestoreError(): void;
   openRepo(path: string): Promise<void>;
   openWorkspace(workspace: Workspace): Promise<void>;
   closeRepo(path: string): void;
@@ -170,5 +173,19 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
     [openRepos, persist],
   );
 
-  return { openRepos, activePath, loading, restoreError, openRepo, closeRepo, switchTo, openWorkspace };
+  const dismissRestoreError = useCallback(() => {
+    setRestoreError(null);
+  }, []);
+
+  return {
+    openRepos,
+    activePath,
+    loading,
+    restoreError,
+    dismissRestoreError,
+    openRepo,
+    closeRepo,
+    switchTo,
+    openWorkspace,
+  };
 }

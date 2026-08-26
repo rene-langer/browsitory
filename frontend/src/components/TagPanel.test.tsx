@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { TagPanel } from "./TagPanel";
@@ -63,6 +63,43 @@ describe("TagPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
 
     expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("clears the form after a successful create", async () => {
+    const onCreate = vi.fn().mockResolvedValue(null);
+    renderPanel({ onCreate });
+
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v2.0.0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+
+    expect(onCreate).toHaveBeenCalledWith("v2.0.0", null);
+    await waitFor(() => expect(screen.getByLabelText("Tag name")).toHaveValue(""));
+  });
+
+  // `useAppState`'s `createTag` never rejects — it reports failure by resolving to the message,
+  // the same contract `RemotePanel`'s `addRemote` established. See issue #30/UX-002.
+  it("shows a failed create-tag's message inline and keeps the entered name", async () => {
+    const onCreate = vi.fn().mockResolvedValue("tag already exists");
+    renderPanel({ onCreate });
+
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tag already exists");
+    expect(screen.getByLabelText("Tag name")).toHaveValue("v1.0.0");
+  });
+
+  it("clears the create-tag failure message once the name is edited again", async () => {
+    const onCreate = vi.fn().mockResolvedValue("tag already exists");
+    renderPanel({ onCreate });
+
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+    await screen.findByRole("alert");
+
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.1" } });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("pushes only selected tags to the selected remote", () => {

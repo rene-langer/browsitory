@@ -1,0 +1,32 @@
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger);
+  color: var(--color-danger-text);
+  font-size: var(--text-sm);
+}
+
+.message {
+  flex: 1;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  background: transparent;
+  border: none;
+}
+
+.dismiss:hover {
+  background: var(--color-danger-text);
+  color: var(--color-danger);
+}

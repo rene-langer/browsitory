@@ -3,6 +3,7 @@ import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
 
@@ -18,12 +19,14 @@ export function WorktreePanel({
   worktrees: WorktreeInfo[];
   branches: BranchInfo[];
   onOpenWorktree: (path: string) => Promise<void>;
+  // `null` = created; a string = the failure message to show inline next to the form. See
+  // `useAppState.ts`'s `createWorktree` (issue #30/UX-002).
   onCreateWorktree: (
     name: string,
     path: string,
     branch: string,
     startPoint: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   onRemoveWorktree: (name: string) => Promise<void>;
   onPruneWorktrees: () => Promise<void>;
   operationDisabled: boolean;
@@ -33,17 +36,23 @@ export function WorktreePanel({
   const [branch, setBranch] = useState("");
   const [startPoint, setStartPoint] = useState("");
   const [removeConfirmation, setRemoveConfirmation] = useState<WorktreeInfo | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const createWorktree = async (event: React.FormEvent) => {
     event.preventDefault();
     const values = [name.trim(), path.trim(), branch.trim()];
     if (values.some((value) => value === "")) return;
-    await onCreateWorktree(
+    const failure = await onCreateWorktree(
       values[0],
       values[1],
       values[2],
       startPoint.trim() || null,
     );
+    if (failure !== null) {
+      setCreateError(failure);
+      return;
+    }
+    setCreateError(null);
     setName("");
     setPath("");
     setBranch("");
@@ -61,7 +70,10 @@ export function WorktreePanel({
           Worktree name
           <input
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              setCreateError(null);
+            }}
           />
         </label>
         <label className={styles.label}>
@@ -91,6 +103,9 @@ export function WorktreePanel({
             onChange={(event) => setStartPoint(event.target.value)}
           />
         </label>
+        {createError !== null && (
+          <InlineError message={createError} onDismiss={() => setCreateError(null)} />
+        )}
         <Toolbar>
           <button type="submit" disabled={operationDisabled}>
             Create worktree

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
+import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -13,6 +14,7 @@ export function RepoPicker({
   workspaces,
   workspacesLoading,
   workspacesError,
+  onDismissWorkspacesError,
   onCreateWorkspace,
   onEditWorkspace,
   onDeleteWorkspace,
@@ -23,6 +25,7 @@ export function RepoPicker({
   workspaces: Workspace[];
   workspacesLoading: boolean;
   workspacesError: string | null;
+  onDismissWorkspacesError: () => void;
   onCreateWorkspace: (name: string, root: string, members: string[]) => Promise<string>;
   onEditWorkspace: (id: string, name: string, members: string[]) => Promise<void>;
   onDeleteWorkspace: (id: string) => Promise<void>;
@@ -85,7 +88,7 @@ export function RepoPicker({
         <button onClick={handleOpenFolder}>Open Folder</button>
         <button onClick={() => setCreatingWorkspace(true)}>Open Workspace Root</button>
       </Toolbar>
-      {error !== null && <p role="alert">{error}</p>}
+      {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
       {recentRepos.length === 0 ? (
         <p>No recent repositories</p>
       ) : (
@@ -98,7 +101,9 @@ export function RepoPicker({
         </ul>
       )}
       <Panel title="Workspaces" headingLevel={3}>
-        {workspacesError !== null && <p role="alert">{workspacesError}</p>}
+        {workspacesError !== null && (
+          <InlineError message={workspacesError} onDismiss={onDismissWorkspacesError} />
+        )}
         {!workspacesLoading && workspaces.length === 0 ? (
           <p>No saved workspaces</p>
         ) : (
