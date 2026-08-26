@@ -24,6 +24,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { useBranchActions } from "./useBranchActions";
 import { useReflogActions } from "./useReflogActions";
 import { useStagingActions } from "./useStagingActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
@@ -332,30 +333,15 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     commit,
   } = useStagingActions(client, repoPath, runMutation, setState);
 
-  const createBranch = useCallback(
-    (name: string, startPoint: string) =>
-      runMutationWithMessage(async () => {
-        await client.createBranch(repoPath, name, startPoint);
-        setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
-      }),
-    [client, runMutationWithMessage, repoPath],
-  );
-  const switchBranch = useCallback(
-    (name: string) =>
-      runMutation(async () => {
-        await client.switchBranch(repoPath, name);
-        setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath],
-  );
-  const deleteBranch = useCallback(
-    (name: string, force: boolean) => runMutation(() => client.deleteBranch(repoPath, name, force)),
-    [client, runMutation, repoPath],
-  );
-  const renameBranch = useCallback(
-    (oldName: string, newName: string) => runMutation(() => client.renameBranch(repoPath, oldName, newName)),
-    [client, runMutation, repoPath],
-  );
+  const {
+    createBranch,
+    switchBranch,
+    deleteBranch,
+    renameBranch,
+    openCreateBranchDraft,
+    closeCreateBranchDraft,
+    setGraphBranchSelection,
+  } = useBranchActions(client, repoPath, runMutation, runMutationWithMessage, setState);
   const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
     client,
     repoPath,
@@ -529,13 +515,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setState((prev) => ({ ...prev, pendingPull: null }));
   }, []);
 
-  const openCreateBranchDraft = useCallback((startPoint: string) => {
-    setState((prev) => ({ ...prev, createBranchDraft: { startPoint } }));
-  }, []);
-  const closeCreateBranchDraft = useCallback(() => {
-    setState((prev) => ({ ...prev, createBranchDraft: null }));
-  }, []);
-
   const saveStash = useCallback(
     () => runMutation(() => client.saveStash(repoPath)),
     [client, runMutation, repoPath],
@@ -673,12 +652,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     (url: string) => client.openExternalUrl(url),
     [client],
   );
-  const setGraphBranchSelection = useCallback(
-    (selectedBranches: string[]) =>
-      runMutation(() => client.setGraphBranchSelection(repoPath, selectedBranches)),
-    [client, runMutation, repoPath],
-  );
-
   const dismissError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
