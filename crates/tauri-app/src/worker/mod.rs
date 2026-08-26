@@ -29,6 +29,7 @@ use crate::pull_requests::{
 mod stash;
 mod submodule;
 mod tag;
+mod worktree;
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -572,74 +573,18 @@ impl Worker {
                             .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::ListWorktrees { reply } => {
-                        let result =
-                            git_core::worktree::list_worktrees(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListWorktrees { reply } => worktree::list(&repo, reply),
                     Command::CreateWorktree {
                         name,
                         path,
                         branch,
                         start_point,
                         reply,
-                    } => {
-                        let mut result = git_core::worktree::create_worktree(
-                            &repo,
-                            &name,
-                            &path,
-                            &branch,
-                            start_point.as_deref(),
-                        )
-                        .map_err(|e| e.to_string());
-                        if result.is_ok() {
-                            result = git_core::repo::open(&repo_path)
-                                .map(|reopened| repo = reopened)
-                                .map_err(|e| e.to_string());
-                        }
-                        let _ = reply.send(result);
-                    }
+                    } => worktree::create(&repo_path, &mut repo, name, path, branch, start_point, reply),
                     Command::RemoveWorktree { name, reply } => {
-                        let current_workdir = repo
-                            .workdir()
-                            .and_then(|path| path.canonicalize().ok())
-                            .ok_or_else(|| "cannot determine the open worktree".to_string());
-                        let mut result = current_workdir.and_then(|current_workdir| {
-                            git_core::worktree::list_worktrees(&repo)
-                                .and_then(|worktrees| {
-                                    worktrees
-                                        .into_iter()
-                                        .find(|worktree| !worktree.is_main && worktree.name == name)
-                                        .ok_or(git_core::worktree::WorktreeError::Git)
-                                })
-                                .map_err(|e| e.to_string())
-                                .and_then(|worktree| {
-                                    if worktree.path == current_workdir {
-                                        return Err(
-                                            "cannot remove the currently open worktree".to_string()
-                                        );
-                                    }
-                                    git_core::worktree::remove_worktree(&repo, &worktree.path)
-                                        .map_err(|e| e.to_string())
-                                })
-                        });
-                        if result.is_ok() {
-                            result = git_core::repo::open(&repo_path)
-                                .map(|reopened| repo = reopened)
-                                .map_err(|e| e.to_string());
-                        }
-                        let _ = reply.send(result);
+                        worktree::remove(&repo_path, &mut repo, name, reply)
                     }
-                    Command::PruneWorktrees { reply } => {
-                        let mut result =
-                            git_core::worktree::prune_worktrees(&repo).map_err(|e| e.to_string());
-                        if result.is_ok() {
-                            result = git_core::repo::open(&repo_path)
-                                .map(|reopened| repo = reopened)
-                                .map_err(|e| e.to_string());
-                        }
-                        let _ = reply.send(result);
-                    }
+                    Command::PruneWorktrees { reply } => worktree::prune(&repo_path, &mut repo, reply),
                     Command::ListSubmodules { reply } => submodule::list(&repo, reply),
                     Command::InitSubmodule { path, reply } => submodule::init(&repo, path, reply),
                     Command::UpdateSubmodule {
@@ -1448,61 +1393,6 @@ impl WorkerHandle {
                 new_name,
                 reply: reply_tx,
             })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListWorktrees { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn create_worktree(
-        &self,
-        name: String,
-        path: PathBuf,
-        branch: String,
-        start_point: Option<String>,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::CreateWorktree {
-                name,
-                path,
-                branch,
-                start_point,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn remove_worktree(&self, name: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::RemoveWorktree {
-                name,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn prune_worktrees(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::PruneWorktrees { reply: reply_tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
