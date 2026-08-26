@@ -27,6 +27,7 @@ use crate::pull_requests::{
 };
 
 mod branch;
+mod forge;
 mod merge;
 mod rebase;
 mod reflog;
@@ -397,18 +398,6 @@ pub struct WorkerHandle {
 /// the raw remote URL or any detection detail) when the remote isn't a supported, unambiguous
 /// forge repository — callers must check this before ever touching `PullRequestService`, so an
 /// unsupported/ambiguous remote never causes an HTTP request.
-fn resolve_forge_repository(
-    repo: &git2::Repository,
-    remote_name: &str,
-) -> Result<ForgeRepository, String> {
-    git_core::forge::detect_forge_repositories(repo)
-        .ok()
-        .into_iter()
-        .flatten()
-        .find(|repository| repository.remote_name == remote_name)
-        .ok_or_else(|| "this remote is not a supported forge repository".to_string())
-}
-
 impl Worker {
     /// Production entry point: constructs the real OS-keychain credential store. Behind the
     /// `forge-fixture-override` feature (E2E builds only — see `Cargo.toml`'s doc comment on
@@ -938,69 +927,44 @@ impl Worker {
                             error: result.err().map(|error| error.transfer_error_kind()),
                         });
                     }
-                    Command::DetectForgeRepository { reply } => {
-                        // An ambiguous or credential-bearing remote (`Err` from git-core)
-                        // declines rather than surfacing an error: the repo simply has no
-                        // usable forge repository, not a failure to report. No HTTP request is
-                        // ever made by this command either way.
-                        let repositories =
-                            git_core::forge::detect_forge_repositories(&repo).unwrap_or_default();
-                        let _ = reply.send(Ok(repositories));
-                    }
+                    Command::DetectForgeRepository { reply } => forge::detect(&repo, reply),
                     Command::SaveForgeToken {
                         provider,
                         account,
                         token,
                         reply,
-                    } => {
-                        let result = credential_service
-                            .save_forge_token(provider, &account, &token)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => forge::save_token(&credential_service, provider, account, token, reply),
                     Command::ForgetForgeToken {
                         provider,
                         account,
                         reply,
-                    } => {
-                        let result = credential_service
-                            .forget_forge_token(provider, &account)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => forge::forget_token(&credential_service, provider, account, reply),
                     Command::ListPullRequests {
                         remote_name,
                         account,
                         reply,
-                    } => {
-                        let result = (|| {
-                            let repository = resolve_forge_repository(&repo, &remote_name)?;
-                            let token = credential_service
-                                .lookup_forge_token(repository.provider, &account)
-                                .map_err(|e| e.to_string())?;
-                            pull_request_service
-                                .list_pull_requests(&repository, token.as_deref())
-                                .map_err(|e| e.to_string())
-                        })();
-                        let _ = reply.send(result);
-                    }
+                    } => forge::list_pull_requests(
+                        &repo,
+                        &credential_service,
+                        &pull_request_service,
+                        remote_name,
+                        account,
+                        reply,
+                    ),
                     Command::CreatePullRequest {
                         remote_name,
                         account,
                         create,
                         reply,
-                    } => {
-                        let result = (|| {
-                            let repository = resolve_forge_repository(&repo, &remote_name)?;
-                            let token = credential_service
-                                .lookup_forge_token(repository.provider, &account)
-                                .map_err(|e| e.to_string())?;
-                            pull_request_service
-                                .create_pull_request(&repository, token.as_deref(), &create)
-                                .map_err(|e| e.to_string())
-                        })();
-                        let _ = reply.send(result);
-                    }
+                    } => forge::create_pull_request(
+                        &repo,
+                        &credential_service,
+                        &pull_request_service,
+                        remote_name,
+                        account,
+                        create,
+                        reply,
+                    ),
                 }
             }
         });
@@ -1470,92 +1434,6 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ClearCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn detect_forge_repository(&self) -> Result<Vec<ForgeRepository>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::DetectForgeRepository { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn save_forge_token(
-        &self,
-        provider: ForgeProvider,
-        account: String,
-        token: String,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SaveForgeToken {
-                provider,
-                account,
-                token,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn forget_forge_token(
-        &self,
-        provider: ForgeProvider,
-        account: String,
-    ) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ForgetForgeToken {
-                provider,
-                account,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_pull_requests(
-        &self,
-        remote_name: String,
-        account: String,
-    ) -> Result<PullRequestList, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListPullRequests {
-                remote_name,
-                account,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn create_pull_request(
-        &self,
-        remote_name: String,
-        account: String,
-        create: CreatePullRequest,
-    ) -> Result<PullRequest, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::CreatePullRequest {
-                remote_name,
-                account,
-                create,
-                reply: reply_tx,
-            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()

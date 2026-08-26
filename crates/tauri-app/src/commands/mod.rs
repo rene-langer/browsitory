@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::worker::{TransferEvent, Worker};
 
 mod branch;
+mod forge;
 mod merge;
 mod rebase;
 mod reflog;
@@ -20,6 +21,10 @@ mod tag;
 mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
+pub use forge::{
+    create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
+    save_forge_token,
+};
 pub use merge::{
     abort_merge, get_conflict_hunks, get_merge_message, resolve_add_delete_conflict,
     resolve_conflict, start_merge,
@@ -1259,67 +1264,6 @@ pub async fn pull_current_upstream(
             .map_err(|_| "pull worker task stopped".to_string())??
             .into(),
     )
-}
-
-#[tauri::command]
-pub async fn detect_forge_repository(
-    repo_path: String,
-    state: State<'_, AppState>,
-) -> Result<Vec<ForgeRepositoryDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .detect_forge_repository()?
-        .into_iter()
-        .map(ForgeRepositoryDto::from)
-        .collect())
-}
-
-#[tauri::command]
-pub async fn save_forge_token(
-    repo_path: String,
-    provider: ForgeProviderDto,
-    account: String,
-    token: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.save_forge_token(provider.into(), account, token)
-}
-
-#[tauri::command]
-pub async fn forget_forge_token(
-    repo_path: String,
-    provider: ForgeProviderDto,
-    account: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.forget_forge_token(provider.into(), account)
-}
-
-#[tauri::command]
-pub async fn list_pull_requests(
-    repo_path: String,
-    remote_name: String,
-    account: String,
-    state: State<'_, AppState>,
-) -> Result<PullRequestListDto, String> {
-    Ok(PullRequestListDto::from(
-        worker_handle(&state, &repo_path)?.list_pull_requests(remote_name, account)?,
-    ))
-}
-
-#[tauri::command]
-pub async fn create_pull_request(
-    repo_path: String,
-    remote_name: String,
-    account: String,
-    pull_request: CreatePullRequestDto,
-    state: State<'_, AppState>,
-) -> Result<PullRequestDto, String> {
-    let created = worker_handle(&state, &repo_path)?.create_pull_request(
-        remote_name,
-        account,
-        pull_request.into(),
-    )?;
-    Ok(PullRequestDto::from(created))
 }
 
 /// Opens `url` in the user's default external browser/handler, never inside this app's own
