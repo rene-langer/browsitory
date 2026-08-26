@@ -27,6 +27,7 @@ use crate::pull_requests::{
 };
 
 mod stash;
+mod submodule;
 mod tag;
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -639,25 +640,13 @@ impl Worker {
                         }
                         let _ = reply.send(result);
                     }
-                    Command::ListSubmodules { reply } => {
-                        let result =
-                            git_core::submodule::list_submodules(&repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::InitSubmodule { path, reply } => {
-                        let result = git_core::submodule::init_submodule(&repo, &path)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListSubmodules { reply } => submodule::list(&repo, reply),
+                    Command::InitSubmodule { path, reply } => submodule::init(&repo, path, reply),
                     Command::UpdateSubmodule {
                         path,
                         recursive,
                         reply,
-                    } => {
-                        let result = git_core::submodule::update_submodule(&repo, &path, recursive)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    } => submodule::update(&repo, path, recursive, reply),
                     Command::ListReflogRefs { reply } => {
                         let result =
                             git_core::reflog::list_reflog_refs(&repo).map_err(|e| e.to_string());
@@ -1514,43 +1503,6 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::PruneWorktrees { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_submodules(&self) -> Result<Vec<SubmoduleInfo>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListSubmodules { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn init_submodule(&self, path: String) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::InitSubmodule {
-                path,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn update_submodule(&self, path: String, recursive: bool) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::UpdateSubmodule {
-                path,
-                recursive,
-                reply: reply_tx,
-            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
