@@ -10,7 +10,6 @@ shipped has silently gone undocumented, per SEC-004/MAINT-003
 """
 
 import json
-import re
 import sys
 import tomllib
 from pathlib import Path
@@ -40,8 +39,7 @@ def js_deps(package_json: Path) -> set[str]:
     return names
 
 
-def doc_table_names(section_header: str, stop_headers: tuple[str, ...]) -> set[str]:
-    text = DOC.read_text()
+def doc_table_names(text: str, section_header: str, stop_headers: tuple[str, ...]) -> set[str]:
     start = text.index(section_header) + len(section_header)
     end = len(text)
     for stop in stop_headers:
@@ -65,20 +63,21 @@ def doc_table_names(section_header: str, stop_headers: tuple[str, ...]) -> set[s
 
 def main() -> int:
     problems: list[str] = []
+    doc_text = DOC.read_text()
 
-    documented_rust = doc_table_names("## Rust (`cargo info <crate>`)", ("\n## ",))
+    documented_rust = doc_table_names(doc_text, "## Rust (`cargo info <crate>`)", ("\n## ",))
     missing_rust = rust_deps() - documented_rust
     if missing_rust:
         problems.append(f"Rust dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_rust)}")
 
     documented_frontend = doc_table_names(
-        "## JavaScript (`npm info <package> license`)", ("\n## JavaScript, `e2e/`",)
+        doc_text, "## JavaScript (`npm info <package> license`)", ("\n## JavaScript, `e2e/`",)
     )
     missing_frontend = js_deps(ROOT / "frontend" / "package.json") - documented_frontend
     if missing_frontend:
         problems.append(f"frontend/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_frontend)}")
 
-    documented_e2e = doc_table_names("## JavaScript, `e2e/` (`npm info <package> license`)", ("\n## ",))
+    documented_e2e = doc_table_names(doc_text, "## JavaScript, `e2e/` (`npm info <package> license`)", ("\n## ",))
     missing_e2e = js_deps(ROOT / "e2e" / "package.json") - documented_e2e
     if missing_e2e:
         problems.append(f"e2e/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_e2e)}")
