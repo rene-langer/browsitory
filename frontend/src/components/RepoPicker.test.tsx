@@ -80,6 +80,8 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     listPullRequests: async () => unimplemented(),
     createPullRequest: async () => unimplemented(),
     openExternalUrl: async () => unimplemented(),
+    getGraphBranchSelection: async () => null,
+    setGraphBranchSelection: async () => unimplemented(),
     getWorkingDiff: async () => unimplemented(),
     getCommitDiff: async () => unimplemented(),
     getCommitFiles: async () => unimplemented(),

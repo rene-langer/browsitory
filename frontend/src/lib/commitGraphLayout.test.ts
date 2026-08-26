@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphCommit } from "../ipc/RepoClient";
-import { assignLanes } from "./commitGraphLayout";
+import { assignLanes, isSquashableRange } from "./commitGraphLayout";
 
 function commit(id: string, parentIds: string[]): GraphCommit {
   return {
@@ -63,5 +63,43 @@ describe("assignLanes", () => {
       parentConnections: [{ parentId: "M1", lane: 0 }],
       passThroughLanes: [0, 1],
     });
+  });
+});
+
+describe("isSquashableRange", () => {
+  it("accepts a straight single-parent chain", () => {
+    const commits = [commit("C", ["B"]), commit("B", ["A"]), commit("A", [])];
+
+    expect(isSquashableRange(commits, 0, 2)).toBe(true);
+  });
+
+  it("rejects a range that crosses a merge commit", () => {
+    const commits = [
+      commit("M2", ["M1", "F1"]),
+      commit("F1", ["M1"]),
+      commit("M1", []),
+    ];
+
+    // M2 has two parents, so squashing it with F1 (its second parent, a different branch)
+    // doesn't correspond to any single rebase-plan group.
+    expect(isSquashableRange(commits, 0, 1)).toBe(false);
+  });
+
+  it("rejects a range whose middle commit is a fork point (two children)", () => {
+    // F1 and M2 are both children of M1: M1 isn't F1's sole descendant's-only-parent chain
+    // partner, since selecting F1 through M1 would silently drop M2's own history.
+    const commits = [
+      commit("F1", ["M1"]),
+      commit("M2", ["M1"]),
+      commit("M1", []),
+    ];
+
+    expect(isSquashableRange(commits, 0, 2)).toBe(false);
+  });
+
+  it("a single-commit range is always squashable (trivial)", () => {
+    const commits = [commit("A", [])];
+
+    expect(isSquashableRange(commits, 0, 0)).toBe(true);
   });
 });

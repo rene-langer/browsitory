@@ -21,7 +21,11 @@ pub struct GraphCommit {
     pub branch_refs: Vec<String>,
 }
 
-pub fn graph_log(repo: &Repository, limit: usize) -> Result<Vec<GraphCommit>, GraphError> {
+pub fn graph_log(
+    repo: &Repository,
+    limit: usize,
+    selected_branches: Option<&[String]>,
+) -> Result<Vec<GraphCommit>, GraphError> {
     let mut tips_by_oid: HashMap<Oid, Vec<String>> = HashMap::new();
     for entry in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = entry?;
@@ -35,11 +39,19 @@ pub fn graph_log(repo: &Repository, limit: usize) -> Result<Vec<GraphCommit>, Gr
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    // On a repo with no commits yet, there are no local branches to match, so this simply
-    // pushes nothing — the loop below then runs zero times, giving an empty graph. Unlike
-    // `push_head()` (which errors on an unborn HEAD, the case the removed `log()` had to
-    // special-case), `push_glob` doesn't error on zero matches — no special-casing needed here.
-    revwalk.push_glob("refs/heads/*")?;
+    match selected_branches {
+        // On a repo with no commits yet, there are no local branches to match, so this simply
+        // pushes nothing — the loop below then runs zero times, giving an empty graph. Unlike
+        // `push_head()` (which errors on an unborn HEAD, the case the removed `log()` had to
+        // special-case), `push_glob` doesn't error on zero matches — no special-casing needed
+        // here.
+        None => revwalk.push_glob("refs/heads/*")?,
+        Some(names) => {
+            for name in names {
+                revwalk.push_ref(&format!("refs/heads/{name}"))?;
+            }
+        }
+    }
 
     let mut commits = Vec::new();
     for oid_result in revwalk.take(limit) {

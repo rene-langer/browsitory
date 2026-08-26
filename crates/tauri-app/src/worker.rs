@@ -64,6 +64,7 @@ pub(crate) enum Command {
     },
     GetCommitGraph {
         limit: usize,
+        selected_branches: Option<Vec<String>>,
         reply: Sender<Result<Vec<GraphCommit>, String>>,
     },
     GetWorkingDiff {
@@ -444,9 +445,14 @@ impl Worker {
                         let result = git_core::status::status(&repo).map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
-                    Command::GetCommitGraph { limit, reply } => {
+                    Command::GetCommitGraph {
+                        limit,
+                        selected_branches,
+                        reply,
+                    } => {
                         let result =
-                            git_core::graph::graph_log(&repo, limit).map_err(|e| e.to_string());
+                            git_core::graph::graph_log(&repo, limit, selected_branches.as_deref())
+                                .map_err(|e| e.to_string());
                         let _ = reply.send(result);
                     }
                     Command::GetWorkingDiff {
@@ -1294,11 +1300,16 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn get_commit_graph(&self, limit: usize) -> Result<Vec<GraphCommit>, String> {
+    pub fn get_commit_graph(
+        &self,
+        limit: usize,
+        selected_branches: Option<Vec<String>>,
+    ) -> Result<Vec<GraphCommit>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::GetCommitGraph {
                 limit,
+                selected_branches,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -2334,7 +2345,7 @@ mod tests {
         commit_all(&repo, "initial commit");
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-        let commits = worker.handle().get_commit_graph(10).unwrap();
+        let commits = worker.handle().get_commit_graph(10, None).unwrap();
 
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0].summary, "initial commit");
@@ -2871,7 +2882,10 @@ mod tests {
         let tags = handle.list_tags().expect("list tags");
         assert_eq!(tags.len(), 1);
         assert_eq!(tags[0].name, "v1.0.0");
-        assert_eq!(tags[0].target_id, handle.get_commit_graph(1).unwrap()[0].id);
+        assert_eq!(
+            tags[0].target_id,
+            handle.get_commit_graph(1, None).unwrap()[0].id
+        );
         assert!(tags[0].annotated);
         assert_eq!(tags[0].message.as_deref(), Some("first release"));
         assert_eq!(tags[0].tagger_name.as_deref(), Some("Test User"));

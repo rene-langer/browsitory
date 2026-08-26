@@ -227,7 +227,9 @@ export interface RepoClient {
   updateWorkspace(id: string, name: string, members: string[]): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
-  getCommitGraph(repoPath: string, limit: number): Promise<GraphCommit[]>;
+  getCommitGraph(repoPath: string, limit: number, selectedBranches: string[] | null): Promise<GraphCommit[]>;
+  getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
+  setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   getWorkingDiff(repoPath: string, path: string, staged: boolean): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;

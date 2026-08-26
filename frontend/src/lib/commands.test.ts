@@ -15,6 +15,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       selectedRow: "uncommitted",
       status: [],
       commits: [],
+      graphBranchSelection: null,
       branches: [
         { name: "main", isCurrent: true },
         { name: "feature", isCurrent: false },
@@ -52,6 +53,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       mergeMessage: null,
       rebaseProgress: null,
       rebaseOnto: null,
+      squashPreset: null,
       pendingPull: null,
       pullOutcome: null,
       transfer: null,
@@ -106,6 +108,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     resolveAddDeleteConflict: vi.fn(),
     abortMerge: vi.fn(),
     openRebasePlanner: vi.fn(),
+    openSquashPlanner: vi.fn(),
     closeRebasePlanner: vi.fn(),
     startRebase: vi.fn(),
     rebaseContinue: vi.fn(),
@@ -115,6 +118,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     forgetForgeToken: vi.fn(),
     createPullRequest: vi.fn(),
     openExternalUrl: vi.fn(),
+    setGraphBranchSelection: vi.fn(),
     refresh: vi.fn(),
   };
 }
