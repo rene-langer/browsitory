@@ -6,7 +6,7 @@ use common::{commit_all, init_repo, write_file};
 fn graph_log_returns_an_empty_vec_for_a_repository_with_no_commits() {
     let (_dir, repo) = init_repo();
 
-    let result = git_core::graph::graph_log(&repo, 10).unwrap();
+    let result = git_core::graph::graph_log(&repo, 10, None).unwrap();
 
     assert!(result.is_empty());
 }
@@ -21,7 +21,7 @@ fn graph_log_shows_commits_from_every_local_branch() {
     write_file(dir.path(), "file.txt", "v2");
     commit_all(&repo, "feature commit");
 
-    let commits = git_core::graph::graph_log(&repo, 10).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
 
     assert_eq!(commits.len(), 2);
     assert!(commits.iter().any(|c| c.summary == "feature commit"));
@@ -42,7 +42,7 @@ fn graph_log_reports_branch_refs_only_for_tip_commits() {
     commit_all(&repo, "feature commit");
     git_core::branch::switch_branch(&repo, &initial_branch).unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
 
     let feature_commit = commits
         .iter()
@@ -71,7 +71,7 @@ fn graph_log_reports_empty_branch_refs_for_a_non_tip_commit() {
         .name
         .clone();
 
-    let commits = git_core::graph::graph_log(&repo, 10).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
 
     let middle_commit = commits
         .iter()
@@ -80,6 +80,27 @@ fn graph_log_reports_empty_branch_refs_for_a_non_tip_commit() {
     assert!(middle_commit.branch_refs.is_empty());
     let tip_commit = commits.iter().find(|c| c.summary == "tip commit").unwrap();
     assert_eq!(tip_commit.branch_refs, vec![branch_name]);
+}
+
+#[test]
+fn graph_log_with_selected_branches_only_walks_those_branches() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+
+    let commits =
+        git_core::graph::graph_log(&repo, 10, Some(std::slice::from_ref(&main_branch))).unwrap();
+
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0].summary, "initial commit");
 }
 
 #[test]
@@ -92,7 +113,7 @@ fn graph_log_respects_the_limit() {
     write_file(dir.path(), "file.txt", "v3");
     commit_all(&repo, "third commit");
 
-    let commits = git_core::graph::graph_log(&repo, 2).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 2, None).unwrap();
 
     assert_eq!(commits.len(), 2);
 }
@@ -134,7 +155,7 @@ fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
     )
     .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
 
     let merge_commit = commits
         .iter()

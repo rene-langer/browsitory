@@ -28,6 +28,8 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       onSelectRow={vi.fn()}
       onApplyStash={vi.fn()}
       onDropStash={vi.fn()}
+      graphBranchSelection={null}
+      onSetGraphBranchSelection={vi.fn()}
       {...overrides}
     />,
   );
@@ -80,6 +82,39 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByText("Cancel"));
 
     expect(onCloseCreateBranchDraft).toHaveBeenCalled();
+  });
+
+  it("with no saved selection, every branch's graph checkbox is checked by default", () => {
+    renderSwitcher();
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByRole("checkbox", { name: "Show main in graph" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show feature in graph" })).toBeChecked();
+  });
+
+  it("unchecking a branch while showing all calls onSetGraphBranchSelection with every other branch", () => {
+    const onSetGraphBranchSelection = vi.fn();
+    renderSwitcher({ onSetGraphBranchSelection });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show feature in graph" }));
+
+    expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main"]);
+  });
+
+  it("a branch absent from an explicit selection renders unchecked; checking it adds it back", () => {
+    const onSetGraphBranchSelection = vi.fn();
+    renderSwitcher({ graphBranchSelection: ["main"], onSetGraphBranchSelection });
+
+    fireEvent.click(screen.getByRole("button", { name: "Branch switcher" }));
+
+    expect(screen.getByRole("checkbox", { name: "Show main in graph" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show feature in graph" })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show feature in graph" }));
+
+    expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feature"]);
   });
 
   it("clicking Delete once calls onDeleteBranch with force=false; a second click (still listed) forces it", async () => {
