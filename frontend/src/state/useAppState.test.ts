@@ -11,6 +11,7 @@ import type {
   TagInfo,
   ReflogEntry,
   UpstreamInfo,
+  WorktreeInfo,
 } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
@@ -1202,6 +1203,47 @@ describe("useAppState", () => {
     });
     expect(outcome).toBe("worktree path already exists");
     expect(result.current.state.error).toBe("worktree path already exists");
+  });
+
+  it("createWorktree adds the worktree to state before the backend call resolves", async () => {
+    let resolveCreate: (() => void) | null = null;
+    const client = transferClient({
+      listWorktrees: async () => [],
+      createWorktree: async () => new Promise<void>((resolve) => { resolveCreate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let createPromise!: Promise<string | null>;
+    act(() => {
+      createPromise = result.current.createWorktree("feature", "/repo/../feature", "feature-branch", null);
+    });
+
+    expect(result.current.state.worktrees).toEqual([
+      { name: "feature", path: "/repo/../feature", head: null, isMain: false, isLocked: false, isPrunable: false },
+    ]);
+
+    await act(async () => {
+      resolveCreate?.();
+      await createPromise;
+    });
+  });
+
+  it("removeWorktree removes the worktree from state before the backend call resolves, restores it on failure", async () => {
+    const worktreeA: WorktreeInfo = { name: "feature", path: "/repo/../feature", head: "abc", isMain: false, isLocked: false, isPrunable: false };
+    const client = transferClient({
+      listWorktrees: async () => [worktreeA],
+      removeWorktree: async () => {
+        throw new Error("worktree has uncommitted changes");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.removeWorktree("feature"));
+
+    expect(result.current.state.worktrees).toEqual([worktreeA]);
+    expect(result.current.state.error).toBe("worktree has uncommitted changes");
   });
 
   it("createTag resolves to null on success and to the failure message on failure", async () => {
