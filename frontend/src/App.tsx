@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Moon, Sun } from "lucide-react";
+import { HelpCircle, Moon, Sun } from "lucide-react";
 import { BranchSwitcher } from "./components/BranchSwitcher";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitGraph } from "./components/CommitGraph";
@@ -9,6 +9,7 @@ import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { InlineError } from "./components/primitives/InlineError";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
@@ -27,6 +28,9 @@ import { useAppState } from "./state/useAppState";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
+import releaseNotesData from "./generated/releaseNotes.json";
+
+const allReleaseNotes = releaseNotesData as ReleaseNotesEntry[];
 
 function RepoWorkspace({
   repoPath,
@@ -361,6 +365,45 @@ export default function App() {
     [openRepo],
   );
 
+  const [releaseNotesView, setReleaseNotesView] = useState<
+    { mode: "auto" | "all"; entries: ReleaseNotesEntry[] } | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkVersion() {
+      try {
+        const [appVersion, lastSeenVersion] = await Promise.all([
+          tauriRepoClient.getAppVersion(),
+          tauriRepoClient.getLastSeenVersion(),
+        ]);
+        if (cancelled || appVersion === lastSeenVersion) return;
+        const seenIndex =
+          lastSeenVersion === null
+            ? -1
+            : allReleaseNotes.findIndex((entry) => entry.version === lastSeenVersion);
+        const entries = seenIndex === -1 ? allReleaseNotes.slice(0, 1) : allReleaseNotes.slice(0, seenIndex);
+        setReleaseNotesView({ mode: "auto", entries });
+      } catch (error) {
+        console.error("Release notes version check failed", error);
+      }
+    }
+    void checkVersion();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function closeReleaseNotes() {
+    const wasAuto = releaseNotesView?.mode === "auto";
+    setReleaseNotesView(null);
+    if (!wasAuto) return;
+    void tauriRepoClient
+      .getAppVersion()
+      .then((version) => tauriRepoClient.setLastSeenVersion(version))
+      .catch((error) => console.error("Failed to record last-seen version", error));
+  }
+
   const themeToggle = (
     <button
       type="button"
@@ -447,12 +490,23 @@ export default function App() {
           onAddTab={() => setPickingRepo(true)}
         />
         {themeToggle}
+        <button
+          type="button"
+          className={styles.themeToggle}
+          aria-label="Release notes"
+          onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
+        >
+          <HelpCircle size={16} />
+        </button>
       </header>
       <LaneBraid />
       {openRepos.restoreError !== null && (
         <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
       )}
       {openError !== null && <InlineError message={openError} onDismiss={() => setOpenError(null)} />}
+      {releaseNotesView !== null && (
+        <ReleaseNotesModal entries={releaseNotesView.entries} onClose={closeReleaseNotes} />
+      )}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
