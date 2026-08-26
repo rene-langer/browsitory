@@ -170,19 +170,23 @@ export function useRemoteTransferActions(
   );
   const setCurrentUpstream = useCallback(
     (remoteName: string, remoteBranch: string) =>
-      runMutation(async () => {
-        await client.setCurrentUpstream(repoPath, remoteName, remoteBranch);
-        setState((prev) => ({ ...prev, pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath, setState],
+      runOptimisticMutation(
+        (prev) => {
+          const localBranch = prev.branches.find((branch) => branch.isCurrent)?.name;
+          if (localBranch === undefined) return prev;
+          return { ...prev, upstream: { localBranch, remoteName, remoteBranch }, pullOutcome: null };
+        },
+        () => client.setCurrentUpstream(repoPath, remoteName, remoteBranch),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const clearCurrentUpstream = useCallback(
     () =>
-      runMutation(async () => {
-        await client.clearCurrentUpstream(repoPath);
-        setState((prev) => ({ ...prev, pullOutcome: null }));
-      }),
-    [client, runMutation, repoPath, setState],
+      runOptimisticMutation(
+        (prev) => ({ ...prev, upstream: null, pullOutcome: null }),
+        () => client.clearCurrentUpstream(repoPath),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const startTransfer = useCallback(
     async (operation: TransferProgress["operation"], start: () => Promise<string>) => {

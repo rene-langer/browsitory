@@ -534,6 +534,7 @@ describe("useAppState", () => {
 
   it("clears the last pull outcome when setting a different upstream", async () => {
     const client = transferClient({
+      listBranches: async () => [{ name: "main", isCurrent: true }],
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
       setCurrentUpstream: async () => {},
     });
@@ -558,6 +559,49 @@ describe("useAppState", () => {
     await act(() => result.current.clearCurrentUpstream());
 
     expect(result.current.state.pullOutcome).toBeNull();
+  });
+
+  it("setCurrentUpstream updates state before the backend call resolves", async () => {
+    const branchA: BranchInfo = { name: "main", isCurrent: true };
+    let resolveSet: (() => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      getCurrentUpstream: async () => null,
+      setCurrentUpstream: async () => new Promise<void>((resolve) => { resolveSet = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let setPromise!: Promise<void>;
+    act(() => {
+      setPromise = result.current.setCurrentUpstream("origin", "main");
+    });
+
+    expect(result.current.state.upstream).toEqual({ localBranch: "main", remoteName: "origin", remoteBranch: "main" });
+
+    await act(async () => {
+      resolveSet?.();
+      await setPromise;
+    });
+  });
+
+  it("clearCurrentUpstream clears state before the backend call resolves, restores it on failure", async () => {
+    const branchA: BranchInfo = { name: "main", isCurrent: true };
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      getCurrentUpstream: async () => upstream,
+      clearCurrentUpstream: async () => {
+        throw new Error("clear failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.upstream).toEqual(upstream);
+
+    await act(() => result.current.clearCurrentUpstream());
+
+    expect(result.current.state.upstream).toEqual(upstream);
+    expect(result.current.state.error).toBe("clear failed");
   });
 
   it("records a divergent pull without beginning reconciliation", async () => {
