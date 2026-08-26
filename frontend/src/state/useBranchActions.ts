@@ -1,7 +1,12 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import type { RunMutation, RunMutationWithMessage } from "./useMutationRunner";
+import type {
+  RunMutation,
+  RunMutationWithMessage,
+  RunOptimisticMutation,
+  RunOptimisticMutationWithMessage,
+} from "./useMutationRunner";
 
 export interface BranchActions {
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`.
@@ -22,6 +27,8 @@ export function useBranchActions(
   repoPath: string,
   runMutation: RunMutation,
   runMutationWithMessage: RunMutationWithMessage,
+  _runOptimisticMutation: RunOptimisticMutation,
+  _runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): BranchActions {
   const createBranch = useCallback(

@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
-import type { RunMutation, RunMutationWithMessage } from "./useMutationRunner";
+import type {
+  RunMutation,
+  RunMutationWithMessage,
+  RunOptimisticMutation,
+  RunOptimisticMutationWithMessage,
+} from "./useMutationRunner";
 
 export interface WorktreeActions {
   // Resolves to `null` on success, or the failure message on failure — the "Create worktree"
@@ -16,6 +21,8 @@ export function useWorktreeActions(
   repoPath: string,
   runMutation: RunMutation,
   runMutationWithMessage: RunMutationWithMessage,
+  _runOptimisticMutation: RunOptimisticMutation,
+  _runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
 ): WorktreeActions {
   const createWorktree = useCallback(
     (name: string, path: string, branch: string, startPoint: string | null) =>
