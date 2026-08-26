@@ -22,6 +22,7 @@ export function BranchSwitcher({
   isMerging,
   isRebasing,
   operationDisabled,
+  operationDisabledReason,
   stashes,
   onSelectRow,
   onApplyStash,
@@ -48,6 +49,10 @@ export function BranchSwitcher({
   // drifted — this just stops the user from getting there.
   isRebasing: boolean;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true (e.g. "A rebase is in progress."), shown
+  // as a `title` on the buttons it disables so they don't just go inert with no explanation
+  // (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
   stashes: StashEntry[];
   onSelectRow: (row: SelectedRow) => void;
   onApplyStash: (index: number) => void;
@@ -173,6 +178,7 @@ export function BranchSwitcher({
                   {!b.isCurrent && (
                     <button
                       disabled={isMerging || isRebasing || operationDisabled}
+                      title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                       onClick={() => {
                         onMergeBranch(b.name);
                         closePopoverState();
@@ -246,6 +252,7 @@ export function BranchSwitcher({
               <span className={styles.stashMessage}>{stash.message}</span>
               <button
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation();
                   onApplyStash(stash.index);
@@ -255,6 +262,7 @@ export function BranchSwitcher({
               </button>
               <button
                 disabled={operationDisabled}
+                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
                 onClick={(event: MouseEvent<HTMLButtonElement>) => {
                   event.stopPropagation();
                   onDropStash(stash.index);

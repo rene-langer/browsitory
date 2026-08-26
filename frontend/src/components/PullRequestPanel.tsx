@@ -26,6 +26,9 @@ interface ForgeRepositorySectionProps {
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
+  // disables (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }
 
 function ForgeRepositorySection({
@@ -37,6 +40,7 @@ function ForgeRepositorySection({
   onCreatePullRequest,
   onOpenExternalUrl,
   operationDisabled,
+  operationDisabledReason,
 }: ForgeRepositorySectionProps) {
   const tokenRef = useRef<HTMLInputElement>(null);
   const [account, setAccount] = useState("");
@@ -164,8 +168,19 @@ function ForgeRepositorySection({
           </p>
         )}
         <Toolbar>
-          <button type="submit" disabled={operationDisabled}>Save token</button>
-          <button type="button" disabled={operationDisabled} onClick={() => void forgetToken()}>
+          <button
+            type="submit"
+            disabled={operationDisabled}
+            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
+            Save token
+          </button>
+          <button
+            type="button"
+            disabled={operationDisabled}
+            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            onClick={() => void forgetToken()}
+          >
             Forget token
           </button>
           <button type="button" onClick={cancelToken}>Cancel</button>
@@ -218,7 +233,13 @@ function ForgeRepositorySection({
           <input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
         </label>
         <Toolbar>
-          <button type="submit" disabled={operationDisabled || creating}>Create pull request</button>
+          <button
+            type="submit"
+            disabled={operationDisabled || creating}
+            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          >
+            Create pull request
+          </button>
         </Toolbar>
       </form>
     </AccordionSection>
@@ -234,6 +255,7 @@ export function PullRequestPanel({
   onCreatePullRequest,
   onOpenExternalUrl,
   operationDisabled,
+  operationDisabledReason,
 }: {
   forgeRepositories: ForgeRepository[];
   pullRequests: Record<string, PullRequestList>;
@@ -247,6 +269,9 @@ export function PullRequestPanel({
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
+  // Human-readable reason `operationDisabled` is true, forwarded to each `ForgeRepositorySection`
+  // (issue #31/UX-003). `null` when nothing is blocking.
+  operationDisabledReason: string | null;
 }) {
   if (forgeRepositories.length === 0) {
     return (
@@ -288,6 +313,7 @@ export function PullRequestPanel({
               onCreatePullRequest={onCreatePullRequest}
               onOpenExternalUrl={onOpenExternalUrl}
               operationDisabled={operationDisabled}
+              operationDisabledReason={operationDisabledReason}
             />
           ))}
         </div>

@@ -63,6 +63,7 @@ function renderPanel(overrides: Partial<Parameters<typeof RemotePanel>[0]> = {})
     onMergePull: vi.fn(),
     onRebasePull: vi.fn(),
     onCancelPull: vi.fn(),
+    operationDisabledReason: null,
     ...restOverrides,
   };
   const result = render(<RemotePanel {...props} />);
@@ -214,6 +215,28 @@ describe("RemotePanel", () => {
     expect(screen.getAllByRole("button", { name: "Add remote" })[1]).toBeEnabled();
 
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
+  });
+
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why Fetch/Push/Add remote are disabled via their title", () => {
+    renderPanel({
+      fetchDisabled: true,
+      pushDisabled: true,
+      operationDisabledReason: "A rebase is in progress.",
+    });
+
+    expect(screen.getByRole("button", { name: "Fetch origin" })).toHaveAttribute(
+      "title",
+      "A rebase is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Push branch to origin" })).toHaveAttribute(
+      "title",
+      "A rebase is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Add remote" })).toHaveAttribute(
+      "title",
+      "A rebase is in progress.",
+    );
   });
 
   it("offers merge or rebase only after a divergent pull", () => {

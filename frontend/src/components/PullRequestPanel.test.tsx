@@ -42,6 +42,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       onCreatePullRequest={vi.fn().mockResolvedValue(true)}
       onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
+      operationDisabledReason={null}
       {...overrides}
     />,
   );
@@ -354,6 +355,24 @@ describe("PullRequestPanel", () => {
     expect(screen.getByRole("button", { name: "Save token" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Forget token" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create pull request" })).toBeDisabled();
+  });
+
+  // Disabled buttons went inert with no explanation — issue #31/UX-003.
+  it("explains why Save/Forget/Create controls are disabled via their title", () => {
+    renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+
+    expect(screen.getByRole("button", { name: "Save token" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Forget token" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
+    expect(screen.getByRole("button", { name: "Create pull request" })).toHaveAttribute(
+      "title",
+      "A merge is in progress.",
+    );
   });
 
   it("shows an icon and the total open pull-request count on the outer Pull Requests header", () => {
