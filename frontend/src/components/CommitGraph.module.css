@@ -14,6 +14,18 @@
   font-size: var(--text-sm);
 }
 
+/*
+ * Bleeds the lane graphic into the row's own vertical padding (from ListRow's shared .row
+ * class) so its svg spans the li's full box edge-to-edge. Without this, the graphic's line
+ * segments stop short of the li boundary and consecutive commits' lines visibly disconnect.
+ */
+.graphCell {
+  display: flex;
+  align-self: stretch;
+  margin-block: calc(-1 * var(--space-1));
+  flex-shrink: 0;
+}
+
 .branchBadge {
   font-size: var(--text-xs);
   padding: 1px var(--space-2);

@@ -913,10 +913,25 @@ pub async fn get_status(
 pub async fn get_commit_graph(
     repo_path: String,
     limit: usize,
+    selected_branches: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, String> {
-    let commits = worker_handle(&state, &repo_path)?.get_commit_graph(limit)?;
+    let commits = worker_handle(&state, &repo_path)?.get_commit_graph(limit, selected_branches)?;
     Ok(commits.into_iter().map(GraphCommitDto::from).collect())
+}
+
+#[tauri::command]
+pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
+    config::get_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_graph_branch_selection(
+    repo_path: String,
+    selected_branches: Vec<String>,
+) -> Result<(), String> {
+    config::set_graph_branch_selection(Path::new(&repo_path), &selected_branches)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

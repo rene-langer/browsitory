@@ -147,6 +147,8 @@ function RepoWorkspace({
               onSelectRow={appState.selectRow}
               onApplyStash={appState.applyStash}
               onDropStash={appState.dropStash}
+              graphBranchSelection={appState.state.graphBranchSelection}
+              onSetGraphBranchSelection={appState.setGraphBranchSelection}
             />
             <WorktreePanel
               worktrees={appState.state.worktrees}
@@ -239,6 +241,7 @@ function RepoWorkspace({
                 onSelectRow={appState.selectRow}
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
+                onSquashCommits={appState.openSquashPlanner}
               />
             }
             right={
@@ -278,6 +281,7 @@ function RepoWorkspace({
             onStartRebase={appState.startRebase}
             onCancel={appState.closeRebasePlanner}
             operationDisabled={repositoryOperationDisabled}
+            presetSquashIds={appState.state.squashPreset ?? undefined}
           />
         </Overlay>
       )}

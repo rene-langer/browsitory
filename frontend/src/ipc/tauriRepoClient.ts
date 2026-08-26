@@ -54,8 +54,12 @@ export const tauriRepoClient: RepoClient = {
     invoke("update_workspace", { id, name, members }),
   deleteWorkspace: (id: string) => invoke("delete_workspace", { id }),
   getStatus: (repoPath: string) => invoke<StatusEntry[]>("get_status", { repoPath }),
-  getCommitGraph: (repoPath: string, limit: number) =>
-    invoke<GraphCommit[]>("get_commit_graph", { repoPath, limit }),
+  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
+    invoke<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
+  getGraphBranchSelection: (repoPath: string) =>
+    invoke<string[] | null>("get_graph_branch_selection", { repoPath }),
+  setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
+    invoke("set_graph_branch_selection", { repoPath, selectedBranches }),
   getWorkingDiff: (repoPath: string, path: string, staged: boolean) =>
     invoke<DiffHunk[]>("get_working_diff", { repoPath, path, staged }),
   getCommitDiff: (repoPath: string, commitId: string, path: string) =>

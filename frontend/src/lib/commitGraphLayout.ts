@@ -68,3 +68,24 @@ export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
 
   return layouts;
 }
+
+// A squash group can only be a straight, unbranched chain: each commit in the range (other than
+// the oldest) must be the sole parent of the one above it. That single check also rejects both
+// ways a range can be non-linear — a merge commit inside it (more than one parent) and a fork
+// point inside it (a commit whose only-in-range child isn't the one it's actually the parent
+// of) — since either case breaks the parentIds[0]-equals-next.id chain somewhere in the range.
+export function isSquashableRange(
+  commits: GraphCommit[],
+  startIndex: number,
+  endIndex: number,
+): boolean {
+  for (let i = startIndex; i < endIndex; i++) {
+    if (commits[i].parentIds.length !== 1) {
+      return false;
+    }
+    if (commits[i].parentIds[0] !== commits[i + 1].id) {
+      return false;
+    }
+  }
+  return true;
+}
