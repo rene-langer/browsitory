@@ -26,6 +26,7 @@ use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
+mod stash;
 mod tag;
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -837,26 +838,10 @@ impl Worker {
                         reply,
                     } => tag::create(&repo, name, message, reply),
                     Command::DeleteTag { name, reply } => tag::delete(&repo, name, reply),
-                    Command::ListStashes { reply } => {
-                        let result =
-                            git_core::stash::list_stashes(&mut repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::SaveStash { reply } => {
-                        let result =
-                            git_core::stash::save_stash(&mut repo).map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::ApplyStash { index, reply } => {
-                        let result = git_core::stash::apply_stash(&mut repo, index)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
-                    Command::DropStash { index, reply } => {
-                        let result = git_core::stash::drop_stash(&mut repo, index)
-                            .map_err(|e| e.to_string());
-                        let _ = reply.send(result);
-                    }
+                    Command::ListStashes { reply } => stash::list(&mut repo, reply),
+                    Command::SaveStash { reply } => stash::save(&mut repo, reply),
+                    Command::ApplyStash { index, reply } => stash::apply(&mut repo, index, reply),
+                    Command::DropStash { index, reply } => stash::drop(&mut repo, index, reply),
                     Command::StartMerge { branch_name, reply } => {
                         let result = git_core::merge::start_merge(&repo, &branch_name)
                             .map_err(|e| e.to_string());
@@ -1811,52 +1796,6 @@ impl WorkerHandle {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(Command::ClearCurrentUpstream { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn list_stashes(&self) -> Result<Vec<StashEntry>, String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ListStashes { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn save_stash(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::SaveStash { reply: reply_tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn apply_stash(&self, index: usize) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::ApplyStash {
-                index,
-                reply: reply_tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        reply_rx
-            .recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    pub fn drop_stash(&self, index: usize) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::channel();
-        self.tx
-            .send(Command::DropStash {
-                index,
-                reply: reply_tx,
-            })
             .map_err(|_| "worker thread stopped".to_string())?;
         reply_rx
             .recv()
