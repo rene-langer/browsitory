@@ -350,7 +350,8 @@ export function RemotePanel({
                     <button
                       type="button"
                       className={`${styles.iconButton} ${styles.dangerButton} danger`}
-                      title={`Remove ${remote.name}`}
+                      disabled={fetchDisabled}
+                      title={fetchDisabled ? (operationDisabledReason ?? `Remove ${remote.name}`) : `Remove ${remote.name}`}
                       aria-label={`Remove ${remote.name}`}
                       onClick={() => requestRemove(remote)}
                     >
@@ -376,6 +377,8 @@ export function RemotePanel({
             )
           }
           confirmLabel="Confirm remove"
+          confirmDisabled={fetchDisabled}
+          confirmTitle={fetchDisabled ? (operationDisabledReason ?? undefined) : undefined}
           onConfirm={() => {
             const target = removeConfirmation.startsWith("clear:") ? removeConfirmation.slice(6) : removeConfirmation;
             const clearUpstreams = removeConfirmation.startsWith("clear:");
