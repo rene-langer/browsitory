@@ -68,8 +68,8 @@ export function useRemoteTransferActions(
   runMutation: RunMutation,
   runMutationWithMessage: RunMutationWithMessage,
   runMutationWithOutcome: RunMutationWithOutcome,
-  _runOptimisticMutation: RunOptimisticMutation,
-  _runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
+  runOptimisticMutation: RunOptimisticMutation,
+  runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   _runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): RemoteTransferActions {
@@ -211,12 +211,26 @@ export function useRemoteTransferActions(
   );
 
   const createTag = useCallback(
-    (name: string, message: string | null) => runMutationWithMessage(() => client.createTag(repoPath, name, message)),
-    [client, runMutationWithMessage, repoPath],
+    (name: string, message: string | null) =>
+      runOptimisticMutationWithMessage(
+        (prev) => ({
+          ...prev,
+          tags: [
+            ...prev.tags,
+            { name, targetId: "", annotated: message !== null, message, taggerName: null, timestamp: null },
+          ],
+        }),
+        () => client.createTag(repoPath, name, message),
+      ),
+    [client, runOptimisticMutationWithMessage, repoPath],
   );
   const deleteTag = useCallback(
-    (name: string) => runMutation(() => client.deleteTag(repoPath, name)),
-    [client, runMutation, repoPath],
+    (name: string) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, tags: prev.tags.filter((tag) => tag.name !== name) }),
+        () => client.deleteTag(repoPath, name),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const pushCurrentBranch = useCallback(
     (remoteName: string) =>

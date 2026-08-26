@@ -1267,6 +1267,47 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("tag already exists");
   });
 
+  it("createTag adds the tag to state before the backend call resolves", async () => {
+    let resolveCreate: (() => void) | null = null;
+    const client = transferClient({
+      listTags: async () => [],
+      createTag: async () => new Promise<void>((resolve) => { resolveCreate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let createPromise!: Promise<string | null>;
+    act(() => {
+      createPromise = result.current.createTag("v1.0.0", null);
+    });
+
+    expect(result.current.state.tags).toHaveLength(1);
+    expect(result.current.state.tags[0].name).toBe("v1.0.0");
+    expect(result.current.state.tags[0].annotated).toBe(false);
+
+    await act(async () => {
+      resolveCreate?.();
+      await createPromise;
+    });
+  });
+
+  it("deleteTag removes the tag from state before the backend call resolves, restores it on failure", async () => {
+    const tagA: TagInfo = { name: "v1.0.0", targetId: "abc", annotated: false, message: null, taggerName: null, timestamp: null };
+    const client = transferClient({
+      listTags: async () => [tagA],
+      deleteTag: async () => {
+        throw new Error("delete failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteTag("v1.0.0"));
+
+    expect(result.current.state.tags).toEqual([tagA]);
+    expect(result.current.state.error).toBe("delete failed");
+  });
+
   // The global banner's dismiss control (issue #30/UX-002): without it, `state.error` only ever
   // clears on the next successful action of the same kind, so a user who moves on to a different
   // panel is left with a stale-looking banner indefinitely.
