@@ -13,6 +13,9 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   return {
     pickRepoFolder: unused,
     listRecentRepos: unused,
+    getAppVersion: unused,
+    getLastSeenVersion: unused,
+    setLastSeenVersion: unused,
     openRepo: unused,
     closeRepo: async () => unused(),
     listOpenRepos: async () => unused(),

@@ -11,6 +11,9 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   return {
     pickRepoFolder: async () => unimplemented(),
     listRecentRepos: async () => unimplemented(),
+    getAppVersion: async () => unimplemented(),
+    getLastSeenVersion: async () => unimplemented(),
+    setLastSeenVersion: async () => unimplemented(),
     scanReposInRoot: async () => unimplemented(),
     listWorkspaces: async () => unimplemented(),
     saveWorkspace: async () => unimplemented(),
