@@ -1015,6 +1015,71 @@ describe("useAppState", () => {
     expect(result.current.state.status).toEqual([]);
   });
 
+  it("stageFile shows the file as staged before the backend call resolves, keeps it after success", async () => {
+    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    let staged = false;
+    let resolveStageFile: (() => void) | null = null;
+    const client = transferClient({
+      getStatus: async () => [{ ...entryA, staged }],
+      stageFile: async () => new Promise<void>((resolve) => {
+        resolveStageFile = () => {
+          staged = true;
+          resolve();
+        };
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let stagePromise!: Promise<void>;
+    act(() => {
+      stagePromise = result.current.stageFile("a.txt");
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+
+    await act(async () => {
+      resolveStageFile?.();
+      await stagePromise;
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+  });
+
+  it("stageFile rolls back the optimistic staged flag if the backend call fails", async () => {
+    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const client = transferClient({
+      getStatus: async () => [entryA],
+      stageFile: async () => {
+        throw new Error("stage failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.stageFile("a.txt"));
+
+    expect(result.current.state.status).toEqual([entryA]);
+    expect(result.current.state.error).toBe("stage failed");
+  });
+
+  it("stageFile merges a partially-staged file's two status rows into one staged row", async () => {
+    const unstagedPart: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const stagedPart: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
+    const client = transferClient({
+      getStatus: async () => [unstagedPart, stagedPart],
+      stageFile: async () => new Promise<void>(() => {}),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    act(() => {
+      void result.current.stageFile("a.txt");
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+  });
+
   // DiffPane's "Stage all" used to loop the per-file `stageFile`, and every one of those is its
   // own `runMutation` — so an N-file batch cost N stage calls *plus* N full `refresh()` rounds
   // (~13 IPC reads each, plus one per remote), all serialized through the single per-repo worker

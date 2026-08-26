@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { RepoClient } from "../ipc/RepoClient";
+import type { RepoClient, StatusEntry, StatusKind } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
 import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 
@@ -21,11 +21,28 @@ export interface StagingActions {
   commit(message: string): Promise<void>;
 }
 
+// A path can have two StatusEntry rows simultaneously (staged + unstaged, for a partially-staged
+// file — see crates/git-core/src/status.rs). stageFile/unstageFile/stageAllFiles/unstageAllFiles
+// are whole-file operations, so the predicted result replaces every existing row for each target
+// path with exactly one row at the new `staged` value, preserving `kind`.
+function withFilesStaged(status: StatusEntry[], paths: string[], staged: boolean): StatusEntry[] {
+  const targets = new Set(paths);
+  const kindByPath = new Map<string, StatusKind>();
+  for (const entry of status) {
+    if (targets.has(entry.path)) kindByPath.set(entry.path, entry.kind);
+  }
+  const untouched = status.filter((entry) => !targets.has(entry.path));
+  const updated = paths
+    .filter((path) => kindByPath.has(path))
+    .map((path) => ({ path, staged, kind: kindByPath.get(path) as StatusKind }));
+  return [...untouched, ...updated];
+}
+
 export function useStagingActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
-  _runOptimisticMutation: RunOptimisticMutation,
+  runOptimisticMutation: RunOptimisticMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): StagingActions {
   const selectRow = useCallback(
@@ -36,33 +53,47 @@ export function useStagingActions(
   );
 
   const stageFile = useCallback(
-    (path: string) => runMutation(() => client.stageFile(repoPath, path)),
-    [client, runMutation, repoPath],
+    (path: string) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, status: withFilesStaged(prev.status, [path], true) }),
+        () => client.stageFile(repoPath, path),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const unstageFile = useCallback(
-    (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
-    [client, runMutation, repoPath],
+    (path: string) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, status: withFilesStaged(prev.status, [path], false) }),
+        () => client.unstageFile(repoPath, path),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   // See the `stageAllFiles`/`unstageAllFiles` note above: one `runMutation` for the whole batch,
   // not one per path. Sequential rather than `Promise.all` because every call lands on the same
   // worker thread anyway, and index writes must not interleave.
   const stageAllFiles = useCallback(
     (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.stageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
+      runOptimisticMutation(
+        (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, true) }),
+        async () => {
+          for (const path of paths) {
+            await client.stageFile(repoPath, path);
+          }
+        },
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const unstageAllFiles = useCallback(
     (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.unstageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
+      runOptimisticMutation(
+        (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, false) }),
+        async () => {
+          for (const path of paths) {
+            await client.unstageFile(repoPath, path);
+          }
+        },
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const stageHunk = useCallback(
     (path: string, oldStart: number, newStart: number) =>
