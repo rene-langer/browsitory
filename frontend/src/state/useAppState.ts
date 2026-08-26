@@ -25,6 +25,7 @@ import type {
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { useReflogActions } from "./useReflogActions";
+import { useStagingActions } from "./useStagingActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
 
@@ -319,58 +320,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const { runMutation, runMutationWithOutcome, runMutationWithMessage } = useMutationRunner(refresh, setState);
 
-  const selectRow = useCallback((row: SelectedRow) => {
-    setState((prev) => ({ ...prev, selectedRow: row }));
-  }, []);
-
-  const stageFile = useCallback(
-    (path: string) => runMutation(() => client.stageFile(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  const unstageFile = useCallback(
-    (path: string) => runMutation(() => client.unstageFile(repoPath, path)),
-    [client, runMutation, repoPath],
-  );
-  // See the `stageAllFiles`/`unstageAllFiles` note in `UseAppStateResult`: one `runMutation`
-  // for the whole batch, not one per path. Sequential rather than `Promise.all` because every
-  // call lands on the same worker thread anyway, and index writes must not interleave.
-  const stageAllFiles = useCallback(
-    (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.stageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
-  );
-  const unstageAllFiles = useCallback(
-    (paths: string[]) =>
-      runMutation(async () => {
-        for (const path of paths) {
-          await client.unstageFile(repoPath, path);
-        }
-      }),
-    [client, runMutation, repoPath],
-  );
-  const stageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const unstageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const discardHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart)),
-    [client, runMutation, repoPath],
-  );
-  const commit = useCallback(
-    (message: string) => runMutation(() => client.commit(repoPath, message)),
-    [client, runMutation, repoPath],
-  );
+  const {
+    selectRow,
+    stageFile,
+    unstageFile,
+    stageAllFiles,
+    unstageAllFiles,
+    stageHunk,
+    unstageHunk,
+    discardHunk,
+    commit,
+  } = useStagingActions(client, repoPath, runMutation, setState);
 
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
