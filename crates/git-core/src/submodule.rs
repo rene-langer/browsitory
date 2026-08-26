@@ -2,6 +2,31 @@ use std::path::{Component, Path, PathBuf};
 
 use git2::{ObjectType, Oid, Repository, Tree};
 use thiserror::Error;
+use url::Url;
+
+#[cfg(test)]
+mod tests {
+    use super::validate_remote_url_scheme;
+
+    #[test]
+    fn rejects_a_file_url() {
+        assert!(validate_remote_url_scheme("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn allows_https_ssh_and_git_urls() {
+        assert!(validate_remote_url_scheme("https://example.test/repo.git").is_ok());
+        assert!(validate_remote_url_scheme("ssh://git@example.test/repo.git").is_ok());
+        assert!(validate_remote_url_scheme("git://example.test/repo.git").is_ok());
+    }
+
+    #[test]
+    fn allows_scp_shorthand_and_bare_local_paths() {
+        assert!(validate_remote_url_scheme("git@example.test:org/repo.git").is_ok());
+        assert!(validate_remote_url_scheme("../sibling-repo").is_ok());
+        assert!(validate_remote_url_scheme("/abs/path/to/repo").is_ok());
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum SubmoduleError {
@@ -9,6 +34,8 @@ pub enum SubmoduleError {
     NotFound,
     #[error("submodule path is invalid")]
     InvalidPath,
+    #[error("submodule url uses a disallowed scheme: {0}")]
+    DisallowedUrlScheme(String),
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
 }
@@ -196,10 +223,34 @@ fn download_target_from_url(
     target_id: Oid,
 ) -> Result<(), SubmoduleError> {
     if repo.find_commit(target_id).is_err() {
+        validate_remote_url_scheme(url)?;
         let mut remote = repo.remote_anonymous(url)?;
         remote.download(&["+refs/heads/*:refs/remotes/browsitory-preflight/*"], None)?;
     }
     repo.find_commit(target_id)?;
+    Ok(())
+}
+
+/// Rejects an explicit `file://` submodule URL before this preflight check fetches it. `url`
+/// here comes straight from `.gitmodules`/`submodule.<name>.url`, i.e. it's attacker-controlled
+/// if the outer repo is untrusted — a malicious `.gitmodules` pointing a submodule at
+/// `file:///etc/passwd`-style would otherwise let this preflight check read arbitrary local
+/// paths on the host. See issue SEC-002.
+///
+/// Deliberately narrow: bare/relative local filesystem paths (`../sibling-repo`) and scp-like
+/// `user@host:path` SSH shorthand are left alone, matching vanilla `git submodule`'s own
+/// behavior — this repo's own test fixtures rely on local-path "remotes" to simulate a remote
+/// without a network, and a real user may legitimately point a submodule at a local repo. Only
+/// an explicit `file://` scheme is both a distinct attacker-actionable vector (real
+/// `.gitmodules` configs targeting a local repo essentially never write it with a `file://`
+/// prefix) and reliably detectable via `Url::parse`, unlike distinguishing a hostile bare path
+/// from a legitimate one.
+fn validate_remote_url_scheme(url: &str) -> Result<(), SubmoduleError> {
+    if let Ok(parsed) = Url::parse(url) {
+        if parsed.scheme() == "file" {
+            return Err(SubmoduleError::DisallowedUrlScheme(url.to_string()));
+        }
+    }
     Ok(())
 }
 
