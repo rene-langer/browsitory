@@ -84,6 +84,9 @@ export interface AppState {
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
+  // Commit ids to default to "Squash" in the rebase planner, set only when it was opened via
+  // CommitGraph's "Squash N commits" action (as opposed to "Rebase onto here").
+  squashPreset: Set<string> | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
   transfer: TransferProgress | null;
@@ -157,6 +160,7 @@ export interface UseAppStateResult {
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
   openRebasePlanner(commitId: string): void;
+  openSquashPlanner(ontoId: string, squashIds: string[]): void;
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
@@ -197,6 +201,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergeMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
+    squashPreset: null,
     pendingPull: null,
     pullOutcome: null,
     transfer: null,
@@ -699,10 +704,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   );
 
   const openRebasePlanner = useCallback((commitId: string) => {
-    setState((prev) => ({ ...prev, rebaseOnto: commitId }));
+    setState((prev) => ({ ...prev, rebaseOnto: commitId, squashPreset: null }));
+  }, []);
+  const openSquashPlanner = useCallback((ontoId: string, squashIds: string[]) => {
+    setState((prev) => ({ ...prev, rebaseOnto: ontoId, squashPreset: new Set(squashIds) }));
   }, []);
   const closeRebasePlanner = useCallback(() => {
-    setState((prev) => ({ ...prev, rebaseOnto: null }));
+    setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
   }, []);
 
   const startRebase = useCallback(
@@ -710,7 +718,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       runMutation(async () => {
         const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
         void result;
-        setState((prev) => ({ ...prev, rebaseOnto: null }));
+        setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
       }),
     [client, runMutation, repoPath],
   );
@@ -832,6 +840,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     resolveAddDeleteConflict,
     abortMerge,
     openRebasePlanner,
+    openSquashPlanner,
     closeRebasePlanner,
     startRebase,
     rebaseContinue,

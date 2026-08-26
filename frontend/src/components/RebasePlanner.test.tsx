@@ -367,4 +367,28 @@ describe("RebasePlanner", () => {
 
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it("pre-marks rows named in presetSquashIds as Squash, with the leader's combined message filled in", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={client}
+        onto="base"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+        presetSquashIds={new Set(["bbb"])}
+      />,
+    );
+    await screen.findAllByLabelText("Action");
+
+    // Row 0 = "add a" (Pick, the leader), row 1 = "add b" (preset Squash).
+    expect(screen.getAllByLabelText("Action")[0]).toHaveValue("Pick");
+    expect(screen.getAllByLabelText("Action")[1]).toHaveValue("Squash");
+
+    const combinedFields = await screen.findAllByLabelText("Combined message");
+    expect(combinedFields).toHaveLength(1);
+    expect(combinedFields[0]).toHaveValue("add a\n\nadd b");
+  });
 });
