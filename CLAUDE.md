@@ -36,6 +36,19 @@ pnpm install
 pnpm test                                          # spawns/reaps tauri-driver itself; needs a display (xvfb-run on headless CI)
 ```
 
+### Git hooks
+
+One-time setup, per clone/worktree:
+
+```bash
+ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
+```
+
+This wires up `scripts/check-changelog.py` as a `pre-push` hook: it blocks a
+push that touches `crates/`, `frontend/src/`, or `e2e/` without a matching
+`CHANGELOG.md` update. Bypass for one push with
+`SKIP_CHANGELOG_CHECK=1 git push`.
+
 ## Project status
 
 Second from-scratch rewrite (branch `feat/rust_from_scratch`). See
