@@ -370,6 +370,10 @@ export default function App() {
   >(null);
 
   useEffect(() => {
+    // Skip in E2E: a fresh run always has no last-seen version, so this would auto-open the
+    // modal (a native <dialog>) on every launch and block interaction with the rest of the UI
+    // that the E2E specs are actually testing.
+    if (typeof import.meta.env.VITE_E2E_REPO_PATH === "string") return;
     let cancelled = false;
     async function checkVersion() {
       try {
