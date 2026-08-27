@@ -43,10 +43,10 @@ describe("Browsitory stash", () => {
 
     await browser.execute((el) => (el as HTMLElement).click(), stashButton);
 
-    // The stash list now lives in the sidebar's "Branches" accordion section, grouped with
-    // branches (see `frontend/src/components/BranchSwitcher.tsx`), not inline in the commit
-    // history — expand it before looking for the row it renders.
-    await expandSidebarSection("Branches");
+    // The stash list lives in its own "Stashes" accordion section (see
+    // `frontend/src/components/StashPanel.tsx`), not inline in the commit history — expand it
+    // before looking for the row it renders.
+    await expandSidebarSection("Stashes");
 
     const stashRow = await $("li*=WIP on");
     await stashRow.waitForExist({ timeout: 10000 });

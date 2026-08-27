@@ -4,6 +4,7 @@ import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./TagPanel.module.css";
 
@@ -84,10 +85,10 @@ export function TagPanel({
         <button type="submit" disabled={pushDisabled} title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}>Create tag</button>
       </form>
 
-      {tags.length === 0 ? <p>No local tags.</p> : (
+      {tags.length === 0 ? <p className={styles.empty}>No local tags. Create one above to mark a commit.</p> : (
         <ul className={styles.list}>
           {tags.map((tag) => (
-            <li key={tag.name}>
+            <ListRow key={tag.name}>
               <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
               <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
               <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
@@ -101,7 +102,7 @@ export function TagPanel({
                   Delete {tag.name}
                 </button>
               </Toolbar>
-            </li>
+            </ListRow>
           ))}
         </ul>
       )}

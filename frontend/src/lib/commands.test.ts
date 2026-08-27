@@ -399,6 +399,7 @@ describe("buildCommands", () => {
         expect(ids).toContain("refresh");
         for (const title of [
           "Branches",
+          "Stashes",
           "Worktrees",
           "Submodules",
           "Reflog",
@@ -439,6 +440,7 @@ describe("buildCommands", () => {
         "Go to Pull Requests",
         "Go to Reflog",
         "Go to Remotes",
+        "Go to Stashes",
         "Go to Submodules",
         "Go to Tags",
         "Go to Worktrees",

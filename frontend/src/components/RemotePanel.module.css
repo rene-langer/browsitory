@@ -10,6 +10,12 @@
   color: var(--color-text-muted);
 }
 
+.rowIcon {
+  vertical-align: text-bottom;
+  margin-right: var(--space-1);
+  color: var(--color-text-muted);
+}
+
 .list li {
   display: flex;
   flex-wrap: wrap;

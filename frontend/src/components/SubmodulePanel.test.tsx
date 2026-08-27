@@ -36,6 +36,12 @@ function renderPanel(
 }
 
 describe("SubmodulePanel", () => {
+  it("shows an empty state when there are no submodules", () => {
+    renderPanel({ submodules: [] });
+
+    expect(screen.getByText(/No submodules/)).toBeInTheDocument();
+  });
+
   it("shows each submodule's URL, recorded gitlink, and initialization state", () => {
     renderPanel();
 
