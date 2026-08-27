@@ -1,0 +1,28 @@
+.list {
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.rowIcon {
+  vertical-align: text-bottom;
+  margin-right: var(--space-1);
+  color: var(--color-text-muted);
+  flex: none;
+}
+
+.message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

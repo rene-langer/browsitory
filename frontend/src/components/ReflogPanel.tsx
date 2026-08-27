@@ -47,31 +47,37 @@ export function ReflogPanel({
           ))}
         </select>
       </label>
-      <ul className={styles.entryList}>
-        {entries.map((entry, ordinal) => (
-          <ListRow key={`${entry.reference}:${ordinal}`}>
-            <History size={14} aria-hidden="true" className={styles.rowIcon} />
-            <span className={styles.entryMeta}>Old ID: {entry.oldId}</span>
-            <span className={styles.entryMeta}>New ID: {entry.newId}</span>
-            <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
-            <time dateTime={new Date(entry.timestamp * 1000).toISOString()}>
-              {new Date(entry.timestamp * 1000).toLocaleString()}
-            </time>
-            <span>{entry.message}</span>
-            {entry.summary !== null && <span>{entry.summary}</span>}
-            <Toolbar>
-              <button
-                type="button"
-                disabled={operationDisabled}
-                aria-label={`Restore ${entry.reference} to ${entry.newId}`}
-                onClick={() => setRestoreConfirmation(entry)}
-              >
-                Restore {entry.reference}
-              </button>
-            </Toolbar>
-          </ListRow>
-        ))}
-      </ul>
+      {selectedReference === null ? (
+        <p className={styles.empty}>Select a reference above to see its reflog.</p>
+      ) : entries.length === 0 ? (
+        <p className={styles.empty}>No reflog entries for {selectedReference}.</p>
+      ) : (
+        <ul className={styles.entryList}>
+          {entries.map((entry, ordinal) => (
+            <ListRow key={`${entry.reference}:${ordinal}`}>
+              <History size={14} aria-hidden="true" className={styles.rowIcon} />
+              <span className={styles.entryMeta}>Old ID: {entry.oldId}</span>
+              <span className={styles.entryMeta}>New ID: {entry.newId}</span>
+              <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
+              <time dateTime={new Date(entry.timestamp * 1000).toISOString()}>
+                {new Date(entry.timestamp * 1000).toLocaleString()}
+              </time>
+              <span>{entry.message}</span>
+              {entry.summary !== null && <span>{entry.summary}</span>}
+              <Toolbar>
+                <button
+                  type="button"
+                  disabled={operationDisabled}
+                  aria-label={`Restore ${entry.reference} to ${entry.newId}`}
+                  onClick={() => setRestoreConfirmation(entry)}
+                >
+                  Restore {entry.reference}
+                </button>
+              </Toolbar>
+            </ListRow>
+          ))}
+        </ul>
+      )}
       {restoreConfirmation !== null && (
         <dialog open aria-label={`Restore ${restoreConfirmation.reference}`}>
           <p>Restore {restoreConfirmation.reference} to {restoreConfirmation.newId}?</p>

@@ -16,6 +16,7 @@ import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
 import { PullRequestPanel } from "./components/PullRequestPanel";
 import { RemotePanel } from "./components/RemotePanel";
+import { StashPanel } from "./components/StashPanel";
 import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
@@ -169,12 +170,16 @@ function RepoWorkspace({
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
               operationDisabledReason={operationDisabledReason}
+              graphBranchSelection={appState.state.graphBranchSelection}
+              onSetGraphBranchSelection={appState.setGraphBranchSelection}
+            />
+            <StashPanel
               stashes={appState.state.stashes}
               onSelectRow={appState.selectRow}
               onApplyStash={appState.applyStash}
               onDropStash={appState.dropStash}
-              graphBranchSelection={appState.state.graphBranchSelection}
-              onSetGraphBranchSelection={appState.setGraphBranchSelection}
+              operationDisabled={repositoryOperationDisabled}
+              operationDisabledReason={operationDisabledReason}
             />
             <WorktreePanel
               worktrees={appState.state.worktrees}
