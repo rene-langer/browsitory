@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseChangelog } from "./generateReleaseNotes.mjs";
+import { isMainModule, parseChangelog } from "./generateReleaseNotes.mjs";
 
 const SAMPLE = `# Changelog
 
@@ -49,5 +49,11 @@ describe("parseChangelog", () => {
   it("returns an empty array for a changelog with only Unreleased", () => {
     const entries = parseChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n");
     expect(entries).toEqual([]);
+  });
+});
+
+describe("isMainModule", () => {
+  it("recognizes an entry-point path when its file URL encodes spaces", () => {
+    expect(isMainModule("file:///tmp/release%20notes.mjs", "/tmp/release notes.mjs")).toBe(true);
   });
 });
