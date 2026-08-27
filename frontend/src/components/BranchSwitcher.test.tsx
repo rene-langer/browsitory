@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
+import type { BranchInfo } from "../ipc/RepoClient";
 import { BranchSwitcher } from "./BranchSwitcher";
 
 const branches: BranchInfo[] = [
@@ -25,10 +25,6 @@ function renderSwitcher(overrides: Partial<Parameters<typeof BranchSwitcher>[0]>
       isRebasing={false}
       operationDisabled={false}
       operationDisabledReason={null}
-      stashes={[]}
-      onSelectRow={vi.fn()}
-      onApplyStash={vi.fn()}
-      onDropStash={vi.fn()}
       graphBranchSelection={null}
       onSetGraphBranchSelection={vi.fn()}
       {...overrides}
@@ -347,72 +343,5 @@ describe("BranchSwitcher", () => {
     fireEvent.click(screen.getByText("feature"));
 
     expect(onSwitchBranch).not.toHaveBeenCalled();
-  });
-
-  // Deliberately distinct from "main"/"feature" above — a stash message containing either
-  // substring would make `getByText` match both the stash row and a colliding branch row.
-  const stashes: StashEntry[] = [
-    { index: 0, message: "WIP on main: stash0fix uncommitted edit", commitId: "stash0" },
-    { index: 1, message: "WIP on main: stash1fix earlier edit", commitId: "stash1" },
-  ];
-
-  it("renders each stash's message", () => {
-    renderSwitcher({ stashes });
-
-    expect(screen.getByText(/WIP on main: stash0fix uncommitted edit/)).toBeInTheDocument();
-    expect(screen.getByText(/WIP on main: stash1fix earlier edit/)).toBeInTheDocument();
-  });
-
-  it("clicking a stash row calls onSelectRow with its commit id", () => {
-    const onSelectRow = vi.fn();
-    renderSwitcher({ stashes, onSelectRow });
-
-    fireEvent.click(screen.getByText(/stash0fix/).closest("li")!);
-
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });
-  });
-
-  it("clicking Apply on a stash row calls onApplyStash with its index, not onSelectRow", () => {
-    const onApplyStash = vi.fn();
-    const onSelectRow = vi.fn();
-    renderSwitcher({ stashes, onApplyStash, onSelectRow });
-
-    fireEvent.click(screen.getAllByText("Apply")[0]);
-
-    expect(onApplyStash).toHaveBeenCalledWith(0);
-    expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  it("clicking Drop on a stash row calls onDropStash with its index, not onSelectRow", () => {
-    const onDropStash = vi.fn();
-    const onSelectRow = vi.fn();
-    renderSwitcher({ stashes, onDropStash, onSelectRow });
-
-    fireEvent.click(screen.getAllByText("Drop")[1]);
-
-    expect(onDropStash).toHaveBeenCalledWith(1);
-    expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  it("disables every stash row's Apply and Drop buttons while an operation is pending", () => {
-    renderSwitcher({ stashes, operationDisabled: true });
-
-    for (const button of screen.getAllByText("Apply")) {
-      expect(button).toBeDisabled();
-    }
-    for (const button of screen.getAllByText("Drop")) {
-      expect(button).toBeDisabled();
-    }
-  });
-
-  it("explains why the stash Apply/Drop buttons are disabled via their title", () => {
-    renderSwitcher({ stashes, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
-
-    for (const button of screen.getAllByText("Apply")) {
-      expect(button).toHaveAttribute("title", "A transfer is in progress.");
-    }
-    for (const button of screen.getAllByText("Drop")) {
-      expect(button).toHaveAttribute("title", "A transfer is in progress.");
-    }
   });
 });

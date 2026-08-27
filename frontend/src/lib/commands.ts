@@ -14,6 +14,7 @@ const RESULT_LIMIT = 50;
 
 const SIDEBAR_SECTIONS = [
   "Branches",
+  "Stashes",
   "Worktrees",
   "Submodules",
   "Reflog",

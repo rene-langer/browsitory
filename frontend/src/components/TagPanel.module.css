@@ -47,3 +47,9 @@
   margin-right: var(--space-1);
   color: var(--color-text-muted);
 }
+
+.empty {
+  padding: var(--space-2) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

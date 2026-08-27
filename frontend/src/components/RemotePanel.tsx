@@ -4,6 +4,7 @@ import type { PullOutcome, RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../i
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RemotePanel.module.css";
 
@@ -212,7 +213,7 @@ export function RemotePanel({
           {remotes.map((remote) => {
             const pushUrl = remote.pushUrl;
             return (
-              <li key={remote.name}>
+              <ListRow key={remote.name}>
               {editing === remote.name ? (
                 <form className={styles.form} onSubmit={(event) => submitEdit(event, remote.name)} aria-label={`Edit ${remote.name}`}>
                   <label className={styles.label}>
@@ -279,6 +280,7 @@ export function RemotePanel({
                 </form>
               ) : (
                 <>
+                  <Cloud size={14} aria-hidden="true" className={styles.rowIcon} />
                   <strong>{remote.name}</strong>
                   <span>Fetch: {remote.fetchUrl}</span>
                   <button
@@ -360,7 +362,7 @@ export function RemotePanel({
                   </Toolbar>
                 </>
               )}
-              </li>
+              </ListRow>
             );
           })}
         </ul>

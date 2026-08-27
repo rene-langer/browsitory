@@ -4,6 +4,7 @@ import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
 
@@ -120,36 +121,40 @@ export function WorktreePanel({
           </button>
         </Toolbar>
       </form>
-      <ul className={styles.list}>
-        {worktrees.map((worktree) => (
-          <li key={worktree.path}>
-            <FolderGit2 size={14} aria-hidden="true" className={styles.rowIcon} />
-            <strong>{worktree.isMain ? "Main" : "Linked"}</strong>
-            <span>{worktree.path}</span>
-            <span>{worktree.head ?? "Detached HEAD"}</span>
-            {worktree.isLocked && <span>Locked</span>}
-            {worktree.isPrunable && <span>Prunable</span>}
-            <Toolbar>
-              <button
-                type="button"
-                disabled={operationDisabled}
-                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-                onClick={() => void onOpenWorktree(worktree.path)}
-              >
-                Open {worktree.path}
-              </button>
-              <button
-                type="button"
-                disabled={operationDisabled || worktree.isMain}
-                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-                onClick={() => removeWorktree(worktree)}
-              >
-                Remove {worktree.path}
-              </button>
-            </Toolbar>
-          </li>
-        ))}
-      </ul>
+      {worktrees.length === 0 ? (
+        <p className={styles.empty}>No worktrees. Create one above to work on another branch in parallel.</p>
+      ) : (
+        <ul className={styles.list}>
+          {worktrees.map((worktree) => (
+            <ListRow key={worktree.path}>
+              <FolderGit2 size={14} aria-hidden="true" className={styles.rowIcon} />
+              <strong>{worktree.isMain ? "Main" : "Linked"}</strong>
+              <span>{worktree.path}</span>
+              <span>{worktree.head ?? "Detached HEAD"}</span>
+              {worktree.isLocked && <span>Locked</span>}
+              {worktree.isPrunable && <span>Prunable</span>}
+              <Toolbar>
+                <button
+                  type="button"
+                  disabled={operationDisabled}
+                  title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  onClick={() => void onOpenWorktree(worktree.path)}
+                >
+                  Open {worktree.path}
+                </button>
+                <button
+                  type="button"
+                  disabled={operationDisabled || worktree.isMain}
+                  title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  onClick={() => removeWorktree(worktree)}
+                >
+                  Remove {worktree.path}
+                </button>
+              </Toolbar>
+            </ListRow>
+          ))}
+        </ul>
+      )}
       <Toolbar>
         <button
           type="button"

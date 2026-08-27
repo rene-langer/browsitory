@@ -33,9 +33,10 @@ the saved workspace without touching the repos themselves.
 ## Overview
 
 Once a repository is open, the window is split into three columns: the
-**sidebar** (branches, worktrees, submodules, reflog, remotes, tags, pull
-requests — each collapsed by default), the **commit graph** (your history,
-newest first), and the **working-directory / diff pane** on the right.
+**sidebar** (branches, stashes, worktrees, submodules, reflog, remotes, tags,
+pull requests — each collapsed by default), the **commit graph** (your
+history, newest first), and the **working-directory / diff pane** on the
+right.
 
 ![Overview: sidebar, commit graph, and the working-directory pane](assets/overview.png)
 
@@ -46,7 +47,7 @@ The right-hand pane defaults to your working directory, split into
 all** action. Hover a file to reveal its stage/unstage toggle, or use
 **Blame** for per-line authorship. Click a file to preview its diff, type a
 commit message, and hit **Commit**. **Stash** sets the current changes
-aside.
+aside — expand **Stashes** in the sidebar to get them back.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
@@ -66,6 +67,12 @@ commit, or starting a rebase onto one, is available from that commit's row
 in the graph.
 
 ![The branch switcher, open over the commit graph](assets/branches.png)
+
+## Stashes
+
+Expand **Stashes** to see everything set aside with **Stash**. Apply one
+back onto your working directory, or drop it for good — dropping asks for
+confirmation first, since it can't be undone.
 
 ## Tags
 

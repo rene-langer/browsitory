@@ -48,6 +48,12 @@ function renderPanel(
 }
 
 describe("WorktreePanel", () => {
+  it("shows an empty state when there are no worktrees", () => {
+    renderPanel({ worktrees: [] });
+
+    expect(screen.getByText(/No worktrees/)).toBeInTheDocument();
+  });
+
   it("renders main and linked worktree paths but disables removal for the main worktree", () => {
     renderPanel();
 

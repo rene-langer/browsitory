@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ExternalLink, GitPullRequest } from "lucide-react";
+import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed } from "lucide-react";
 import type {
   CreatePullRequest,
   ForgeProvider,
@@ -8,8 +8,19 @@ import type {
 } from "../ipc/RepoClient";
 import { AccordionGroup } from "./primitives/AccordionGroup";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./PullRequestPanel.module.css";
+
+// Providers report state as free-form strings ("open"/"closed" from GitHub, "OPEN"/"MERGED"/…
+// from Bitbucket, lowercased by the backend — see `crates/tauri-app/src/pull_requests.rs`), so
+// this only special-cases the two states worth a distinct glyph and falls back to a generic
+// closed icon for everything else (declined, superseded, …).
+function pullRequestStateIcon(state: string) {
+  if (state === "open") return GitPullRequest;
+  if (state === "merged") return GitMerge;
+  return GitPullRequestClosed;
+}
 
 interface ForgeRepositorySectionProps {
   repository: ForgeRepository;
@@ -199,19 +210,30 @@ function ForgeRepositorySection({
               Showing the first {visibleRows.length} pull requests — more may be available on the provider.
             </p>
           )}
-          <ul className={styles.prList} aria-label={`Pull requests for ${repository.remoteName}`}>
-            {visibleRows.map((pullRequest) => (
-              <li key={pullRequest.id} className={styles.prRow}>
-                <GitPullRequest size={14} aria-hidden="true" />
-                #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
-                {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}{" "}
-                <button type="button" onClick={() => void onOpenExternalUrl(pullRequest.url)}>
-                  <ExternalLink size={14} aria-hidden="true" />
-                  {pullRequest.url}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {visibleRows.length === 0 ? (
+            <p className={styles.empty}>No pull requests found for this remote.</p>
+          ) : (
+            <ul className={styles.prList} aria-label={`Pull requests for ${repository.remoteName}`}>
+              {visibleRows.map((pullRequest) => {
+                const StateIcon = pullRequestStateIcon(pullRequest.state);
+                return (
+                  <ListRow key={pullRequest.id}>
+                    <StateIcon size={14} aria-hidden="true" className={styles.rowIcon} />
+                    <span>
+                      #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
+                      {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}
+                    </span>
+                    <Toolbar>
+                      <button type="button" onClick={() => void onOpenExternalUrl(pullRequest.url)}>
+                        <ExternalLink size={14} aria-hidden="true" />
+                        {pullRequest.url}
+                      </button>
+                    </Toolbar>
+                  </ListRow>
+                );
+              })}
+            </ul>
+          )}
         </>
       )}
 
@@ -276,7 +298,9 @@ export function PullRequestPanel({
   if (forgeRepositories.length === 0) {
     return (
       <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
-        <p>No supported GitHub or Bitbucket remotes detected.</p>
+        <p className={styles.empty}>
+          No supported GitHub or Bitbucket remotes. Add one under Remotes to see its pull requests here.
+        </p>
       </AccordionSection>
     );
   }
