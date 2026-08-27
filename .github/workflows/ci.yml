@@ -9,6 +9,11 @@ on:
     # any PR activity — see SEC-003 (issue #24).
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+  checks: write
+  issues: write
+
 jobs:
   audit:
     runs-on: ubuntu-latest
