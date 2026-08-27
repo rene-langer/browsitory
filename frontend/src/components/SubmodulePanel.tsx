@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Package } from "lucide-react";
 import type { SubmoduleInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SubmodulePanel.module.css";
 
@@ -39,38 +40,42 @@ export function SubmodulePanel({
         />
         Update recursively
       </label>
-      <ul className={styles.list}>
-        {submodules.map((submodule) => {
-          const rowDisabled = operationDisabled || pendingPath === submodule.path;
+      {submodules.length === 0 ? (
+        <p className={styles.empty}>No submodules. They show up here once the repo's .gitmodules records one.</p>
+      ) : (
+        <ul className={styles.list}>
+          {submodules.map((submodule) => {
+            const rowDisabled = operationDisabled || pendingPath === submodule.path;
 
-          return (
-            <li key={submodule.path}>
-              <Package size={14} aria-hidden="true" className={styles.rowIcon} />
-              <strong>{submodule.path}</strong>
-              <span>{submodule.url ?? "No URL configured"}</span>
-              <span>{submodule.gitlinkId ?? "No recorded gitlink"}</span>
-              <span>{submodule.initialized ? "Initialized" : "Not initialized"}</span>
-              {submodule.headId !== null && <span>{submodule.headId}</span>}
-              <Toolbar>
-                <button
-                  type="button"
-                  disabled={rowDisabled}
-                  onClick={() => void runMutation(submodule.path, () => onInit(submodule.path))}
-                >
-                  Initialize {submodule.path}
-                </button>
-                <button
-                  type="button"
-                  disabled={rowDisabled}
-                  onClick={() => void runMutation(submodule.path, () => onUpdate(submodule.path, recursive))}
-                >
-                  Update {submodule.path}
-                </button>
-              </Toolbar>
-            </li>
-          );
-        })}
-      </ul>
+            return (
+              <ListRow key={submodule.path}>
+                <Package size={14} aria-hidden="true" className={styles.rowIcon} />
+                <strong>{submodule.path}</strong>
+                <span>{submodule.url ?? "No URL configured"}</span>
+                <span>{submodule.gitlinkId ?? "No recorded gitlink"}</span>
+                <span>{submodule.initialized ? "Initialized" : "Not initialized"}</span>
+                {submodule.headId !== null && <span>{submodule.headId}</span>}
+                <Toolbar>
+                  <button
+                    type="button"
+                    disabled={rowDisabled}
+                    onClick={() => void runMutation(submodule.path, () => onInit(submodule.path))}
+                  >
+                    Initialize {submodule.path}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rowDisabled}
+                    onClick={() => void runMutation(submodule.path, () => onUpdate(submodule.path, recursive))}
+                  >
+                    Update {submodule.path}
+                  </button>
+                </Toolbar>
+              </ListRow>
+            );
+          })}
+        </ul>
+      )}
     </AccordionSection>
   );
 }

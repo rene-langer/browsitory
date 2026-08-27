@@ -34,6 +34,18 @@ function renderPanel(
 }
 
 describe("ReflogPanel", () => {
+  it("prompts for a reference when none is selected", () => {
+    renderPanel({ selectedReference: null, entries: [] });
+
+    expect(screen.getByText(/Select a reference above/)).toBeInTheDocument();
+  });
+
+  it("shows an empty state when the selected reference has no reflog entries", () => {
+    renderPanel({ entries: [] });
+
+    expect(screen.getByText("No reflog entries for refs/heads/main.")).toBeInTheDocument();
+  });
+
   it("lists HEAD and local branches with each selected entry's recovery details", () => {
     renderPanel();
 

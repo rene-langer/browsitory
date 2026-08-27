@@ -1,11 +1,9 @@
-import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { GitBranch } from "lucide-react";
-import type { BranchInfo, StashEntry } from "../ipc/RepoClient";
-import type { SelectedRow } from "../state/useAppState";
+import type { BranchInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
-import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchSwitcher.module.css";
 
@@ -23,10 +21,6 @@ export function BranchSwitcher({
   isRebasing,
   operationDisabled,
   operationDisabledReason,
-  stashes,
-  onSelectRow,
-  onApplyStash,
-  onDropStash,
   graphBranchSelection,
   onSetGraphBranchSelection,
 }: {
@@ -53,10 +47,6 @@ export function BranchSwitcher({
   // as a `title` on the buttons it disables so they don't just go inert with no explanation
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
-  stashes: StashEntry[];
-  onSelectRow: (row: SelectedRow) => void;
-  onApplyStash: (index: number) => void;
-  onDropStash: (index: number) => void;
   // `null` means no filter is saved — every branch shows in CommitGraph (see `graph_log` in
   // `git-core` and `useAppState`'s `AppState.graphBranchSelection`).
   graphBranchSelection: string[] | null;
@@ -244,35 +234,6 @@ export function BranchSwitcher({
             <InlineError message={createError} onDismiss={() => setCreateError(null)} />
           )}
         </div>
-      )}
-      {stashes.length > 0 && (
-        <ul className={styles.stashList}>
-          {stashes.map((stash) => (
-            <ListRow key={stash.commitId} className="stash-row" onClick={() => onSelectRow({ commitId: stash.commitId })}>
-              <span className={styles.stashMessage}>{stash.message}</span>
-              <button
-                disabled={operationDisabled}
-                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-                onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                  event.stopPropagation();
-                  onApplyStash(stash.index);
-                }}
-              >
-                Apply
-              </button>
-              <button
-                disabled={operationDisabled}
-                title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-                onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                  event.stopPropagation();
-                  onDropStash(stash.index);
-                }}
-              >
-                Drop
-              </button>
-            </ListRow>
-          ))}
-        </ul>
       )}
     </AccordionSection>
   );

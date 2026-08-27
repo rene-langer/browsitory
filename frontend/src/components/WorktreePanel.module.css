@@ -34,3 +34,9 @@
   align-items: center;
   gap: var(--space-1) var(--space-2);
 }
+
+.empty {
+  padding: var(--space-2) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
