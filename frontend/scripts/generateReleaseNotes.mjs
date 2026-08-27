@@ -42,7 +42,11 @@ export function parseChangelog(markdown) {
   return entries;
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+export function isMainModule(moduleUrl, entryPoint) {
+  return entryPoint !== undefined && fileURLToPath(moduleUrl) === entryPoint;
+}
+
+const isMain = isMainModule(import.meta.url, process.argv[1]);
 if (isMain) {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const changelogPath = join(scriptDir, "..", "..", "CHANGELOG.md");
