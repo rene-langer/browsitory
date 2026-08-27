@@ -1,7 +1,11 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import type { RunMutation, RunMutationWithMessage } from "./useMutationRunner";
+import type {
+  RunMutation,
+  RunOptimisticMutation,
+  RunOptimisticMutationWithMessage,
+} from "./useMutationRunner";
 
 export interface BranchActions {
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`.
@@ -21,16 +25,20 @@ export function useBranchActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
-  runMutationWithMessage: RunMutationWithMessage,
+  runOptimisticMutation: RunOptimisticMutation,
+  runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): BranchActions {
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
-      runMutationWithMessage(async () => {
-        await client.createBranch(repoPath, name, startPoint);
-        setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
-      }),
-    [client, runMutationWithMessage, repoPath, setState],
+      runOptimisticMutationWithMessage(
+        (prev) => ({ ...prev, branches: [...prev.branches, { name, isCurrent: false }] }),
+        async () => {
+          await client.createBranch(repoPath, name, startPoint);
+          setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
+        },
+      ),
+    [client, runOptimisticMutationWithMessage, repoPath, setState],
   );
   const switchBranch = useCallback(
     (name: string) =>
@@ -41,12 +49,23 @@ export function useBranchActions(
     [client, runMutation, repoPath, setState],
   );
   const deleteBranch = useCallback(
-    (name: string, force: boolean) => runMutation(() => client.deleteBranch(repoPath, name, force)),
-    [client, runMutation, repoPath],
+    (name: string, force: boolean) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, branches: prev.branches.filter((branch) => branch.name !== name) }),
+        () => client.deleteBranch(repoPath, name, force),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const renameBranch = useCallback(
-    (oldName: string, newName: string) => runMutation(() => client.renameBranch(repoPath, oldName, newName)),
-    [client, runMutation, repoPath],
+    (oldName: string, newName: string) =>
+      runOptimisticMutation(
+        (prev) => ({
+          ...prev,
+          branches: prev.branches.map((branch) => (branch.name === oldName ? { ...branch, name: newName } : branch)),
+        }),
+        () => client.renameBranch(repoPath, oldName, newName),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
 
   const openCreateBranchDraft = useCallback(

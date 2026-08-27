@@ -217,6 +217,9 @@ export interface Workspace {
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
+  getAppVersion(): Promise<string>;
+  getLastSeenVersion(): Promise<string | null>;
+  setLastSeenVersion(version: string): Promise<void>;
   openRepo(path: string): Promise<void>;
   closeRepo(repoPath: string): Promise<void>;
   listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;

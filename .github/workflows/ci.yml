@@ -34,6 +34,18 @@ jobs:
       - name: License compliance doc is in sync
         run: python3 scripts/check-license-compliance.py
 
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: CHANGELOG.md updated
+        env:
+          SKIP_CHANGELOG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') && '1' || '' }}
+        run: python3 scripts/check-changelog.py --base "origin/${{ github.base_ref }}"
+
   rust:
     runs-on: ${{ matrix.os }}
     strategy:
