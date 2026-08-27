@@ -5,11 +5,12 @@
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "generate:release-notes": "node scripts/generateReleaseNotes.mjs",
+    "dev": "pnpm generate:release-notes && vite",
+    "build": "pnpm generate:release-notes && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "pnpm generate:release-notes && vitest"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

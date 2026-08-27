@@ -7,11 +7,18 @@ import type { AppState } from "./useAppState";
 export type RunMutation = (mutate: () => Promise<void>) => Promise<void>;
 export type RunMutationWithOutcome = (mutate: () => Promise<void>) => Promise<boolean>;
 export type RunMutationWithMessage = (mutate: () => Promise<void>) => Promise<string | null>;
+export type OptimisticUpdate = (prev: AppState) => AppState;
+export type RunOptimisticMutation = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<void>;
+export type RunOptimisticMutationWithMessage = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<string | null>;
+export type RunOptimisticMutationWithOutcome = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<boolean>;
 
 export interface MutationRunner {
   runMutation: RunMutation;
   runMutationWithOutcome: RunMutationWithOutcome;
   runMutationWithMessage: RunMutationWithMessage;
+  runOptimisticMutation: RunOptimisticMutation;
+  runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage;
+  runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome;
 }
 
 export function credentialFailureMessage(error: unknown): string {
@@ -86,5 +93,78 @@ export function useMutationRunner(
     [refresh, setState],
   );
 
-  return { runMutation, runMutationWithOutcome, runMutationWithMessage };
+  // Optimistic counterparts of the three variants above: apply `optimisticUpdate` to `AppState`
+  // immediately (before awaiting `mutate`), so the UI reflects the predicted result with no
+  // visible round-trip. On failure, restore the *exact* pre-call snapshot rather than computing
+  // a per-mutation inverse — cheap (one object) and trivially correct: failure always means
+  // "exactly what it looked like before this call touched anything." The `pending`-driven global
+  // lock (still set here) already rules out two overlapping optimistic mutations racing each
+  // other's snapshot/restore.
+  const runOptimisticMutation = useCallback<RunOptimisticMutation>(
+    async (optimisticUpdate, mutate) => {
+      let snapshot: AppState | null = null;
+      setState((prev) => {
+        snapshot = prev;
+        return { ...optimisticUpdate(prev), pending: true };
+      });
+      try {
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+      } catch (err) {
+        setState(() => ({ ...(snapshot as AppState), error: credentialFailureMessage(err), pending: false }));
+      }
+    },
+    [refresh, setState],
+  );
+
+  const runOptimisticMutationWithMessage = useCallback<RunOptimisticMutationWithMessage>(
+    async (optimisticUpdate, mutate) => {
+      let snapshot: AppState | null = null;
+      setState((prev) => {
+        snapshot = prev;
+        return { ...optimisticUpdate(prev), pending: true };
+      });
+      try {
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return null;
+      } catch (err) {
+        const message = credentialFailureMessage(err);
+        setState(() => ({ ...(snapshot as AppState), error: message, pending: false }));
+        return message;
+      }
+    },
+    [refresh, setState],
+  );
+
+  const runOptimisticMutationWithOutcome = useCallback<RunOptimisticMutationWithOutcome>(
+    async (optimisticUpdate, mutate) => {
+      let snapshot: AppState | null = null;
+      setState((prev) => {
+        snapshot = prev;
+        return { ...optimisticUpdate(prev), pending: true };
+      });
+      try {
+        await mutate();
+        await refresh();
+        setState((prev) => ({ ...prev, pending: false }));
+        return true;
+      } catch (err) {
+        setState(() => ({ ...(snapshot as AppState), error: credentialFailureMessage(err), pending: false }));
+        return false;
+      }
+    },
+    [refresh, setState],
+  );
+
+  return {
+    runMutation,
+    runMutationWithOutcome,
+    runMutationWithMessage,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
+    runOptimisticMutationWithOutcome,
+  };
 }

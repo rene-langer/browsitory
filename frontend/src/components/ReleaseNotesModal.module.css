@@ -1,0 +1,17 @@
+.entry {
+  margin-bottom: var(--space-4);
+}
+
+.date {
+  font-weight: normal;
+  color: var(--color-text-muted);
+  font-size: 0.85em;
+}
+
+.empty {
+  color: var(--color-text-muted);
+}
+
+.closeButton {
+  margin-top: var(--space-3);
+}

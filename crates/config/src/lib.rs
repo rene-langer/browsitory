@@ -110,6 +110,8 @@ struct ConfigFile {
     recent_repos: Vec<PathBuf>,
     #[serde(default)]
     active_repo: Option<PathBuf>,
+    #[serde(default)]
+    last_seen_version: Option<String>,
     // These fields serialize as TOML array-of-tables because their element type is a struct.
     // TOML requires plain `key = value` lines to precede an array-of-tables section, so they
     // must remain last.
@@ -173,6 +175,24 @@ pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigE
     config.recent_repos.retain(|p| p != path);
     config.recent_repos.insert(0, path.to_path_buf());
     config.recent_repos.truncate(MAX_RECENT_REPOS);
+    write_config(config_file, &config)
+}
+
+pub fn get_last_seen_version() -> Result<Option<String>, ConfigError> {
+    get_last_seen_version_at(&config_file_path()?)
+}
+
+pub fn set_last_seen_version(version: &str) -> Result<(), ConfigError> {
+    set_last_seen_version_at(&config_file_path()?, version)
+}
+
+pub fn get_last_seen_version_at(config_file: &Path) -> Result<Option<String>, ConfigError> {
+    Ok(read_config(config_file)?.last_seen_version)
+}
+
+pub fn set_last_seen_version_at(config_file: &Path, version: &str) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.last_seen_version = Some(version.to_string());
     write_config(config_file, &config)
 }
 

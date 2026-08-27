@@ -913,6 +913,21 @@ pub fn list_recent_repos() -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn get_last_seen_version() -> Result<Option<String>, String> {
+    config::get_last_seen_version().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_last_seen_version(version: String) -> Result<(), String> {
+    config::set_last_seen_version(&version).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 // Clone the worker's channel handle and drop the guard before blocking on the reply —
 // holding the mutex across the round-trip would serialize every command behind this one
 // and let a wedged worker hold the lock forever.

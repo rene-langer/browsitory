@@ -264,7 +264,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     }
   }, [client, repoPath]);
 
-  const { runMutation, runMutationWithOutcome, runMutationWithMessage } = useMutationRunner(refresh, setState);
+  const {
+    runMutation,
+    runMutationWithOutcome,
+    runMutationWithMessage,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
+    runOptimisticMutationWithOutcome,
+  } = useMutationRunner(refresh, setState);
 
   const {
     selectRow,
@@ -276,7 +283,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     unstageHunk,
     discardHunk,
     commit,
-  } = useStagingActions(client, repoPath, runMutation, setState);
+  } = useStagingActions(client, repoPath, runMutation, runOptimisticMutation, setState);
 
   const {
     createBranch,
@@ -286,12 +293,20 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openCreateBranchDraft,
     closeCreateBranchDraft,
     setGraphBranchSelection,
-  } = useBranchActions(client, repoPath, runMutation, runMutationWithMessage, setState);
+  } = useBranchActions(
+    client,
+    repoPath,
+    runMutation,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
+    setState,
+  );
   const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
     client,
     repoPath,
     runMutation,
-    runMutationWithMessage,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
   );
 
   const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
@@ -330,10 +345,18 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runMutation,
     runMutationWithMessage,
     runMutationWithOutcome,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
+    runOptimisticMutationWithOutcome,
     setState,
   );
 
-  const { saveStash, applyStash, dropStash } = useStashActions(client, repoPath, runMutation, state, setState);
+  const { saveStash, applyStash, dropStash } = useStashActions(
+    client,
+    repoPath,
+    runMutation,
+    runOptimisticMutation,
+  );
 
   const {
     mergeBranch,

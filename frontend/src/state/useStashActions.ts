@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
-import type { AppState } from "./useAppState";
-import type { RunMutation } from "./useMutationRunner";
+import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 
 export interface StashActions {
   saveStash(): Promise<void>;
@@ -13,8 +12,7 @@ export function useStashActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
-  state: AppState,
-  setState: (updater: (prev: AppState) => AppState) => void,
+  runOptimisticMutation: RunOptimisticMutation,
 ): StashActions {
   const saveStash = useCallback(
     () => runMutation(() => client.saveStash(repoPath)),
@@ -26,21 +24,22 @@ export function useStashActions(
   );
   const dropStash = useCallback(
     (index: number) =>
-      runMutation(async () => {
-        // Read the about-to-be-dropped stash's commitId before calling the client: if it's
-        // the one currently selected, `DiffPane` would otherwise keep showing a diff for a
-        // commit that's about to become unreachable until GC.
-        const droppedCommitId = state.stashes[index]?.commitId;
-        const dropsSelectedStash =
-          droppedCommitId !== undefined &&
-          typeof state.selectedRow === "object" &&
-          state.selectedRow.commitId === droppedCommitId;
-        await client.dropStash(repoPath, index);
-        if (dropsSelectedStash) {
-          setState((prev) => ({ ...prev, selectedRow: "uncommitted" }));
-        }
-      }),
-    [client, runMutation, state, repoPath, setState],
+      runOptimisticMutation(
+        (prev) => {
+          const droppedCommitId = prev.stashes[index]?.commitId;
+          const dropsSelectedStash =
+            droppedCommitId !== undefined &&
+            typeof prev.selectedRow === "object" &&
+            prev.selectedRow.commitId === droppedCommitId;
+          return {
+            ...prev,
+            stashes: prev.stashes.filter((_, stashIndex) => stashIndex !== index),
+            selectedRow: dropsSelectedStash ? "uncommitted" : prev.selectedRow,
+          };
+        },
+        () => client.dropStash(repoPath, index),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
 
   return { saveStash, applyStash, dropStash };

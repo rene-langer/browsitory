@@ -1,6 +1,10 @@
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
-import type { RunMutation, RunMutationWithMessage } from "./useMutationRunner";
+import type {
+  RunMutation,
+  RunOptimisticMutation,
+  RunOptimisticMutationWithMessage,
+} from "./useMutationRunner";
 
 export interface WorktreeActions {
   // Resolves to `null` on success, or the failure message on failure — the "Create worktree"
@@ -15,16 +19,27 @@ export function useWorktreeActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
-  runMutationWithMessage: RunMutationWithMessage,
+  runOptimisticMutation: RunOptimisticMutation,
+  runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
 ): WorktreeActions {
   const createWorktree = useCallback(
     (name: string, path: string, branch: string, startPoint: string | null) =>
-      runMutationWithMessage(() => client.createWorktree(repoPath, name, path, branch, startPoint)),
-    [client, runMutationWithMessage, repoPath],
+      runOptimisticMutationWithMessage(
+        (prev) => ({
+          ...prev,
+          worktrees: [...prev.worktrees, { name, path, head: null, isMain: false, isLocked: false, isPrunable: false }],
+        }),
+        () => client.createWorktree(repoPath, name, path, branch, startPoint),
+      ),
+    [client, runOptimisticMutationWithMessage, repoPath],
   );
   const removeWorktree = useCallback(
-    (name: string) => runMutation(() => client.removeWorktree(repoPath, name)),
-    [client, runMutation, repoPath],
+    (name: string) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, worktrees: prev.worktrees.filter((worktree) => worktree.name !== name) }),
+        () => client.removeWorktree(repoPath, name),
+      ),
+    [client, runOptimisticMutation, repoPath],
   );
   const pruneWorktrees = useCallback(
     () => runMutation(() => client.pruneWorktrees(repoPath)),

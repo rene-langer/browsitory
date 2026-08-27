@@ -11,6 +11,7 @@ import type {
   TagInfo,
   ReflogEntry,
   UpstreamInfo,
+  WorktreeInfo,
 } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
@@ -78,6 +79,9 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     ...remoteManagementClient,
     pickRepoFolder: async () => unimplemented(),
     listRecentRepos: async () => unimplemented(),
+    getAppVersion: async () => unimplemented(),
+    getLastSeenVersion: async () => unimplemented(),
+    setLastSeenVersion: async () => unimplemented(),
     openRepo: async () => {},
     getStatus: async () => [],
     getCommitGraph: async () => [],
@@ -533,6 +537,7 @@ describe("useAppState", () => {
 
   it("clears the last pull outcome when setting a different upstream", async () => {
     const client = transferClient({
+      listBranches: async () => [{ name: "main", isCurrent: true }],
       pullCurrentUpstream: async () => ({ kind: "UpToDate" }),
       setCurrentUpstream: async () => {},
     });
@@ -557,6 +562,49 @@ describe("useAppState", () => {
     await act(() => result.current.clearCurrentUpstream());
 
     expect(result.current.state.pullOutcome).toBeNull();
+  });
+
+  it("setCurrentUpstream updates state before the backend call resolves", async () => {
+    const branchA: BranchInfo = { name: "main", isCurrent: true };
+    let resolveSet: (() => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      getCurrentUpstream: async () => null,
+      setCurrentUpstream: async () => new Promise<void>((resolve) => { resolveSet = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let setPromise!: Promise<void>;
+    act(() => {
+      setPromise = result.current.setCurrentUpstream("origin", "main");
+    });
+
+    expect(result.current.state.upstream).toEqual({ localBranch: "main", remoteName: "origin", remoteBranch: "main" });
+
+    await act(async () => {
+      resolveSet?.();
+      await setPromise;
+    });
+  });
+
+  it("clearCurrentUpstream clears state before the backend call resolves, restores it on failure", async () => {
+    const branchA: BranchInfo = { name: "main", isCurrent: true };
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      getCurrentUpstream: async () => upstream,
+      clearCurrentUpstream: async () => {
+        throw new Error("clear failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.upstream).toEqual(upstream);
+
+    await act(() => result.current.clearCurrentUpstream());
+
+    expect(result.current.state.upstream).toEqual(upstream);
+    expect(result.current.state.error).toBe("clear failed");
   });
 
   it("records a divergent pull without beginning reconciliation", async () => {
@@ -853,6 +901,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [entry],
       getCommitGraph: async () => [graphCommit],
@@ -907,6 +958,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => {
         getStatusCalls += 1;
@@ -964,6 +1018,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => {
         getStatusCalls += 1;
@@ -1013,6 +1070,71 @@ describe("useAppState", () => {
 
     expect(stageFileArg).toBe("a.txt");
     expect(result.current.state.status).toEqual([]);
+  });
+
+  it("stageFile shows the file as staged before the backend call resolves, keeps it after success", async () => {
+    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    let staged = false;
+    let resolveStageFile: (() => void) | null = null;
+    const client = transferClient({
+      getStatus: async () => [{ ...entryA, staged }],
+      stageFile: async () => new Promise<void>((resolve) => {
+        resolveStageFile = () => {
+          staged = true;
+          resolve();
+        };
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let stagePromise!: Promise<void>;
+    act(() => {
+      stagePromise = result.current.stageFile("a.txt");
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+
+    await act(async () => {
+      resolveStageFile?.();
+      await stagePromise;
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+  });
+
+  it("stageFile rolls back the optimistic staged flag if the backend call fails", async () => {
+    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const client = transferClient({
+      getStatus: async () => [entryA],
+      stageFile: async () => {
+        throw new Error("stage failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.stageFile("a.txt"));
+
+    expect(result.current.state.status).toEqual([entryA]);
+    expect(result.current.state.error).toBe("stage failed");
+  });
+
+  it("stageFile merges a partially-staged file's two status rows into one staged row", async () => {
+    const unstagedPart: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const stagedPart: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
+    const client = transferClient({
+      getStatus: async () => [unstagedPart, stagedPart],
+      stageFile: async () => new Promise<void>(() => {}),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    act(() => {
+      void result.current.stageFile("a.txt");
+    });
+
+    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
   });
 
   // DiffPane's "Stage all" used to loop the per-file `stageFile`, and every one of those is its
@@ -1094,6 +1216,113 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(false);
   });
 
+  it("addRemote adds the remote to state before the backend call resolves", async () => {
+    let resolveAdd: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [],
+      addRemote: async () => new Promise<void>((resolve) => { resolveAdd = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let addPromise!: Promise<string | null>;
+    act(() => {
+      addPromise = result.current.addRemote("upstream", "../upstream.git", null);
+    });
+
+    expect(result.current.state.remotes).toEqual([
+      { name: "upstream", fetchUrl: "../upstream.git", pushUrl: null, authMode: null, authUsername: null },
+    ]);
+
+    await act(async () => {
+      resolveAdd?.();
+      await addPromise;
+    });
+  });
+
+  it("removeRemote removes the remote from state before the backend call resolves, restores it on failure", async () => {
+    const remoteA: RemoteInfo = { name: "upstream", fetchUrl: "../upstream.git", pushUrl: null, authMode: null, authUsername: null };
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      removeRemote: async () => {
+        throw new Error("remove failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.removeRemote("upstream", false));
+
+    expect(result.current.state.remotes).toEqual([remoteA]);
+    expect(result.current.state.error).toBe("remove failed");
+  });
+
+  it("renameRemote renames the remote in state before the backend call resolves, resolves true on success", async () => {
+    const remoteA: RemoteInfo = { name: "old", fetchUrl: "../r.git", pushUrl: null, authMode: null, authUsername: null };
+    let resolveRename: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      renameRemote: async () => new Promise<void>((resolve) => { resolveRename = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let renamePromise!: Promise<boolean>;
+    act(() => {
+      renamePromise = result.current.renameRemote("old", "new");
+    });
+
+    expect(result.current.state.remotes[0].name).toBe("new");
+
+    let succeeded!: boolean;
+    await act(async () => {
+      resolveRename?.();
+      succeeded = await renamePromise;
+    });
+    expect(succeeded).toBe(true);
+  });
+
+  it("renameRemote resolves false and restores the original name on failure", async () => {
+    const remoteA: RemoteInfo = { name: "old", fetchUrl: "../r.git", pushUrl: null, authMode: null, authUsername: null };
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      renameRemote: async () => {
+        throw new Error("rename failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    const succeeded = await act(() => result.current.renameRemote("old", "new"));
+
+    expect(succeeded).toBe(false);
+    expect(result.current.state.remotes).toEqual([remoteA]);
+  });
+
+  it("updateRemoteUrls updates the URLs in state before the backend call resolves", async () => {
+    const remoteA: RemoteInfo = { name: "origin", fetchUrl: "../old.git", pushUrl: null, authMode: null, authUsername: null };
+    let resolveUpdate: (() => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [remoteA],
+      updateRemoteUrls: async () => new Promise<void>((resolve) => { resolveUpdate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let updatePromise!: Promise<void>;
+    act(() => {
+      updatePromise = result.current.updateRemoteUrls("origin", "../new.git", "../push.git");
+    });
+
+    expect(result.current.state.remotes[0].fetchUrl).toBe("../new.git");
+    expect(result.current.state.remotes[0].pushUrl).toBe("../push.git");
+
+    await act(async () => {
+      resolveUpdate?.();
+      await updatePromise;
+    });
+  });
+
   // Same `Promise<string | null>` contract as `addRemote` above, for the same reason:
   // `BranchSwitcher`, `WorktreePanel`, and `TagPanel` each render their create-form's failure
   // inline next to the form rather than routing it through the shared banner (issue #30/UX-002).
@@ -1139,6 +1368,47 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("worktree path already exists");
   });
 
+  it("createWorktree adds the worktree to state before the backend call resolves", async () => {
+    let resolveCreate: (() => void) | null = null;
+    const client = transferClient({
+      listWorktrees: async () => [],
+      createWorktree: async () => new Promise<void>((resolve) => { resolveCreate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let createPromise!: Promise<string | null>;
+    act(() => {
+      createPromise = result.current.createWorktree("feature", "/repo/../feature", "feature-branch", null);
+    });
+
+    expect(result.current.state.worktrees).toEqual([
+      { name: "feature", path: "/repo/../feature", head: null, isMain: false, isLocked: false, isPrunable: false },
+    ]);
+
+    await act(async () => {
+      resolveCreate?.();
+      await createPromise;
+    });
+  });
+
+  it("removeWorktree removes the worktree from state before the backend call resolves, restores it on failure", async () => {
+    const worktreeA: WorktreeInfo = { name: "feature", path: "/repo/../feature", head: "abc", isMain: false, isLocked: false, isPrunable: false };
+    const client = transferClient({
+      listWorktrees: async () => [worktreeA],
+      removeWorktree: async () => {
+        throw new Error("worktree has uncommitted changes");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.removeWorktree("feature"));
+
+    expect(result.current.state.worktrees).toEqual([worktreeA]);
+    expect(result.current.state.error).toBe("worktree has uncommitted changes");
+  });
+
   it("createTag resolves to null on success and to the failure message on failure", async () => {
     const client = transferClient({
       createTag: async (_repoPath, name) => {
@@ -1158,6 +1428,47 @@ describe("useAppState", () => {
     });
     expect(outcome).toBe("tag already exists");
     expect(result.current.state.error).toBe("tag already exists");
+  });
+
+  it("createTag adds the tag to state before the backend call resolves", async () => {
+    let resolveCreate: (() => void) | null = null;
+    const client = transferClient({
+      listTags: async () => [],
+      createTag: async () => new Promise<void>((resolve) => { resolveCreate = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let createPromise!: Promise<string | null>;
+    act(() => {
+      createPromise = result.current.createTag("v1.0.0", null);
+    });
+
+    expect(result.current.state.tags).toHaveLength(1);
+    expect(result.current.state.tags[0].name).toBe("v1.0.0");
+    expect(result.current.state.tags[0].annotated).toBe(false);
+
+    await act(async () => {
+      resolveCreate?.();
+      await createPromise;
+    });
+  });
+
+  it("deleteTag removes the tag from state before the backend call resolves, restores it on failure", async () => {
+    const tagA: TagInfo = { name: "v1.0.0", targetId: "abc", annotated: false, message: null, taggerName: null, timestamp: null };
+    const client = transferClient({
+      listTags: async () => [tagA],
+      deleteTag: async () => {
+        throw new Error("delete failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteTag("v1.0.0"));
+
+    expect(result.current.state.tags).toEqual([tagA]);
+    expect(result.current.state.error).toBe("delete failed");
   });
 
   // The global banner's dismiss control (issue #30/UX-002): without it, `state.error` only ever
@@ -1187,6 +1498,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => {
         getStatusCalls += 1;
@@ -1244,6 +1558,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1294,6 +1611,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1344,6 +1664,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1393,6 +1716,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1452,6 +1778,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1497,12 +1826,133 @@ describe("useAppState", () => {
     expect(result.current.state.selectedRow).toBe("uncommitted");
   });
 
+  it("deleteBranch removes the branch from state before the backend call resolves", async () => {
+    const branchA: BranchInfo = { name: "feature", isCurrent: false };
+    let branches = [branchA];
+    let resolveDelete: (() => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => branches,
+      deleteBranch: async () => new Promise<void>((resolve) => {
+        resolveDelete = () => {
+          branches = [];
+          resolve();
+        };
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.branches).toEqual([branchA]);
+
+    let deletePromise!: Promise<void>;
+    act(() => {
+      deletePromise = result.current.deleteBranch("feature", false);
+    });
+
+    expect(result.current.state.branches).toEqual([]);
+
+    await act(async () => {
+      resolveDelete?.();
+      await deletePromise;
+    });
+
+    expect(result.current.state.branches).toEqual([]);
+  });
+
+  it("deleteBranch restores the branch to state if the backend call fails", async () => {
+    const branchA: BranchInfo = { name: "feature", isCurrent: false };
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      deleteBranch: async () => {
+        throw new Error("branch has unmerged changes");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteBranch("feature", false));
+
+    expect(result.current.state.branches).toEqual([branchA]);
+    expect(result.current.state.error).toBe("branch has unmerged changes");
+  });
+
+  it("createBranch adds a not-yet-current branch to state before the backend call resolves", async () => {
+    let branches: BranchInfo[] = [];
+    let resolveCreate: (() => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => branches,
+      createBranch: async () => new Promise<void>((resolve) => {
+        resolveCreate = () => {
+          branches = [{ name: "feature", isCurrent: false }];
+          resolve();
+        };
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let createPromise!: Promise<string | null>;
+    act(() => {
+      createPromise = result.current.createBranch("feature", "main");
+    });
+
+    expect(result.current.state.branches).toEqual([{ name: "feature", isCurrent: false }]);
+
+    await act(async () => {
+      resolveCreate?.();
+      await createPromise;
+    });
+
+    expect(result.current.state.branches).toEqual([{ name: "feature", isCurrent: false }]);
+  });
+
+  it("createBranch resolves the failure message and removes the optimistic entry on failure", async () => {
+    const client = transferClient({
+      listBranches: async () => [],
+      createBranch: async () => {
+        throw new Error("branch already exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    const failure = await act(() => result.current.createBranch("feature", "main"));
+
+    expect(failure).toBe("branch already exists");
+    expect(result.current.state.branches).toEqual([]);
+  });
+
+  it("renameBranch renames the branch in state before the backend call resolves", async () => {
+    const branchA: BranchInfo = { name: "old-name", isCurrent: false };
+    let resolveRename: (() => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => [branchA],
+      renameBranch: async () => new Promise<void>((resolve) => { resolveRename = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let renamePromise!: Promise<void>;
+    act(() => {
+      renamePromise = result.current.renameBranch("old-name", "new-name");
+    });
+
+    expect(result.current.state.branches).toEqual([{ name: "new-name", isCurrent: false }]);
+
+    await act(async () => {
+      resolveRename?.();
+      await renamePromise;
+    });
+  });
+
   it("createBranch calls client.createBranch and clears the create-branch draft", async () => {
     let createArgs: [string, string] | null = null;
     const client: RepoClient = {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1556,6 +2006,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1606,6 +2059,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1655,6 +2111,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1704,6 +2163,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1763,6 +2225,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1814,6 +2279,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1859,6 +2327,49 @@ describe("useAppState", () => {
     expect(dropStashArg).toBe(0);
   });
 
+  it("dropStash removes the stash from state before the backend call resolves, restores it on failure", async () => {
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    const client = transferClient({
+      listStashes: async () => [stashA],
+      dropStash: async () => {
+        throw new Error("drop failed");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.dropStash(0));
+
+    expect(result.current.state.stashes).toEqual([stashA]);
+    expect(result.current.state.error).toBe("drop failed");
+  });
+
+  it("dropStash clears the selected row optimistically when dropping the currently-selected stash", async () => {
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    let resolveDrop: (() => void) | null = null;
+    const client = transferClient({
+      listStashes: async () => [stashA],
+      dropStash: async () => new Promise<void>((resolve) => { resolveDrop = resolve; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    act(() => result.current.selectRow({ commitId: "abc" }));
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc" });
+
+    let dropPromise!: Promise<void>;
+    act(() => {
+      dropPromise = result.current.dropStash(0);
+    });
+
+    expect(result.current.state.stashes).toEqual([]);
+    expect(result.current.state.selectedRow).toBe("uncommitted");
+
+    await act(async () => {
+      resolveDrop?.();
+      await dropPromise;
+    });
+  });
+
   it("dropStash resets selectedRow to uncommitted when dropping the currently selected stash", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     let listStashesCalls = 0;
@@ -1866,6 +2377,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1920,6 +2434,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
@@ -1970,6 +2487,9 @@ describe("useAppState", () => {
       ...remoteManagementClient,
       pickRepoFolder: async () => unimplemented(),
       listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
       openRepo: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => [],
