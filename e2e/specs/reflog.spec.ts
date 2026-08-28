@@ -36,8 +36,8 @@ describe("Browsitory reflog recovery", () => {
   });
 
   it("restores a prior local branch entry and refreshes the selected branch history", async () => {
-    // "Reflog" holds the reference selector and restore controls; "Branches" holds the switcher
-    // whose text is asserted after the restore. Both default closed.
+    // "Reflog" holds the reference selector and restore controls; "Branches" holds the
+    // current-branch row whose text is asserted after the restore. Both default closed.
     await expandSidebarSection("Reflog");
     await expandSidebarSection("Branches");
 
@@ -58,8 +58,10 @@ describe("Browsitory reflog recovery", () => {
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
     await (await dialog.$("button=Restore reflog entry")).click();
 
-    const branchSwitcher = await $("aria/Branch switcher");
-    await expect(branchSwitcher).toHaveText(branchName);
+    // BranchTree has no separate switcher control any more — the current branch is just the
+    // row in the Local folder carrying the " (current)" suffix.
+    const currentBranchRow = await $(`button=${branchName} (current)`);
+    await currentBranchRow.waitForExist({ timeout: 10000 });
     await browser.waitUntil(
       async () => await graphHasSummary(FIRST_SUMMARY),
       { timeout: 10000, timeoutMsg: "expected the restored commit in the refreshed graph" },

@@ -44,6 +44,43 @@ async function startCredentialChallengeServer(): Promise<{
   };
 }
 
+// Remotes and branches now live in one unified tree (`BranchTree.tsx`, replacing the separate
+// `RemotePanel` accordion), and every mutating remote action moved from a persistent
+// button/aria-label to a right-click context menu on the remote's folder header. This dispatches
+// a synthetic DOM `contextmenu` event (see rebase.spec.ts's comment on why, not
+// WebdriverIO's `.click({ button: "right" })`), then clicks the named menu item — which, being a
+// `ContextMenu`, closes itself immediately after the click, so no reference to the item survives
+// past this call.
+async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
+  const remoteHeader = await $(`button=${remoteName}`);
+  await remoteHeader.waitForExist({ timeout: 10000 });
+  await browser.execute((el) => {
+    el.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+    );
+  }, remoteHeader);
+  const menuItem = await $(`button=${itemLabel}`);
+  await menuItem.waitForExist({ timeout: 10000 });
+  await menuItem.waitForEnabled({ timeout: 10000 });
+  await menuItem.click();
+}
+
+// "Set upstream…" is a context-menu item on the *current* local branch's row (its button carries
+// the " (current)" suffix), opening a dialog with the remote/branch fields.
+async function openSetUpstreamDialog() {
+  const currentBranchButton = await $("//button[contains(., ' (current)')]");
+  await currentBranchButton.waitForExist({ timeout: 10000 });
+  await browser.execute((el) => {
+    el.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+    );
+  }, currentBranchButton);
+  await (await $("button=Set upstream…")).click();
+  const dialog = await $("dialog[aria-label^='Set upstream for']");
+  await dialog.waitForExist({ timeout: 10000 });
+  return dialog;
+}
+
 describe("Browsitory remote transfer", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, TRANSFER_SEED_FILE), "transfer seed\n");
@@ -70,11 +107,16 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("fetches a configured remote", async () => {
-    // "Remotes" defaults closed; expand it before its Add remote button exists.
-    await expandSidebarSection("Remotes");
+    // Remotes now live inside the unified "Branches" tree; it defaults closed, expand it before
+    // its Add button exists.
+    await expandSidebarSection("Branches");
 
-    // The Add-remote form is gated behind a button — open it before reaching for its fields.
-    await (await $("button=Add remote")).click();
+    // Adding a remote is reached via the tree's "Add" toolbar button (opens a context menu with
+    // "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle.
+    const addButton = await $('[aria-label="Add"]');
+    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.click();
+    await (await $("button=Add Remote…")).click();
 
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
@@ -84,9 +126,9 @@ describe("Browsitory remote transfer", () => {
     await (await $("[data-testid='add-remote-fetch-url']")).setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
-    const fetchButton = await $("aria/Fetch transfer-origin");
-    await fetchButton.waitForExist({ timeout: 10000 });
-    await fetchButton.click();
+    const remoteFolderHeader = await $("button=transfer-origin");
+    await remoteFolderHeader.waitForExist({ timeout: 10000 });
+    await clickRemoteContextItem("transfer-origin", "Fetch");
 
     const remoteHead = execFileSync("git", ["rev-parse", "refs/heads/main"], {
       cwd: REMOTE_SOURCE_PATH,
@@ -105,19 +147,25 @@ describe("Browsitory remote transfer", () => {
       timeout: 10000,
       timeoutMsg: "expected Fetch to update the transfer-origin tracking ref",
     });
-    await expect(fetchButton).toBeEnabled();
+    // The old "fetch button stays enabled after completion" check doesn't translate: "Fetch" is
+    // now a context-menu item that closes (and unmounts) itself the instant it's clicked, so no
+    // reference to it survives to re-check. The remote-transfer flow completing at all (asserted
+    // above) already exercises the same underlying `onFetchRemote` call.
   });
 
   it("remediates a missing HTTPS credential without exposing the callback diagnostic", async () => {
     // Idempotent re-expand — see the previous test's comment.
-    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Branches");
 
     const challenge = await startCredentialChallengeServer();
     try {
       // Left open by the previous test's successful add (it doesn't auto-close on success); only
       // open it here if that isn't the case.
       if (!(await $("form[aria-label='Add remote']").isExisting())) {
-        await (await $("button=Add remote")).click();
+        const addButton = await $('[aria-label="Add"]');
+        await addButton.waitForExist({ timeout: 10000 });
+        await addButton.click();
+        await (await $("button=Add Remote…")).click();
       }
       const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
       const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
@@ -125,7 +173,7 @@ describe("Browsitory remote transfer", () => {
       await remoteNameInput.setValue("credential-origin");
       await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
       await addRemoteButton.click();
-      await (await $("aria/Fetch credential-origin")).waitForExist({ timeout: 10000 });
+      await (await $("button=credential-origin")).waitForExist({ timeout: 10000 });
 
       // This is the non-secret metadata the UI normally persists before saving a token. No
       // token is saved, so the loopback server invokes the real missing-credential callback.
@@ -138,7 +186,7 @@ describe("Browsitory remote transfer", () => {
         }).trim(),
       ).toBe(challenge.url);
 
-      await (await $("aria/Fetch credential-origin")).click();
+      await clickRemoteContextItem("credential-origin", "Fetch");
       await browser.waitUntil(() => challenge.requests() > 0, {
         timeout: 10000,
         timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
@@ -154,14 +202,15 @@ describe("Browsitory remote transfer", () => {
 
   it("fast-forwards a clean tracked upstream", async () => {
     // Idempotent re-expand — see the first test's comment.
-    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Branches");
 
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe("");
-    const upstreamRemote = await $("form[aria-label='Set upstream'] select");
+    const upstreamDialog = await openSetUpstreamDialog();
+    const upstreamRemote = await upstreamDialog.$("select");
     await upstreamRemote.selectByAttribute("value", "transfer-origin");
-    const upstreamBranch = await $("form[aria-label='Set upstream'] input");
+    const upstreamBranch = await upstreamDialog.$("input");
     await upstreamBranch.setValue("main");
-    await (await $("button=Set upstream")).click();
+    await (await upstreamDialog.$("button=Set upstream")).click();
 
     const pullButton = await $("button=Pull");
     await pullButton.waitForEnabled({ timeout: 10000 });
@@ -178,9 +227,9 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a local tag", async () => {
-    // "Remotes" holds the branch-push button; "Tags" holds the tag-creation form and the
-    // push-tags controls used later in this test. Both default closed.
-    await expandSidebarSection("Remotes");
+    // "Branches" holds the remote-folder's push action; "Tags" holds the tag-creation form and
+    // the push-tags controls used later in this test. Both default closed.
+    await expandSidebarSection("Branches");
     await expandSidebarSection("Tags");
 
     try {
@@ -205,9 +254,7 @@ describe("Browsitory remote transfer", () => {
     const localHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
-    const pushBranch = await $("aria/Push branch to transfer-origin");
-    await pushBranch.waitForEnabled({ timeout: 10000 });
-    await pushBranch.click();
+    await clickRemoteContextItem("transfer-origin", "Push current branch here");
     await browser.waitUntil(
       () => execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], { cwd: BARE_REMOTE_PATH, encoding: "utf8" }).trim() === localHead,
       { timeout: 10000, timeoutMsg: "expected Push to advance the remote branch" },
@@ -251,10 +298,12 @@ describe("Browsitory remote transfer", () => {
 
   it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {
     // Idempotent re-expand — see the first test's comment.
-    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Branches");
 
-    await (await $("aria/Credentials for transfer-origin")).click();
-    const credentialsForm = await $("form[aria-label='Credentials for transfer-origin']");
+    await clickRemoteContextItem("transfer-origin", "Manage credentials");
+    // The `aria-label` naming this dialog now lives on the `<dialog>` itself, not a nested
+    // `<form>` (the form carries no attributes of its own).
+    const credentialsForm = await $("dialog[aria-label='Credentials for transfer-origin']");
     await credentialsForm.waitForExist({ timeout: 10000 });
     await credentialsForm.$("select").selectByAttribute("value", "SshAgent");
 

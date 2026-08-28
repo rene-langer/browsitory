@@ -54,10 +54,15 @@ const BITBUCKET_CREATE_FIXTURE = {
 };
 
 async function addRemote(name: string, url: string) {
-  // The Add-remote form is gated behind a button and stays open after a successful add, so only
-  // open it when it isn't already showing (the first call in a test, typically).
+  // The Add-remote form is reached via `BranchTree`'s "Add" toolbar button (opens a context menu
+  // with "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle, and it stays open
+  // after a successful add — so only open it when it isn't already showing (the first call in a
+  // test, typically).
   if (!(await $("form[aria-label='Add remote']").isExisting())) {
-    await (await $("button=Add remote")).click();
+    const addButton = await $('[aria-label="Add"]');
+    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.click();
+    await (await $("button=Add Remote…")).click();
   }
   const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
   await remoteNameInput.waitForExist({ timeout: 10000 });
@@ -82,9 +87,10 @@ describe("Browsitory pull requests", () => {
   });
 
   it("renders sections only for supported remotes and sends no request for an unsupported one", async () => {
-    // "Remotes" holds the Add remote form `addRemote` drives; "Pull Requests" holds the
+    // "Branches" holds the Add remote form `addRemote` drives (remotes now live inside the
+    // unified Branches tree, not their own "Remotes" section); "Pull Requests" holds the
     // per-remote sections asserted on below. Both default closed.
-    await expandSidebarSection("Remotes");
+    await expandSidebarSection("Branches");
     await expandSidebarSection("Pull Requests");
 
     await addRemote("gh-origin", "https://github.com/acme/widget.git");

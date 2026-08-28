@@ -113,17 +113,13 @@ describe("Browsitory screenshots (docs)", () => {
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "commit-diff.png"));
   });
 
-  it("captures the branch switcher open over the commit graph", async () => {
+  it("captures the Branches tree over the commit graph", async () => {
+    // `BranchSwitcher`'s dropdown popover is gone — `BranchTree` renders local branches inline
+    // (defaulting open) as soon as "Branches" itself is expanded, no extra toggle needed.
     await expandSidebarSection("Branches");
-    const switcherButton = await $('[aria-label="Branch switcher"]');
-    await switcherButton.waitForExist({ timeout: 10000 });
-    await browser.execute((el) => (el as HTMLElement).click(), switcherButton);
     await $("li*=feature/screenshots").waitForExist({ timeout: 10000 });
 
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "branches.png"));
-
-    // Close the popover so it doesn't linger over later screenshots in this run.
-    await browser.execute((el) => (el as HTMLElement).click(), switcherButton);
   });
 
   it("captures the Tags sidebar panel", async () => {
@@ -133,18 +129,25 @@ describe("Browsitory screenshots (docs)", () => {
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "tags.png"));
   });
 
-  it("captures the Remotes sidebar panel", async () => {
+  it("captures the Branches tree with a remote folder expanded", async () => {
     // "Tags" is still expanded (localStorage-persisted from the previous test, and `beforeTest`
-    // only reloads the page — it doesn't clear storage) and would otherwise push Remotes below
-    // the fold. Collapse it first so this shot isn't cut off.
+    // only reloads the page — it doesn't clear storage) and would otherwise push the remote
+    // folder below the fold. Collapse it first so this shot isn't cut off.
     const tagsTrigger = await $("section[aria-label='Tags'] button[aria-expanded]");
     await tagsTrigger.waitForExist({ timeout: 10000 });
     if ((await tagsTrigger.getAttribute("aria-expanded")) === "true") {
       await browser.execute((el) => (el as HTMLElement).click(), tagsTrigger);
     }
 
-    await expandSidebarSection("Remotes");
-    await $("strong=origin").waitForExist({ timeout: 10000 });
+    // `RemotePanel`'s own accordion is gone — remotes are now folders inside the unified
+    // "Branches" tree, collapsed by default, named by a plain-text folder-header button rather
+    // than a `<strong>` label.
+    await expandSidebarSection("Branches");
+    const remoteFolderHeader = await $("button=origin");
+    await remoteFolderHeader.waitForExist({ timeout: 10000 });
+    if ((await remoteFolderHeader.getAttribute("aria-expanded")) !== "true") {
+      await browser.execute((el) => (el as HTMLElement).click(), remoteFolderHeader);
+    }
 
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "remotes.png"));
   });

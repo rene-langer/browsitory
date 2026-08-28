@@ -67,7 +67,7 @@ describe("Browsitory commit graph", () => {
     // confirms `branch_refs` made it end-to-end from git-core through to the rendered row.
     // Assert on `featureCommitEntry` itself (not a fresh `$("li*=...")` lookup) so this can
     // only pass if the badge is in that specific commit's row, not some unrelated `<li>`
-    // elsewhere in the app (e.g. BranchSwitcher's popover).
+    // elsewhere in the app (e.g. BranchTree's Local folder rows).
     const featureCommitEntryText = await featureCommitEntry.getText();
     expect(featureCommitEntryText).toContain("e2e-graph-feature");
   });
