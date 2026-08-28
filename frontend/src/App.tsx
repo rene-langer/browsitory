@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpCircle, Moon, Sun } from "lucide-react";
-import { BranchSwitcher } from "./components/BranchSwitcher";
+import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
@@ -87,7 +87,7 @@ function RepoWorkspace({
 
   // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
   // — threaded into the sidebar mutation panels (`RemotePanel`, `WorktreePanel`, `TagPanel`,
-  // `PullRequestPanel`, `BranchSwitcher`) so their disabled buttons carry a `title` explaining the
+  // `PullRequestPanel`, `BranchTree`) so their disabled buttons carry a `title` explaining the
   // block instead of just going inert with no explanation (issue #31/UX-003). First-match-wins,
   // in the same order `repositoryOperationDisabled` checks them; `null` when nothing is blocking.
   // Deliberately not a fine-grained per-panel lock (e.g. "only disable panels that actually
@@ -156,7 +156,7 @@ function RepoWorkspace({
         label="Sidebar width"
         left={
           <Sidebar>
-            <BranchSwitcher
+            <BranchTree
               branches={appState.state.branches}
               createBranchDraft={appState.state.createBranchDraft}
               onSwitchBranch={appState.switchBranch}
@@ -172,6 +172,30 @@ function RepoWorkspace({
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
+              remotes={[]}
+              upstream={null}
+              remoteUpstreams={{}}
+              onAddRemote={() => Promise.resolve(null)}
+              onRenameRemote={() => Promise.resolve(false)}
+              onUpdateRemoteUrls={() => Promise.resolve()}
+              onRemoveRemote={() => Promise.resolve()}
+              onSaveHttpsCredential={() => Promise.resolve()}
+              onForgetHttpsCredential={() => Promise.resolve()}
+              onSetRemoteAuthMode={() => Promise.resolve(false)}
+              onSetUpstream={() => Promise.resolve()}
+              onClearUpstream={() => Promise.resolve()}
+              onListRemoteBranches={() => Promise.resolve([])}
+              onFetchRemote={() => Promise.resolve()}
+              onPushCurrentBranch={() => Promise.resolve()}
+              onPull={() => Promise.resolve()}
+              pendingPull={null}
+              pullOutcome={null}
+              onMergePull={() => Promise.resolve()}
+              onRebasePull={() => {}}
+              onCancelPull={() => {}}
+              addRemoteDraftOpen={false}
+              onOpenAddRemoteDraft={() => {}}
+              onCloseAddRemoteDraft={() => {}}
             />
             <StashPanel
               stashes={appState.state.stashes}

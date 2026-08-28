@@ -1,0 +1,51 @@
+.draftForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.folder {
+  margin-bottom: var(--space-1);
+}
+
+.folderHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderHeader:hover {
+  background: var(--color-selected-bg);
+}
+
+.chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.folderBody {
+  list-style: none;
+  margin: 0;
+  padding-left: var(--space-4);
+}
