@@ -455,6 +455,55 @@ describe("buildCommands", () => {
     expect(commands.find((c) => c.id === "go-to:Branches")).toBeDefined();
   });
 
+  describe("hidden sidebar panels", () => {
+    // The sidebar panel-visibility toggles (a separate, already-merged task) fully unmount a
+    // hidden panel rather than just CSS-hiding it. Without this filtering, every command that
+    // navigates to or names something in a hidden panel became a dead no-op: `goToSidebarSection`
+    // resolves the section by `aria-label` in the DOM and silently returns when nothing matches.
+    const allVisible = { stash: true, worktree: true, submodule: true, reflog: true, tags: true, pullRequests: true };
+
+    it("omits 'Go to <Panel>' for a panel whose visibility is false", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      expect(commands.some((c) => c.id === "go-to:Tags")).toBe(false);
+      // Unaffected sections keep their command.
+      expect(commands.some((c) => c.id === "go-to:Stashes")).toBe(true);
+    });
+
+    it("keeps 'Go to Branches' even though Branches has no visibility toggle", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      expect(commands.some((c) => c.id === "go-to:Branches")).toBe(true);
+    });
+
+    it("omits per-tag delete commands while the Tags panel is hidden", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      expect(commands.some((c) => c.id.startsWith("delete-tag:"))).toBe(false);
+    });
+
+    it("omits per-stash apply/drop commands while the Stashes panel is hidden", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, stash: false });
+      expect(commands.some((c) => c.id.startsWith("apply-stash:"))).toBe(false);
+      expect(commands.some((c) => c.id.startsWith("drop-stash:"))).toBe(false);
+    });
+
+    it("omits per-worktree commands while the Worktrees panel is hidden", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, worktree: false });
+      expect(commands.some((c) => c.id.startsWith("open-worktree:"))).toBe(false);
+      expect(commands.some((c) => c.id.startsWith("remove-worktree:"))).toBe(false);
+    });
+
+    it("omits per-submodule commands while the Submodules panel is hidden", () => {
+      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, submodule: false });
+      expect(commands.some((c) => c.id.startsWith("init-submodule:"))).toBe(false);
+      expect(commands.some((c) => c.id.startsWith("update-submodule:"))).toBe(false);
+    });
+
+    it("defaults to every panel visible when no panelVisibility argument is passed", () => {
+      const commands = buildCommands(makeAppState());
+      expect(commands.some((c) => c.id === "go-to:Tags")).toBe(true);
+      expect(commands.some((c) => c.id.startsWith("delete-tag:"))).toBe(true);
+    });
+  });
+
   it("emits an Add remote command that opens the add-remote draft", () => {
     const appState = makeAppState();
     const commands = buildCommands(appState);

@@ -100,6 +100,27 @@ describe("BranchTree — local branches", () => {
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
 
+  // Regression test for a bug where the force-delete dialog fired after every *successful*
+  // delete too: `handleDeleteClick` unconditionally arms `pendingForceFor` after the soft
+  // delete, with no check for whether it actually failed. The app's real optimistic-update flow
+  // removes a deleted branch from `branches` immediately on success (only rolling back on
+  // failure), so a re-render with the branch gone from `branches` is what "the delete
+  // succeeded" looks like from BranchTree's point of view.
+  it("does not show the force-delete dialog after a successful delete (branch removed from branches)", async () => {
+    const { props, rerender } = renderTree();
+
+    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
+    await Promise.resolve();
+
+    // Simulate the optimistic removal: re-render with the deleted branch gone from `branches`.
+    rerender(<BranchTree {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
+
+    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Force Delete" })).not.toBeInTheDocument();
+  });
+
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByText("feat/foo"));
@@ -340,6 +361,38 @@ describe("BranchTree — remotes", () => {
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // collapse
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
     expect(onListRemoteBranches).toHaveBeenCalledOnce();
+  });
+
+  // The lazily-fetched `remoteBranches[remoteName]` cache was never invalidated after Fetch, so
+  // the tree kept showing pre-fetch branches for the rest of the session (folder open state is
+  // localStorage-persisted, so not even a restart mid-session helped). Fetch must drop the cache
+  // entry and, if the folder is currently open, re-fetch immediately.
+  it("Fetch drops the cached remote branch list and re-fetches when the folder is open", async () => {
+    const onListRemoteBranches = vi
+      .fn()
+      .mockResolvedValueOnce(["main"])
+      .mockResolvedValueOnce(["main", "feat/new-on-remote"]);
+    const onFetchRemote = vi.fn().mockResolvedValue(undefined);
+    renderTree({ remotes: oneRemote, onListRemoteBranches, onFetchRemote });
+
+    const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
+    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand, first fetch
+    await within(remoteFolder).findByText("main");
+    expect(onListRemoteBranches).toHaveBeenCalledTimes(1);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fetch" }));
+    expect(onFetchRemote).toHaveBeenCalledWith("origin");
+
+    expect(await within(remoteFolder).findByText("feat/new-on-remote")).toBeInTheDocument();
+    expect(onListRemoteBranches).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an inline error, without an unhandled rejection, when the lazy remote-branch fetch fails", async () => {
+    const onListRemoteBranches = vi.fn().mockRejectedValue(new Error("network unreachable"));
+    renderTree({ remotes: oneRemote, onListRemoteBranches });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not list branches for origin.");
   });
 
   it("right-clicking a remote branch offers Checkout and Set as upstream", async () => {

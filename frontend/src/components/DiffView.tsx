@@ -20,9 +20,10 @@ export function DiffView({
   // A stale armed confirmation must never carry over to a different hunk list (switching files,
   // or any hunk mutation refetching this file's own hunks) — `hunkIndex` is only meaningful
   // relative to the specific `hunks` array it was armed against. Same class of bug
-  // `BranchSwitcher`'s `closePopoverState` guards against for `pendingForceFor`; same
-  // reset-during-render pattern `TagPanel`'s `previousRemotes`/`previousTags` use, rather than
-  // an effect (an effect here would fire a second, avoidable render after every hunks refetch).
+  // `BranchTree`'s `pendingForceFor` guards against (it checks the pending branch is still
+  // present in `branches` before showing its force-delete dialog); same reset-during-render
+  // pattern `TagPanel`'s `previousRemotes`/`previousTags` use, rather than an effect (an effect
+  // here would fire a second, avoidable render after every hunks refetch).
   if (previousHunks !== hunks) {
     setPreviousHunks(hunks);
     setConfirmingDiscardIndex(null);

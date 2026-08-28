@@ -159,6 +159,7 @@ export function BranchTree({
   const [showPushUrl, setShowPushUrl] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [remoteBranchesError, setRemoteBranchesError] = useState<string | null>(null);
   const pullDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -200,14 +201,25 @@ export function BranchTree({
     return openRemotes[remoteName] ?? loadPersistedOpen(remoteFolderKey(remoteName), false);
   }
 
+  // Shared by the initial lazy-expand fetch and by the Fetch context-menu item's cache
+  // invalidation below, so both paths get the same error handling — matching the Set-upstream
+  // dialog's `onListRemoteBranches(...).catch(() => setRemoteBranchOptions([]))` pattern instead
+  // of leaving this call's promise unhandled.
+  const fetchRemoteBranchList = (remoteName: string) => {
+    void onListRemoteBranches(remoteName)
+      .then((names) => {
+        setRemoteBranches((prev) => ({ ...prev, [remoteName]: names }));
+        setRemoteBranchesError(null);
+      })
+      .catch(() => setRemoteBranchesError(`Could not list branches for ${remoteName}.`));
+  };
+
   const toggleRemote = (remoteName: string) => {
     const willOpen = !isRemoteOpen(remoteName);
     setOpenRemotes((prev) => ({ ...prev, [remoteName]: willOpen }));
     persistOpen(remoteFolderKey(remoteName), willOpen);
     if (willOpen && remoteBranches[remoteName] === undefined) {
-      void onListRemoteBranches(remoteName).then((names) =>
-        setRemoteBranches((prev) => ({ ...prev, [remoteName]: names })),
-      );
+      fetchRemoteBranchList(remoteName);
     }
   };
 
@@ -248,7 +260,20 @@ export function BranchTree({
         label: "Fetch",
         disabled: operationDisabled,
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => void onFetchRemote(remote.name),
+        // The remote's branch list is cached in `remoteBranches` and never otherwise
+        // invalidated (folder open/closed state is localStorage-persisted, so even an app
+        // restart mid-session doesn't clear it) — drop the cache entry after a successful fetch
+        // so the tree reflects any new/removed remote branches, and re-fetch immediately if the
+        // folder is currently open so the user sees the update without a manual re-toggle.
+        onSelect: () =>
+          void onFetchRemote(remote.name).then(() => {
+            setRemoteBranches((prev) => {
+              const next = { ...prev };
+              delete next[remote.name];
+              return next;
+            });
+            if (isRemoteOpen(remote.name)) fetchRemoteBranchList(remote.name);
+          }),
       },
       {
         label: "Push current branch here",
@@ -603,8 +628,17 @@ export function BranchTree({
       </ul>
 
       {checkoutError !== null && <InlineError message={checkoutError} onDismiss={() => setCheckoutError(null)} />}
+      {remoteBranchesError !== null && (
+        <InlineError message={remoteBranchesError} onDismiss={() => setRemoteBranchesError(null)} />
+      )}
 
-      {pendingForceFor !== null && (
+      {/* Guarded by `branches.some(...)`, not just `pendingForceFor !== null`: the app's
+          optimistic-update flow removes a deleted branch from `branches` immediately on a
+          successful soft delete, only rolling back on failure. So "is the name still in
+          `branches`" is the reliable signal for "did the soft delete actually fail" — without
+          it, this dialog would also fire right after every successful delete, since
+          `handleDeleteClick` always sets `pendingForceFor` unconditionally. */}
+      {pendingForceFor !== null && branches.some((b) => b.name === pendingForceFor) && (
         <ConfirmDialog
           ariaLabel={`Force delete ${pendingForceFor}`}
           message={
@@ -620,14 +654,22 @@ export function BranchTree({
         />
       )}
 
-      {rowMenu !== null && rowMenu.kind === "local-branch" && (
-        <ContextMenu
-          x={rowMenu.x}
-          y={rowMenu.y}
-          onClose={() => setRowMenu(null)}
-          items={branchContextItems(branches.find((b) => b.name === rowMenu.name)!)}
-        />
-      )}
+      {rowMenu !== null &&
+        rowMenu.kind === "local-branch" &&
+        (() => {
+          // A non-null assertion here would throw at render time if a background refresh
+          // removed this branch while its context menu was still open — guard instead so the
+          // menu just doesn't render for a branch that's gone, rather than crashing the app.
+          const branch = branches.find((b) => b.name === rowMenu.name);
+          return branch !== undefined ? (
+            <ContextMenu
+              x={rowMenu.x}
+              y={rowMenu.y}
+              onClose={() => setRowMenu(null)}
+              items={branchContextItems(branch)}
+            />
+          ) : null;
+        })()}
       {rowMenu !== null && rowMenu.kind === "add" && (
         <ContextMenu
           x={rowMenu.x}
@@ -639,14 +681,19 @@ export function BranchTree({
           ]}
         />
       )}
-      {rowMenu !== null && rowMenu.kind === "remote-folder" && (
-        <ContextMenu
-          x={rowMenu.x}
-          y={rowMenu.y}
-          onClose={() => setRowMenu(null)}
-          items={remoteFolderItems(remotes.find((r) => r.name === rowMenu.name)!)}
-        />
-      )}
+      {rowMenu !== null &&
+        rowMenu.kind === "remote-folder" &&
+        (() => {
+          const remote = remotes.find((r) => r.name === rowMenu.name);
+          return remote !== undefined ? (
+            <ContextMenu
+              x={rowMenu.x}
+              y={rowMenu.y}
+              onClose={() => setRowMenu(null)}
+              items={remoteFolderItems(remote)}
+            />
+          ) : null;
+        })()}
       {rowMenu !== null && rowMenu.kind === "remote-branch" && (
         <ContextMenu
           x={rowMenu.x}

@@ -15,7 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   report doesn't require a live dev session to diagnose.
 - A gear popover in the sidebar lets each panel (Stashes, Worktrees,
   Submodules, Reflog, Tags, Pull Requests) be shown or hidden, persisted
-  per repo — clutter from features a project doesn't use can be tucked
+  globally (one `localStorage` setting shared across every repo and open
+  tab) — clutter from features a project doesn't use can be tucked
   away.
 
 ### Changed
