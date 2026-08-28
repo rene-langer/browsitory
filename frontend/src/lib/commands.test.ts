@@ -100,6 +100,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     clearPendingPull: vi.fn(),
     openCreateBranchDraft: vi.fn(),
     closeCreateBranchDraft: vi.fn(),
+    openAddRemoteDraft: vi.fn(),
     saveStash: vi.fn(),
     applyStash: vi.fn(),
     dropStash: vi.fn(),
@@ -403,7 +404,6 @@ describe("buildCommands", () => {
           "Worktrees",
           "Submodules",
           "Reflog",
-          "Remotes",
           "Tags",
           "Pull Requests",
         ]) {
@@ -439,13 +439,33 @@ describe("buildCommands", () => {
         "Go to Branches",
         "Go to Pull Requests",
         "Go to Reflog",
-        "Go to Remotes",
         "Go to Stashes",
         "Go to Submodules",
         "Go to Tags",
         "Go to Worktrees",
       ].sort(),
     );
+  });
+
+  it("no longer emits a separate 'Go to Remotes' command (folded into Branches)", () => {
+    const commands = buildCommands(makeAppState());
+    expect(commands.find((c) => c.id === "go-to:Remotes")).toBeUndefined();
+    expect(commands.find((c) => c.id === "go-to:Branches")).toBeDefined();
+  });
+
+  it("emits an Add remote command that opens the add-remote draft", () => {
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
+    const addRemote = commands.find((c) => c.id === "add-remote");
+    expect(addRemote).toBeDefined();
+    addRemote?.run();
+    expect(appState.openAddRemoteDraft).toHaveBeenCalledOnce();
+  });
+
+  it("omits Add remote while a repository operation is in progress", () => {
+    const appState = makeAppState({ pending: true });
+    const commands = buildCommands(appState);
+    expect(commands.find((c) => c.id === "add-remote")).toBeUndefined();
   });
 });
 
