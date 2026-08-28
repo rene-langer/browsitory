@@ -18,6 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   globally (one `localStorage` setting shared across every repo and open
   tab) — clutter from features a project doesn't use can be tucked
   away.
+- Each branch's context menu in the Branches tree gained "Isolate branch",
+  a one-click way to filter the commit graph down to just that branch; the
+  tree's "+" menu gained "Show all branches" to clear the filter.
 
 ### Changed
 
@@ -34,3 +37,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a branch, merge, add/edit/remove a remote, set upstream, manage
   credentials, push/fetch) moved to right-click context menus and the
   command palette.
+
+### Fixed
+
+- The workspaces E2E spec's Edit/Delete steps now allow up to 45s for the
+  picker to reload its workspace list after a full app restart, matching
+  the CI-runner contention already documented for this suite's repo-scan
+  wait — the previous 10s budget was flaking on `main`.
