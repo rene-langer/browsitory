@@ -15,7 +15,6 @@ import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
 import { PullRequestPanel } from "./components/PullRequestPanel";
-import { RemotePanel } from "./components/RemotePanel";
 import { StashPanel } from "./components/StashPanel";
 import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
@@ -86,8 +85,8 @@ function RepoWorkspace({
     appState.state.rebaseProgress !== null;
 
   // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
-  // — threaded into the sidebar mutation panels (`RemotePanel`, `WorktreePanel`, `TagPanel`,
-  // `PullRequestPanel`, `BranchTree`) so their disabled buttons carry a `title` explaining the
+  // — threaded into the sidebar mutation panels (`BranchTree`, `WorktreePanel`, `TagPanel`,
+  // `PullRequestPanel`) so their disabled buttons carry a `title` explaining the
   // block instead of just going inert with no explanation (issue #31/UX-003). First-match-wins,
   // in the same order `repositoryOperationDisabled` checks them; `null` when nothing is blocking.
   // Deliberately not a fine-grained per-panel lock (e.g. "only disable panels that actually
@@ -172,30 +171,36 @@ function RepoWorkspace({
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
-              remotes={[]}
-              upstream={null}
-              remoteUpstreams={{}}
-              onAddRemote={() => Promise.resolve(null)}
-              onRenameRemote={() => Promise.resolve(false)}
-              onUpdateRemoteUrls={() => Promise.resolve()}
-              onRemoveRemote={() => Promise.resolve()}
-              onSaveHttpsCredential={() => Promise.resolve()}
-              onForgetHttpsCredential={() => Promise.resolve()}
-              onSetRemoteAuthMode={() => Promise.resolve(false)}
-              onSetUpstream={() => Promise.resolve()}
-              onClearUpstream={() => Promise.resolve()}
-              onListRemoteBranches={() => Promise.resolve([])}
-              onFetchRemote={() => Promise.resolve()}
-              onPushCurrentBranch={() => Promise.resolve()}
-              onPull={() => Promise.resolve()}
-              pendingPull={null}
-              pullOutcome={null}
-              onMergePull={() => Promise.resolve()}
-              onRebasePull={() => {}}
-              onCancelPull={() => {}}
-              addRemoteDraftOpen={false}
-              onOpenAddRemoteDraft={() => {}}
-              onCloseAddRemoteDraft={() => {}}
+              remotes={appState.state.remotes}
+              upstream={appState.state.upstream}
+              remoteUpstreams={appState.state.remoteUpstreams}
+              onAddRemote={appState.addRemote}
+              onRenameRemote={appState.renameRemote}
+              onUpdateRemoteUrls={appState.updateRemoteUrls}
+              onRemoveRemote={appState.removeRemote}
+              onSaveHttpsCredential={appState.saveHttpsCredential}
+              onForgetHttpsCredential={appState.forgetHttpsCredential}
+              onSetRemoteAuthMode={appState.setRemoteAuthMode}
+              onSetUpstream={appState.setCurrentUpstream}
+              onClearUpstream={appState.clearCurrentUpstream}
+              onListRemoteBranches={appState.listRemoteBranches}
+              onFetchRemote={appState.fetchRemote}
+              onPushCurrentBranch={appState.pushCurrentBranch}
+              onPull={appState.pullCurrentUpstream}
+              pendingPull={appState.state.pendingPull}
+              pullOutcome={appState.state.pullOutcome}
+              onMergePull={async (upstreamRef) => {
+                appState.clearPendingPull();
+                await appState.mergeBranch(upstreamRef);
+              }}
+              onRebasePull={(upstreamRef) => {
+                appState.clearPendingPull();
+                appState.openRebasePlanner(upstreamRef);
+              }}
+              onCancelPull={appState.clearPendingPull}
+              addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
+              onOpenAddRemoteDraft={appState.openAddRemoteDraft}
+              onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
             />
             <StashPanel
               stashes={appState.state.stashes}
@@ -228,39 +233,6 @@ function RepoWorkspace({
               onSelectReference={appState.selectReflogReference}
               onRestore={appState.restoreReflogEntry}
               operationDisabled={repositoryOperationDisabled}
-            />
-            <RemotePanel
-              remotes={appState.state.remotes}
-              upstream={appState.state.upstream}
-              remoteUpstreams={appState.state.remoteUpstreams}
-              onAddRemote={appState.addRemote}
-              onRenameRemote={appState.renameRemote}
-              onUpdateRemoteUrls={appState.updateRemoteUrls}
-              onRemoveRemote={appState.removeRemote}
-              onSaveHttpsCredential={appState.saveHttpsCredential}
-              onForgetHttpsCredential={appState.forgetHttpsCredential}
-              onSetRemoteAuthMode={appState.setRemoteAuthMode}
-              onSetUpstream={appState.setCurrentUpstream}
-              onClearUpstream={appState.clearCurrentUpstream}
-              onListRemoteBranches={appState.listRemoteBranches}
-              onFetchRemote={appState.fetchRemote}
-              fetchDisabled={repositoryOperationDisabled}
-              onPushCurrentBranch={appState.pushCurrentBranch}
-              pushDisabled={repositoryOperationDisabled}
-              onPull={appState.pullCurrentUpstream}
-              pullDisabled={repositoryOperationDisabled}
-              operationDisabledReason={operationDisabledReason}
-              pendingPull={appState.state.pendingPull}
-              pullOutcome={appState.state.pullOutcome}
-              onMergePull={async (upstreamRef) => {
-                appState.clearPendingPull();
-                await appState.mergeBranch(upstreamRef);
-              }}
-              onRebasePull={(upstreamRef) => {
-                appState.clearPendingPull();
-                appState.openRebasePlanner(upstreamRef);
-              }}
-              onCancelPull={appState.clearPendingPull}
             />
             <TagPanel
               tags={appState.state.tags}
