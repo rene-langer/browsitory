@@ -1,14 +1,8 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { loadPersistedOpen, persistOpen } from "../../lib/persistedOpenState";
 import { useAccordionGroup } from "./AccordionGroup";
 import styles from "./AccordionSection.module.css";
-
-function loadOpen(storageKey: string, defaultOpen: boolean): boolean {
-  const stored = localStorage.getItem(storageKey);
-  if (stored === "open") return true;
-  if (stored === "closed") return false;
-  return defaultOpen;
-}
 
 export function AccordionSection({
   title,
@@ -27,13 +21,13 @@ export function AccordionSection({
   headingLevel?: 2 | 3;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(() => loadOpen(storageKey, defaultOpen));
+  const [open, setOpen] = useState(() => loadPersistedOpen(storageKey, defaultOpen));
   const headerRef = useRef<HTMLButtonElement>(null);
   const group = useAccordionGroup();
 
   function setOpenState(next: boolean) {
     setOpen(next);
-    localStorage.setItem(storageKey, next ? "open" : "closed");
+    persistOpen(storageKey, next);
   }
 
   useEffect(() => {

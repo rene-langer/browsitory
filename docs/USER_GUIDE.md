@@ -33,10 +33,14 @@ the saved workspace without touching the repos themselves.
 ## Overview
 
 Once a repository is open, the window is split into three columns: the
-**sidebar** (branches, stashes, worktrees, submodules, reflog, remotes, tags,
-pull requests — each collapsed by default), the **commit graph** (your
-history, newest first), and the **working-directory / diff pane** on the
-right.
+**sidebar** (Branches, Stashes, Worktrees, Submodules, Reflog, Tags, Pull
+Requests — Branches is expanded by default, the rest start collapsed), the
+**commit graph** (your history, newest first), and the **working-directory /
+diff pane** on the right.
+
+Every sidebar section except Branches can be hidden entirely — click the
+gear icon at the top of the sidebar to open a popover with a toggle per
+section, and tuck away whatever a given project doesn't use.
 
 ![Overview: sidebar, commit graph, and the working-directory pane](assets/overview.png)
 
@@ -59,14 +63,23 @@ local branch are shown, each tagged with the branches that point at it.
 
 ![Viewing a past commit's diff](assets/commit-diff.png)
 
-## Branches
+## Branches and remotes
 
-Expand **Branches** to switch, create, rename, delete, or merge — the
-button always shows the current branch. Creating a branch from a specific
-commit, or starting a rebase onto one, is available from that commit's row
-in the graph.
+**Branches** is a single tree: a **Local** folder holding your local
+branches, and one folder per remote holding that remote's branches (fetched
+lazily the first time you expand it). Click a local branch to switch to it;
+right-click a branch, a remote folder, or a remote branch to bring up its
+actions — rename, delete, or merge a local branch; checkout or set a remote
+branch as upstream; fetch, push, edit, manage credentials for, or remove a
+remote. The **+** button in the section header opens **New Branch…** or
+**Add Remote…**. Creating a branch from a specific commit, or starting a
+rebase onto one, is available from that commit's row in the graph. The
+current branch's upstream status, a **Pull** button, and **Set upstream…**
+live at the bottom of the section.
 
-![The branch switcher, open over the commit graph](assets/branches.png)
+![The Branches tree, open over the commit graph](assets/branches.png)
+
+![The Branches tree with a remote folder expanded](assets/remotes.png)
 
 ## Stashes
 
@@ -80,13 +93,6 @@ Expand **Tags** to create lightweight or annotated tags, delete local ones,
 and push a selection (or all of them) to a remote.
 
 ![The Tags panel: create, delete, and push tags](assets/tags.png)
-
-## Remotes
-
-Expand **Remotes** to add or edit remotes, fetch, push the current branch,
-manage saved credentials, and set or clear the current branch's upstream.
-
-![The Remotes panel: origin's URLs and actions](assets/remotes.png)
 
 ## Worktrees and submodules
 

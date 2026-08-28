@@ -30,12 +30,13 @@ describe("Browsitory branch management", () => {
   });
 
   it("creates a branch from HEAD, switches to it, and shows it as current", async () => {
-    // "Branches" defaults closed; expand it before its contents (the switcher button) exist.
+    // "Branches" defaults closed; expand it before its contents (the Add button, the Local
+    // folder) exist.
     await expandSidebarSection("Branches");
 
-    const switcherButton = await $('[aria-label="Branch switcher"]');
-    await switcherButton.waitForExist({ timeout: 10000 });
-    await switcherButton.click();
+    const addButton = await $('[aria-label="Add"]');
+    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.click();
 
     const newBranchButton = await $("button=New Branch…");
     await newBranchButton.click();
@@ -45,11 +46,12 @@ describe("Browsitory branch management", () => {
     const createButton = await $("button=Create");
     await createButton.click();
 
-    // Switching happens automatically on create; the toggle button's label should now read
-    // the new branch's name.
+    // Switching happens automatically on create; the new branch's row button in the Local
+    // folder should now read its name with the " (current)" suffix.
+    const branchButton = await $("button*=feature/e2e-branch");
     await browser.waitUntil(
-      async () => (await switcherButton.getText()) === "feature/e2e-branch",
-      { timeout: 10000, timeoutMsg: "expected the switcher to show the new branch as current" },
+      async () => (await branchButton.getText()) === "feature/e2e-branch (current)",
+      { timeout: 10000, timeoutMsg: "expected the new branch to show as current in the tree" },
     );
   });
 });

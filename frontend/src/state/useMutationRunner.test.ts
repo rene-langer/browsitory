@@ -33,6 +33,7 @@ const BASE_STATE: AppState = {
   transfer: null,
   error: null,
   pending: false,
+  addRemoteDraftOpen: false,
 };
 
 function setupRunner() {
