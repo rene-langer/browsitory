@@ -470,6 +470,11 @@ describe("BranchTree — remotes", () => {
     expect(await screen.findByText(/clear upstreams for main/)).toBeInTheDocument();
   });
 
+  it("keeps the add-remote form hidden until addRemoteDraftOpen is true", () => {
+    renderTree({ addRemoteDraftOpen: false });
+    expect(screen.queryByLabelText("Fetch URL")).not.toBeInTheDocument();
+  });
+
   it("the header '+' menu's Add Remote opens the add-remote draft", () => {
     const onOpenAddRemoteDraft = vi.fn();
     renderTree({ onOpenAddRemoteDraft });
