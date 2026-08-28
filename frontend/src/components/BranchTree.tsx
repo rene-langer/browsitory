@@ -287,9 +287,16 @@ export function BranchTree({
 
   function remoteBranchItems(remoteName: string, branchName: string): ContextMenuItem[] {
     return [
-      { label: "Checkout", onSelect: () => void checkoutRemoteBranch(remoteName, branchName) },
+      {
+        label: "Checkout",
+        disabled: operationDisabled,
+        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
+        onSelect: () => void checkoutRemoteBranch(remoteName, branchName),
+      },
       {
         label: "Set as upstream for current branch",
+        disabled: operationDisabled,
+        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => void onSetUpstream(remoteName, branchName),
       },
     ];
