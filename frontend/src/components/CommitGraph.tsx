@@ -4,6 +4,7 @@ import { assignLanes, isSquashableRange } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic } from "./CommitLaneGraphic";
 import { ListRow } from "./primitives/ListRow";
+import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import styles from "./CommitGraph.module.css";
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
@@ -145,51 +146,37 @@ export function CommitGraph({
         </ListRow>
       ))}
       {contextMenu !== null && (
-        <ul
-          style={{ position: "fixed", top: contextMenu.y, left: contextMenu.x }}
-          onMouseLeave={() => setContextMenu(null)}
-        >
-          {squashMenuActive && activeSquashRange !== null ? (
-            <li>
-              <button
-                onClick={() => {
-                  const ontoId = commits[activeSquashRange.end].parentIds[0];
-                  const squashIds = commits
-                    .slice(activeSquashRange.start, activeSquashRange.end)
-                    .map((commit) => commit.id);
-                  onSquashCommits?.(ontoId, squashIds);
-                  setContextMenu(null);
-                }}
-              >
-                Squash {activeSquashRange.end - activeSquashRange.start + 1} commits
-              </button>
-            </li>
-          ) : (
-            <>
-              <li>
-                <button
-                  onClick={() => {
-                    onBranchFromCommit(contextMenu.commitId);
-                    setContextMenu(null);
-                  }}
-                >
-                  Branch from here
-                </button>
-              </li>
-              <li>
-                <button
-                  disabled={pending}
-                  onClick={() => {
-                    onRebaseFromCommit(contextMenu.commitId);
-                    setContextMenu(null);
-                  }}
-                >
-                  Rebase onto here
-                </button>
-              </li>
-            </>
-          )}
-        </ul>
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={
+            squashMenuActive && activeSquashRange !== null
+              ? [
+                  {
+                    label: `Squash ${activeSquashRange.end - activeSquashRange.start + 1} commits`,
+                    onSelect: () => {
+                      const ontoId = commits[activeSquashRange.end].parentIds[0];
+                      const squashIds = commits
+                        .slice(activeSquashRange.start, activeSquashRange.end)
+                        .map((commit) => commit.id);
+                      onSquashCommits?.(ontoId, squashIds);
+                    },
+                  },
+                ]
+              : ([
+                  {
+                    label: "Branch from here",
+                    onSelect: () => onBranchFromCommit(contextMenu.commitId),
+                  },
+                  {
+                    label: "Rebase onto here",
+                    onSelect: () => onRebaseFromCommit(contextMenu.commitId),
+                    disabled: pending,
+                  },
+                ] satisfies ContextMenuItem[])
+          }
+        />
       )}
     </ul>
   );
