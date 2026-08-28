@@ -143,6 +143,7 @@ function RepoWorkspace({
               onOpenRepoTab,
               openRepos.filter((repo) => repo.path !== repoPath),
               onSwitchRepoTab,
+              panelVisibility.visibility,
             )}
             onRun={() => setPaletteOpen(false)}
           />
