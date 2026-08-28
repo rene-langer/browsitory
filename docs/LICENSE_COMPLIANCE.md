@@ -26,6 +26,8 @@ completion (not the full transitive tree).
 | toml | MIT OR Apache-2.0 | `config` |
 | tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |
 | tauri-plugin-process 2 | Apache-2.0 OR MIT | `tauri-app` — restarts the app to apply a downloaded update. Source: [crates.io](https://crates.io/crates/tauri-plugin-process); verified with `cargo info tauri-plugin-process` on 2026-08-26. |
+| log 0.4 | MIT OR Apache-2.0 | `tauri-app` — logging facade used for the panic hook and any future backend log calls. Source: [crates.io](https://crates.io/crates/log); verified with `cargo info log` on 2026-08-28. |
+| tauri-plugin-log 2 | Apache-2.0 OR MIT | `tauri-app` — rotated file logging (OS log dir) for failure diagnosis, backing `frontend`'s `@tauri-apps/plugin-log`. Source: [crates.io](https://crates.io/crates/tauri-plugin-log); verified with `cargo info tauri-plugin-log` on 2026-08-28. |
 
 ## JavaScript (`npm info <package> license`)
 
@@ -54,6 +56,7 @@ completion (not the full transitive tree).
 | @types/react-dom | MIT | dev only |
 | @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
+| @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
