@@ -165,6 +165,24 @@ describe("BranchTree — local branches", () => {
     expect(props.onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
+  it("a branch's context menu Isolate branch calls onSetGraphBranchSelection with only that branch", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
+    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["feat/foo"]);
+  });
+
+  it("the header '+' menu's Show all branches is disabled with no saved selection, and restores every branch when a filter is active", () => {
+    const { props, rerender } = renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
+
+    rerender(<BranchTree {...props} graphBranchSelection={["feat/foo"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
+  });
+
   it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
     const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
     fireEvent.change(screen.getByPlaceholderText("New branch name"), { target: { value: "feat/new" } });
