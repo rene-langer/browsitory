@@ -25,7 +25,26 @@ use commands::{
 };
 
 fn main() {
+    // Installed before `.run()`, so it only fires once the log plugin below has a chance to
+    // set up its logger: catches a worker thread panic (see worker/mod.rs's threading model
+    // notes) that would otherwise just silently stop replying to that repo's commands.
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("panic: {info}");
+    }));
+
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("browsitory".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .level(log::LevelFilter::Info)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
