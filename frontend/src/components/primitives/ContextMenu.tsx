@@ -6,6 +6,8 @@ export interface ContextMenuItem {
   onSelect: () => void;
   disabled?: boolean;
   destructive?: boolean;
+  /** Rendered as the item button's `title` — e.g. explaining why it's disabled (issue #31/UX-003). */
+  title?: string;
 }
 
 export function ContextMenu({
@@ -51,6 +53,7 @@ export function ContextMenu({
             role="menuitem"
             className={styles.item}
             disabled={item.disabled}
+            title={item.title}
             data-destructive={item.destructive === true ? "true" : undefined}
             onClick={() => {
               if (item.disabled === true) return;
