@@ -54,6 +54,8 @@ export interface RemoteTransferActions {
   pushTags(remoteName: string, names: string[]): Promise<void>;
   pullCurrentUpstream(): Promise<void>;
   clearPendingPull(): void;
+  openAddRemoteDraft(): void;
+  closeAddRemoteDraft(): void;
 }
 
 // Owns everything transfer-progress-shaped (fetch/push/pull), plus the rest of remote/upstream/tag
@@ -303,6 +305,13 @@ export function useRemoteTransferActions(
     setState((prev) => ({ ...prev, pendingPull: null }));
   }, [setState]);
 
+  const openAddRemoteDraft = useCallback(() => {
+    setState((prev) => ({ ...prev, addRemoteDraftOpen: true }));
+  }, [setState]);
+  const closeAddRemoteDraft = useCallback(() => {
+    setState((prev) => ({ ...prev, addRemoteDraftOpen: false }));
+  }, [setState]);
+
   return {
     addRemote,
     renameRemote,
@@ -321,5 +330,7 @@ export function useRemoteTransferActions(
     pushTags,
     pullCurrentUpstream,
     clearPendingPull,
+    openAddRemoteDraft,
+    closeAddRemoteDraft,
   };
 }

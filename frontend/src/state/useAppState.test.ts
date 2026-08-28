@@ -2105,6 +2105,59 @@ describe("useAppState", () => {
     expect(result.current.state.createBranchDraft).toBeNull();
   });
 
+  it("openAddRemoteDraft/closeAddRemoteDraft toggle addRemoteDraftOpen without calling the client", async () => {
+    const client: RepoClient = {
+      ...remoteManagementClient,
+      pickRepoFolder: async () => unimplemented(),
+      listRecentRepos: async () => unimplemented(),
+      getAppVersion: async () => unimplemented(),
+      getLastSeenVersion: async () => unimplemented(),
+      setLastSeenVersion: async () => unimplemented(),
+      openRepo: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      createBranch: async () => unimplemented(),
+      switchBranch: async () => unimplemented(),
+      deleteBranch: async () => unimplemented(),
+      renameBranch: async () => unimplemented(),
+      listStashes: async () => [],
+      saveStash: async () => unimplemented(),
+      applyStash: async () => unimplemented(),
+      dropStash: async () => unimplemented(),
+      getBlame: async () => unimplemented(),
+      mergeBranch: async () => unimplemented(),
+      getConflictHunks: async () => unimplemented(),
+      resolveConflict: async () => unimplemented(),
+      abortMerge: async () => unimplemented(),
+      getMergeMessage: async () => null,
+      resolveAddDeleteConflict: async () => unimplemented(),
+      commitsSince: async () => unimplemented(),
+      startRebase: async () => unimplemented(),
+      rebaseContinue: async () => unimplemented(),
+      abortRebase: async () => unimplemented(),
+      getRebaseProgress: async () => null,
+      getWorkingDiff: async () => unimplemented(),
+      getCommitDiff: async () => unimplemented(),
+      getCommitFiles: async () => unimplemented(),
+      stageFile: async () => unimplemented(),
+      unstageFile: async () => unimplemented(),
+      stageHunk: async () => unimplemented(),
+      unstageHunk: async () => unimplemented(),
+      discardHunk: async () => unimplemented(),
+      commit: async () => unimplemented(),
+    };
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    expect(result.current.state.addRemoteDraftOpen).toBe(false);
+
+    act(() => result.current.openAddRemoteDraft());
+    expect(result.current.state.addRemoteDraftOpen).toBe(true);
+
+    act(() => result.current.closeAddRemoteDraft());
+    expect(result.current.state.addRemoteDraftOpen).toBe(false);
+  });
+
   it("refresh also populates stashes", async () => {
     const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
     const client: RepoClient = {
