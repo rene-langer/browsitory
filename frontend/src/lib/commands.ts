@@ -18,7 +18,6 @@ const SIDEBAR_SECTIONS = [
   "Worktrees",
   "Submodules",
   "Reflog",
-  "Remotes",
   "Tags",
   "Pull Requests",
 ] as const;
@@ -146,6 +145,13 @@ export function buildCommands(
         run: () => void appState.pushTags(remote.name, []),
       });
     }
+
+    commands.push({
+      id: "add-remote",
+      label: "Add remote",
+      keywords: ["remote", "add"],
+      run: () => appState.openAddRemoteDraft(),
+    });
 
     // Deleting a tag has a real confirmation dialog in TagPanel — the palette
     // must not skip it. This stays discoverable by tag name but only navigates
