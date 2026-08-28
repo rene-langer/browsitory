@@ -4,7 +4,7 @@ use std::sync::mpsc::Sender;
 use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
 
 use super::{Command, TransferEvent, WorkerHandle};
-use crate::credentials::{CredentialService, CredentialStore};
+use crate::credentials::{CredentialService, CredentialStore, CredentialStoreError};
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -118,7 +118,7 @@ pub(super) fn save_https<S: CredentialStore>(
         .and_then(|remote| {
             credentials
                 .save_https(&remote.fetch_url, &username, &token)
-                .map_err(|_| "credential keychain failure".to_string())
+                .map_err(credential_operation_error)
         });
     let _ = reply.send(result);
 }
@@ -141,9 +141,18 @@ pub(super) fn forget_https<S: CredentialStore>(
             .ok_or_else(|| "could not find remote".to_string())?;
         credentials
             .forget_https(&remote.fetch_url, &username)
-            .map_err(|_| "credential keychain failure".to_string())
+            .map_err(credential_operation_error)
     })();
     let _ = reply.send(result);
+}
+
+fn credential_operation_error(error: CredentialStoreError) -> String {
+    match error {
+        CredentialStoreError::Keychain(diagnostic) => {
+            format!("credential keychain failure: {diagnostic}")
+        }
+        CredentialStoreError::InvalidHttpsUrl => error.to_string(),
+    }
 }
 pub(super) fn set_auth_mode(
     repo: &git2::Repository,
@@ -156,6 +165,7 @@ pub(super) fn set_auth_mode(
             .map_err(|_| "could not configure remote authentication".to_string()),
     );
 }
+
 pub(super) fn remove(
     repo: &git2::Repository,
     name: String,
@@ -170,6 +180,7 @@ pub(super) fn remove(
     .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
+
 pub(super) fn set_current_upstream(
     repo: &git2::Repository,
     remote_name: String,
@@ -558,5 +569,22 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::credential_operation_error;
+    use crate::credentials::CredentialStoreError;
+
+    #[test]
+    fn credential_operation_error_keeps_the_backend_diagnostic() {
+        let error =
+            CredentialStoreError::Keychain("CredWrite failed with Windows error 1312".to_owned());
+
+        assert_eq!(
+            credential_operation_error(error),
+            "credential keychain failure: CredWrite failed with Windows error 1312"
+        );
     }
 }

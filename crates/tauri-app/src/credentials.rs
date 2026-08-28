@@ -67,15 +67,18 @@ pub struct HttpsCredential {
 #[derive(Debug)]
 pub enum CredentialStoreError {
     InvalidHttpsUrl,
-    Keychain,
+    Keychain(String),
 }
 
 impl fmt::Display for CredentialStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidHttpsUrl => formatter.write_str("expected an HTTPS URL without user info"),
-            Self::Keychain => {
-                formatter.write_str("the operating-system credential store is unavailable")
+            Self::Keychain(diagnostic) => {
+                write!(
+                    formatter,
+                    "the operating-system credential store is unavailable: {diagnostic}"
+                )
             }
         }
     }
@@ -102,7 +105,8 @@ pub struct KeyringCredentialStore;
 #[cfg(not(feature = "forge-fixture-override"))]
 impl KeyringCredentialStore {
     fn entry(&self, key: &CredentialKey) -> Result<keyring::Entry, CredentialStoreError> {
-        keyring::Entry::new(&key.service, &key.account).map_err(|_| CredentialStoreError::Keychain)
+        keyring::Entry::new(&key.service, &key.account)
+            .map_err(|error| CredentialStoreError::Keychain(error.to_string()))
     }
 }
 
@@ -112,20 +116,20 @@ impl CredentialStore for KeyringCredentialStore {
         match self.entry(key)?.get_password() {
             Ok(token) => Ok(Some(token)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(CredentialStoreError::Keychain),
+            Err(error) => Err(CredentialStoreError::Keychain(error.to_string())),
         }
     }
 
     fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
         self.entry(key)?
             .set_password(token)
-            .map_err(|_| CredentialStoreError::Keychain)
+            .map_err(|error| CredentialStoreError::Keychain(error.to_string()))
     }
 
     fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
         match self.entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(CredentialStoreError::Keychain),
+            Err(error) => Err(CredentialStoreError::Keychain(error.to_string())),
         }
     }
 }
@@ -157,7 +161,7 @@ impl CredentialStore for InMemoryCredentialStore {
         Ok(self
             .tokens
             .lock()
-            .map_err(|_| CredentialStoreError::Keychain)?
+            .map_err(|error| CredentialStoreError::Keychain(error.to_string()))?
             .get(key)
             .cloned())
     }
@@ -165,7 +169,7 @@ impl CredentialStore for InMemoryCredentialStore {
     fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
         self.tokens
             .lock()
-            .map_err(|_| CredentialStoreError::Keychain)?
+            .map_err(|error| CredentialStoreError::Keychain(error.to_string()))?
             .insert(key.clone(), token.to_owned());
         Ok(())
     }
@@ -173,7 +177,7 @@ impl CredentialStore for InMemoryCredentialStore {
     fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
         self.tokens
             .lock()
-            .map_err(|_| CredentialStoreError::Keychain)?
+            .map_err(|error| CredentialStoreError::Keychain(error.to_string()))?
             .remove(key);
         Ok(())
     }
@@ -315,7 +319,7 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
                 let credential = match self.service.lookup_https(url, Some(username)) {
                     Ok(Some(credential)) => credential,
                     Ok(None) => return Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
-                    Err(CredentialStoreError::Keychain) => {
+                    Err(CredentialStoreError::Keychain(_)) => {
                         return Err(git2::Error::from_str(CREDENTIAL_STORE_FAILURE_ERROR))
                     }
                     Err(_) => return Err(git2::Error::from_str(CREDENTIAL_LOOKUP_FAILURE_ERROR)),
@@ -396,7 +400,9 @@ mod tests {
 
     impl CredentialStore for FailingCredentialStore {
         fn get(&self, _key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
-            Err(CredentialStoreError::Keychain)
+            Err(CredentialStoreError::Keychain(
+                "test credential-store failure".to_owned(),
+            ))
         }
 
         fn set(&self, _key: &CredentialKey, _token: &str) -> Result<(), CredentialStoreError> {
@@ -406,6 +412,17 @@ mod tests {
         fn delete(&self, _key: &CredentialKey) -> Result<(), CredentialStoreError> {
             unreachable!("test store is read-only")
         }
+    }
+
+    #[test]
+    fn keychain_error_preserves_the_safe_backend_diagnostic() {
+        let error =
+            CredentialStoreError::Keychain("CredWrite failed with Windows error 1312".to_owned());
+
+        assert_eq!(
+            error.to_string(),
+            "the operating-system credential store is unavailable: CredWrite failed with Windows error 1312"
+        );
     }
 
     #[derive(Default)]
