@@ -87,8 +87,13 @@ describe("Browsitory multi-repo workspaces", function () {
   it("Edit re-scans the root, pre-checking current members and offering the newly-found repo unchecked", async () => {
     await openPickerOverlay();
 
+    // `useWorkspaces`'s initial `listWorkspaces()` fetch re-runs from scratch after the previous
+    // test's `browser.reloadSession()` (a full app restart, not just a re-render) — under the
+    // same CI-runner contention documented above for `scan_repos_in_root`, that round trip has
+    // also been observed to blow past 10s. Match the 45s budget used for that other IPC round
+    // trip rather than a shorter one that only held up under low contention.
     const editButton = await $('button=Edit');
-    await editButton.waitForExist({ timeout: 10000 });
+    await editButton.waitForExist({ timeout: 45000 });
     await browser.execute((el) => (el as HTMLElement).click(), editButton);
 
     // This is the first `scan_repos_in_root` invocation anywhere in this spec's session. A
@@ -129,8 +134,10 @@ describe("Browsitory multi-repo workspaces", function () {
     // for this button were back-to-back with zero wait between them, and the button wasn't in
     // the DOM yet. `waitForExist` closes that race the same way every other click in this file
     // already does.
+    // Same `listWorkspaces()`-after-reload contention as the Edit test above — 45s budget, not
+    // just enough for the picker overlay itself to render.
     const deleteButton = await $('button=Delete E2E Workspace');
-    await deleteButton.waitForExist({ timeout: 10000 });
+    await deleteButton.waitForExist({ timeout: 45000 });
     await browser.execute((el) => (el as HTMLElement).click(), deleteButton);
     const confirmDialog = await $('dialog[aria-label="Delete workspace E2E Workspace"]');
     await confirmDialog.waitForExist({ timeout: 10000 });
