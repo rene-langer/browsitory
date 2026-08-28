@@ -18,6 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   globally (one `localStorage` setting shared across every repo and open
   tab) — clutter from features a project doesn't use can be tucked
   away.
+- Each branch's context menu in the Branches tree gained "Isolate branch",
+  a one-click way to filter the commit graph down to just that branch; the
+  tree's "+" menu gained "Show all branches" to clear the filter.
 
 ### Changed
 

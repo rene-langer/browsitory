@@ -405,6 +405,11 @@ export function BranchTree({
       });
     }
     items.push({
+      label: "Isolate branch",
+      title: "Show only this branch in the commit graph",
+      onSelect: () => onSetGraphBranchSelection([branch.name]),
+    });
+    items.push({
       label: "Delete",
       disabled: isRebasing,
       destructive: true,
@@ -678,6 +683,11 @@ export function BranchTree({
           items={[
             { label: "New Branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
             { label: "Add Remote…", onSelect: onOpenAddRemoteDraft },
+            {
+              label: "Show all branches",
+              disabled: graphBranchSelection === null,
+              onSelect: () => onSetGraphBranchSelection(branches.map((b) => b.name)),
+            },
           ]}
         />
       )}
