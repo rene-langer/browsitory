@@ -37,3 +37,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a branch, merge, add/edit/remove a remote, set upstream, manage
   credentials, push/fetch) moved to right-click context menus and the
   command palette.
+
+### Fixed
+
+- The workspaces E2E spec's Edit/Delete steps now allow up to 45s for the
+  picker to reload its workspace list after a full app restart, matching
+  the CI-runner contention already documented for this suite's repo-scan
+  wait — the previous 10s budget was flaking on `main`.
