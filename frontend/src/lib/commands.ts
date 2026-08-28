@@ -1,5 +1,6 @@
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
 
 export interface Command {
   id: string;
@@ -18,10 +19,34 @@ const SIDEBAR_SECTIONS = [
   "Worktrees",
   "Submodules",
   "Reflog",
-  "Remotes",
   "Tags",
   "Pull Requests",
 ] as const;
+
+function defaultPanelVisibility(): Record<SidebarPanelId, boolean> {
+  return Object.fromEntries(SIDEBAR_PANEL_IDS.map((id) => [id, true])) as Record<SidebarPanelId, boolean>;
+}
+
+// "Branches" has no visibility toggle (it's always shown), so it maps to `null` here —
+// `SIDEBAR_SECTIONS`' loop below treats `null` as "never hidden".
+function sidebarSectionPanelId(title: (typeof SIDEBAR_SECTIONS)[number]): SidebarPanelId | null {
+  switch (title) {
+    case "Stashes":
+      return "stash";
+    case "Worktrees":
+      return "worktree";
+    case "Submodules":
+      return "submodule";
+    case "Reflog":
+      return "reflog";
+    case "Tags":
+      return "tags";
+    case "Pull Requests":
+      return "pullRequests";
+    case "Branches":
+      return null;
+  }
+}
 
 function goToSidebarSection(title: string): void {
   // Scoped to the active tab's workspace, not the whole document: every open repo's
@@ -47,6 +72,7 @@ export function buildCommands(
   onOpenRepoTab: (path: string) => void = () => {},
   otherOpenRepos: OpenRepo[] = [],
   onSwitchRepoTab: (path: string) => void = () => {},
+  panelVisibility: Record<SidebarPanelId, boolean> = defaultPanelVisibility(),
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -147,66 +173,87 @@ export function buildCommands(
       });
     }
 
+    commands.push({
+      id: "add-remote",
+      label: "Add remote",
+      keywords: ["remote", "add"],
+      run: () => appState.openAddRemoteDraft(),
+    });
+
+    // Every loop below is also skipped while its sidebar panel is hidden (the new sidebar
+    // panel-visibility toggles fully unmount hidden panels, not just CSS-hide them) — otherwise
+    // these commands either navigate to a section that no longer renders (Tags/Worktrees'
+    // `goToSidebarSection` calls) or silently mutate state the user can't see the result of
+    // (stash/submodule). "Branches" has no toggle, so it's never filtered.
+
     // Deleting a tag has a real confirmation dialog in TagPanel — the palette
     // must not skip it. This stays discoverable by tag name but only navigates
     // to the Tags section; the actual mutation happens behind the confirmation.
-    for (const tag of state.tags) {
-      commands.push({
-        id: `delete-tag:${tag.name}`,
-        label: `Delete tag ${tag.name}`,
-        keywords: ["tag", "delete", tag.name],
-        run: () => goToSidebarSection("Tags"),
-      });
-    }
-
-    for (const stash of state.stashes) {
-      commands.push({
-        id: `apply-stash:${stash.index}`,
-        label: `Apply stash: ${stash.message}`,
-        keywords: ["stash", "apply"],
-        run: () => void appState.applyStash(stash.index),
-      });
-      commands.push({
-        id: `drop-stash:${stash.index}`,
-        label: `Drop stash: ${stash.message}`,
-        keywords: ["stash", "drop", "delete"],
-        run: () => void appState.dropStash(stash.index),
-      });
-    }
-
-    for (const worktree of state.worktrees) {
-      if (worktree.isMain) continue;
-      commands.push({
-        id: `open-worktree:${worktree.path}`,
-        label: `Open worktree ${worktree.name}`,
-        keywords: ["worktree", "open", worktree.name],
-        run: () => onOpenRepoTab(worktree.path),
-      });
-      // Removing a worktree has a real confirmation dialog in WorktreePanel —
-      // navigate there instead of removing directly from the palette.
-      commands.push({
-        id: `remove-worktree:${worktree.name}`,
-        label: `Remove worktree ${worktree.name}`,
-        keywords: ["worktree", "remove", "delete", worktree.name],
-        run: () => goToSidebarSection("Worktrees"),
-      });
-    }
-
-    for (const submodule of state.submodules) {
-      if (submodule.initialized) {
+    if (panelVisibility.tags) {
+      for (const tag of state.tags) {
         commands.push({
-          id: `update-submodule:${submodule.path}`,
-          label: `Update submodule ${submodule.path}`,
-          keywords: ["submodule", "update", submodule.path],
-          run: () => void appState.updateSubmodule(submodule.path, false),
+          id: `delete-tag:${tag.name}`,
+          label: `Delete tag ${tag.name}`,
+          keywords: ["tag", "delete", tag.name],
+          run: () => goToSidebarSection("Tags"),
         });
-      } else {
+      }
+    }
+
+    if (panelVisibility.stash) {
+      for (const stash of state.stashes) {
         commands.push({
-          id: `init-submodule:${submodule.path}`,
-          label: `Initialize submodule ${submodule.path}`,
-          keywords: ["submodule", "init", "initialize", submodule.path],
-          run: () => void appState.initSubmodule(submodule.path),
+          id: `apply-stash:${stash.index}`,
+          label: `Apply stash: ${stash.message}`,
+          keywords: ["stash", "apply"],
+          run: () => void appState.applyStash(stash.index),
         });
+        commands.push({
+          id: `drop-stash:${stash.index}`,
+          label: `Drop stash: ${stash.message}`,
+          keywords: ["stash", "drop", "delete"],
+          run: () => void appState.dropStash(stash.index),
+        });
+      }
+    }
+
+    if (panelVisibility.worktree) {
+      for (const worktree of state.worktrees) {
+        if (worktree.isMain) continue;
+        commands.push({
+          id: `open-worktree:${worktree.path}`,
+          label: `Open worktree ${worktree.name}`,
+          keywords: ["worktree", "open", worktree.name],
+          run: () => onOpenRepoTab(worktree.path),
+        });
+        // Removing a worktree has a real confirmation dialog in WorktreePanel —
+        // navigate there instead of removing directly from the palette.
+        commands.push({
+          id: `remove-worktree:${worktree.name}`,
+          label: `Remove worktree ${worktree.name}`,
+          keywords: ["worktree", "remove", "delete", worktree.name],
+          run: () => goToSidebarSection("Worktrees"),
+        });
+      }
+    }
+
+    if (panelVisibility.submodule) {
+      for (const submodule of state.submodules) {
+        if (submodule.initialized) {
+          commands.push({
+            id: `update-submodule:${submodule.path}`,
+            label: `Update submodule ${submodule.path}`,
+            keywords: ["submodule", "update", submodule.path],
+            run: () => void appState.updateSubmodule(submodule.path, false),
+          });
+        } else {
+          commands.push({
+            id: `init-submodule:${submodule.path}`,
+            label: `Initialize submodule ${submodule.path}`,
+            keywords: ["submodule", "init", "initialize", submodule.path],
+            run: () => void appState.initSubmodule(submodule.path),
+          });
+        }
       }
     }
 
@@ -218,6 +265,8 @@ export function buildCommands(
   }
 
   for (const title of SIDEBAR_SECTIONS) {
+    const panelId = sidebarSectionPanelId(title);
+    if (panelId !== null && !panelVisibility[panelId]) continue;
     commands.push({
       id: `go-to:${title}`,
       label: `Go to ${title}`,

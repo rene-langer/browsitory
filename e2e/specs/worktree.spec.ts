@@ -13,13 +13,13 @@ const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 // `App.tsx`'s tab-opening path) rather than switching the current workspace's branch in place —
 // and every open tab's `RepoWorkspace` stays mounted (toggling `display: none`/`display:
 // contents` for snappy switching, never unmounting), so once a second tab is open, BOTH tabs'
-// "Branch switcher" buttons exist simultaneously, and both tabs' `WorktreePanel`s render
-// identical "Open <path>"/"Remove <path>" buttons for the *same* underlying worktree list (it's
-// shared by the underlying repository, not scoped per tab — see `WorktreePanel.tsx`, which never
-// excludes the tab's own current worktree). A plain `$(selector)` — or a reference captured
-// before the second tab existed — resolves to whichever match is first in the DOM, which can be
-// the wrong (hidden, non-interactable) tab's copy. This polls for, and returns, the one match
-// that's actually displayed.
+// current-branch rows in their respective `BranchTree`s exist simultaneously, and both tabs'
+// `WorktreePanel`s render identical "Open <path>"/"Remove <path>" buttons for the *same*
+// underlying worktree list (it's shared by the underlying repository, not scoped per tab — see
+// `WorktreePanel.tsx`, which never excludes the tab's own current worktree). A plain
+// `$(selector)` — or a reference captured before the second tab existed — resolves to whichever
+// match is first in the DOM, which can be the wrong (hidden, non-interactable) tab's copy. This
+// polls for, and returns, the one match that's actually displayed.
 async function activeElement(selector: string, timeout = 10000) {
   await browser.waitUntil(
     async () => {
@@ -38,8 +38,10 @@ async function activeElement(selector: string, timeout = 10000) {
   throw new Error(`unreachable: activeElement's own waitUntil already confirmed a visible match for ${selector}`);
 }
 
-function activeBranchSwitcher() {
-  return activeElement("aria/Branch switcher");
+// BranchTree has no separate switcher control — the current branch is just the row in the
+// Local folder whose button text carries the " (current)" suffix (`BranchTree.tsx`).
+function activeCurrentBranchButton() {
+  return activeElement("//button[contains(., ' (current)')]");
 }
 
 describe("Browsitory worktrees", () => {
@@ -52,15 +54,16 @@ describe("Browsitory worktrees", () => {
   });
 
   it("creates, opens, returns from, and removes a linked worktree", async () => {
-    // "Worktrees" holds the create form; "Branches" holds the switcher this test reads text
-    // from throughout. Both default closed.
+    // "Worktrees" holds the create form; "Branches" holds the current-branch row this test reads
+    // text from throughout. Both default closed.
     await expandSidebarSection("Worktrees");
     await expandSidebarSection("Branches");
 
     const createForm = await $("aria/Create worktree");
     await createForm.waitForExist({ timeout: 10000 });
-    const branchSwitcher = await $("aria/Branch switcher");
-    const mainBranch = await branchSwitcher.getText();
+    const currentBranchButton = await $("//button[contains(., ' (current)')]");
+    await currentBranchButton.waitForExist({ timeout: 10000 });
+    const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\)$/, "");
     const nameInput = await $("aria/Worktree name");
     await nameInput.setValue(WORKTREE_NAME);
     await (await $("aria/Worktree path")).setValue(WORKTREE_PATH);
@@ -74,11 +77,11 @@ describe("Browsitory worktrees", () => {
     await expect(openLinkedWorktree).toBeExisting();
 
     await openLinkedWorktree.click();
-    await expect(await activeBranchSwitcher()).toHaveText(WORKTREE_BRANCH);
+    await expect(await activeCurrentBranchButton()).toHaveText(`${WORKTREE_BRANCH} (current)`);
     const openMainWorktree = await activeElement(`button=Open ${E2E_REPO_PATH}`);
 
     await openMainWorktree.click();
-    await expect(await activeBranchSwitcher()).toHaveText(mainBranch);
+    await expect(await activeCurrentBranchButton()).toHaveText(`${mainBranch} (current)`);
     const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}`);
 
     await removeLinkedWorktree.click();

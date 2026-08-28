@@ -24,11 +24,16 @@ describe("Browsitory remote management", () => {
   });
 
   it("clears affected upstreams when removing a remote", async () => {
-    // "Remotes" defaults closed; expand it before its Add remote button exists.
-    await expandSidebarSection("Remotes");
+    // Remotes now live inside the unified "Branches" tree (`BranchTree.tsx`), not their own
+    // "Remotes" section — it defaults closed; expand it before its Add button exists.
+    await expandSidebarSection("Branches");
 
-    // The Add-remote form is gated behind a button — open it before reaching for its fields.
-    await (await $("button=Add remote")).click();
+    // Adding a remote is reached via the tree's "Add" toolbar button (opens a context menu with
+    // "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle.
+    const addButton = await $('[aria-label="Add"]');
+    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.click();
+    await (await $("button=Add Remote…")).click();
 
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });
@@ -39,34 +44,57 @@ describe("Browsitory remote management", () => {
     await fetchUrlInput.setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
-    await browser.waitUntil(async () => await $("aria/Remove origin").isExisting(), {
-      timeout: 10000,
-      timeoutMsg: "expected the newly added origin remote to appear",
-    });
+    // The new remote renders as its own folder header in the tree, named exactly "origin".
+    const remoteFolderHeader = await $("button=origin");
+    await remoteFolderHeader.waitForExist({ timeout: 10000 });
 
-    const upstreamRemote = await $("form[aria-label='Set upstream'] select");
+    // Setting upstream is a context-menu action on the *current* local branch (its row carries
+    // the " (current)" suffix), opening a dialog with the remote/branch fields.
+    const currentBranchButton = await $("//button[contains(., ' (current)')]");
+    await currentBranchButton.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, currentBranchButton);
+    await (await $("button=Set upstream…")).click();
+
+    const upstreamDialog = await $("dialog[aria-label^='Set upstream for']");
+    await upstreamDialog.waitForExist({ timeout: 10000 });
+    const upstreamRemote = await upstreamDialog.$("select");
     await upstreamRemote.selectByAttribute("value", "origin");
-    const upstreamBranch = await $("form[aria-label='Set upstream'] input");
+    const upstreamBranch = await upstreamDialog.$("input");
     await upstreamBranch.setValue("main");
-    await (await $("button=Set upstream")).click();
+    await (await upstreamDialog.$("button=Set upstream")).click();
+
+    // The Upstream summary is a plain `<section>` headed "Upstream" (no `aria-labelledby`
+    // any more — select it by its heading text instead).
+    const upstreamSection = await $("//section[h3[text()='Upstream']]");
 
     // `onSetUpstream` is an async IPC round-trip; without waiting for `state.upstream` to
-    // actually reflect it, the immediate "Remove origin" click below can race ahead of the
+    // actually reflect it, the immediate remove-remote click below can race ahead of the
     // mutation (observed as an intermittent failure under load: `requestRemove` reads a stale
     // `remoteUpstreams["origin"]` and skips the "clear upstreams" confirmation entirely, so the
     // confirmation `<dialog>` never appears).
     await browser.waitUntil(
-      async () => (await (await $("section[aria-labelledby='upstream-heading']")).getText()).includes("tracks origin/main"),
+      async () => (await upstreamSection.getText()).includes("tracks origin/main"),
       { timeout: 10000, timeoutMsg: "expected the upstream to be set before removing its remote" },
     );
 
-    await (await $("aria/Remove origin")).click();
+    // Removing a remote is now a context-menu item ("Remove remote") on the remote's folder
+    // header, not a standalone "Remove <name>" icon button.
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, remoteFolderHeader);
+    await (await $("button=Remove remote")).click();
     const blockingDialog = await $("dialog[aria-label='Remove remote confirmation']");
     await blockingDialog.waitForExist({ timeout: 10000 });
     expect(await blockingDialog.getText()).toContain("clear upstreams for");
     await (await blockingDialog.$("button=Confirm remove")).click();
     await browser.waitUntil(
-      async () => (await (await $("section[aria-labelledby='upstream-heading']")).getText()).includes("No upstream"),
+      async () => (await upstreamSection.getText()).includes("No upstream"),
       { timeout: 10000, timeoutMsg: "expected removing the remote to clear its upstream" },
     );
 

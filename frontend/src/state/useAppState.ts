@@ -62,6 +62,9 @@ export interface AppState {
   // `listPullRequests` below, which removes the key on failure rather than leaving stale rows).
   pullRequests: Record<string, PullRequestList>;
   createBranchDraft: { startPoint: string } | null;
+  // Mirrors createBranchDraft: lets both BranchTree's own "+" button and the command palette's
+  // "Add remote" entry open the same inline add-remote form.
+  addRemoteDraftOpen: boolean;
   stashes: StashEntry[];
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
@@ -139,6 +142,8 @@ export interface UseAppStateResult {
   pushTags(remoteName: string, names: string[]): Promise<void>;
   pullCurrentUpstream(): Promise<void>;
   clearPendingPull(): void;
+  openAddRemoteDraft(): void;
+  closeAddRemoteDraft(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -191,6 +196,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     forgeRepositories: [],
     pullRequests: {},
     createBranchDraft: null,
+    addRemoteDraftOpen: false,
     stashes: [],
     mergeMessage: null,
     rebaseProgress: null,
@@ -338,6 +344,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pushTags,
     pullCurrentUpstream,
     clearPendingPull,
+    openAddRemoteDraft,
+    closeAddRemoteDraft,
   } = useRemoteTransferActions(
     client,
     repoPath,
@@ -416,6 +424,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pushTags,
     pullCurrentUpstream,
     clearPendingPull,
+    openAddRemoteDraft,
+    closeAddRemoteDraft,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

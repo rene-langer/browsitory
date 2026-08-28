@@ -44,16 +44,24 @@ describe("Browsitory merge with conflict resolution", () => {
   });
 
   it("merges a diverged branch, resolves a conflict per hunk, and commits the merge", async () => {
-    // "Branches" defaults closed; expand it before its switcher button exists.
+    // "Branches" defaults closed; expand it before its tree rows exist.
     await expandSidebarSection("Branches");
 
-    const branchSwitcherButton = await $("[aria-label='Branch switcher']");
-    await branchSwitcherButton.waitForExist({ timeout: 10000 });
-    await branchSwitcherButton.click();
+    // BranchTree's mutating actions live on each row's right-click context menu (see
+    // rebase.spec.ts's comment on why a synthetic `contextmenu` DOM event is used instead of
+    // WebdriverIO's `.click({ button: "right" })`). The handler is bound to the branch-name
+    // `<button>` inside the row, not the row `<li>` itself, so dispatch on that button.
+    const branchRow = await $("li*=e2e-merge-feature");
+    await branchRow.waitForExist({ timeout: 10000 });
+    const branchButton = await branchRow.$("button");
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, branchButton);
 
-    const mergeButton = await $("li*=e2e-merge-feature").then((li) =>
-      li.$("button*=Merge into current branch"),
-    );
+    const mergeButton = await $("button*=Merge into current branch");
+    await mergeButton.waitForExist({ timeout: 10000 });
     await mergeButton.click();
 
     // The uncommitted file list is a `role="listbox"` of `<li role="option">` rows, each holding
@@ -136,13 +144,17 @@ describe("Browsitory merge with conflict resolution", () => {
     // `AccordionSection`'s open state persists in localStorage, which survives a page refresh.
     await expandSidebarSection("Branches");
 
-    const branchSwitcherButton = await $("[aria-label='Branch switcher']");
-    await branchSwitcherButton.waitForExist({ timeout: 10000 });
-    await branchSwitcherButton.click();
+    const branchRow = await $("li*=e2e-merge-adddelete-feature");
+    await branchRow.waitForExist({ timeout: 10000 });
+    const branchButton = await branchRow.$("button");
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, branchButton);
 
-    const mergeButton = await $("li*=e2e-merge-adddelete-feature").then((li) =>
-      li.$("button*=Merge into current branch"),
-    );
+    const mergeButton = await $("button*=Merge into current branch");
+    await mergeButton.waitForExist({ timeout: 10000 });
     await mergeButton.click();
 
     // See the first test: the row's path text lives in a `<span>` inside `<li role="option">`.
