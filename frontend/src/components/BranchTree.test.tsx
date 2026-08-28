@@ -628,6 +628,21 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
   });
 
+  // A remote branch's Checkout can call `onSwitchBranch` (when a same-named local branch already
+  // exists), which is exactly the hazard `isRebasing` already guards for local branches: switching
+  // underneath a paused rebase silently retargets an unrelated branch once `rebase::finish` moves
+  // the original branch ref (see BranchTree's local "does not switch branches while a rebase is in
+  // progress" test and BranchSwitcher's original comment on the same hazard). `operationDisabled`
+  // is the broader gate (rebase/merge/transfer/etc.), so both remote-branch actions must respect it
+  // too, matching the sibling remote-folder items right above.
+  it("disables Checkout and Set as upstream on a remote branch while another operation is active", async () => {
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["only-remote"]), operationDisabled: true });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.contextMenu(await screen.findByText("only-remote"));
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeDisabled();
+  });
+
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
   it("explains why Fetch/Push/Add remote are disabled via their title", () => {
     renderTree({
