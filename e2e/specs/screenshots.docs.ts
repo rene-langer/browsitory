@@ -147,6 +147,13 @@ describe("Browsitory screenshots (docs)", () => {
     await remoteFolderHeader.waitForExist({ timeout: 10000 });
     if ((await remoteFolderHeader.getAttribute("aria-expanded")) !== "true") {
       await browser.execute((el) => (el as HTMLElement).click(), remoteFolderHeader);
+      // The click flips `aria-expanded` synchronously in React state, but the attribute doesn't
+      // land in the DOM until the next render commits — screenshotting immediately after
+      // `execute()` returns can catch the pre-render frame, showing the folder still collapsed.
+      await browser.waitUntil(async () => (await remoteFolderHeader.getAttribute("aria-expanded")) === "true", {
+        timeout: 5000,
+        timeoutMsg: "remote folder never reported aria-expanded=true after being clicked",
+      });
     }
 
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "remotes.png"));
