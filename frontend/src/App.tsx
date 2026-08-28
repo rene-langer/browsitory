@@ -26,6 +26,7 @@ import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
+import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
 import releaseNotesData from "./generated/releaseNotes.json";
@@ -51,6 +52,7 @@ function RepoWorkspace({
   onSwitchRepoTab: (path: string) => void;
 }) {
   const appState = useAppState(tauriRepoClient, repoPath);
+  const panelVisibility = useSidebarPanelVisibility();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Populate this tab's state as soon as it mounts. `useAppState` no longer fetches anything on
@@ -154,7 +156,16 @@ function RepoWorkspace({
         collapsible
         label="Sidebar width"
         left={
-          <Sidebar>
+          <Sidebar
+            panelToggles={[
+              { id: "stash", label: "Stashes", visible: panelVisibility.visibility.stash, onToggle: (v) => panelVisibility.setPanelVisible("stash", v) },
+              { id: "worktree", label: "Worktrees", visible: panelVisibility.visibility.worktree, onToggle: (v) => panelVisibility.setPanelVisible("worktree", v) },
+              { id: "submodule", label: "Submodules", visible: panelVisibility.visibility.submodule, onToggle: (v) => panelVisibility.setPanelVisible("submodule", v) },
+              { id: "reflog", label: "Reflog", visible: panelVisibility.visibility.reflog, onToggle: (v) => panelVisibility.setPanelVisible("reflog", v) },
+              { id: "tags", label: "Tags", visible: panelVisibility.visibility.tags, onToggle: (v) => panelVisibility.setPanelVisible("tags", v) },
+              { id: "pullRequests", label: "Pull Requests", visible: panelVisibility.visibility.pullRequests, onToggle: (v) => panelVisibility.setPanelVisible("pullRequests", v) },
+            ]}
+          >
             <BranchTree
               branches={appState.state.branches}
               createBranchDraft={appState.state.createBranchDraft}
@@ -202,58 +213,70 @@ function RepoWorkspace({
               onOpenAddRemoteDraft={appState.openAddRemoteDraft}
               onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
             />
-            <StashPanel
-              stashes={appState.state.stashes}
-              onSelectRow={appState.selectRow}
-              onApplyStash={appState.applyStash}
-              onDropStash={appState.dropStash}
-              operationDisabled={repositoryOperationDisabled}
-              operationDisabledReason={operationDisabledReason}
-            />
-            <WorktreePanel
-              worktrees={appState.state.worktrees}
-              branches={appState.state.branches}
-              onOpenWorktree={onOpenRepoTab}
-              onCreateWorktree={appState.createWorktree}
-              onRemoveWorktree={appState.removeWorktree}
-              onPruneWorktrees={appState.pruneWorktrees}
-              operationDisabled={repositoryOperationDisabled}
-              operationDisabledReason={operationDisabledReason}
-            />
-            <SubmodulePanel
-              submodules={appState.state.submodules}
-              onInit={appState.initSubmodule}
-              onUpdate={appState.updateSubmodule}
-              operationDisabled={repositoryOperationDisabled}
-            />
-            <ReflogPanel
-              references={appState.state.reflogRefs}
-              selectedReference={appState.state.selectedReflogReference}
-              entries={appState.state.reflog}
-              onSelectReference={appState.selectReflogReference}
-              onRestore={appState.restoreReflogEntry}
-              operationDisabled={repositoryOperationDisabled}
-            />
-            <TagPanel
-              tags={appState.state.tags}
-              remotes={appState.state.remotes}
-              onCreate={appState.createTag}
-              onDelete={appState.deleteTag}
-              onPush={appState.pushTags}
-              pushDisabled={repositoryOperationDisabled}
-              operationDisabledReason={operationDisabledReason}
-            />
-            <PullRequestPanel
-              forgeRepositories={appState.state.forgeRepositories}
-              pullRequests={appState.state.pullRequests}
-              onListPullRequests={appState.listPullRequests}
-              onSaveForgeToken={appState.saveForgeToken}
-              onForgetForgeToken={appState.forgetForgeToken}
-              onCreatePullRequest={appState.createPullRequest}
-              onOpenExternalUrl={appState.openExternalUrl}
-              operationDisabled={repositoryOperationDisabled}
-              operationDisabledReason={operationDisabledReason}
-            />
+            {panelVisibility.visibility.stash && (
+              <StashPanel
+                stashes={appState.state.stashes}
+                onSelectRow={appState.selectRow}
+                onApplyStash={appState.applyStash}
+                onDropStash={appState.dropStash}
+                operationDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
+              />
+            )}
+            {panelVisibility.visibility.worktree && (
+              <WorktreePanel
+                worktrees={appState.state.worktrees}
+                branches={appState.state.branches}
+                onOpenWorktree={onOpenRepoTab}
+                onCreateWorktree={appState.createWorktree}
+                onRemoveWorktree={appState.removeWorktree}
+                onPruneWorktrees={appState.pruneWorktrees}
+                operationDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
+              />
+            )}
+            {panelVisibility.visibility.submodule && (
+              <SubmodulePanel
+                submodules={appState.state.submodules}
+                onInit={appState.initSubmodule}
+                onUpdate={appState.updateSubmodule}
+                operationDisabled={repositoryOperationDisabled}
+              />
+            )}
+            {panelVisibility.visibility.reflog && (
+              <ReflogPanel
+                references={appState.state.reflogRefs}
+                selectedReference={appState.state.selectedReflogReference}
+                entries={appState.state.reflog}
+                onSelectReference={appState.selectReflogReference}
+                onRestore={appState.restoreReflogEntry}
+                operationDisabled={repositoryOperationDisabled}
+              />
+            )}
+            {panelVisibility.visibility.tags && (
+              <TagPanel
+                tags={appState.state.tags}
+                remotes={appState.state.remotes}
+                onCreate={appState.createTag}
+                onDelete={appState.deleteTag}
+                onPush={appState.pushTags}
+                pushDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
+              />
+            )}
+            {panelVisibility.visibility.pullRequests && (
+              <PullRequestPanel
+                forgeRepositories={appState.state.forgeRepositories}
+                pullRequests={appState.state.pullRequests}
+                onListPullRequests={appState.listPullRequests}
+                onSaveForgeToken={appState.saveForgeToken}
+                onForgetForgeToken={appState.forgetForgeToken}
+                onCreatePullRequest={appState.createPullRequest}
+                onOpenExternalUrl={appState.openExternalUrl}
+                operationDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
+              />
+            )}
           </Sidebar>
         }
         right={
