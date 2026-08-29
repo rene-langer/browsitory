@@ -55,9 +55,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # Cross-platform runners are reserved for pushes to main; pull requests only need
-        # the Linux validation to keep feedback fast and avoid spending three runner minutes.
-        os: ${{ fromJSON(github.ref == 'refs/heads/main' && '["ubuntu-latest", "macos-latest", "windows-latest"]' || '["ubuntu-latest"]') }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
