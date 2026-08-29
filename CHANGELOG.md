@@ -24,6 +24,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The diff view now renders every changed file's diff expanded by default,
+  Sublime Merge-style, instead of a file list where each row had to be
+  clicked to reveal its diff. Each file's header carries an inline
+  Stage/Unstage control and a Blame button, plus a per-file collapse
+  chevron; a "Collapse all"/"Expand all" toggle gives an overview of a
+  large changeset.
 - HTTPS credential-store failures now retain a safe diagnostic in the
   application log while keeping the on-screen message generic.
 - Stashes moved out of the Branches sidebar section into their own
