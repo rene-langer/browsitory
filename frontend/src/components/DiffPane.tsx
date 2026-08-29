@@ -1,5 +1,17 @@
-import { AlertTriangle, ArrowRightLeft, FileDiff, FileMinus, FilePlus, Minus, Pencil, Plus, type LucideIcon } from "lucide-react";
-import { useEffect, useState, type KeyboardEvent } from "react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  ChevronDown,
+  ChevronRight,
+  FileDiff,
+  FileMinus,
+  FilePlus,
+  Minus,
+  Pencil,
+  Plus,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
@@ -27,64 +39,208 @@ const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
   Conflicted: AlertTriangle,
 };
 
-function FileListRow({
+function CollapseToggle({ collapsed, path, onToggle }: { collapsed: boolean; path: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={styles.collapseToggle}
+      aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      {collapsed ? (
+        <ChevronRight size={14} aria-hidden="true" />
+      ) : (
+        <ChevronDown size={14} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
+function CollapseAllToggle({ allCollapsed, onToggle }: { allCollapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle}>
+      {allCollapsed ? "Expand all" : "Collapse all"}
+    </button>
+  );
+}
+
+function UncommittedFileSection({
+  repoPath,
+  client,
   entry,
-  selected,
+  status,
+  isCurrent,
+  collapsed,
+  onToggleCollapse,
   onSelect,
-  onBlame,
   onStageFile,
   onUnstageFile,
+  onStageHunk,
+  onUnstageHunk,
+  onDiscardHunk,
+  onSelectRow,
+  onResolveConflict,
+  onResolveAddDeleteConflict,
+  sectionRef,
 }: {
+  repoPath: string;
+  client: RepoClient;
   entry: StatusEntry;
-  selected: boolean;
+  status: StatusEntry[];
+  isCurrent: boolean;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   onSelect: () => void;
-  onBlame: () => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  onSelectRow: (row: SelectedRow) => void;
+  onResolveConflict: (path: string, resolvedContent: string) => void;
+  onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
+  sectionRef: (el: HTMLDivElement | null) => void;
 }) {
+  const [mode, setMode] = useState<"diff" | "blame">("diff");
+  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const isConflicted = entry.kind === "Conflicted";
+
+  // Every file's diff is fetched eagerly (all sections render expanded by default), keyed on the
+  // file's own identity rather than a shared "selected" pointer. Whole-file staging/unstaging
+  // moves this file to a differently-keyed section and remounts it fresh, but *partial* (hunk)
+  // staging leaves it at the same path/staged key while only its hunk count changes underneath —
+  // `status` stays a dependency for the same reason the old single-pane version needed it: a new
+  // `status` array (by reference) is the only signal that this file's own diff may be stale.
+  useEffect(() => {
+    if (mode !== "diff" || isConflicted) return;
+    let ignore = false;
+    client
+      .getWorkingDiff(repoPath, entry.path, entry.staged)
+      .then((next) => {
+        if (!ignore) {
+          setHunks(next);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(String(err));
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status]);
+
+  // `status` is a dependency for the same reason as the diff effect above: staging or committing
+  // the file on screen while its blame view is open must not leave stale pre-commit attribution
+  // on screen.
+  useEffect(() => {
+    if (mode !== "blame") return;
+    let ignore = false;
+    client
+      .getBlame(repoPath, "HEAD", entry.path)
+      .then((next) => {
+        if (!ignore) {
+          setBlameLines(next);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setError("No blame available for this file at this revision.");
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [repoPath, client, entry.path, mode, status]);
+
   const Icon = STATUS_ICONS[entry.kind];
+
   return (
-    <ListRow selected={selected} onClick={onSelect} className={styles.fileRow}>
-      <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
-      <span className={styles.path}>
-        {entry.path} ({entry.kind})
-      </span>
-      <div className={styles.rowActions}>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onBlame();
-          }}
-        >
-          Blame
-        </button>
-        {entry.staged ? (
+    <ListRow selected={isCurrent} onClick={onSelect} className={styles.fileSection}>
+      <div className={styles.fileSectionHeader}>
+        <CollapseToggle collapsed={collapsed} path={entry.path} onToggle={onToggleCollapse} />
+        <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
+        <span className={styles.path}>
+          {entry.path} ({entry.kind})
+        </span>
+        <div className={styles.rowActions}>
           <button
             type="button"
-            className={styles.stageToggle}
-            aria-label={`Unstage ${entry.path}`}
             onClick={(event) => {
               event.stopPropagation();
-              onUnstageFile(entry.path);
+              setMode("blame");
             }}
           >
-            <Minus size={14} aria-hidden="true" />
+            Blame
           </button>
-        ) : (
-          <button
-            type="button"
-            className={styles.stageToggle}
-            aria-label={`Stage ${entry.path}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onStageFile(entry.path);
-            }}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
-        )}
+          {entry.staged ? (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`Unstage ${entry.path}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onUnstageFile(entry.path);
+              }}
+            >
+              <Minus size={14} aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`Stage ${entry.path}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onStageFile(entry.path);
+              }}
+            >
+              <Plus size={14} aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
+      {!collapsed && (
+        <div className={styles.fileSectionBody} ref={sectionRef}>
+          {mode === "blame" ? (
+            <>
+              {error !== null ? (
+                <InlineError message={error} onDismiss={() => setError(null)} />
+              ) : (
+                <BlameView lines={blameLines} onSelectRow={onSelectRow} />
+              )}
+              <button type="button" onClick={() => setMode("diff")}>
+                Back to Diff
+              </button>
+            </>
+          ) : isConflicted ? (
+            <ConflictResolutionPane
+              repoPath={repoPath}
+              client={client}
+              path={entry.path}
+              onResolve={onResolveConflict}
+              onResolveAddDelete={onResolveAddDeleteConflict}
+            />
+          ) : error !== null ? (
+            <InlineError message={error} onDismiss={() => setError(null)} />
+          ) : (
+            <DiffView
+              hunks={hunks}
+              onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart) : undefined}
+              onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart) : undefined}
+              onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart)}
+            />
+          )}
+        </div>
+      )}
     </ListRow>
   );
 }
@@ -171,6 +327,10 @@ export function DiffPane({
   );
 }
 
+function entryKey(entry: { path: string; staged: boolean }): string {
+  return `${entry.staged}:${entry.path}`;
+}
+
 function UncommittedDiffPane({
   repoPath,
   client,
@@ -214,97 +374,14 @@ function UncommittedDiffPane({
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
 }) {
-  const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
-  const [viewMode, setViewMode] = useState<"diff" | "blame" | "conflict">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
-  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // `status` is a dependency even though it isn't read here: staging, unstaging or committing
-  // the file currently on screen refreshes `status` without changing `selected` by reference,
-  // and the displayed diff is stale afterwards (an "unstaged" diff for a file that is now
-  // staged, or a working-tree diff for a file that was just committed away). Re-fetching on
-  // every `status` change is what keeps the pane honest. The blame effect below needs the same
-  // `status` dependency for the same reason: staging/committing the file while blame view is
-  // open must not leave stale pre-commit attribution on screen.
-  //
-  // `ignore` closes the companion race: rapid clicking between files leaves several fetches in
-  // flight, and a slow earlier one resolving after a fast later one would clobber the correct
-  // diff. Anything whose effect has already been cleaned up is discarded.
   useEffect(() => {
-    if (selected === null || viewMode !== "diff") {
-      return;
-    }
-    let ignore = false;
-    client
-      .getWorkingDiff(repoPath, selected.path, selected.staged)
-      .then((next) => {
-        if (!ignore) {
-          setHunks(next);
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          setError(String(err));
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [repoPath, client, selected, status, viewMode]);
-
-  // Same `ignore` guard, gated on `viewMode === "blame"` instead. Blame always targets `"HEAD"`
-  // — blaming a dirty working-tree edit isn't meaningful (see the design spec's non-goals).
-  // `status` is a dependency for the same reason it's on the diff effect above: staging or
-  // committing the file on screen while blame view is still open must trigger a refetch, or
-  // the pane keeps showing pre-commit attribution indefinitely.
-  useEffect(() => {
-    if (selected === null || viewMode !== "blame") {
-      return;
-    }
-    let ignore = false;
-    client
-      .getBlame(repoPath, "HEAD", selected.path)
-      .then((next) => {
-        if (!ignore) {
-          setBlameLines(next);
-          setError(null);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          // libgit2's rejection message (e.g. "the path 'x' does not exist in the given tree")
-          // is jarring for what's usually just an unexceptional case — blaming a new/untracked
-          // file that isn't in HEAD's tree yet.
-          setError("No blame available for this file at this revision.");
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [repoPath, client, selected, viewMode, status]);
-
-  // Once the selected file's conflict is resolved (via this pane, or externally e.g. abort),
-  // `status` no longer lists it as `Conflicted`, so the render below correctly stops showing
-  // `ConflictResolutionPane` — but `viewMode` itself is still `"conflict"`, and the diff-fetch
-  // effect above only runs when `viewMode === "diff"`. Left alone, the pane falls through to
-  // `DiffView` with stale/empty `hunks` instead of the real post-resolution diff. Transitioning
-  // back to `"diff"` here lets that effect fire and fetch the real diff.
-  useEffect(() => {
-    if (
-      viewMode === "conflict" &&
-      selected !== null &&
-      !status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted")
-    ) {
-      // Deliberate view-mode transition, not a synchronization loop — see comment above.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setViewMode("diff");
-    }
-  }, [viewMode, selected, status]);
-
-  const displayedHunks = selected === null || viewMode !== "diff" ? [] : hunks;
-  const displayedBlameLines = selected === null || viewMode !== "blame" ? [] : blameLines;
+    if (current === null) return;
+    sectionRefs.current[entryKey(current)]?.scrollIntoView?.({ block: "nearest" });
+  }, [current]);
 
   const stagedEntries = status.filter((entry) => entry.staged);
   const unstagedEntries = status.filter((entry) => !entry.staged);
@@ -318,23 +395,37 @@ function UncommittedDiffPane({
     .filter((entry) => entry.kind !== "Conflicted")
     .map((entry) => entry.path);
 
+  const allEntries = [...unstagedEntries, ...stagedEntries];
+  const allKeys = allEntries.map(entryKey);
+  const allCollapsed = allKeys.length > 0 && allKeys.every((key) => collapsedKeys.has(key));
+
   const isEntrySelected = (entry: StatusEntry) =>
-    selected !== null && selected.path === entry.path && selected.staged === entry.staged;
+    current !== null && current.path === entry.path && current.staged === entry.staged;
 
   const selectEntry = (entry: StatusEntry) => {
-    setSelected({ path: entry.path, staged: entry.staged });
-    setViewMode(entry.kind === "Conflicted" ? "conflict" : "diff");
+    setCurrent({ path: entry.path, staged: entry.staged });
   };
 
-  const blameEntry = (entry: StatusEntry) => {
-    setSelected({ path: entry.path, staged: entry.staged });
-    setViewMode("blame");
+  const toggleCollapse = (key: string) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleCollapseAll = () => {
+    setCollapsedKeys(allCollapsed ? new Set() : new Set(allKeys));
   };
 
   const navigateGroup = (entries: StatusEntry[], direction: 1 | -1) => {
     if (entries.length === 0) return;
     const currentIndex = entries.findIndex(
-      (entry) => selected !== null && entry.path === selected.path && entry.staged === selected.staged,
+      (entry) => current !== null && entry.path === current.path && entry.staged === current.staged,
     );
     const nextIndex =
       currentIndex === -1 ? 0 : Math.min(Math.max(currentIndex + direction, 0), entries.length - 1);
@@ -350,8 +441,7 @@ function UncommittedDiffPane({
   // `primitives/ListRow.tsx`'s doc comment for why the buttons weren't moved out of the row.
   const toggleStageSelected = (entries: StatusEntry[]) => {
     const entry = entries.find(
-      (candidate) =>
-        selected !== null && candidate.path === selected.path && candidate.staged === selected.staged,
+      (candidate) => current !== null && candidate.path === current.path && candidate.staged === current.staged,
     );
     if (entry === undefined) return;
     if (entry.staged) {
@@ -382,8 +472,41 @@ function UncommittedDiffPane({
     onUnstageAllFiles(stagedEntries.map((entry) => entry.path));
   };
 
+  const renderSection = (entry: StatusEntry) => {
+    const key = entryKey(entry);
+    return (
+      <UncommittedFileSection
+        key={key}
+        repoPath={repoPath}
+        client={client}
+        entry={entry}
+        status={status}
+        isCurrent={isEntrySelected(entry)}
+        collapsed={collapsedKeys.has(key)}
+        onToggleCollapse={() => toggleCollapse(key)}
+        onSelect={() => selectEntry(entry)}
+        onStageFile={onStageFile}
+        onUnstageFile={onUnstageFile}
+        onStageHunk={onStageHunk}
+        onUnstageHunk={onUnstageHunk}
+        onDiscardHunk={onDiscardHunk}
+        onSelectRow={onSelectRow}
+        onResolveConflict={onResolveConflict}
+        onResolveAddDeleteConflict={onResolveAddDeleteConflict}
+        sectionRef={(el) => {
+          sectionRefs.current[key] = el;
+        }}
+      />
+    );
+  };
+
   return (
     <div>
+      {allKeys.length > 0 && (
+        <div className={styles.groupHeading}>
+          <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
+        </div>
+      )}
       {unstagedEntries.length > 0 && (
         <div>
           <div className={styles.groupHeading}>
@@ -402,17 +525,7 @@ function UncommittedDiffPane({
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(unstagedEntries)}
           >
-            {unstagedEntries.map((entry) => (
-              <FileListRow
-                key={`${entry.staged}:${entry.path}`}
-                entry={entry}
-                selected={isEntrySelected(entry)}
-                onSelect={() => selectEntry(entry)}
-                onBlame={() => blameEntry(entry)}
-                onStageFile={onStageFile}
-                onUnstageFile={onUnstageFile}
-              />
-            ))}
+            {unstagedEntries.map(renderSection)}
           </ul>
         </div>
       )}
@@ -432,61 +545,9 @@ function UncommittedDiffPane({
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(stagedEntries)}
           >
-            {stagedEntries.map((entry) => (
-              <FileListRow
-                key={`${entry.staged}:${entry.path}`}
-                entry={entry}
-                selected={isEntrySelected(entry)}
-                onSelect={() => selectEntry(entry)}
-                onBlame={() => blameEntry(entry)}
-                onStageFile={onStageFile}
-                onUnstageFile={onUnstageFile}
-              />
-            ))}
+            {stagedEntries.map(renderSection)}
           </ul>
         </div>
-      )}
-      {viewMode === "blame" ? (
-        <>
-          {error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
-          ) : (
-            <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
-          )}
-          <button onClick={() => setViewMode("diff")}>Back to Diff</button>
-        </>
-      ) : viewMode === "conflict" &&
-        selected !== null &&
-        status.some((entry) => entry.path === selected.path && entry.kind === "Conflicted") ? (
-        <ConflictResolutionPane
-          key={selected.path}
-          repoPath={repoPath}
-          client={client}
-          path={selected.path}
-          onResolve={onResolveConflict}
-          onResolveAddDelete={onResolveAddDeleteConflict}
-        />
-      ) : error !== null ? (
-        <InlineError message={error} onDismiss={() => setError(null)} />
-      ) : (
-        <DiffView
-          hunks={displayedHunks}
-          onStageHunk={
-            selected !== null && !selected.staged
-              ? (hunkOldStart: number, hunkNewStart: number) => onStageHunk(selected.path, hunkOldStart, hunkNewStart)
-              : undefined
-          }
-          onUnstageHunk={
-            selected !== null && selected.staged
-              ? (hunkOldStart: number, hunkNewStart: number) => onUnstageHunk(selected.path, hunkOldStart, hunkNewStart)
-              : undefined
-          }
-          onDiscardHunk={
-            selected !== null
-              ? (hunkOldStart: number, hunkNewStart: number) => onDiscardHunk(selected.path, hunkOldStart, hunkNewStart)
-              : undefined
-          }
-        />
       )}
       {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
           resolved/amended content lives in the working tree, so stashing it away and continuing
@@ -515,6 +576,103 @@ function UncommittedDiffPane({
   );
 }
 
+function CommitFileSection({
+  repoPath,
+  client,
+  commitId,
+  path,
+  collapsed,
+  onToggleCollapse,
+  onSelectRow,
+}: {
+  repoPath: string;
+  client: RepoClient;
+  commitId: string;
+  path: string;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onSelectRow: (row: SelectedRow) => void;
+}) {
+  const [mode, setMode] = useState<"diff" | "blame">("diff");
+  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mode !== "diff") return;
+    let ignore = false;
+    client
+      .getCommitDiff(repoPath, commitId, path)
+      .then((next) => {
+        if (!ignore) {
+          setHunks(next);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(String(err));
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [repoPath, client, commitId, path, mode]);
+
+  useEffect(() => {
+    if (mode !== "blame") return;
+    let ignore = false;
+    client
+      .getBlame(repoPath, commitId, path)
+      .then((next) => {
+        if (!ignore) {
+          setBlameLines(next);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setError("No blame available for this file at this revision.");
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [repoPath, client, commitId, path, mode]);
+
+  return (
+    <li className={styles.fileSection}>
+      <div className={styles.fileSectionHeader}>
+        <CollapseToggle collapsed={collapsed} path={path} onToggle={onToggleCollapse} />
+        <span className={styles.path}>{path}</span>
+        <div className={styles.rowActions}>
+          <button type="button" onClick={() => setMode("blame")}>
+            Blame
+          </button>
+        </div>
+      </div>
+      {!collapsed && (
+        <div className={styles.fileSectionBody}>
+          {mode === "blame" ? (
+            <>
+              {error !== null ? (
+                <InlineError message={error} onDismiss={() => setError(null)} />
+              ) : (
+                <BlameView lines={blameLines} onSelectRow={onSelectRow} />
+              )}
+              <button onClick={() => setMode("diff")}>Back to Diff</button>
+            </>
+          ) : error !== null ? (
+            <InlineError message={error} onDismiss={() => setError(null)} />
+          ) : (
+            <DiffView hunks={hunks} />
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function CommitDiffPane({
   repoPath,
   client,
@@ -527,15 +685,9 @@ function CommitDiffPane({
   onSelectRow: (row: SelectedRow) => void;
 }) {
   const [files, setFiles] = useState<string[]>([]);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
-  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
 
-  // Same `ignore` guard as `UncommittedDiffPane`: `commitId` changes remount this component
-  // (the `key` in `DiffPane`), but rapid file switching *within* one mount can still land a
-  // slow fetch after a fast one.
   useEffect(() => {
     let ignore = false;
     client
@@ -556,96 +708,49 @@ function CommitDiffPane({
     };
   }, [repoPath, client, commitId]);
 
-  useEffect(() => {
-    if (selectedPath === null || viewMode !== "diff") {
-      return;
-    }
-    let ignore = false;
-    client
-      .getCommitDiff(repoPath, commitId, selectedPath)
-      .then((next) => {
-        if (!ignore) {
-          setHunks(next);
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          setError(String(err));
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [repoPath, client, commitId, selectedPath, viewMode]);
+  const allCollapsed = files.length > 0 && files.every((path) => collapsedPaths.has(path));
 
-  useEffect(() => {
-    if (selectedPath === null || viewMode !== "blame") {
-      return;
-    }
-    let ignore = false;
-    client
-      .getBlame(repoPath, commitId, selectedPath)
-      .then((next) => {
-        if (!ignore) {
-          setBlameLines(next);
-          setError(null);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          // See UncommittedDiffPane's blame effect: swap libgit2's raw rejection message for a
-          // friendlier one — this is a common, unexceptional case (e.g. a file that was added
-          // or removed relative to this commit's parent).
-          setError("No blame available for this file at this revision.");
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [repoPath, client, commitId, selectedPath, viewMode]);
+  const toggleCollapse = (path: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
 
-  const displayedHunks = selectedPath === null || viewMode !== "diff" ? [] : hunks;
-  const displayedBlameLines = selectedPath === null || viewMode !== "blame" ? [] : blameLines;
+  const toggleCollapseAll = () => {
+    setCollapsedPaths(allCollapsed ? new Set() : new Set(files));
+  };
+
+  if (error !== null) {
+    return <InlineError message={error} onDismiss={() => setError(null)} />;
+  }
 
   return (
     <div>
+      {files.length > 0 && (
+        <div className={styles.groupHeading}>
+          <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
+        </div>
+      )}
       <ul className={styles.fileList}>
         {files.map((path) => (
-          <li key={path}>
-            <button
-              onClick={() => {
-                setSelectedPath(path);
-                setViewMode("diff");
-              }}
-            >
-              {path}
-            </button>
-            <button
-              onClick={() => {
-                setSelectedPath(path);
-                setViewMode("blame");
-              }}
-            >
-              Blame
-            </button>
-          </li>
+          <CommitFileSection
+            key={path}
+            repoPath={repoPath}
+            client={client}
+            commitId={commitId}
+            path={path}
+            collapsed={collapsedPaths.has(path)}
+            onToggleCollapse={() => toggleCollapse(path)}
+            onSelectRow={onSelectRow}
+          />
         ))}
       </ul>
-      {viewMode === "blame" ? (
-        <>
-          {error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
-          ) : (
-            <BlameView lines={displayedBlameLines} onSelectRow={onSelectRow} />
-          )}
-          <button onClick={() => setViewMode("diff")}>Back to Diff</button>
-        </>
-      ) : error !== null ? (
-        <InlineError message={error} onDismiss={() => setError(null)} />
-      ) : (
-        <DiffView hunks={displayedHunks} />
-      )}
     </div>
   );
 }
