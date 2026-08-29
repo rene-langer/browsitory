@@ -330,9 +330,10 @@ fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
 }
 
 fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, toml::to_string_pretty(config)?)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(&mut tmp, toml::to_string_pretty(config)?.as_bytes())?;
+    tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
