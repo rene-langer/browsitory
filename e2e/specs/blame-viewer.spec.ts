@@ -57,7 +57,9 @@ describe("Browsitory blame", () => {
     await secondCommitEntry.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), secondCommitEntry);
 
-    const fileEntry = await $(`button=${BLAME_FIXTURE_FILE}`);
+    // Commit diffs render every file's section expanded by default (`DiffPane.tsx`'s
+    // `CommitFileSection`) — the path is a plain header label now, not a click-to-reveal button.
+    const fileEntry = await $(`span=${BLAME_FIXTURE_FILE}`);
     await fileEntry.waitForExist({ timeout: 10000 });
 
     const blameButton = await $("button=Blame");
