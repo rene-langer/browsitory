@@ -549,7 +549,6 @@ fn abort_rebase_restores_the_original_branch_and_tip_exactly() {
     let branch_name = git_core::branch::list_branches(&repo).unwrap()[0]
         .name
         .clone();
-    let original_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
 
     let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
     let plan = vec![pick(&commits[0].id)];
@@ -559,6 +558,15 @@ fn abort_rebase_restores_the_original_branch_and_tip_exactly() {
     // `start_rebase` already reached `Done` in one shot for a clean plan — abort a rebase that's
     // still genuinely paused instead, so this test exercises the real "abort mid-flight" case.
     let _ = state;
+
+    // The tip to restore to is whatever the branch points at right *before* the rebase being
+    // aborted starts — not the pre-everything tip captured above. `land_current_step` always
+    // mints a fresh committer signature (see `pick_preserves_the_original_authors_identity_but_uses_a_fresh_committer`),
+    // so the `pick` above already produced a new commit OID even though it replayed onto the
+    // same parent; asserting against the original pre-rebase commit here would only pass when
+    // that fresh committer timestamp happens to land in the same second as the original commit's,
+    // which is a timing coincidence, not a guarantee (observed flaky on slower CI runners).
+    let tip_before_second_rebase = repo.head().unwrap().peel_to_commit().unwrap().id();
 
     // Rebuild a genuinely paused rebase to abort: an Edit step, still open when we abort.
     write_file(dir.path(), "base.txt", "v1\n"); // no-op rewrite, just to get a clean starting point
@@ -575,7 +583,10 @@ fn abort_rebase_restores_the_original_branch_and_tip_exactly() {
 
     let head_ref = repo.head().unwrap();
     assert_eq!(head_ref.shorthand().unwrap(), branch_name);
-    assert_eq!(head_ref.peel_to_commit().unwrap().id(), original_tip);
+    assert_eq!(
+        head_ref.peel_to_commit().unwrap().id(),
+        tip_before_second_rebase
+    );
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
     let contents = std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
     assert_eq!(contents, "a\n");
