@@ -18,6 +18,31 @@
   justify-content: flex-start;
 }
 
+.fileSection {
+  flex-direction: column;
+  align-items: stretch;
+  cursor: default;
+}
+
+.fileSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+}
+
+.fileSectionBody {
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.collapseToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  color: var(--color-text-muted);
+}
+
 .statusIcon {
   flex-shrink: 0;
   color: var(--color-text-muted);

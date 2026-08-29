@@ -87,8 +87,8 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     openExternalUrl: unused,
     getGraphBranchSelection: async () => null,
     setGraphBranchSelection: unused,
-    getWorkingDiff: unused,
-    getCommitDiff: unused,
+    getWorkingDiff: async () => [],
+    getCommitDiff: async () => [],
     getCommitFiles: unused,
     stageFile: unused,
     unstageFile: unused,
@@ -100,6 +100,58 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
   };
 }
 
+const noopHandlers = {
+  onStageFile: vi.fn(),
+  onUnstageFile: vi.fn(),
+  onStageAllFiles: vi.fn(),
+  onUnstageAllFiles: vi.fn(),
+  onStageHunk: vi.fn(),
+  onUnstageHunk: vi.fn(),
+  onDiscardHunk: vi.fn(),
+  onCommit: vi.fn(),
+  onSaveStash: vi.fn(),
+  onSelectRow: vi.fn(),
+  onResolveConflict: vi.fn(),
+  onResolveAddDeleteConflict: vi.fn(),
+  onAbortMerge: vi.fn(),
+  onRebaseContinue: vi.fn(),
+  onRebaseAbort: vi.fn(),
+};
+
+function renderUncommitted(
+  client: RepoClient,
+  status: StatusEntry[],
+  overrides: Partial<React.ComponentProps<typeof DiffPane>> = {},
+) {
+  return render(
+    <DiffPane
+      repoPath={TEST_REPO_PATH}
+      client={client}
+      selectedRow="uncommitted"
+      status={status}
+      mergeMessage={null}
+      rebaseProgress={null}
+      {...noopHandlers}
+      {...overrides}
+    />,
+  );
+}
+
+function renderCommit(client: RepoClient, commitId: string, overrides: Partial<React.ComponentProps<typeof DiffPane>> = {}) {
+  return render(
+    <DiffPane
+      repoPath={TEST_REPO_PATH}
+      client={client}
+      selectedRow={{ commitId }}
+      status={[]}
+      mergeMessage={null}
+      rebaseProgress={null}
+      {...noopHandlers}
+      {...overrides}
+    />,
+  );
+}
+
 describe("DiffPane", () => {
   describe("uncommitted", () => {
     const status: StatusEntry[] = [
@@ -108,184 +160,65 @@ describe("DiffPane", () => {
     ];
 
     it("renders an icon-only Stage control for unstaged entries and Unstage for staged ones", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status);
 
       expect(screen.getByRole("button", { name: "Stage a.txt" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Unstage b.txt" })).toBeInTheDocument();
+    });
+
+    it("renders every file's diff expanded by default, with no click needed", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
+      ];
+      const getWorkingDiff = vi.fn(async () => hunks);
+      renderUncommitted(fakeClient({ getWorkingDiff }), status);
+
+      expect(await screen.findAllByText(/changed line/)).toHaveLength(2);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
     });
 
     it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
       const hunks: DiffHunk[] = [
         { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
       ];
-      const client = fakeClient({ getWorkingDiff: async () => hunks });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
+      // Only a.txt (unstaged) gets hunks — b.txt (staged) stays empty, so the assertions below
+      // are unambiguous now that both sections render at once.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
+      renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
       expect(await screen.findByText("Stage Hunk")).toBeInTheDocument();
       expect(screen.queryByText("Unstage Hunk")).not.toBeInTheDocument();
       expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
     });
 
-    it("shows Unstage Hunk (not Stage Hunk) and Discard Hunk for a staged file's diff", async () => {
+    it("shows Unstage Hunk (not Stage Hunk) for a staged file's diff", async () => {
       const hunks: DiffHunk[] = [
         { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
       ];
-      const client = fakeClient({ getWorkingDiff: async () => hunks });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("b.txt (New)"));
+      // Only b.txt (staged) gets hunks this time — a.txt stays empty.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "b.txt" ? hunks : []));
+      renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
       expect(await screen.findByText("Unstage Hunk")).toBeInTheDocument();
       expect(screen.queryByText("Stage Hunk")).not.toBeInTheDocument();
-      expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
     });
 
-    it("clicking Stage Hunk calls onStageHunk with the selected file's path and the hunk's start lines", async () => {
+    it("clicking Stage Hunk calls onStageHunk with that section's path and the hunk's start lines", async () => {
       const hunks: DiffHunk[] = [
         { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
       ];
-      const client = fakeClient({ getWorkingDiff: async () => hunks });
       const onStageHunk = vi.fn();
+      renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), status, { onStageHunk });
 
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={onStageHunk}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
       fireEvent.click(await screen.findByText("Stage Hunk"));
 
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
-      const client = fakeClient({});
       const onStageFile = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={onStageFile}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status, { onStageFile });
 
       fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
 
@@ -301,35 +234,9 @@ describe("DiffPane", () => {
         { path: "c.txt", staged: false, kind: "New" },
         { path: "b.txt", staged: true, kind: "New" },
       ];
-      const client = fakeClient({});
       const onStageFile = vi.fn();
       const onStageAllFiles = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={threeStatus}
-          onStageFile={onStageFile}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={onStageAllFiles}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), threeStatus, { onStageFile, onStageAllFiles });
 
       fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
 
@@ -345,34 +252,8 @@ describe("DiffPane", () => {
         { path: "a.txt", staged: false, kind: "Modified" },
         { path: "shared.txt", staged: false, kind: "Conflicted" },
       ];
-      const client = fakeClient({});
       const onStageAllFiles = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={conflictedMix}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={onStageAllFiles}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictedMix, { onStageAllFiles });
 
       fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
 
@@ -382,70 +263,16 @@ describe("DiffPane", () => {
     });
 
     it("disables Stage all when every unstaged entry is Conflicted", () => {
-      const conflictsOnly: StatusEntry[] = [
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
-      ];
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={conflictsOnly}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      const conflictsOnly: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
+      renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictsOnly);
 
       expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
     });
 
     it("Unstage all makes a single bulk call with every staged path", () => {
-      const client = fakeClient({});
       const onUnstageFile = vi.fn();
       const onUnstageAllFiles = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={onUnstageFile}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={onUnstageAllFiles}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status, { onUnstageFile, onUnstageAllFiles });
 
       fireEvent.click(screen.getByRole("button", { name: "Unstage all" }));
 
@@ -456,273 +283,21 @@ describe("DiffPane", () => {
 
     it("does not render Stage all when there are no unstaged entries", () => {
       const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={stagedOnly}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), stagedOnly);
 
       expect(screen.queryByRole("button", { name: "Stage all" })).not.toBeInTheDocument();
     });
 
-    it("clicking a file fetches and renders its working diff", async () => {
-      const hunks: DiffHunk[] = [
-        {
-          oldStart: 1,
-          oldLines: 1,
-          newStart: 1,
-          newLines: 1,
-          lines: [{ origin: "Add", content: "changed line" }],
-        },
-      ];
-      const getWorkingDiff = vi.fn(async () => hunks);
-      const client = fakeClient({ getWorkingDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
-
-      expect(await screen.findByText(/changed line/)).toBeInTheDocument();
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-    });
-
-    it("clicking a staged file's diff button fetches the staged diff", async () => {
-      const hunks: DiffHunk[] = [
-        {
-          oldStart: 1,
-          oldLines: 1,
-          newStart: 1,
-          newLines: 1,
-          lines: [{ origin: "Add", content: "staged content" }],
-        },
-      ];
-      const getWorkingDiff = vi.fn(async () => hunks);
-      const client = fakeClient({ getWorkingDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("b.txt (New)"));
-
-      expect(await screen.findByText(/staged content/)).toBeInTheDocument();
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
-    });
-
-    it("refetches the diff when status changes for the same selected file", async () => {
-      let call = 0;
-      const getWorkingDiff = vi.fn(async () => {
-        call += 1;
-        const content = call === 1 ? "before stage" : "after stage";
-        return [
-          {
-            oldStart: 1,
-            oldLines: 1,
-            newStart: 1,
-            newLines: 1,
-            lines: [{ origin: "Context" as const, content }],
-          },
-        ];
-      });
-      const client = fakeClient({ getWorkingDiff });
-
-      const { rerender } = render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
-      expect(await screen.findByText(/before stage/)).toBeInTheDocument();
-
-      // Simulate a stage/unstage/commit refresh: status is a new array (by reference), but
-      // the same file (`a.txt`) is still selected — the pane must refetch, not keep showing
-      // the pre-refresh diff.
-      const refreshedStatus: StatusEntry[] = [
-        { path: "a.txt", staged: true, kind: "Modified" },
-        { path: "b.txt", staged: true, kind: "New" },
-      ];
-      rerender(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={refreshedStatus}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
-      expect(await screen.findByText(/after stage/)).toBeInTheDocument();
-      expect(screen.queryByText(/before stage/)).not.toBeInTheDocument();
-    });
-
     it("CommitBox is disabled when nothing is staged", () => {
-      const client = fakeClient({});
       const unstagedOnly: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={unstagedOnly}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), unstagedOnly);
 
       expect(screen.getByText("Commit")).toBeDisabled();
     });
 
     it("CommitBox is enabled when something is staged", () => {
-      const client = fakeClient({});
       const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={stagedOnly}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), stagedOnly);
 
       // CommitBox itself still requires a non-empty message before it will enable
       // (covered by CommitBox.test.tsx); typing one here isolates DiffPane's own
@@ -735,66 +310,14 @@ describe("DiffPane", () => {
     });
 
     it("renders a Stash button", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status);
 
       expect(screen.getByText("Stash")).toBeInTheDocument();
     });
 
     it("clicking Stash calls onSaveStash", () => {
-      const client = fakeClient({});
       const onSaveStash = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={onSaveStash}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status, { onSaveStash });
 
       fireEvent.click(screen.getByText("Stash"));
 
@@ -802,65 +325,13 @@ describe("DiffPane", () => {
     });
 
     it("Stash button is disabled when the working tree is clean", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), []);
 
       expect(screen.getByText("Stash")).toBeDisabled();
     });
 
     it("Stash button is enabled when there are changes", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status);
 
       expect(screen.getByText("Stash")).not.toBeDisabled();
     });
@@ -870,108 +341,23 @@ describe("DiffPane", () => {
       // lands an empty or wrong commit, with nothing in the rebase state that notices — so the
       // action is off the table for the whole pause (see the backend's own HEAD-drift guard in
       // `git-core::rebase::rebase_continue`).
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={{ currentStep: 1, totalSteps: 3 }}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       expect(screen.getByText("Stash")).toBeDisabled();
     });
 
     it("renders a Blame button per file", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status);
 
       expect(screen.getAllByText("Blame")).toHaveLength(2);
     });
 
     it("clicking Blame fetches and renders blame for that file", async () => {
       const blameLines: BlameLine[] = [
-        {
-          lineNumber: 1,
-          content: "hello",
-          commitId: "abc123",
-          shortId: "abc1234",
-          authorName: "Rene",
-          timestamp: 1,
-        },
+        { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
       const getBlame = vi.fn(async () => blameLines);
-      const client = fakeClient({ getBlame });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
 
@@ -981,44 +367,11 @@ describe("DiffPane", () => {
 
     it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
       const blameLines: BlameLine[] = [
-        {
-          lineNumber: 1,
-          content: "hello",
-          commitId: "abc123",
-          shortId: "abc1234",
-          authorName: "Rene",
-          timestamp: 1,
-        },
+        { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
       const getBlame = vi.fn(async () => blameLines);
-      const client = fakeClient({ getBlame });
       const onSelectRow = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={onSelectRow}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status, { onSelectRow });
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
       const row = await screen.findByText("hello");
@@ -1031,269 +384,87 @@ describe("DiffPane", () => {
       const getBlame = vi.fn(async () => {
         throw new Error("git operation failed: the path 'a.txt' does not exist in the given tree");
       });
-      const client = fakeClient({ getBlame });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
 
-      expect(
-        await screen.findByText("No blame available for this file at this revision."),
-      ).toBeInTheDocument();
+      expect(await screen.findByText("No blame available for this file at this revision.")).toBeInTheDocument();
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
     });
 
-    it("Back to Diff switches back to the diff view", async () => {
+    it("Back to Diff switches that section back to the diff view", async () => {
       const blameLines: BlameLine[] = [
-        {
-          lineNumber: 1,
-          content: "hello",
-          commitId: "abc123",
-          shortId: "abc1234",
-          authorName: "Rene",
-          timestamp: 1,
-        },
+        { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
       const getBlame = vi.fn(async () => blameLines);
-      // Switching back to diff view re-triggers the diff-fetch effect (this file's diff was
-      // never fetched, since we went straight to blame) — see UncommittedDiffPane's diff
-      // effect comment on why every viewMode/selected change refetches.
       const getWorkingDiff = vi.fn(async () => []);
-      const client = fakeClient({ getBlame, getWorkingDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff }), status);
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
       await screen.findByText("hello");
       fireEvent.click(screen.getByText("Back to Diff"));
 
       expect(screen.queryByText("Back to Diff")).not.toBeInTheDocument();
+      expect(screen.queryByText("hello")).not.toBeInTheDocument();
     });
 
-    it("clicking a conflicted file opens the conflict resolution pane instead of a diff", async () => {
-      const conflictedStatus: StatusEntry[] = [
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
-      ];
-      const client = fakeClient({
-        getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
-      });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={conflictedStatus}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
+    it("shows the conflict resolution pane instead of a diff for a Conflicted file", async () => {
+      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
+      const client = fakeClient({ getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }] });
+      renderUncommitted(client, conflictedStatus);
 
       await waitFor(() => screen.getByText("Save resolution"));
     });
 
-    it("closes the conflict pane when a status refresh no longer lists the selected path as Conflicted (e.g. after abort)", async () => {
-      const conflictedStatus: StatusEntry[] = [
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
-      ];
+    it("falls back to the real diff (fetched fresh) once a status refresh no longer lists the path as Conflicted", async () => {
+      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
       const client = fakeClient({
         getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
-        // Finding 5: once the conflicted entry disappears from `status`, `viewMode` now
-        // transitions back to `"diff"`, which fires the normal diff-fetch effect for the
-        // (no-longer-conflicted) selected file — so a real stub is needed here.
         getWorkingDiff: vi.fn(async () => []),
       });
 
-      const { rerender } = render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={conflictedStatus}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={"Merge branch 'feature'"}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
+      const { rerender } = renderUncommitted(client, conflictedStatus, { mergeMessage: "Merge branch 'feature'" });
       await waitFor(() => screen.getByText("Save resolution"));
 
       // Simulate a status refresh after an abort (or after the conflict was already resolved
-      // through this same pane): the conflicted entry is gone.
+      // through this same pane): the conflicted entry is gone, replaced by its resolved form.
+      const resolvedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Modified" }];
       rerender(
         <DiffPane
           repoPath={TEST_REPO_PATH}
           client={client}
           selectedRow="uncommitted"
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
+          status={resolvedStatus}
+          {...noopHandlers}
           mergeMessage={null}
-          onAbortMerge={vi.fn()}
           rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
         />,
       );
 
       expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
-      // Finding 5: the pane falls back to the real diff view (which fetches), not a
-      // permanently blank one — `viewMode` transitioned back to `"diff"`.
-      await waitFor(() =>
-        expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false),
-      );
+      await waitFor(() => expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false));
     });
 
-    it("switching the selected conflicted file discards stale add/delete fallback state (remounts via key)", async () => {
+    it("keeps each conflicted file's resolution state independent of the others", async () => {
       const twoConflicts: StatusEntry[] = [
         { path: "binary.dat", staged: false, kind: "Conflicted" },
         { path: "shared.txt", staged: false, kind: "Conflicted" },
       ];
-      let resolveSharedHunks: (segments: ConflictSegment[]) => void = () => {};
       const getConflictHunks = vi.fn((_repoPath: string, path: string): Promise<ConflictSegment[]> => {
         if (path === "binary.dat") {
-          return Promise.reject(
-            new Error("'binary.dat' is an add/delete conflict, not a text conflict"),
-          );
+          return Promise.reject(new Error("'binary.dat' is an add/delete conflict, not a text conflict"));
         }
-        // shared.txt: a fetch that never resolves during this test, simulating the window
-        // where the new path's fetch is still in flight.
-        return new Promise((resolve) => {
-          resolveSharedHunks = resolve;
-        });
+        return Promise.resolve([{ kind: "Clean", content: "shared content" }]);
       });
-      const client = fakeClient({ getConflictHunks });
+      renderUncommitted(fakeClient({ getConflictHunks }), twoConflicts);
 
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={twoConflicts}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
-
-      fireEvent.click(screen.getByText("binary.dat (Conflicted)"));
       await waitFor(() => screen.getByText("Keep Our Version"));
+      await waitFor(() => screen.getByText("Save resolution"));
 
-      fireEvent.click(screen.getByText("shared.txt (Conflicted)"));
-
-      // The add/delete fallback buttons (bound to the OLD path) must not survive into the new
-      // render while the new path's fetch is still pending — the `key={selected.path}` on
-      // `ConflictResolutionPane` forces a fresh mount, discarding the stale state.
-      expect(screen.queryByText("Keep Our Version")).not.toBeInTheDocument();
-      expect(screen.queryByText("Keep Their Version")).not.toBeInTheDocument();
-      expect(screen.queryByText("Delete File")).not.toBeInTheDocument();
-
-      // Avoid an unresolved-promise/act warning leaking into other tests.
-      resolveSharedHunks([]);
+      // Both sections are mounted simultaneously now — one file's add/delete fallback state
+      // must not appear on the other's section.
+      expect(screen.getAllByText("Keep Our Version")).toHaveLength(1);
+      expect(screen.getAllByText("Save resolution")).toHaveLength(1);
     });
 
     it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
@@ -1301,99 +472,21 @@ describe("DiffPane", () => {
         { path: "a.txt", staged: true, kind: "New" },
         { path: "shared.txt", staged: false, kind: "Conflicted" },
       ];
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={mixedStatus}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixedStatus);
 
       const commitButton = screen.getByText("Commit").closest("button");
       expect(commitButton).toBeDisabled();
     });
 
     it("groups unstaged and staged entries under labelled headings with counts", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status);
 
       expect(screen.getByText("Changes (1)")).toBeInTheDocument();
       expect(screen.getByText("Staged (1)")).toBeInTheDocument();
     });
 
-    it("marks the selected file's row as aria-selected", async () => {
-      const client = fakeClient({ getWorkingDiff: async () => [] });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+    it("marks the current file's row as aria-selected on click, without hiding any other section", async () => {
+      renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
 
       const row = screen.getByText("a.txt (Modified)").closest('[role="option"]');
       expect(row).toHaveAttribute("aria-selected", "false");
@@ -1401,34 +494,20 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByText("a.txt (Modified)"));
 
       await waitFor(() => expect(row).toHaveAttribute("aria-selected", "true"));
+      // The other file's section stays mounted and visible — clicking never hides it.
+      expect(screen.getByText("b.txt (New)")).toBeInTheDocument();
     });
 
     it("renders a status-kind icon for each file row", () => {
-      const client = fakeClient({});
-
       const { container } = render(
         <DiffPane
           repoPath={TEST_REPO_PATH}
-          client={client}
+          client={fakeClient({})}
           selectedRow="uncommitted"
           status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
+          {...noopHandlers}
           mergeMessage={null}
-          onAbortMerge={vi.fn()}
           rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
         />,
       );
 
@@ -1437,48 +516,23 @@ describe("DiffPane", () => {
       expect(container.querySelectorAll('li[role="option"] svg').length).toBeGreaterThanOrEqual(2);
     });
 
-    it("navigates the unstaged group with ArrowDown/ArrowUp and updates the diff", async () => {
+    it("navigates the unstaged group with ArrowDown/ArrowUp, highlighting without hiding sections", async () => {
       const twoUnstaged: StatusEntry[] = [
         { path: "a.txt", staged: false, kind: "Modified" },
         { path: "c.txt", staged: false, kind: "New" },
       ];
-      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => [
-        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Context" as const, content: path }] },
-      ]);
-      const client = fakeClient({ getWorkingDiff });
+      renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), twoUnstaged);
 
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={twoUnstaged}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
+      const group = screen.getByRole("listbox", { name: "Unstaged changes" });
+      fireEvent.keyDown(group, { key: "ArrowDown" });
+
+      await waitFor(() =>
+        expect(screen.getByText("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
+          "aria-selected",
+          "true",
+        ),
       );
-
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
-      await screen.findByText("a.txt");
-
-      fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "ArrowDown" });
-
-      expect(await screen.findByText("c.txt")).toBeInTheDocument();
+      expect(screen.getByText("c.txt (New)")).toBeInTheDocument();
     });
 
     // The per-row Stage/Unstage buttons live inside a `role="option"` row, where ARIA's
@@ -1486,38 +540,11 @@ describe("DiffPane", () => {
     // navigation (see `primitives/ListRow.tsx`'s doc comment). `s` on the group container —
     // the listbox's single tab stop, which already owns `j`/`k`/arrow navigation — is the
     // keyboard-only path to the same action.
-    it("stages the selected unstaged row when 's' is pressed on the group", async () => {
-      const client = fakeClient({ getWorkingDiff: async () => [] });
+    it("stages the current unstaged row when 's' is pressed on the group", async () => {
       const onStageFile = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={onStageFile}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status, { onStageFile });
 
       const group = screen.getByRole("listbox", { name: "Unstaged changes" });
-      // Select with the keyboard too, so nothing in this path depends on a pointer.
       fireEvent.keyDown(group, { key: "ArrowDown" });
       await waitFor(() =>
         expect(screen.getByText("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
@@ -1531,43 +558,14 @@ describe("DiffPane", () => {
       expect(onStageFile).toHaveBeenCalledWith("a.txt");
     });
 
-    it("unstages the selected staged row when 's' is pressed on the staged group", async () => {
-      const client = fakeClient({ getWorkingDiff: async () => [] });
+    it("unstages the current staged row when 's' is pressed on the staged group", async () => {
       const onUnstageFile = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={onUnstageFile}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status, { onUnstageFile });
 
       const group = screen.getByRole("listbox", { name: "Staged changes" });
       fireEvent.keyDown(group, { key: "ArrowDown" });
       await waitFor(() =>
-        expect(screen.getByText("b.txt (New)").closest('[role="option"]')).toHaveAttribute(
-          "aria-selected",
-          "true",
-        ),
+        expect(screen.getByText("b.txt (New)").closest('[role="option"]')).toHaveAttribute("aria-selected", "true"),
       );
 
       fireEvent.keyDown(group, { key: "s" });
@@ -1576,186 +574,102 @@ describe("DiffPane", () => {
     });
 
     it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
-      const client = fakeClient({});
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow="uncommitted"
-          status={status}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={{ currentStep: 1, totalSteps: 3 }}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
       expect(screen.queryByPlaceholderText("Commit message")).not.toBeInTheDocument();
+    });
+
+    describe("collapse", () => {
+      it("collapsing a file's section hides its diff but keeps the header", async () => {
+        const hunks: DiffHunk[] = [
+          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
+        ];
+        // Only a.txt gets this content — b.txt stays empty so it can't keep the text on screen
+        // after a.txt's section collapses.
+        const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
+        renderUncommitted(fakeClient({ getWorkingDiff }), status);
+
+        await screen.findByText("changed line");
+        fireEvent.click(screen.getByRole("button", { name: "Collapse a.txt" }));
+
+        expect(screen.queryByText("changed line")).not.toBeInTheDocument();
+        expect(screen.getByText("a.txt (Modified)")).toBeInTheDocument();
+      });
+
+      it("expanding a collapsed section shows its diff again", async () => {
+        const hunks: DiffHunk[] = [
+          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
+        ];
+        const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
+        renderUncommitted(fakeClient({ getWorkingDiff }), status);
+
+        await screen.findByText("changed line");
+        fireEvent.click(screen.getByRole("button", { name: "Collapse a.txt" }));
+        fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
+
+        expect(await screen.findByText("changed line")).toBeInTheDocument();
+      });
+
+      it("Collapse all hides every section's body", async () => {
+        renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
+        await screen.findByRole("button", { name: "Collapse a.txt" });
+
+        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+
+        expect(screen.queryByRole("button", { name: "Collapse a.txt" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Expand a.txt" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Expand b.txt" })).toBeInTheDocument();
+        // Headers stay, so the overview is still readable after collapsing everything.
+        expect(screen.getByText("a.txt (Modified)")).toBeInTheDocument();
+        expect(screen.getByText("b.txt (New)")).toBeInTheDocument();
+      });
+
+      it("Expand all (shown once everything is collapsed) reopens every section", async () => {
+        renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
+        await screen.findByRole("button", { name: "Collapse a.txt" });
+        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+
+        fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+
+        expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Collapse b.txt" })).toBeInTheDocument();
+      });
     });
   });
 
   describe("commit", () => {
     const getCommitFiles = vi.fn(async () => ["src/main.rs"]);
     const hunks: DiffHunk[] = [
-      {
-        oldStart: 1,
-        oldLines: 1,
-        newStart: 1,
-        newLines: 1,
-        lines: [{ origin: "Add", content: "fn main() {}" }],
-      },
+      { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "fn main() {}" }] },
     ];
     const getCommitDiff = vi.fn(async () => hunks);
 
-    it("renders the commit's changed files and their diff on click", async () => {
-      const client = fakeClient({ getCommitFiles, getCommitDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+    it("renders every changed file's diff expanded by default, with no click needed", async () => {
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), "abc123");
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
-
-      fireEvent.click(screen.getByText("src/main.rs"));
-
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
       expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
     it("no CommitBox or stage/unstage buttons render", async () => {
-      const client = fakeClient({ getCommitFiles, getCommitDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), "abc123");
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
-
       expect(screen.queryByText("Commit")).toBeNull();
       expect(screen.queryByText("Stage")).toBeNull();
     });
 
     it("no Stash button renders for a commit's diff", async () => {
-      const client = fakeClient({ getCommitFiles, getCommitDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), "abc123");
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
-
       expect(screen.queryByText("Stash")).toBeNull();
     });
 
     it("renders a Blame button per file", async () => {
-      const client = fakeClient({ getCommitFiles, getCommitDiff });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), "abc123");
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
       expect(screen.getByText("Blame")).toBeInTheDocument();
@@ -1763,43 +677,10 @@ describe("DiffPane", () => {
 
     it("clicking Blame fetches and renders blame for that commit's file", async () => {
       const blameLines: BlameLine[] = [
-        {
-          lineNumber: 1,
-          content: "fn main() {}",
-          commitId: "abc123",
-          shortId: "abc1234",
-          authorName: "Rene",
-          timestamp: 1,
-        },
+        { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
       const getBlame = vi.fn(async () => blameLines);
-      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getBlame }), "abc123");
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
@@ -1810,44 +691,11 @@ describe("DiffPane", () => {
 
     it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
       const blameLines: BlameLine[] = [
-        {
-          lineNumber: 1,
-          content: "fn main() {}",
-          commitId: "abc123",
-          shortId: "abc1234",
-          authorName: "Rene",
-          timestamp: 1,
-        },
+        { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
       const getBlame = vi.fn(async () => blameLines);
-      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
       const onSelectRow = vi.fn();
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={onSelectRow}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getBlame }), "abc123", { onSelectRow });
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
@@ -1859,45 +707,31 @@ describe("DiffPane", () => {
 
     it("shows a friendly message, not the raw error, when blame fetch rejects", async () => {
       const getBlame = vi.fn(async () => {
-        throw new Error(
-          "git operation failed: the path 'src/main.rs' does not exist in the given tree",
-        );
+        throw new Error("git operation failed: the path 'src/main.rs' does not exist in the given tree");
       });
-      const client = fakeClient({ getCommitFiles, getCommitDiff, getBlame });
-
-      render(
-        <DiffPane
-          repoPath={TEST_REPO_PATH}
-          client={client}
-          selectedRow={{ commitId: "abc123" }}
-          status={[]}
-          onStageFile={vi.fn()}
-          onUnstageFile={vi.fn()}
-          onStageAllFiles={vi.fn()}
-          onUnstageAllFiles={vi.fn()}
-          onStageHunk={vi.fn()}
-          onUnstageHunk={vi.fn()}
-          onDiscardHunk={vi.fn()}
-          onCommit={vi.fn()}
-          onSaveStash={vi.fn()}
-          onSelectRow={vi.fn()}
-          onResolveConflict={vi.fn()}
-          onResolveAddDeleteConflict={vi.fn()}
-          mergeMessage={null}
-          onAbortMerge={vi.fn()}
-          rebaseProgress={null}
-          onRebaseContinue={vi.fn()}
-          onRebaseAbort={vi.fn()}
-        />,
-      );
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getBlame }), "abc123");
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
 
-      expect(
-        await screen.findByText("No blame available for this file at this revision."),
-      ).toBeInTheDocument();
+      expect(await screen.findByText("No blame available for this file at this revision.")).toBeInTheDocument();
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
+    });
+
+    it("Collapse all / Expand all toggles every file's section", async () => {
+      const getTwoCommitFiles = vi.fn(async () => ["src/main.rs", "src/lib.rs"]);
+      renderCommit(fakeClient({ getCommitFiles: getTwoCommitFiles, getCommitDiff }), "abc123");
+
+      await screen.findByRole("button", { name: "Collapse src/main.rs" });
+      fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+
+      expect(screen.getByRole("button", { name: "Expand src/main.rs" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand src/lib.rs" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+
+      expect(screen.getByRole("button", { name: "Collapse src/main.rs" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
     });
   });
 });

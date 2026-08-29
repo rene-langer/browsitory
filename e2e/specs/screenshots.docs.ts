@@ -105,9 +105,8 @@ describe("Browsitory screenshots (docs)", () => {
     await commitEntry.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), commitEntry);
 
-    const fileButton = await $("button=src.txt");
-    await fileButton.waitForExist({ timeout: 10000 });
-    await browser.execute((el) => (el as HTMLElement).click(), fileButton);
+    // Commit diffs render every changed file's section expanded by default (`DiffPane.tsx`'s
+    // `CommitFileSection`) — no click needed to reveal it.
     await $(".diff-line-add").waitForExist({ timeout: 10000 });
 
     await browser.saveScreenshot(path.join(SCREENSHOT_DIR, "commit-diff.png"));
