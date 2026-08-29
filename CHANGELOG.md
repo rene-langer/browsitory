@@ -50,3 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   picker to reload its workspace list after a full app restart, matching
   the CI-runner contention already documented for this suite's repo-scan
   wait — the previous 10s budget was flaking on `main`.
+- `abort_rebase_restores_the_original_branch_and_tip_exactly` no longer
+  asserts against the pre-rebase commit's OID, which only matched by
+  coincidence when two independently-generated committer timestamps
+  landed in the same second; it was flaking on the `windows-latest` CI
+  runner. Also: the `rust` CI job's macOS/Windows legs now run on every
+  pull request instead of only on pushes to `main`, so a platform-specific
+  regression like this one is caught before merge.
