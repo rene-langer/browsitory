@@ -46,6 +46,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `config.toml` writes are now atomic (write-temp-then-rename) instead of
+  an in-place `fs::write`, which could interleave with a concurrent save
+  and leave corrupt trailing bytes from the prior write.
 - The workspaces E2E spec's Edit/Delete steps now allow up to 45s for the
   picker to reload its workspace list after a full app restart, matching
   the CI-runner contention already documented for this suite's repo-scan
