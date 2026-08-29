@@ -15,7 +15,7 @@ completion (not the full transitive tree).
 | reqwest 0.12.28 | MIT OR Apache-2.0 | `tauri-app` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
 | thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
 | url | MIT OR Apache-2.0 | `git-core` and `tauri-app` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
-| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `config` |
+| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core` and `tauri-app`; runtime dependency of `config` (atomic config-file writes) |
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
 | tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
