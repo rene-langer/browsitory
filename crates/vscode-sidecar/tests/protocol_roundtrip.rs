@@ -447,3 +447,56 @@ fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
     let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
     assert_eq!(on_disk.replace("\r\n", "\n"), "line one\nline two\n");
 }
+
+#[test]
+fn branch_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let created = sidecar.call(
+        2,
+        "create_branch",
+        serde_json::json!({"repoPath": repo_path, "name": "feature", "startPoint": "HEAD"}),
+    );
+    assert_eq!(created["result"], serde_json::Value::Null);
+
+    let branches = sidecar.call(3, "list_branches", serde_json::json!({"repoPath": repo_path}));
+    let list = branches["result"].as_array().expect("branch list");
+    assert_eq!(list.len(), 2);
+    let feature = list.iter().find(|b| b["name"] == "feature").expect("feature branch");
+    assert_eq!(feature["isCurrent"], true);
+
+    let initial_name = list
+        .iter()
+        .find(|b| b["name"] != "feature")
+        .expect("initial branch")["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sidecar.call(
+        4,
+        "switch_branch",
+        serde_json::json!({"repoPath": repo_path, "name": initial_name}),
+    );
+
+    let renamed = sidecar.call(
+        5,
+        "rename_branch",
+        serde_json::json!({"repoPath": repo_path, "oldName": "feature", "newName": "renamed"}),
+    );
+    assert_eq!(renamed["result"], serde_json::Value::Null);
+
+    let deleted = sidecar.call(
+        6,
+        "delete_branch",
+        serde_json::json!({"repoPath": repo_path, "name": "renamed", "force": true}),
+    );
+    assert_eq!(deleted["result"], serde_json::Value::Null);
+
+    let final_branches = sidecar.call(7, "list_branches", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(final_branches["result"].as_array().unwrap().len(), 1);
+}

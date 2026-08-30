@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::status::StatusEntry;
@@ -37,6 +38,11 @@ pub fn dispatch(
         "unstage_hunk" => unstage_hunk(params, repos),
         "discard_hunk" => discard_hunk(params, repos),
         "commit" => commit(params, repos),
+        "list_branches" => list_branches(params, repos),
+        "create_branch" => create_branch(params, repos),
+        "switch_branch" => switch_branch(params, repos),
+        "delete_branch" => delete_branch(params, repos),
+        "rename_branch" => rename_branch(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -490,4 +496,90 @@ fn commit(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, S
     let params: CommitParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let commit_id = worker_handle(repos, &params.repo_path)?.commit(params.message)?;
     Ok(Value::String(commit_id))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchInfoDto {
+    name: String,
+    is_current: bool,
+}
+
+impl From<BranchInfo> for BranchInfoDto {
+    fn from(branch: BranchInfo) -> Self {
+        Self {
+            name: branch.name,
+            is_current: branch.is_current,
+        }
+    }
+}
+
+fn list_branches(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let branches: Vec<BranchInfoDto> = worker_handle(repos, &params.repo_path)?
+        .list_branches()?
+        .into_iter()
+        .map(BranchInfoDto::from)
+        .collect();
+    serde_json::to_value(branches).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateBranchParams {
+    repo_path: String,
+    name: String,
+    start_point: String,
+}
+
+fn create_branch(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: CreateBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.create_branch(params.name, params.start_point)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwitchBranchParams {
+    repo_path: String,
+    name: String,
+}
+
+fn switch_branch(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: SwitchBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.switch_branch(params.name)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteBranchParams {
+    repo_path: String,
+    name: String,
+    force: bool,
+}
+
+fn delete_branch(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: DeleteBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.delete_branch(params.name, params.force)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenameBranchParams {
+    repo_path: String,
+    old_name: String,
+    new_name: String,
+}
+
+fn rename_branch(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RenameBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.rename_branch(params.old_name, params.new_name)?;
+    Ok(Value::Null)
 }
