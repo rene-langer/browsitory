@@ -123,13 +123,17 @@ export const vscodeRepoClient: RepoClient = {
     call<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
-  getCommitFiles: notImplemented("getCommitFiles"),
-  stageFile: notImplemented("stageFile"),
-  unstageFile: notImplemented("unstageFile"),
-  stageHunk: notImplemented("stageHunk"),
-  unstageHunk: notImplemented("unstageHunk"),
-  discardHunk: notImplemented("discardHunk"),
-  commit: notImplemented("commit"),
+  getCommitFiles: (repoPath: string, commitId: string) =>
+    call<string[]>("get_commit_files", { repoPath, commitId }),
+  stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
+  unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("stage_hunk", { repoPath, path, oldStart, newStart }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("discard_hunk", { repoPath, path, oldStart, newStart }),
+  commit: (repoPath: string, message: string) => call<string>("commit", { repoPath, message }),
   listBranches: notImplemented("listBranches"),
   createBranch: notImplemented("createBranch"),
   switchBranch: notImplemented("switchBranch"),

@@ -183,4 +183,70 @@ describe("vscodeRepoClient", () => {
     respond(2, null);
     await expect(setPromise).resolves.toBeNull();
   });
+
+  it("wires getCommitFiles", async () => {
+    const promise = vscodeRepoClient.getCommitFiles("/repo", "abc123");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_files",
+      params: { repoPath: "/repo", commitId: "abc123" },
+    });
+    respond(1, ["a.txt"]);
+    await expect(promise).resolves.toEqual(["a.txt"]);
+  });
+
+  it("wires stageFile and unstageFile", async () => {
+    const stagePromise = vscodeRepoClient.stageFile("/repo", "a.txt");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "stage_file",
+      params: { repoPath: "/repo", path: "a.txt" },
+    });
+    respond(1, null);
+    await expect(stagePromise).resolves.toBeNull();
+
+    const unstagePromise = vscodeRepoClient.unstageFile("/repo", "a.txt");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "unstage_file",
+      params: { repoPath: "/repo", path: "a.txt" },
+    });
+    respond(2, null);
+    await expect(unstagePromise).resolves.toBeNull();
+  });
+
+  it("wires stageHunk, unstageHunk, and discardHunk", async () => {
+    const stagePromise = vscodeRepoClient.stageHunk("/repo", "a.txt", 1, 1);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "stage_hunk",
+      params: { repoPath: "/repo", path: "a.txt", oldStart: 1, newStart: 1 },
+    });
+    respond(1, null);
+    await expect(stagePromise).resolves.toBeNull();
+
+    const unstagePromise = vscodeRepoClient.unstageHunk("/repo", "a.txt", 1, 1);
+    respond(2, null);
+    await expect(unstagePromise).resolves.toBeNull();
+
+    const discardPromise = vscodeRepoClient.discardHunk("/repo", "a.txt", 1, 1);
+    respond(3, null);
+    await expect(discardPromise).resolves.toBeNull();
+  });
+
+  it("wires commit", async () => {
+    const promise = vscodeRepoClient.commit("/repo", "message");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "commit",
+      params: { repoPath: "/repo", message: "message" },
+    });
+    respond(1, "abc123");
+    await expect(promise).resolves.toBe("abc123");
+  });
 });
