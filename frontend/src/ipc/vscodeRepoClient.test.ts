@@ -69,4 +69,118 @@ describe("vscodeRepoClient", () => {
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
+
+  it("wires listRecentRepos", async () => {
+    const promise = vscodeRepoClient.listRecentRepos();
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "list_recent_repos",
+      params: {},
+    });
+    respond(1, ["/repos/a"]);
+    await expect(promise).resolves.toEqual(["/repos/a"]);
+  });
+
+  it("wires listOpenRepos", async () => {
+    const promise = vscodeRepoClient.listOpenRepos();
+    respond(1, { entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" });
+    await expect(promise).resolves.toEqual({
+      entries: [{ path: "/repos/a", workspaceId: null }],
+      activePath: "/repos/a",
+    });
+  });
+
+  it("wires persistOpenRepos", async () => {
+    const promise = vscodeRepoClient.persistOpenRepos(
+      [{ path: "/repos/a", workspaceId: null }],
+      "/repos/a",
+    );
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "persist_open_repos",
+      params: { entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("wires scanReposInRoot", async () => {
+    const promise = vscodeRepoClient.scanReposInRoot("/repos");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "scan_repos_in_root",
+      params: { root: "/repos" },
+    });
+    respond(1, ["/repos/a"]);
+    await expect(promise).resolves.toEqual(["/repos/a"]);
+  });
+
+  it("wires listWorkspaces", async () => {
+    const promise = vscodeRepoClient.listWorkspaces();
+    respond(1, [{ id: "w1", name: "Suite", rootPath: "/repos/suite", memberPaths: [] }]);
+    await expect(promise).resolves.toEqual([
+      { id: "w1", name: "Suite", rootPath: "/repos/suite", memberPaths: [] },
+    ]);
+  });
+
+  it("wires saveWorkspace", async () => {
+    const promise = vscodeRepoClient.saveWorkspace("Suite", "/repos/suite", ["/repos/suite/api"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_workspace",
+      params: { name: "Suite", root: "/repos/suite", members: ["/repos/suite/api"] },
+    });
+    respond(1, "w1");
+    await expect(promise).resolves.toBe("w1");
+  });
+
+  it("wires updateWorkspace", async () => {
+    const promise = vscodeRepoClient.updateWorkspace("w1", "Renamed", ["/repos/suite/web"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "update_workspace",
+      params: { id: "w1", name: "Renamed", members: ["/repos/suite/web"] },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("wires deleteWorkspace", async () => {
+    const promise = vscodeRepoClient.deleteWorkspace("w1");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "delete_workspace",
+      params: { id: "w1" },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("wires getGraphBranchSelection and setGraphBranchSelection", async () => {
+    const getPromise = vscodeRepoClient.getGraphBranchSelection("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_graph_branch_selection",
+      params: { repoPath: "/repo" },
+    });
+    respond(1, ["main"]);
+    await expect(getPromise).resolves.toEqual(["main"]);
+
+    const setPromise = vscodeRepoClient.setGraphBranchSelection("/repo", ["main", "feature"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "set_graph_branch_selection",
+      params: { repoPath: "/repo", selectedBranches: ["main", "feature"] },
+    });
+    respond(2, null);
+    await expect(setPromise).resolves.toBeNull();
+  });
 });

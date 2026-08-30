@@ -1,4 +1,11 @@
-import type { DiffHunk, GraphCommit, RepoClient, StatusEntry } from "./RepoClient";
+import type {
+  DiffHunk,
+  GraphCommit,
+  OpenRepoEntry,
+  RepoClient,
+  StatusEntry,
+  Workspace,
+} from "./RepoClient";
 
 // No `vscode` npm package dependency here on purpose — the real extension host's webview API
 // typings arrive with sub-phase (c)'s `extension/` package. This ambient declaration is the
@@ -97,19 +104,25 @@ export const vscodeRepoClient: RepoClient = {
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
 
   pickRepoFolder: notImplemented("pickRepoFolder"),
-  listRecentRepos: notImplemented("listRecentRepos"),
+  listRecentRepos: () => call<string[]>("list_recent_repos", {}),
   getAppVersion: notImplemented("getAppVersion"),
   getLastSeenVersion: notImplemented("getLastSeenVersion"),
   setLastSeenVersion: notImplemented("setLastSeenVersion"),
-  listOpenRepos: notImplemented("listOpenRepos"),
-  persistOpenRepos: notImplemented("persistOpenRepos"),
-  scanReposInRoot: notImplemented("scanReposInRoot"),
-  listWorkspaces: notImplemented("listWorkspaces"),
-  saveWorkspace: notImplemented("saveWorkspace"),
-  updateWorkspace: notImplemented("updateWorkspace"),
-  deleteWorkspace: notImplemented("deleteWorkspace"),
-  getGraphBranchSelection: notImplemented("getGraphBranchSelection"),
-  setGraphBranchSelection: notImplemented("setGraphBranchSelection"),
+  listOpenRepos: () =>
+    call<{ entries: OpenRepoEntry[]; activePath: string | null }>("list_open_repos", {}),
+  persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
+    call<void>("persist_open_repos", { entries, activePath }),
+  scanReposInRoot: (root: string) => call<string[]>("scan_repos_in_root", { root }),
+  listWorkspaces: () => call<Workspace[]>("list_workspaces", {}),
+  saveWorkspace: (name: string, root: string, members: string[]) =>
+    call<string>("save_workspace", { name, root, members }),
+  updateWorkspace: (id: string, name: string, members: string[]) =>
+    call<void>("update_workspace", { id, name, members }),
+  deleteWorkspace: (id: string) => call<void>("delete_workspace", { id }),
+  getGraphBranchSelection: (repoPath: string) =>
+    call<string[] | null>("get_graph_branch_selection", { repoPath }),
+  setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
+    call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
   getCommitFiles: notImplemented("getCommitFiles"),
   stageFile: notImplemented("stageFile"),
   unstageFile: notImplemented("unstageFile"),
