@@ -5,12 +5,20 @@
 ```
 browsitory/
 ├── crates/
-│   ├── git-core/      # git2-based service layer, UI-agnostic, unit-tested headlessly
-│   ├── config/        # repo registry + preferences: recent-repos list, backed by TOML
-│   ├── repo-service/  # transport-agnostic worker threads, credentials, forge/PR API access
-│   └── tauri-app/      # thin Tauri command adapter over repo-service
-└── frontend/            # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
+│   ├── git-core/        # git2-based service layer, UI-agnostic, unit-tested headlessly
+│   ├── config/          # repo registry + preferences: recent-repos list, backed by TOML
+│   ├── repo-service/    # transport-agnostic worker threads, credentials, forge/PR API access
+│   ├── tauri-app/        # thin Tauri command adapter over repo-service
+│   └── vscode-sidecar/  # JSON-RPC-over-stdio adapter over repo-service, for the VSCode extension
+└── frontend/              # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
 ```
+
+`vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target (Phase 6, spec
+`docs/superpowers/specs/2026-08-30-vscode-extension-design.md`): a standalone binary speaking
+line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. As of this writing it wires
+`open_repo`/`close_repo` plus the status/log/diff method family
+(`crates/vscode-sidecar/src/dispatch.rs`); the remaining ~79 `RepoClient` methods, and the
+`extension/` host that will actually spawn this process from VSCode, are follow-up work.
 
 ## Why Tauri + a web frontend, not egui again
 

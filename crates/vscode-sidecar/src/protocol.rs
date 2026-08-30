@@ -58,7 +58,8 @@ mod tests {
 
     #[test]
     fn request_deserializes_from_json_rpc_shape() {
-        let json = r#"{"jsonrpc":"2.0","id":7,"method":"get_status","params":{"repoPath":"/tmp/x"}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":7,"method":"get_status","params":{"repoPath":"/tmp/x"}}"#;
 
         let request: JsonRpcRequest = serde_json::from_str(json).expect("parse request");
 

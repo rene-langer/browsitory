@@ -41,9 +41,9 @@ struct OpenRepoParams {
 fn open_repo(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: OpenRepoParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    if !repos.contains_key(&params.path) {
-        let worker = Worker::spawn(params.path.clone().into())?;
-        repos.insert(params.path, worker);
+    if let std::collections::hash_map::Entry::Vacant(entry) = repos.entry(params.path.clone()) {
+        let worker = Worker::spawn(params.path.into())?;
+        entry.insert(worker);
     }
     Ok(Value::Null)
 }

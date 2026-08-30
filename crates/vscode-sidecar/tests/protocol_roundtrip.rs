@@ -48,7 +48,10 @@ fn unknown_method_returns_a_json_rpc_error_not_a_hang() {
 
     let response = sidecar.call(1, "does_not_exist", serde_json::json!({}));
 
-    assert_eq!(response["error"]["message"], "unknown method: does_not_exist");
+    assert_eq!(
+        response["error"]["message"],
+        "unknown method: does_not_exist"
+    );
     assert!(response.get("result").is_none());
 }
 
@@ -60,7 +63,10 @@ fn malformed_request_is_dropped_without_killing_the_sidecar() {
     sidecar.stdin.flush().expect("flush malformed line");
 
     let response = sidecar.call(1, "does_not_exist", serde_json::json!({}));
-    assert_eq!(response["error"]["message"], "unknown method: does_not_exist");
+    assert_eq!(
+        response["error"]["message"],
+        "unknown method: does_not_exist"
+    );
 }
 
 fn write_file(dir: &std::path::Path, relative_path: &str, contents: &str) {
@@ -100,7 +106,11 @@ fn open_status_close_round_trip_through_the_sidecar() {
 fn get_status_on_an_unopened_repo_returns_a_json_rpc_error() {
     let mut sidecar = Sidecar::spawn();
 
-    let status = sidecar.call(1, "get_status", serde_json::json!({"repoPath": "/no/such/repo"}));
+    let status = sidecar.call(
+        1,
+        "get_status",
+        serde_json::json!({"repoPath": "/no/such/repo"}),
+    );
 
     assert!(status["error"]["message"]
         .as_str()
@@ -146,7 +156,9 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null}),
     );
 
-    let commits = graph["result"].as_array().expect("commit graph result array");
+    let commits = graph["result"]
+        .as_array()
+        .expect("commit graph result array");
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0]["summary"], "initial commit");
 }
@@ -166,7 +178,9 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
         "get_working_diff",
         serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false}),
     );
-    let hunks = working["result"].as_array().expect("working diff result array");
+    let hunks = working["result"]
+        .as_array()
+        .expect("working diff result array");
     assert_eq!(hunks.len(), 1);
 
     let graph = sidecar.call(
