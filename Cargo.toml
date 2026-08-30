@@ -5,4 +5,5 @@ members = [
     "crates/config",
     "crates/repo-service",
     "crates/tauri-app",
+    "crates/vscode-sidecar",
 ]
