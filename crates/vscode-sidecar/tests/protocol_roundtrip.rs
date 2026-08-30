@@ -84,10 +84,11 @@ fn init_repo() -> (tempfile::TempDir, git2::Repository) {
 
 #[test]
 fn open_status_close_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "untracked.txt", "hello");
     let repo_path = dir.path().to_str().unwrap().to_string();
-    let mut sidecar = Sidecar::spawn();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
 
     let open = sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
     assert_eq!(open["result"], serde_json::Value::Null);
@@ -143,11 +144,12 @@ fn commit_all(repo: &git2::Repository, message: &str) {
 
 #[test]
 fn commit_graph_reflects_a_commit_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "hello");
     commit_all(&repo, "initial commit");
     let repo_path = dir.path().to_str().unwrap().to_string();
-    let mut sidecar = Sidecar::spawn();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
     let graph = sidecar.call(
@@ -169,12 +171,13 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
 
 #[test]
 fn working_and_commit_diff_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "line one\nline two\n");
     commit_all(&repo, "initial commit");
     write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
     let repo_path = dir.path().to_str().unwrap().to_string();
-    let mut sidecar = Sidecar::spawn();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
     let working = sidecar.call(
