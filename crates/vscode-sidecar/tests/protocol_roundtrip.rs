@@ -464,10 +464,17 @@ fn branch_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(created["result"], serde_json::Value::Null);
 
-    let branches = sidecar.call(3, "list_branches", serde_json::json!({"repoPath": repo_path}));
+    let branches = sidecar.call(
+        3,
+        "list_branches",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     let list = branches["result"].as_array().expect("branch list");
     assert_eq!(list.len(), 2);
-    let feature = list.iter().find(|b| b["name"] == "feature").expect("feature branch");
+    let feature = list
+        .iter()
+        .find(|b| b["name"] == "feature")
+        .expect("feature branch");
     assert_eq!(feature["isCurrent"], true);
 
     let initial_name = list
@@ -497,6 +504,10 @@ fn branch_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(deleted["result"], serde_json::Value::Null);
 
-    let final_branches = sidecar.call(7, "list_branches", serde_json::json!({"repoPath": repo_path}));
+    let final_branches = sidecar.call(
+        7,
+        "list_branches",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     assert_eq!(final_branches["result"].as_array().unwrap().len(), 1);
 }

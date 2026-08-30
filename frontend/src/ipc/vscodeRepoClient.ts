@@ -1,4 +1,5 @@
 import type {
+  BranchInfo,
   DiffHunk,
   GraphCommit,
   OpenRepoEntry,
@@ -134,11 +135,14 @@ export const vscodeRepoClient: RepoClient = {
   discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
     call<void>("discard_hunk", { repoPath, path, oldStart, newStart }),
   commit: (repoPath: string, message: string) => call<string>("commit", { repoPath, message }),
-  listBranches: notImplemented("listBranches"),
-  createBranch: notImplemented("createBranch"),
-  switchBranch: notImplemented("switchBranch"),
-  deleteBranch: notImplemented("deleteBranch"),
-  renameBranch: notImplemented("renameBranch"),
+  listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
+  createBranch: (repoPath: string, name: string, startPoint: string) =>
+    call<void>("create_branch", { repoPath, name, startPoint }),
+  switchBranch: (repoPath: string, name: string) => call<void>("switch_branch", { repoPath, name }),
+  deleteBranch: (repoPath: string, name: string, force: boolean) =>
+    call<void>("delete_branch", { repoPath, name, force }),
+  renameBranch: (repoPath: string, oldName: string, newName: string) =>
+    call<void>("rename_branch", { repoPath, oldName, newName }),
   listWorktrees: notImplemented("listWorktrees"),
   createWorktree: notImplemented("createWorktree"),
   removeWorktree: notImplemented("removeWorktree"),

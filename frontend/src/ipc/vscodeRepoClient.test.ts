@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listBranches("/repo")).rejects.toThrow(
-      "listBranches is not implemented yet",
+    await expect(vscodeRepoClient.listWorktrees("/repo")).rejects.toThrow(
+      "listWorktrees is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -248,5 +248,53 @@ describe("vscodeRepoClient", () => {
     });
     respond(1, "abc123");
     await expect(promise).resolves.toBe("abc123");
+  });
+
+  it("wires listBranches", async () => {
+    const promise = vscodeRepoClient.listBranches("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "list_branches",
+      params: { repoPath: "/repo" },
+    });
+    respond(1, [{ name: "main", isCurrent: true }]);
+    await expect(promise).resolves.toEqual([{ name: "main", isCurrent: true }]);
+  });
+
+  it("wires createBranch, switchBranch, renameBranch, and deleteBranch", async () => {
+    const createPromise = vscodeRepoClient.createBranch("/repo", "feature", "HEAD");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "create_branch",
+      params: { repoPath: "/repo", name: "feature", startPoint: "HEAD" },
+    });
+    respond(1, null);
+    await expect(createPromise).resolves.toBeNull();
+
+    const switchPromise = vscodeRepoClient.switchBranch("/repo", "feature");
+    respond(2, null);
+    await expect(switchPromise).resolves.toBeNull();
+
+    const renamePromise = vscodeRepoClient.renameBranch("/repo", "feature", "renamed");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "rename_branch",
+      params: { repoPath: "/repo", oldName: "feature", newName: "renamed" },
+    });
+    respond(3, null);
+    await expect(renamePromise).resolves.toBeNull();
+
+    const deletePromise = vscodeRepoClient.deleteBranch("/repo", "renamed", true);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "delete_branch",
+      params: { repoPath: "/repo", name: "renamed", force: true },
+    });
+    respond(4, null);
+    await expect(deletePromise).resolves.toBeNull();
   });
 });
