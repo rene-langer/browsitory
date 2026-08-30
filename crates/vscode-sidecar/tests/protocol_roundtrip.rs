@@ -161,6 +161,10 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
         .expect("commit graph result array");
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0]["summary"], "initial commit");
+    // Exercise camelCase-only field names (`shortId`, `parentIds`) so a stray removal of
+    // `#[serde(rename_all = "camelCase")]` on `GraphCommitDto` would actually fail a test.
+    assert!(commits[0]["shortId"].is_string());
+    assert!(commits[0]["parentIds"].is_array());
 }
 
 #[test]
@@ -182,6 +186,12 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
         .as_array()
         .expect("working diff result array");
     assert_eq!(hunks.len(), 1);
+    // Exercise camelCase-only field names (`oldStart`, `newLines`) so a stray removal of
+    // `#[serde(rename_all = "camelCase")]` on `DiffHunkDto` would actually fail a test. The
+    // first changed line ("line one" -> "line one changed") is a removal of the old line.
+    assert!(hunks[0]["oldStart"].is_number());
+    assert!(hunks[0]["newLines"].is_number());
+    assert_eq!(hunks[0]["lines"][0]["origin"], "Remove");
 
     let graph = sidecar.call(
         3,

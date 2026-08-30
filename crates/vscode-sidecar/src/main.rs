@@ -33,7 +33,13 @@ fn main() {
         };
 
         let serialized = serde_json::to_string(&response).expect("response always serializes");
-        writeln!(stdout, "{serialized}").expect("stdout write failed");
-        stdout.flush().expect("stdout flush failed");
+        if writeln!(stdout, "{serialized}").is_err() {
+            // The reading end (the extension host) has gone away; exit gracefully rather than
+            // panicking, matching the EOF-on-stdin path above.
+            break;
+        }
+        if stdout.flush().is_err() {
+            break;
+        }
     }
 }

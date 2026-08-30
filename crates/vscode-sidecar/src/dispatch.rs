@@ -38,6 +38,10 @@ struct OpenRepoParams {
     path: String,
 }
 
+// Unlike the Tauri transport's `open_repo`, this doesn't call `config::add_recent_repo` after a
+// successful open — `listRecentRepos` is an unwired stub on the frontend side today, so this
+// isn't currently a bug. Whoever wires up recent-repos support for the VSCode sidecar later
+// should add that call here too.
 fn open_repo(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: OpenRepoParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;

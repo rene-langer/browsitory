@@ -33,31 +33,50 @@ function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
   );
 }
 
-const vscode = acquireVsCodeApi();
+let vscode: VsCodeWebviewApi | undefined;
+let listenerRegistered = false;
 let nextRequestId = 1;
+// Entries are only ever removed by a matching reply (see the `message` listener below). If the
+// sidecar process dies, or the host never replies, a pending entry's promise hangs forever —
+// there is no timeout and no "transport closed" signal today. A future task (once the
+// `extension/` host exists and can detect sidecar exit) should add either a per-request timeout
+// or a mechanism to reject every pending entry when the host reports the transport is closed.
 const pending = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 
-window.addEventListener("message", (event: MessageEvent) => {
-  const message = event.data;
-  if (!isJsonRpcResponse(message)) return;
-  const waiting = pending.get(message.id);
-  if (!waiting) return;
-  pending.delete(message.id);
-  if ("error" in message) {
-    waiting.reject(new Error(message.error.message));
-  } else {
-    waiting.resolve(message.result);
+// Lazily acquire the VSCode webview API and register the message listener on first use, rather
+// than at module load, so this module stays safe to statically import into a bundle that
+// doesn't inject `acquireVsCodeApi` (e.g. today's Tauri build).
+function ensureInitialized(): VsCodeWebviewApi {
+  if (!vscode) {
+    vscode = acquireVsCodeApi();
   }
-});
+  if (!listenerRegistered) {
+    listenerRegistered = true;
+    window.addEventListener("message", (event: MessageEvent) => {
+      const message = event.data;
+      if (!isJsonRpcResponse(message)) return;
+      const waiting = pending.get(message.id);
+      if (!waiting) return;
+      pending.delete(message.id);
+      if ("error" in message) {
+        waiting.reject(new Error(message.error.message));
+      } else {
+        waiting.resolve(message.result);
+      }
+    });
+  }
+  return vscode;
+}
 
 function call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  const api = ensureInitialized();
   const id = nextRequestId++;
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-    vscode.postMessage({ jsonrpc: "2.0", id, method, params });
+    api.postMessage({ jsonrpc: "2.0", id, method, params });
   });
 }
 
@@ -133,7 +152,12 @@ export const vscodeRepoClient: RepoClient = {
   pushCurrentBranch: notImplemented("pushCurrentBranch"),
   pushTags: notImplemented("pushTags"),
   pullCurrentUpstream: notImplemented("pullCurrentUpstream"),
-  subscribeTransferProgress: () => () => {},
+  subscribeTransferProgress: () => {
+    console.warn(
+      "vscodeRepoClient: subscribeTransferProgress is not wired up on this transport yet",
+    );
+    return () => {};
+  },
   listStashes: notImplemented("listStashes"),
   saveStash: notImplemented("saveStash"),
   applyStash: notImplemented("applyStash"),
