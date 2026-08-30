@@ -62,3 +62,49 @@ fn malformed_request_is_dropped_without_killing_the_sidecar() {
     let response = sidecar.call(1, "does_not_exist", serde_json::json!({}));
     assert_eq!(response["error"]["message"], "unknown method: does_not_exist");
 }
+
+fn write_file(dir: &std::path::Path, relative_path: &str, contents: &str) {
+    std::fs::write(dir.join(relative_path), contents).expect("write file");
+}
+
+fn init_repo() -> (tempfile::TempDir, git2::Repository) {
+    let dir = tempfile::TempDir::new().expect("create temp dir");
+    let repo = git2::Repository::init(dir.path()).expect("init repo");
+    let mut config = repo.config().expect("repo config");
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn open_status_close_round_trip_through_the_sidecar() {
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), "untracked.txt", "hello");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+
+    let open = sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    assert_eq!(open["result"], serde_json::Value::Null);
+
+    let status = sidecar.call(2, "get_status", serde_json::json!({"repoPath": repo_path}));
+    let entries = status["result"].as_array().expect("status result array");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["path"], "untracked.txt");
+    assert_eq!(entries[0]["kind"], "New");
+
+    let close = sidecar.call(3, "close_repo", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(close["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn get_status_on_an_unopened_repo_returns_a_json_rpc_error() {
+    let mut sidecar = Sidecar::spawn();
+
+    let status = sidecar.call(1, "get_status", serde_json::json!({"repoPath": "/no/such/repo"}));
+
+    assert!(status["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("repo not open"));
+    assert!(status.get("result").is_none());
+}
