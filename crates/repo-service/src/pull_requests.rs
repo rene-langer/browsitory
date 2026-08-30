@@ -174,8 +174,8 @@ impl<T: ForgeApi + ?Sized> ForgeApi for &T {
 }
 
 /// `reqwest`'s blocking client, matching this codebase's synchronous worker-thread model (see
-/// `crates/tauri-app/src/worker.rs` — one `thread::spawn`-owned thread per open repository, no
-/// tokio runtime anywhere in this crate).
+/// `crates/repo-service/src/worker/mod.rs` — one `thread::spawn`-owned thread per open
+/// repository, no tokio runtime anywhere in this crate).
 ///
 /// The inner client is built lazily, on first use, rather than in `new()`. `Worker::spawn`
 /// constructs a `ReqwestForgeApi` on the *caller's* thread (before handing it off to the
@@ -378,8 +378,8 @@ fn extract_validation_message(body: &str) -> String {
 // the "empty string doesn't count as set" rule) can be unit-tested with plain values — never by
 // mutating the real process environment, which `std::env::set_var`/`remove_var` calls would race
 // against every other test in this binary that (under the `forge-fixture-override` feature) also
-// calls `github_api_base`/`bitbucket_api_base` concurrently on another test thread. See
-// `crates/tauri-app/src/pull_requests.rs`'s test module for that unit coverage, and
+// calls `github_api_base`/`bitbucket_api_base` concurrently on another test thread. See this
+// file's own test module for that unit coverage, and
 // `e2e/specs/pull-requests.spec.ts` for genuine end-to-end coverage of the real env var actually
 // being read by a running process.
 #[cfg(feature = "forge-fixture-override")]

@@ -11,17 +11,17 @@ completion (not the full transitive tree).
 | Crate | License | Notes |
 |---|---|---|
 | git2 | MIT OR Apache-2.0 (binding); vendored libgit2 is GPL-2.0-with-linking-exception | Deliberate exception — see below. Direct dep of `git-core`; dev-dependency of `tauri-app`. |
-| keyring 4.1.6 | MIT OR Apache-2.0 | `tauri-app` — cross-platform operating-system credential storage. Source: [crates.io](https://crates.io/crates/keyring/4.1.6); verified with `cargo info keyring@4.1.6` on 2026-08-15. |
-| reqwest 0.12.28 | MIT OR Apache-2.0 | `tauri-app` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
+| keyring 4.1.6 | MIT OR Apache-2.0 | `repo-service` — cross-platform operating-system credential storage. Source: [crates.io](https://crates.io/crates/keyring/4.1.6); verified with `cargo info keyring@4.1.6` on 2026-08-15. |
+| reqwest 0.12.28 | MIT OR Apache-2.0 | `repo-service` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
 | thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
-| url | MIT OR Apache-2.0 | `git-core` and `tauri-app` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
-| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core` and `tauri-app`; runtime dependency of `config` (atomic config-file writes) |
+| url | MIT OR Apache-2.0 | `git-core` and `repo-service` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
+| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `repo-service`; runtime dependency of `config` (atomic config-file writes) |
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
 | tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
 | tauri-plugin-opener 2.5.4 | Apache-2.0 OR MIT | `tauri-app` — opens a pull request's provider URL in the user's default external browser instead of navigating the app's own webview away. Source: [crates.io](https://crates.io/crates/tauri-plugin-opener/2.5.4); verified with `cargo info tauri-plugin-opener` on 2026-08-17. |
-| serde | MIT OR Apache-2.0 | `tauri-app`; also `config` |
-| serde_json | MIT OR Apache-2.0 | `tauri-app` |
+| serde | MIT OR Apache-2.0 | `tauri-app` and `repo-service`; also `config` |
+| serde_json | MIT OR Apache-2.0 | `tauri-app` and `repo-service` |
 | directories | MIT OR Apache-2.0 | `config` |
 | toml | MIT OR Apache-2.0 | `config` |
 | tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |

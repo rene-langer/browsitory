@@ -91,11 +91,16 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
 ## Testing strategy
 
 - `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
-- `tauri-app`: inline unit tests for logic that isn't thin delegation (see `worker.rs`'s tests,
-  which spawn a real worker thread against a real temp-dir repo). Pass-through Tauri commands
-  don't get separate tests, except for the DTO wire format: `commands.rs` has a test pinning
-  the `StatusKind` strings it serializes to the `StatusKind` union in
+- `repo-service`: inline unit tests next to the code they cover (worker, credential store, and
+  forge/PR API logic), including `crates/repo-service/src/worker/mod.rs`'s tests, which spawn a
+  real worker thread against a real temp-dir repo — no mocks. It also owns the DTO wire-format
+  contract: `crates/repo-service/src/lib.rs`'s `wire_format_tests` module pins the `StatusKind`
+  and `DiffLineOrigin` `Debug` output against the matching unions in
   `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
+- `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
+  delegation tests of its own. It keeps `crates/tauri-app/src/commands/mod.rs`'s inline tests
+  for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
+  like `WorkspaceDto`/`OpenRepoEntryDto`).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO (`e2e/`) driving
   the built `tauri-app` binary as a black box — `cargo build --workspace --features

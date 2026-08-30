@@ -8,8 +8,16 @@ license = "MIT"
 # Mirrors tauri-app's own feature of the same name (see that crate's Cargo.toml): swaps
 # Worker::spawn's credential store from KeyringCredentialStore to InMemoryCredentialStore and
 # lets pull_requests.rs's forge API base URLs be redirected via env vars, so an E2E build never
-# touches a real OS keychain or a live GitHub/Bitbucket account. tauri-app's own flag forwards
-# to this one (see Task 2, Step 6).
+# touches a real OS keychain or a live GitHub/Bitbucket account. tauri-app's own flag of the
+# same name forwards to this one; see that crate's Cargo.toml.
+#
+# NOT enabled by default, and must never be enabled in a release build: it swaps out the real
+# OS-keychain-backed credential store for an in-memory one, and lets a user's real forge API
+# traffic (and their saved token) be redirected via env vars to an arbitrary host. This crate is
+# meant to gain more consumers over time (e.g. a future VSCode extension sidecar), each of which
+# builds and enables its own features independently, so this invariant has to be carried here
+# too, not just documented at tauri-app's call site: no consumer's build-time toggle should be
+# able to silently redirect a user's real credentials or forge traffic.
 forge-fixture-override = []
 
 [dependencies]

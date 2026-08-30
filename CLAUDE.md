@@ -102,7 +102,8 @@ commit before the platform builds run.
 See `docs/ARCHITECTURE.md` for the full crate/package layout, the `RepoClient` IPC boundary,
 and the threading model. Summary: `crates/git-core` (git2, UI-agnostic, DI'd per function,
 tested against real temp-dir repos) + `crates/config` (TOML-backed recent-repos registry) +
-`crates/tauri-app` (Tauri commands, one worker thread per open repo) + `frontend/` (React/TS,
+`crates/repo-service` (transport-agnostic worker threads, credentials, forge/PR API access) +
+`crates/tauri-app` (a thin Tauri command adapter over `repo-service`) + `frontend/` (React/TS,
 talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
 
 Building `tauri-app` standalone (no dev server) requires the `custom-protocol` Cargo feature —
@@ -137,8 +138,8 @@ owned there (that's why `Worker::spawn`'s `thread::spawn(move || …)` compiles)
 so a `Repository` can't be `State` directly, and putting it behind `State<Mutex<Repository>>`
 would serialize every command on one lock held across blocking git work. The response to
 `!Sync` is therefore message-passing to a single owning thread:
-`crates/tauri-app/src/worker.rs`'s `Worker::spawn` opens the repository on a dedicated thread
-and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
+`crates/repo-service/src/worker/mod.rs`'s `Worker::spawn` opens the repository on a dedicated
+thread and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
 send `Command`s over an `mpsc` channel and get replies over a per-call reply channel. UI code
 never touches `git-core` directly — only through `RepoClient` → a Tauri command → the worker
 thread.
@@ -167,12 +168,16 @@ from differently-licensed code. Verify new dependencies (`cargo info <crate>` / 
 - `git-core` tests live in `crates/git-core/tests/*.rs` (one file per module) plus a shared
   `tests/common/mod.rs` helper. They use real repos via `git2::Repository::init`/`TempDir`,
   never a mocked `Repository`.
-- `tauri-app` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
-  `worker.rs`), also against real temp-dir repos. Thin pass-through Tauri commands
-  (`commands.rs`) don't need their own tests — the `git-core`/`Worker` logic they call already
-  is tested. The exception is the DTO wire format: `commands.rs`'s test module asserts the
-  `StatusKind` strings it emits match the `StatusKind` union in
+- `repo-service` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
+  `worker/mod.rs`), against real temp-dir repos, and also own the DTO wire-format pinning:
+  `crates/repo-service/src/lib.rs`'s `wire_format_tests` module asserts the `StatusKind` and
+  `DiffLineOrigin` strings it emits match the matching unions in
   `frontend/src/ipc/RepoClient.ts`, since nothing else catches that drift.
+- `tauri-app` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
+  `commands/mod.rs`). It's now a thin adapter over `repo-service`, so pass-through Tauri
+  commands don't need their own tests — the `git-core`/`repo-service` logic they call already
+  is tested. What remains is its own DTO serialization (e.g. camelCase field names), covered by
+  `commands/mod.rs`'s test module.
 - `frontend` tests mock `RepoClient` (a real interface seam), never `@tauri-apps/api`.
 - `e2e/` holds `tauri-driver` + WebdriverIO specs (`e2e/specs/*.spec.ts`) that drive the real
   built `tauri-app` binary as a black box, one flow per major feature area (currently: open

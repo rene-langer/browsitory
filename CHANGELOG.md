@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Extracted the git worker/credential/forge service layer out of `tauri-app` into a new
+  internal `repo-service` crate, in preparation for a future VSCode extension — no
+  user-visible behavior change.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added
