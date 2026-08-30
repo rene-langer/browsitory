@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::status::StatusEntry;
 use repo_service::worker::Worker;
@@ -16,6 +17,8 @@ pub fn dispatch(
         "close_repo" => close_repo(params, repos),
         "get_status" => get_status(params, repos),
         "get_commit_graph" => get_commit_graph(params, repos),
+        "get_working_diff" => get_working_diff(params, repos),
+        "get_commit_diff" => get_commit_diff(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -131,4 +134,77 @@ fn get_commit_graph(params: Value, repos: &mut HashMap<String, Worker>) -> Resul
         .map(GraphCommitDto::from)
         .collect();
     serde_json::to_value(commits).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+struct DiffLineDto {
+    origin: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffHunkDto {
+    old_start: u32,
+    old_lines: u32,
+    new_start: u32,
+    new_lines: u32,
+    lines: Vec<DiffLineDto>,
+}
+
+impl From<DiffHunk> for DiffHunkDto {
+    fn from(hunk: DiffHunk) -> Self {
+        Self {
+            old_start: hunk.old_start,
+            old_lines: hunk.old_lines,
+            new_start: hunk.new_start,
+            new_lines: hunk.new_lines,
+            lines: hunk
+                .lines
+                .into_iter()
+                .map(|line| DiffLineDto {
+                    origin: format!("{:?}", line.origin),
+                    content: line.content,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetWorkingDiffParams {
+    repo_path: String,
+    path: String,
+    staged: bool,
+}
+
+fn get_working_diff(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetWorkingDiffParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
+        .get_working_diff(params.path, params.staged)?
+        .into_iter()
+        .map(DiffHunkDto::from)
+        .collect();
+    serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetCommitDiffParams {
+    repo_path: String,
+    commit_id: String,
+    path: String,
+}
+
+fn get_commit_diff(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetCommitDiffParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
+        .get_commit_diff(params.commit_id, params.path)?
+        .into_iter()
+        .map(DiffHunkDto::from)
+        .collect();
+    serde_json::to_value(hunks).map_err(|error| error.to_string())
 }

@@ -150,3 +150,42 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0]["summary"], "initial commit");
 }
+
+#[test]
+fn working_and_commit_diff_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "line one\nline two\n");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let working = sidecar.call(
+        2,
+        "get_working_diff",
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false}),
+    );
+    let hunks = working["result"].as_array().expect("working diff result array");
+    assert_eq!(hunks.len(), 1);
+
+    let graph = sidecar.call(
+        3,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selectedBranches": null}),
+    );
+    let head_id = graph["result"][0]["id"]
+        .as_str()
+        .expect("head commit id")
+        .to_string();
+
+    let commit_diff = sidecar.call(
+        4,
+        "get_commit_diff",
+        serde_json::json!({"repoPath": repo_path, "commitId": head_id, "path": "tracked.txt"}),
+    );
+    let commit_hunks = commit_diff["result"]
+        .as_array()
+        .expect("commit diff result array");
+    assert_eq!(commit_hunks.len(), 1);
+}
