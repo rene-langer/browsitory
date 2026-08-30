@@ -3336,6 +3336,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "repo-service"
+version = "0.1.0"
+dependencies = [
+ "git-core",
+ "git2",
+ "keyring",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "url",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4252,9 +4266,8 @@ dependencies = [
  "config",
  "git-core",
  "git2",
- "keyring",
  "log",
- "reqwest 0.12.28",
+ "repo-service",
  "serde",
  "serde_json",
  "tauri",
@@ -4265,7 +4278,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tempfile",
- "url",
 ]
 
 [[package]]
