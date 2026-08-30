@@ -451,19 +451,31 @@ struct HunkParams {
 
 fn stage_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.stage_hunk(params.path, params.old_start, params.new_start)?;
+    worker_handle(repos, &params.repo_path)?.stage_hunk(
+        params.path,
+        params.old_start,
+        params.new_start,
+    )?;
     Ok(Value::Null)
 }
 
 fn unstage_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.unstage_hunk(params.path, params.old_start, params.new_start)?;
+    worker_handle(repos, &params.repo_path)?.unstage_hunk(
+        params.path,
+        params.old_start,
+        params.new_start,
+    )?;
     Ok(Value::Null)
 }
 
 fn discard_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.discard_hunk(params.path, params.old_start, params.new_start)?;
+    worker_handle(repos, &params.repo_path)?.discard_hunk(
+        params.path,
+        params.old_start,
+        params.new_start,
+    )?;
     Ok(Value::Null)
 }
 
