@@ -108,3 +108,45 @@ fn get_status_on_an_unopened_repo_returns_a_json_rpc_error() {
         .contains("repo not open"));
     assert!(status.get("result").is_none());
 }
+
+fn commit_all(repo: &git2::Repository, message: &str) {
+    let mut index = repo.index().expect("open index");
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .expect("stage all");
+    index.write().expect("write index");
+    let tree_id = index.write_tree().expect("write tree");
+    let tree = repo.find_tree(tree_id).expect("find tree");
+    let signature = repo.signature().expect("signature");
+    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        &parents,
+    )
+    .expect("commit");
+}
+
+#[test]
+fn commit_graph_reflects_a_commit_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let graph = sidecar.call(
+        2,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null}),
+    );
+
+    let commits = graph["result"].as_array().expect("commit graph result array");
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0]["summary"], "initial commit");
+}

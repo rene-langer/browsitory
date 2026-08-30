@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use git_core::graph::GraphCommit;
 use git_core::status::StatusEntry;
 use repo_service::worker::Worker;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ pub fn dispatch(
         "open_repo" => open_repo(params, repos),
         "close_repo" => close_repo(params, repos),
         "get_status" => get_status(params, repos),
+        "get_commit_graph" => get_commit_graph(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -82,4 +84,51 @@ fn get_status(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Valu
         .map(StatusEntryDto::from)
         .collect();
     serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetCommitGraphParams {
+    repo_path: String,
+    limit: usize,
+    selected_branches: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphCommitDto {
+    id: String,
+    short_id: String,
+    summary: String,
+    author_name: String,
+    author_email: String,
+    timestamp: i64,
+    parent_ids: Vec<String>,
+    branch_refs: Vec<String>,
+}
+
+impl From<GraphCommit> for GraphCommitDto {
+    fn from(c: GraphCommit) -> Self {
+        Self {
+            id: c.id,
+            short_id: c.short_id,
+            summary: c.summary,
+            author_name: c.author_name,
+            author_email: c.author_email,
+            timestamp: c.timestamp,
+            parent_ids: c.parent_ids,
+            branch_refs: c.branch_refs,
+        }
+    }
+}
+
+fn get_commit_graph(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetCommitGraphParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
+        .get_commit_graph(params.limit, params.selected_branches)?
+        .into_iter()
+        .map(GraphCommitDto::from)
+        .collect();
+    serde_json::to_value(commits).map_err(|error| error.to_string())
 }
