@@ -213,3 +213,150 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
         .expect("commit diff result array");
     assert_eq!(commit_hunks.len(), 1);
 }
+
+struct ConfigDirGuard {
+    _dir: tempfile::TempDir,
+}
+
+impl ConfigDirGuard {
+    fn new() -> (Self, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().expect("create config dir");
+        let path = dir.path().to_path_buf();
+        (Self { _dir: dir }, path)
+    }
+}
+
+impl Sidecar {
+    fn spawn_with_config_dir(config_dir: &std::path::Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vscode-sidecar"))
+            .env("BROWSITORY_CONFIG_DIR", config_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn vscode-sidecar");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+}
+
+#[test]
+fn opening_a_repo_adds_it_to_recent_repos() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let recent = sidecar.call(2, "list_recent_repos", serde_json::json!({}));
+
+    let paths = recent["result"].as_array().expect("recent repos array");
+    assert!(paths.iter().any(|p| p == &repo_path));
+}
+
+#[test]
+fn persist_and_list_open_repos_round_trip() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let persist = sidecar.call(
+        1,
+        "persist_open_repos",
+        serde_json::json!({
+            "entries": [{"path": "/repos/a", "workspaceId": null}],
+            "activePath": "/repos/a",
+        }),
+    );
+    assert_eq!(persist["result"], serde_json::Value::Null);
+
+    let listed = sidecar.call(2, "list_open_repos", serde_json::json!({}));
+    assert_eq!(listed["result"]["entries"][0]["path"], "/repos/a");
+    assert_eq!(
+        listed["result"]["entries"][0]["workspaceId"],
+        serde_json::Value::Null
+    );
+    assert_eq!(listed["result"]["activePath"], "/repos/a");
+}
+
+#[test]
+fn scan_repos_in_root_finds_a_nested_repo() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let root = tempfile::TempDir::new().expect("create root dir");
+    let (repo_dir, _repo) = init_repo();
+    std::fs::rename(repo_dir.path(), root.path().join("nested")).expect("move repo into root");
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let scanned = sidecar.call(
+        1,
+        "scan_repos_in_root",
+        serde_json::json!({"root": root.path().to_str().unwrap()}),
+    );
+
+    let paths = scanned["result"].as_array().expect("scanned repos array");
+    assert_eq!(paths.len(), 1);
+}
+
+#[test]
+fn save_update_delete_workspace_round_trip() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let saved = sidecar.call(
+        1,
+        "save_workspace",
+        serde_json::json!({"name": "Suite", "root": "/repos/suite", "members": ["/repos/suite/api"]}),
+    );
+    let id = saved["result"].as_str().expect("workspace id").to_string();
+
+    let listed = sidecar.call(2, "list_workspaces", serde_json::json!({}));
+    assert_eq!(listed["result"][0]["id"], id);
+    assert_eq!(listed["result"][0]["rootPath"], "/repos/suite");
+
+    let updated = sidecar.call(
+        3,
+        "update_workspace",
+        serde_json::json!({"id": id, "name": "Suite Renamed", "members": ["/repos/suite/web"]}),
+    );
+    assert_eq!(updated["result"], serde_json::Value::Null);
+    let listed_after_update = sidecar.call(4, "list_workspaces", serde_json::json!({}));
+    assert_eq!(listed_after_update["result"][0]["name"], "Suite Renamed");
+
+    let deleted = sidecar.call(5, "delete_workspace", serde_json::json!({"id": id}));
+    assert_eq!(deleted["result"], serde_json::Value::Null);
+    let listed_after_delete = sidecar.call(6, "list_workspaces", serde_json::json!({}));
+    assert_eq!(listed_after_delete["result"], serde_json::json!([]));
+}
+
+#[test]
+fn graph_branch_selection_round_trips() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let before = sidecar.call(
+        1,
+        "get_graph_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(before["result"], serde_json::Value::Null);
+
+    let set = sidecar.call(
+        2,
+        "set_graph_branch_selection",
+        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["main", "feature"]}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null);
+
+    let after = sidecar.call(
+        3,
+        "get_graph_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after["result"], serde_json::json!(["main", "feature"]));
+}

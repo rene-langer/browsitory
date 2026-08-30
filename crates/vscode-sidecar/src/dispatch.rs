@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
@@ -19,6 +20,16 @@ pub fn dispatch(
         "get_commit_graph" => get_commit_graph(params, repos),
         "get_working_diff" => get_working_diff(params, repos),
         "get_commit_diff" => get_commit_diff(params, repos),
+        "list_recent_repos" => list_recent_repos(),
+        "list_open_repos" => list_open_repos_handler(),
+        "persist_open_repos" => persist_open_repos(params),
+        "scan_repos_in_root" => scan_repos_in_root(params),
+        "list_workspaces" => list_workspaces_handler(),
+        "save_workspace" => save_workspace(params),
+        "update_workspace" => update_workspace(params),
+        "delete_workspace" => delete_workspace(params),
+        "get_graph_branch_selection" => get_graph_branch_selection(params),
+        "set_graph_branch_selection" => set_graph_branch_selection(params),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -38,17 +49,14 @@ struct OpenRepoParams {
     path: String,
 }
 
-// Unlike the Tauri transport's `open_repo`, this doesn't call `config::add_recent_repo` after a
-// successful open — `listRecentRepos` is an unwired stub on the frontend side today, so this
-// isn't currently a bug. Whoever wires up recent-repos support for the VSCode sidecar later
-// should add that call here too.
 fn open_repo(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: OpenRepoParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     if let std::collections::hash_map::Entry::Vacant(entry) = repos.entry(params.path.clone()) {
-        let worker = Worker::spawn(params.path.into())?;
+        let worker = Worker::spawn(params.path.clone().into())?;
         entry.insert(worker);
     }
+    let _ = config::add_recent_repo(Path::new(&params.path));
     Ok(Value::Null)
 }
 
@@ -211,4 +219,181 @@ fn get_commit_diff(params: Value, repos: &mut HashMap<String, Worker>) -> Result
         .map(DiffHunkDto::from)
         .collect();
     serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+fn list_recent_repos() -> Result<Value, String> {
+    let paths = config::list_recent_repos().map_err(|error| error.to_string())?;
+    let paths: Vec<String> = paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    serde_json::to_value(paths).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenRepoEntryDto {
+    path: String,
+    workspace_id: Option<String>,
+}
+
+impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
+    fn from(entry: config::OpenRepoEntry) -> Self {
+        Self {
+            path: entry.path.to_string_lossy().into_owned(),
+            workspace_id: entry.workspace_id,
+        }
+    }
+}
+
+fn list_open_repos_handler() -> Result<Value, String> {
+    let (entries, active) = config::list_open_repos().map_err(|error| error.to_string())?;
+    let entries: Vec<OpenRepoEntryDto> = entries.into_iter().map(OpenRepoEntryDto::from).collect();
+    let active = active.map(|p| p.to_string_lossy().into_owned());
+    serde_json::to_value(serde_json::json!({ "entries": entries, "activePath": active }))
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenRepoEntryInput {
+    path: String,
+    workspace_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistOpenReposParams {
+    entries: Vec<OpenRepoEntryInput>,
+    active_path: Option<String>,
+}
+
+fn persist_open_repos(params: Value) -> Result<Value, String> {
+    let params: PersistOpenReposParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let entries: Vec<config::OpenRepoEntry> = params
+        .entries
+        .into_iter()
+        .map(|entry| config::OpenRepoEntry {
+            path: PathBuf::from(entry.path),
+            workspace_id: entry.workspace_id,
+        })
+        .collect();
+    config::set_open_repos(&entries, params.active_path.as_deref().map(Path::new))
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+struct ScanReposInRootParams {
+    root: String,
+}
+
+fn scan_repos_in_root(params: Value) -> Result<Value, String> {
+    let params: ScanReposInRootParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let paths =
+        config::scan_repos_in_root(Path::new(&params.root)).map_err(|error| error.to_string())?;
+    let paths: Vec<String> = paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    serde_json::to_value(paths).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceDto {
+    id: String,
+    name: String,
+    root_path: String,
+    member_paths: Vec<String>,
+}
+
+impl From<config::Workspace> for WorkspaceDto {
+    fn from(workspace: config::Workspace) -> Self {
+        Self {
+            id: workspace.id,
+            name: workspace.name,
+            root_path: workspace.root_path.to_string_lossy().into_owned(),
+            member_paths: workspace
+                .member_paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+        }
+    }
+}
+
+fn list_workspaces_handler() -> Result<Value, String> {
+    let workspaces = config::list_workspaces().map_err(|error| error.to_string())?;
+    let workspaces: Vec<WorkspaceDto> = workspaces.into_iter().map(WorkspaceDto::from).collect();
+    serde_json::to_value(workspaces).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+struct SaveWorkspaceParams {
+    name: String,
+    root: String,
+    members: Vec<String>,
+}
+
+fn save_workspace(params: Value) -> Result<Value, String> {
+    let params: SaveWorkspaceParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
+    let id = config::save_workspace(&params.name, Path::new(&params.root), &members)
+        .map_err(|error| error.to_string())?;
+    Ok(Value::String(id))
+}
+
+#[derive(Deserialize)]
+struct UpdateWorkspaceParams {
+    id: String,
+    name: String,
+    members: Vec<String>,
+}
+
+fn update_workspace(params: Value) -> Result<Value, String> {
+    let params: UpdateWorkspaceParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
+    config::update_workspace(&params.id, &params.name, &members)
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+struct DeleteWorkspaceParams {
+    id: String,
+}
+
+fn delete_workspace(params: Value) -> Result<Value, String> {
+    let params: DeleteWorkspaceParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::delete_workspace(&params.id).map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn get_graph_branch_selection(params: Value) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let selection = config::get_graph_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(selection).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetGraphBranchSelectionParams {
+    repo_path: String,
+    selected_branches: Vec<String>,
+}
+
+fn set_graph_branch_selection(params: Value) -> Result<Value, String> {
+    let params: SetGraphBranchSelectionParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::set_graph_branch_selection(Path::new(&params.repo_path), &params.selected_branches)
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
 }
