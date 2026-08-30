@@ -1287,7 +1287,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn two_open_repos_have_independent_worker_state() {
         use repo_service::worker::Worker;

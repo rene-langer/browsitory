@@ -5,10 +5,11 @@
 ```
 browsitory/
 ├── crates/
-│   ├── git-core/    # git2-based service layer, UI-agnostic, unit-tested headlessly
-│   ├── config/      # repo registry + preferences: recent-repos list, backed by TOML
-│   └── tauri-app/    # Tauri commands + per-repo worker threads
-└── frontend/          # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
+│   ├── git-core/      # git2-based service layer, UI-agnostic, unit-tested headlessly
+│   ├── config/        # repo registry + preferences: recent-repos list, backed by TOML
+│   ├── repo-service/  # transport-agnostic worker threads, credentials, forge/PR API access
+│   └── tauri-app/      # thin Tauri command adapter over repo-service
+└── frontend/            # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
 ```
 
 ## Why Tauri + a web frontend, not egui again
@@ -58,11 +59,11 @@ bare `Repository` can't be `State` at all, and `State<Mutex<Repository>>` (which
 duration of blocking git work.
 
 The `!Sync` constraint is what message-passing answers. Each opened repository gets one
-dedicated OS thread (`crates/tauri-app/src/worker.rs`'s `Worker::spawn`) that opens its own
-`Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved in
-once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands.rs`) send a
-`Command` enum value over a `std::sync::mpsc` channel to that thread and receive the result
-over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
+dedicated OS thread (`crates/repo-service/src/worker/mod.rs`'s `Worker::spawn`) that opens its
+own `Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved
+in once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands/mod.rs`)
+send a `Command` enum value over a `std::sync::mpsc` channel to that thread and receive the
+result over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
 Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
 on a reply, so one slow repository operation can't serialize unrelated commands. One worker
 thread per open repo also means multiple repos never contend on a shared handle.
