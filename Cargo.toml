@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "crates/git-core",
     "crates/config",
+    "crates/repo-service",
     "crates/tauri-app",
 ]

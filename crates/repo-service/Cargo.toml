@@ -1,0 +1,25 @@
+[package]
+name = "repo-service"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[features]
+# Mirrors tauri-app's own feature of the same name (see that crate's Cargo.toml): swaps
+# Worker::spawn's credential store from KeyringCredentialStore to InMemoryCredentialStore and
+# lets pull_requests.rs's forge API base URLs be redirected via env vars, so an E2E build never
+# touches a real OS keychain or a live GitHub/Bitbucket account. tauri-app's own flag forwards
+# to this one (see Task 2, Step 6).
+forge-fixture-override = []
+
+[dependencies]
+git-core = { path = "../git-core" }
+git2 = "0.21"
+keyring = { version = "4.1.6", features = ["v1"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3"
