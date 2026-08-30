@@ -363,3 +363,87 @@ fn graph_branch_selection_round_trips() {
     );
     assert_eq!(after["result"], serde_json::json!(["main", "feature"]));
 }
+
+#[test]
+fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), "new.txt", "hello");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let staged = sidecar.call(
+        2,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "new.txt"}),
+    );
+    assert_eq!(staged["result"], serde_json::Value::Null);
+
+    let committed = sidecar.call(
+        3,
+        "commit",
+        serde_json::json!({"repoPath": repo_path, "message": "add new.txt"}),
+    );
+    let commit_id = committed["result"].as_str().expect("commit id").to_string();
+    assert_eq!(commit_id.len(), 40);
+
+    let files = sidecar.call(
+        4,
+        "get_commit_files",
+        serde_json::json!({"repoPath": repo_path, "commitId": commit_id}),
+    );
+    assert_eq!(files["result"], serde_json::json!(["new.txt"]));
+
+    let unstaged = sidecar.call(
+        5,
+        "unstage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "new.txt"}),
+    );
+    assert_eq!(unstaged["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "line one\nline two\n");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "tracked.txt", "line one changed\nline two\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let diff = sidecar.call(
+        2,
+        "get_working_diff",
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false}),
+    );
+    let hunk = &diff["result"][0];
+    let old_start = hunk["oldStart"].as_u64().unwrap();
+    let new_start = hunk["newStart"].as_u64().unwrap();
+
+    let staged = sidecar.call(
+        3,
+        "stage_hunk",
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+    );
+    assert_eq!(staged["result"], serde_json::Value::Null);
+
+    let status = sidecar.call(4, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert!(status["result"][0]["staged"].as_bool().unwrap());
+
+    let unstaged = sidecar.call(
+        5,
+        "unstage_hunk",
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+    );
+    assert_eq!(unstaged["result"], serde_json::Value::Null);
+
+    let discarded = sidecar.call(
+        6,
+        "discard_hunk",
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+    );
+    assert_eq!(discarded["result"], serde_json::Value::Null);
+    let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
+    assert_eq!(on_disk.replace("\r\n", "\n"), "line one\nline two\n");
+}

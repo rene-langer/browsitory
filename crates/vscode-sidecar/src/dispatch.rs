@@ -30,6 +30,13 @@ pub fn dispatch(
         "delete_workspace" => delete_workspace(params),
         "get_graph_branch_selection" => get_graph_branch_selection(params),
         "set_graph_branch_selection" => set_graph_branch_selection(params),
+        "get_commit_files" => get_commit_files(params, repos),
+        "stage_file" => stage_file(params, repos),
+        "unstage_file" => unstage_file(params, repos),
+        "stage_hunk" => stage_hunk(params, repos),
+        "unstage_hunk" => unstage_hunk(params, repos),
+        "discard_hunk" => discard_hunk(params, repos),
+        "commit" => commit(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -396,4 +403,79 @@ fn set_graph_branch_selection(params: Value) -> Result<Value, String> {
     config::set_graph_branch_selection(Path::new(&params.repo_path), &params.selected_branches)
         .map_err(|error| error.to_string())?;
     Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetCommitFilesParams {
+    repo_path: String,
+    commit_id: String,
+}
+
+fn get_commit_files(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetCommitFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let files = worker_handle(repos, &params.repo_path)?.get_commit_files(params.commit_id)?;
+    serde_json::to_value(files).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoFilePathParams {
+    repo_path: String,
+    path: String,
+}
+
+fn stage_file(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoFilePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.stage_file(params.path)?;
+    Ok(Value::Null)
+}
+
+fn unstage_file(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoFilePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.unstage_file(params.path)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HunkParams {
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+}
+
+fn stage_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.stage_hunk(params.path, params.old_start, params.new_start)?;
+    Ok(Value::Null)
+}
+
+fn unstage_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.unstage_hunk(params.path, params.old_start, params.new_start)?;
+    Ok(Value::Null)
+}
+
+fn discard_hunk(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.discard_hunk(params.path, params.old_start, params.new_start)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitParams {
+    repo_path: String,
+    message: String,
+}
+
+fn commit(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: CommitParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let commit_id = worker_handle(repos, &params.repo_path)?.commit(params.message)?;
+    Ok(Value::String(commit_id))
 }
