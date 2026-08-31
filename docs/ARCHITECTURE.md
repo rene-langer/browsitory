@@ -15,10 +15,17 @@ browsitory/
 
 `vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target (Phase 6, spec
 `docs/superpowers/specs/2026-08-30-vscode-extension-design.md`): a standalone binary speaking
-line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. As of this writing it wires
-`open_repo`/`close_repo` plus the status/log/diff method family
-(`crates/vscode-sidecar/src/dispatch.rs`); the remaining ~79 `RepoClient` methods, and the
-`extension/` host that will actually spawn this process from VSCode, are follow-up work.
+line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. It now wires every `RepoClient`
+method except the five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
+`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`), which sub-phase (c)'s
+`extension/` host implements directly against VSCode APIs instead of round-tripping through the
+sidecar — see the spec's "VSCode-native integrations" section. Transfer progress
+(`subscribeTransferProgress`) rides the same JSON-RPC connection as everything else, as
+server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
+`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phase (b) is complete;
+the `extension/` host that will actually spawn this process from VSCode, package it per
+platform, and add the `@vscode/test-electron` E2E layer are sub-phases (c)-(e), still follow-up
+work.
 
 ## Why Tauri + a web frontend, not egui again
 
