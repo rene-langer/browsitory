@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { RepoClient } from "./ipc/RepoClient";
+import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
   throw new Error("not used in this test");
@@ -116,13 +117,10 @@ describe("App", () => {
     await waitFor(() => expect(listOpenRepos).toHaveBeenCalledOnce());
 
     act(() => {
-      window.dispatchEvent(new MessageEvent("message", {
-        data: {
-          jsonrpc: "2.0",
-          method: "transportStatus",
-          params: { state: "failed", message: "sidecar stopped unexpectedly" },
-        },
-      }));
+      publishTransportStatus({
+        state: "failed",
+        message: "sidecar stopped unexpectedly",
+      });
     });
 
     expect(await screen.findByText("sidecar stopped unexpectedly")).toBeInTheDocument();

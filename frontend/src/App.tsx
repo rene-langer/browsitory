@@ -22,7 +22,7 @@ import { TransferPanel } from "./components/TransferPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { WorktreePanel } from "./components/WorktreePanel";
 import type { RepoClient } from "./ipc/RepoClient";
-import { subscribeTransportStatus } from "./ipc/vscodeRepoClient";
+import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";

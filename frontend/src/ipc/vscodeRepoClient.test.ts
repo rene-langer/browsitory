@@ -91,7 +91,7 @@ describe("vscodeRepoClient", () => {
     const first = vscodeRepoClient.getStatus("/repo");
     const second = vscodeRepoClient.listRecentRepos();
     const received = vi.fn();
-    const { subscribeTransportStatus } = await import("./vscodeRepoClient");
+    const { subscribeTransportStatus } = await import("./transportStatus");
     subscribeTransportStatus(received);
 
     window.dispatchEvent(new MessageEvent("message", {
@@ -131,7 +131,7 @@ describe("vscodeRepoClient", () => {
 
   it("stops delivering transport status notifications after unsubscribe", async () => {
     const received = vi.fn();
-    const { subscribeTransportStatus } = await import("./vscodeRepoClient");
+    const { subscribeTransportStatus } = await import("./transportStatus");
     const unsubscribe = subscribeTransportStatus(received);
 
     window.dispatchEvent(new MessageEvent("message", {

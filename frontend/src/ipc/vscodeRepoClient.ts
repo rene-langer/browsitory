@@ -30,6 +30,11 @@ import type {
   WorktreeInfo,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./tauriRepoClient";
+import {
+  __resetTransportStatusForTests,
+  publishTransportStatus,
+  type TransportStatus,
+} from "./transportStatus";
 
 // No `vscode` npm package dependency here on purpose — the real extension host's webview API
 // typings arrive with sub-phase (c)'s `extension/` package. This ambient declaration is the
@@ -84,10 +89,6 @@ function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
   );
 }
 
-export interface TransportStatus {
-  state: "reconnecting" | "failed";
-  message: string;
-}
 
 function isTransportStatus(value: unknown): value is TransportStatus {
   if (typeof value !== "object" || value === null || !("state" in value) || !("message" in value)) {
@@ -107,7 +108,6 @@ const pending = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
-const transportStatusListeners = new Set<(status: TransportStatus) => void>();
 
 function handleMessage(event: MessageEvent) {
   const message = event.data;
@@ -134,7 +134,7 @@ function handleMessage(event: MessageEvent) {
   const waitingCalls = [...pending.values()];
   pending.clear();
   for (const waiting of waitingCalls) waiting.reject(error);
-  for (const listener of transportStatusListeners) listener(status);
+  publishTransportStatus(status);
 }
 
 function ensureMessageListener() {
@@ -142,6 +142,9 @@ function ensureMessageListener() {
   listenerRegistered = true;
   window.addEventListener("message", handleMessage);
 }
+
+// Importing the VS Code adapter activates its inbound notification bridge.
+ensureMessageListener();
 
 // Lazily acquire the VSCode API so importing this module remains safe in the Tauri bundle.
 function ensureInitialized(): VsCodeWebviewApi {
@@ -159,13 +162,6 @@ function call<T>(method: string, params: Record<string, unknown>): Promise<T> {
   });
 }
 
-export function subscribeTransportStatus(listener: (status: TransportStatus) => void) {
-  ensureMessageListener();
-  transportStatusListeners.add(listener);
-  return () => {
-    transportStatusListeners.delete(listener);
-  };
-}
 
 /** Test-only lifecycle cleanup for Vitest's shared window. */
 export function __resetVscodeRepoClientForTests() {
@@ -177,7 +173,7 @@ export function __resetVscodeRepoClientForTests() {
   nextRequestId = 1;
   pending.clear();
   transferProgressListeners.clear();
-  transportStatusListeners.clear();
+  __resetTransportStatusForTests();
 }
 
 export const vscodeRepoClient: RepoClient = {
