@@ -535,9 +535,15 @@ fn worktree_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(created["result"], serde_json::Value::Null);
 
-    let listed = sidecar.call(3, "list_worktrees", serde_json::json!({"repoPath": repo_path}));
+    let listed = sidecar.call(
+        3,
+        "list_worktrees",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     let worktrees = listed["result"].as_array().expect("worktree list");
-    assert!(worktrees.iter().any(|w| w["name"] == "feature-tree" && w["isMain"] == false));
+    assert!(worktrees
+        .iter()
+        .any(|w| w["name"] == "feature-tree" && w["isMain"] == false));
 
     let removed = sidecar.call(
         4,
@@ -547,6 +553,10 @@ fn worktree_lifecycle_round_trips_through_the_sidecar() {
     assert_eq!(removed["result"], serde_json::Value::Null);
     assert!(!linked.exists());
 
-    let pruned = sidecar.call(5, "prune_worktrees", serde_json::json!({"repoPath": repo_path}));
+    let pruned = sidecar.call(
+        5,
+        "prune_worktrees",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     assert_eq!(pruned["result"], serde_json::Value::Null);
 }
