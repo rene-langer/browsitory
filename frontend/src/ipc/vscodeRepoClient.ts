@@ -2,12 +2,17 @@ import type {
   BlameLine,
   BranchInfo,
   ConflictSegment,
+  CreatePullRequest,
   DiffHunk,
   FileConflictChoice,
+  ForgeProvider,
+  ForgeRepository,
   GraphCommit,
   MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
+  PullRequest,
+  PullRequestList,
   RebasePlanCommit,
   RebasePlanEntry,
   RebaseStepResult,
@@ -283,10 +288,15 @@ export const vscodeRepoClient: RepoClient = {
   abortRebase: (repoPath: string) => call<void>("abort_rebase", { repoPath }),
   getRebaseProgress: (repoPath: string) =>
     call<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
-  detectForgeRepository: notImplemented("detectForgeRepository"),
-  saveForgeToken: notImplemented("saveForgeToken"),
-  forgetForgeToken: notImplemented("forgetForgeToken"),
-  listPullRequests: notImplemented("listPullRequests"),
-  createPullRequest: notImplemented("createPullRequest"),
+  detectForgeRepository: (repoPath: string) =>
+    call<ForgeRepository[]>("detect_forge_repository", { repoPath }),
+  saveForgeToken: (repoPath: string, provider: ForgeProvider, account: string, token: string) =>
+    call<void>("save_forge_token", { repoPath, provider, account, token }),
+  forgetForgeToken: (repoPath: string, provider: ForgeProvider, account: string) =>
+    call<void>("forget_forge_token", { repoPath, provider, account }),
+  listPullRequests: (repoPath: string, remoteName: string, account: string) =>
+    call<PullRequestList>("list_pull_requests", { repoPath, remoteName, account }),
+  createPullRequest: (repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest) =>
+    call<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
   openExternalUrl: notImplemented("openExternalUrl"),
 };

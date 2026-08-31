@@ -64,8 +64,10 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.detectForgeRepository("/repo")).rejects.toThrow(
-      "detectForgeRepository is not implemented yet",
+    // VSCode-native-only methods (permanently out of scope for the sidecar per the spec) are the
+    // only ones still unwired once forge repository detection and pull requests are wired below.
+    await expect(vscodeRepoClient.pickRepoFolder()).rejects.toThrow(
+      "pickRepoFolder is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -772,5 +774,66 @@ describe("vscodeRepoClient", () => {
     const progressPromise = vscodeRepoClient.getRebaseProgress("/repo");
     respond(5, { currentStep: 1, totalSteps: 3 });
     await expect(progressPromise).resolves.toEqual({ currentStep: 1, totalSteps: 3 });
+  });
+
+  it("wires detectForgeRepository, saveForgeToken, and forgetForgeToken", async () => {
+    const detectPromise = vscodeRepoClient.detectForgeRepository("/repo");
+    respond(1, [{ provider: "GitHub", host: "github.com", owner: "acme", name: "widget", remoteName: "origin" }]);
+    await expect(detectPromise).resolves.toHaveLength(1);
+
+    const savePromise = vscodeRepoClient.saveForgeToken("/repo", "GitHub", "alice", "secret");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "save_forge_token",
+      params: { repoPath: "/repo", provider: "GitHub", account: "alice", token: "secret" },
+    });
+    respond(2, null);
+    await expect(savePromise).resolves.toBeNull();
+
+    const forgetPromise = vscodeRepoClient.forgetForgeToken("/repo", "GitHub", "alice");
+    respond(3, null);
+    await expect(forgetPromise).resolves.toBeNull();
+  });
+
+  it("wires listPullRequests and createPullRequest", async () => {
+    const listPromise = vscodeRepoClient.listPullRequests("/repo", "origin", "alice");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "list_pull_requests",
+      params: { repoPath: "/repo", remoteName: "origin", account: "alice" },
+    });
+    respond(1, { pullRequests: [], truncated: false });
+    await expect(listPromise).resolves.toEqual({ pullRequests: [], truncated: false });
+
+    const createPromise = vscodeRepoClient.createPullRequest("/repo", "origin", "alice", {
+      title: "Add feature",
+      description: null,
+      sourceBranch: "feature",
+      targetBranch: "main",
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "create_pull_request",
+      params: {
+        repoPath: "/repo",
+        remoteName: "origin",
+        account: "alice",
+        pullRequest: { title: "Add feature", description: null, sourceBranch: "feature", targetBranch: "main" },
+      },
+    });
+    respond(2, {
+      id: "1",
+      number: 7,
+      title: "Add feature",
+      url: "https://github.com/acme/widget/pull/7",
+      author: "alice",
+      sourceBranch: "feature",
+      targetBranch: "main",
+      state: "open",
+    });
+    await expect(createPromise).resolves.toMatchObject({ number: 7 });
   });
 });
