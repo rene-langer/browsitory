@@ -109,6 +109,21 @@ describe("App", () => {
     await waitFor(() => expect(listOpenRepos).toHaveBeenCalledOnce());
   });
 
+  it("leaves updater UI absent unless the transport bootstrap injects it", async () => {
+    const listOpenRepos = vi.fn().mockResolvedValue({ entries: [], activePath: null });
+    const client = fakeClient({ listOpenRepos });
+    const view = render(<App client={client} />);
+    await waitFor(() => expect(listOpenRepos).toHaveBeenCalledOnce());
+
+    expect(screen.queryByText("Tauri updater")).not.toBeInTheDocument();
+
+    view.rerender(
+      <App client={client} updateBanner={<div>Tauri updater</div>} />,
+    );
+
+    expect(screen.getByText("Tauri updater")).toBeInTheDocument();
+  });
+
   it("renders a transport status failure with the existing inline error treatment", async () => {
     const listOpenRepos = vi.fn().mockResolvedValue({ entries: [], activePath: null });
     const client = fakeClient({ listOpenRepos });

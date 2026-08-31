@@ -80,6 +80,54 @@ function createBridge(overrides: {
   };
 }
 
+function writtenRequest(sidecar: FakeSidecar, index: number) {
+  const chunk = sidecar.stdin.write.mock.calls[index]?.[0];
+  if (typeof chunk !== "string") throw new Error(`missing sidecar request ${index}`);
+  return JSON.parse(chunk) as {
+    jsonrpc: "2.0";
+    id: number;
+    method: string;
+    params: Record<string, unknown>;
+  };
+}
+
+async function completePersistedRepositoryRestore(
+  sidecar: FakeSidecar,
+  repoPaths: readonly string[] = [],
+) {
+  await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(1));
+  const listRequest = writtenRequest(sidecar, 0);
+  expect(listRequest).toMatchObject({
+    jsonrpc: "2.0",
+    method: "list_open_repos",
+    params: {},
+  });
+  sidecar.stdout.push(
+    `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: listRequest.id,
+      result: {
+        entries: repoPaths.map((path) => ({ path, workspaceId: null })),
+        activePath: repoPaths[0] ?? null,
+      },
+    })}\n`,
+  );
+
+  for (const [offset, repoPath] of repoPaths.entries()) {
+    const index = offset + 1;
+    await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(index + 1));
+    const openRequest = writtenRequest(sidecar, index);
+    expect(openRequest).toMatchObject({
+      jsonrpc: "2.0",
+      method: "open_repo",
+      params: { path: repoPath },
+    });
+    sidecar.stdout.push(
+      `${JSON.stringify({ jsonrpc: "2.0", id: openRequest.id, result: null })}\n`,
+    );
+  }
+}
+
 describe("SidecarBridge", () => {
   it("lazily spawns one sidecar, writes one request per line, and preserves split UTF-8 replies", async () => {
     const { bridge, child, spawn, postToWebview } = createBridge();
@@ -248,7 +296,7 @@ describe("SidecarBridge", () => {
     expect(child.kill).toHaveBeenCalledOnce();
   });
 
-  it("rejects every pending id on exit and lazily starts one fresh sidecar", async () => {
+  it("restores persisted repositories before forwarding the first request after exit", async () => {
     const first = new FakeSidecar();
     const replacement = new FakeSidecar();
     const { bridge, spawn, postToWebview } = createBridge({
@@ -292,10 +340,12 @@ describe("SidecarBridge", () => {
       method: "get_status",
       params: { repoPath: "/repo" },
     };
-    await bridge.handleWebviewMessage(next);
+    const handling = bridge.handleWebviewMessage(next);
+    await completePersistedRepositoryRestore(replacement, ["/repo"]);
+    await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(next)}\n`);
+    expect(writtenRequest(replacement, 2)).toEqual(next);
     expect(first.stdin.write).not.toHaveBeenCalledWith(`${JSON.stringify(next)}\n`);
   });
 
@@ -340,12 +390,68 @@ describe("SidecarBridge", () => {
       method: "get_status",
       params: { repoPath: "/repo" },
     };
-    await bridge.handleWebviewMessage(retry);
+    const handling = bridge.handleWebviewMessage(retry);
+    await completePersistedRepositoryRestore(replacement);
+    await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(replacement.stdin.write).toHaveBeenCalledTimes(1);
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
     expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(retry)}\n`);
     expect(first.stdin.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts repository restoration when the replacement sidecar exits", async () => {
+    const first = new FakeSidecar();
+    const replacement = new FakeSidecar();
+    const nextReplacement = new FakeSidecar();
+    const { bridge, spawn, postToWebview } = createBridge({
+      spawnResults: [first, replacement, nextReplacement],
+    });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 54, method: "get_status", params: { repoPath: "/repo-a" },
+    });
+    first.emit("exit", 1, null);
+    postToWebview.mockClear();
+
+    const retry = {
+      jsonrpc: "2.0" as const,
+      id: 55,
+      method: "get_status",
+      params: { repoPath: "/repo-a" },
+    };
+    const handling = bridge.handleWebviewMessage(retry);
+    await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(1));
+    const listRequest = writtenRequest(replacement, 0);
+    replacement.stdout.push(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: listRequest.id,
+        result: {
+          entries: [
+            { path: "/repo-a", workspaceId: null },
+            { path: "/repo-b", workspaceId: null },
+          ],
+          activePath: "/repo-a",
+        },
+      })}\n`,
+    );
+    await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(2));
+    replacement.emit("exit", 9, null);
+    await handling;
+
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 55,
+      error: { code: -32001, message: "Browsitory sidecar exited with code 9" },
+    });
+
+    const nextHandling = bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 56, method: "list_recent_repos", params: {},
+    });
+    await completePersistedRepositoryRestore(nextReplacement);
+    await nextHandling;
+    expect(spawn).toHaveBeenCalledTimes(3);
   });
 
   it("handles a synchronous stdin write failure and never replays the failed mutation", async () => {
@@ -408,7 +514,9 @@ describe("SidecarBridge", () => {
       method: "get_status",
       params: { repoPath: "/repo" },
     };
-    await bridge.handleWebviewMessage(retry);
+    const handling = bridge.handleWebviewMessage(retry);
+    await completePersistedRepositoryRestore(replacement);
+    await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(retry)}\n`);
@@ -457,7 +565,9 @@ describe("SidecarBridge", () => {
       method: "list_recent_repos",
       params: {},
     };
-    await bridge.handleWebviewMessage(retry);
+    const handling = bridge.handleWebviewMessage(retry);
+    await completePersistedRepositoryRestore(replacement);
+    await handling;
 
     expect(spawn).toHaveBeenCalledTimes(3);
     expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(retry)}\n`);

@@ -29,7 +29,7 @@ import type {
   Workspace,
   WorktreeInfo,
 } from "./RepoClient";
-import { validateRemoteUrls } from "./tauriRepoClient";
+import { validateRemoteUrls } from "./validateRemoteUrls";
 import {
   __resetTransportStatusForTests,
   publishTransportStatus,

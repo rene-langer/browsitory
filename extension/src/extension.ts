@@ -34,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.ViewColumn.One,
       {
         enableScripts: true,
+        retainContextWhenHidden: true,
         localResourceRoots: [assetRoot],
       },
     );

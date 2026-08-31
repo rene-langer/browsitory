@@ -48,6 +48,11 @@ export interface JsonRpcRequest {
 
 type JsonRpcMessage = Record<string, unknown>;
 
+interface InternalRequestWaiter {
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+}
+
 export interface SidecarBridgeDependencies {
   readonly spawn: (executablePath: string) => SidecarProcess;
   readonly executablePath: string;
@@ -72,6 +77,10 @@ export class SidecarBridge {
   private state: SidecarBridgeState = "idle";
   private detachSidecarListeners: (() => void) | undefined;
   private readonly pendingRequestIds = new Set<number>();
+  private readonly internalRequestWaiters = new Map<number, InternalRequestWaiter>();
+  private nextInternalRequestId = Number.MAX_SAFE_INTEGER;
+  private sidecarStartup: Promise<SidecarProcess | undefined> | undefined;
+  private restoreRepositoriesOnNextSpawn = false;
   private disposed = false;
 
   constructor(private readonly dependencies: SidecarBridgeDependencies) {}
@@ -93,7 +102,7 @@ export class SidecarBridge {
       return;
     }
 
-    const sidecar = this.ensureSidecar();
+    const sidecar = await this.ensureSidecar();
     if (!sidecar) return;
     try {
       sidecar.stdin.write(JSON.stringify(message) + "\n");
@@ -110,9 +119,11 @@ export class SidecarBridge {
     if (this.disposed) return Promise.resolve();
     this.disposed = true;
     const sidecar = this.sidecar;
+    this.sidecarStartup = undefined;
     this.detachCurrentSidecar();
     this.sidecar = undefined;
     this.state = "idle";
+    this.rejectInternalRequests(DISPOSED_MESSAGE);
     if (sidecar) this.killSidecar(sidecar);
     if (this.pendingRequestIds.size > 0) {
       this.rejectPendingAndNotify("failed", DISPOSED_MESSAGE);
@@ -120,15 +131,23 @@ export class SidecarBridge {
     return Promise.resolve();
   }
 
-  private ensureSidecar(): SidecarProcess | undefined {
+  private async ensureSidecar(): Promise<SidecarProcess | undefined> {
     if (this.state === "running" && this.sidecar) return this.sidecar;
+    if (this.sidecarStartup) return this.sidecarStartup;
 
+    const startup = this.spawnSidecar();
+    this.sidecarStartup = startup;
     try {
-      const sidecar = this.dependencies.spawn(this.dependencies.executablePath);
-      this.sidecar = sidecar;
-      this.state = "running";
-      this.attachSidecar(sidecar);
-      return sidecar;
+      return await startup;
+    } finally {
+      if (this.sidecarStartup === startup) this.sidecarStartup = undefined;
+    }
+  }
+
+  private async spawnSidecar(): Promise<SidecarProcess | undefined> {
+    let sidecar: SidecarProcess;
+    try {
+      sidecar = this.dependencies.spawn(this.dependencies.executablePath);
     } catch (error) {
       const message = "Browsitory sidecar failed to start: " + errorMessage(error);
       this.state = "failed";
@@ -136,6 +155,78 @@ export class SidecarBridge {
       this.rejectPendingAndNotify("failed", message);
       return undefined;
     }
+
+    this.sidecar = sidecar;
+    this.attachSidecar(sidecar);
+    if (this.restoreRepositoriesOnNextSpawn) {
+      try {
+        await this.restorePersistedRepositories(sidecar);
+      } catch (error) {
+        if (sidecar !== this.sidecar || this.disposed) return undefined;
+        const message =
+          "Browsitory sidecar failed to restore persisted repositories: " +
+          errorMessage(error);
+        this.detachCurrentSidecar();
+        this.sidecar = undefined;
+        this.state = "failed";
+        this.killSidecar(sidecar);
+        this.dependencies.appendLine(message);
+        this.rejectInternalRequests(message);
+        this.rejectPendingAndNotify("failed", message);
+        return undefined;
+      }
+    }
+
+    if (sidecar !== this.sidecar || this.disposed) return undefined;
+    this.restoreRepositoriesOnNextSpawn = false;
+    this.state = "running";
+    return sidecar;
+  }
+
+  private async restorePersistedRepositories(sidecar: SidecarProcess): Promise<void> {
+    const listed = await this.callSidecar(sidecar, "list_open_repos", {});
+    for (const repoPath of persistedRepositoryPaths(listed)) {
+      try {
+        await this.callSidecar(sidecar, "open_repo", { path: repoPath });
+      } catch (error) {
+        if (sidecar !== this.sidecar || this.disposed) throw error;
+        this.dependencies.appendLine(
+          `Browsitory: failed to reopen persisted repository ${repoPath}: ${errorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  private callSidecar(
+    sidecar: SidecarProcess,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const id = this.allocateInternalRequestId();
+    return new Promise((resolve, reject) => {
+      this.internalRequestWaiters.set(id, { resolve, reject });
+      try {
+        sidecar.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      } catch (error) {
+        this.internalRequestWaiters.delete(id);
+        reject(error instanceof Error ? error : new Error(errorMessage(error)));
+        this.handleProcessLoss(
+          sidecar,
+          "Browsitory sidecar stdin write failed: " + errorMessage(error),
+          true,
+        );
+      }
+    });
+  }
+
+  private allocateInternalRequestId(): number {
+    while (
+      this.pendingRequestIds.has(this.nextInternalRequestId) ||
+      this.internalRequestWaiters.has(this.nextInternalRequestId)
+    ) {
+      this.nextInternalRequestId -= 1;
+    }
+    return this.nextInternalRequestId--;
   }
 
   private attachSidecar(sidecar: SidecarProcess): void {
@@ -195,9 +286,12 @@ export class SidecarBridge {
     if (sidecar !== this.sidecar || this.disposed) return;
     this.detachCurrentSidecar();
     this.sidecar = undefined;
+    this.sidecarStartup = undefined;
     this.state = "reconnecting";
+    this.restoreRepositoriesOnNextSpawn = true;
     if (kill) this.killSidecar(sidecar);
     this.dependencies.appendLine(message);
+    this.rejectInternalRequests(message);
     this.rejectPendingAndNotify("reconnecting", message);
   }
 
@@ -214,6 +308,15 @@ export class SidecarBridge {
       this.dependencies.appendLine(
         "Browsitory: failed to stop vscode-sidecar: " + errorMessage(error),
       );
+    }
+  }
+
+  private rejectInternalRequests(message: string): void {
+    const waiters = [...this.internalRequestWaiters.values()];
+    this.internalRequestWaiters.clear();
+    const error = new Error(message);
+    for (const waiter of waiters) {
+      waiter.reject(error);
     }
   }
 
@@ -261,6 +364,19 @@ export class SidecarBridge {
         throw new Error("not a JSON-RPC response or notification");
       }
       if (typeof message["id"] === "number") {
+        const internalWaiter = this.internalRequestWaiters.get(message["id"]);
+        if (internalWaiter) {
+          this.internalRequestWaiters.delete(message["id"]);
+          const rpcError = message["error"];
+          if (isRecord(rpcError) && typeof rpcError["message"] === "string") {
+            internalWaiter.reject(new Error(rpcError["message"]));
+          } else if (Object.prototype.hasOwnProperty.call(message, "result")) {
+            internalWaiter.resolve(message["result"]);
+          } else {
+            internalWaiter.reject(new Error("malformed internal JSON-RPC response"));
+          }
+          return;
+        }
         this.pendingRequestIds.delete(message["id"]);
       }
       this.dependencies.postToWebview(message);
@@ -402,6 +518,18 @@ function requireStringParam(request: JsonRpcRequest, name: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function persistedRepositoryPaths(value: unknown): string[] {
+  if (!isRecord(value) || !Array.isArray(value["entries"])) {
+    throw new Error("list_open_repos returned an invalid result");
+  }
+  return value["entries"].map((entry) => {
+    if (!isRecord(entry) || typeof entry["path"] !== "string") {
+      throw new Error("list_open_repos returned an invalid repository entry");
+    }
+    return entry["path"];
+  });
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {

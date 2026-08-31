@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpCircle, Moon, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
@@ -19,7 +19,6 @@ import { StashPanel } from "./components/StashPanel";
 import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
-import { UpdateBanner } from "./components/UpdateBanner";
 import { WorktreePanel } from "./components/WorktreePanel";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
@@ -347,7 +346,13 @@ function RepoWorkspace({
   );
 }
 
-export default function App({ client }: { client: RepoClient }) {
+export default function App({
+  client,
+  updateBanner = null,
+}: {
+  client: RepoClient;
+  updateBanner?: ReactNode;
+}) {
   const openRepos = useOpenRepos(client);
   const workspaces = useWorkspaces(client);
   const workspaceNames = useMemo(
@@ -513,7 +518,7 @@ export default function App({ client }: { client: RepoClient }) {
 
   return (
     <main>
-      <UpdateBanner />
+      {updateBanner}
       <header className={styles.headerRow}>
         <h1>Browsitory</h1>
         <RepoTabs

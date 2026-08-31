@@ -19,6 +19,7 @@ describe("vscodeRepoClient", () => {
 
   afterEach(() => {
     resetVscodeRepoClientForTests?.();
+    vi.doUnmock("./tauriRepoClient");
   });
 
   function respond(id: number, result: unknown) {
@@ -53,6 +54,17 @@ describe("vscodeRepoClient", () => {
     respondWithError(1, "repo not open: /missing");
 
     await expect(promise).rejects.toThrow("repo not open: /missing");
+  });
+
+  it("loads without the Tauri transport module", async () => {
+    // A VS Code webview does not ship @tauri-apps/api. Its adapter must therefore be loadable
+    // even when the Tauri-specific client cannot be imported.
+    vi.resetModules();
+    vi.doMock("./tauriRepoClient", () => {
+      throw new Error("Tauri transport is unavailable");
+    });
+
+    await expect(import("./vscodeRepoClient")).resolves.toHaveProperty("vscodeRepoClient");
   });
 
   it("correlates concurrent requests by id", async () => {

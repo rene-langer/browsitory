@@ -150,6 +150,35 @@ describe("extension lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("retains the webview context while the panel is hidden", () => {
+    activate(harness.context);
+    harness.openPanel();
+
+    expect(harness.vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+      "browsitory",
+      "Browsitory",
+      1,
+      expect.objectContaining({
+        enableScripts: true,
+        retainContextWhenHidden: true,
+      }),
+    );
+  });
+
+  it("delivers delayed sidecar replies through Webview.postMessage", async () => {
+    activate(harness.context);
+    harness.openPanel();
+    await harness.dispatch({
+      jsonrpc: "2.0", id: 93, method: "get_status", params: { repoPath: "/repo" },
+    });
+    harness.postMessage.mockClear();
+
+    const response = { jsonrpc: "2.0", id: 93, result: [] };
+    harness.child.stdout.emit("data", Buffer.from(`${JSON.stringify(response)}\n`));
+
+    await vi.waitFor(() => expect(harness.postMessage).toHaveBeenCalledWith(response));
+  });
+
   it("closing the panel disposes the same bridge and message listener", async () => {
     activate(harness.context);
     harness.openPanel();
