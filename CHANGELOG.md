@@ -11,9 +11,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Extracted the git worker/credential/forge service layer out of `tauri-app` into a new
   internal `repo-service` crate, in preparation for a future VSCode extension — no
   user-visible behavior change.
-- Added `crates/vscode-sidecar`, a JSON-RPC-over-stdio proof-of-concept proving out the
-  future VSCode extension's sidecar architecture on a handful of `RepoClient` methods
-  (status/log/diff) — internal only, not yet wired into any shipped product.
+- `crates/vscode-sidecar` now wires the full `RepoClient` method surface (every method except
+  the five VSCode-native ones — repo folder picking, app/last-seen version, and opening an
+  external URL — which a later phase wires directly against VSCode APIs), including a
+  transfer-progress JSON-RPC notification mechanism for fetch/push/pull — internal only, not
+  yet wired into any shipped product.
 
 ## [0.2.0] - 2026-08-29
 
