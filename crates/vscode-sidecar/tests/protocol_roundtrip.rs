@@ -668,3 +668,147 @@ fn reflog_lists_and_restores_through_the_sidecar() {
     );
     assert_eq!(restored["result"], serde_json::Value::Null);
 }
+
+#[test]
+fn remote_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    repo.remote("origin", "https://example.com/owner/repo.git")
+        .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let remotes = sidecar.call(
+        2,
+        "list_remotes",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    let list = remotes["result"].as_array().expect("remote list");
+    assert_eq!(list[0]["name"], "origin");
+    assert_eq!(list[0]["fetchUrl"], "https://example.com/owner/repo.git");
+    assert_eq!(list[0]["authMode"], serde_json::Value::Null);
+
+    let renamed = sidecar.call(
+        3,
+        "rename_remote",
+        serde_json::json!({"repoPath": repo_path, "oldName": "origin", "newName": "upstream"}),
+    );
+    assert_eq!(renamed["result"], serde_json::Value::Null);
+
+    let updated = sidecar.call(
+        4,
+        "update_remote_urls",
+        serde_json::json!({"repoPath": repo_path, "name": "upstream", "fetchUrl": "https://example.com/owner/repo2.git", "pushUrl": null}),
+    );
+    assert_eq!(updated["result"], serde_json::Value::Null);
+
+    let auth_set = sidecar.call(
+        5,
+        "set_remote_auth_mode",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "upstream", "mode": "HttpsToken", "username": "alice"}),
+    );
+    assert_eq!(auth_set["result"], serde_json::Value::Null);
+
+    let remotes_after = sidecar.call(
+        6,
+        "list_remotes",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(remotes_after["result"][0]["authMode"], "HttpsToken");
+    assert_eq!(remotes_after["result"][0]["authUsername"], "alice");
+
+    let removed = sidecar.call(
+        7,
+        "remove_remote",
+        serde_json::json!({"repoPath": repo_path, "name": "upstream", "clearUpstreams": true}),
+    );
+    assert_eq!(removed["result"], serde_json::Value::Null);
+    let remotes_final = sidecar.call(
+        8,
+        "list_remotes",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(remotes_final["result"], serde_json::json!([]));
+}
+
+#[test]
+fn add_remote_https_credential_and_current_upstream_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let added = sidecar.call(
+        2,
+        "add_remote",
+        serde_json::json!({"repoPath": repo_path, "name": "origin", "fetchUrl": "https://example.com/owner/repo.git", "pushUrl": null}),
+    );
+    assert_eq!(added["result"], serde_json::Value::Null);
+
+    let saved = sidecar.call(
+        3,
+        "save_https_credential",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "username": "alice", "token": "secret"}),
+    );
+    assert_eq!(saved["result"], serde_json::Value::Null);
+
+    let forgotten = sidecar.call(
+        4,
+        "forget_https_credential",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin"}),
+    );
+    assert_eq!(forgotten["result"], serde_json::Value::Null);
+
+    let no_upstream = sidecar.call(
+        5,
+        "get_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(no_upstream["result"], serde_json::Value::Null);
+
+    let set = sidecar.call(
+        6,
+        "set_current_upstream",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "remoteBranch": "main"}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null);
+
+    let upstream = sidecar.call(
+        7,
+        "get_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(upstream["result"]["remoteName"], "origin");
+    assert_eq!(upstream["result"]["remoteBranch"], "main");
+
+    let upstreams = sidecar.call(
+        8,
+        "get_remote_upstreams",
+        serde_json::json!({"repoPath": repo_path, "name": "origin"}),
+    );
+    assert_eq!(upstreams["result"].as_array().unwrap().len(), 1);
+
+    let cleared = sidecar.call(
+        9,
+        "clear_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(cleared["result"], serde_json::Value::Null);
+    let after_clear = sidecar.call(
+        10,
+        "get_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after_clear["result"], serde_json::Value::Null);
+
+    let branches = sidecar.call(
+        11,
+        "list_remote_branches",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin"}),
+    );
+    assert_eq!(branches["result"], serde_json::json!([]));
+}

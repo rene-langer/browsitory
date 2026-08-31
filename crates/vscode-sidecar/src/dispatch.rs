@@ -56,6 +56,19 @@ pub fn dispatch(
         "list_reflog_refs" => list_reflog_refs(params, repos),
         "get_reflog" => get_reflog(params, repos),
         "restore_reflog_entry" => restore_reflog_entry(params, repos),
+        "list_remotes" => list_remotes(params, repos),
+        "list_remote_branches" => list_remote_branches(params, repos),
+        "get_current_upstream" => get_current_upstream(params, repos),
+        "get_remote_upstreams" => get_remote_upstreams(params, repos),
+        "add_remote" => add_remote(params, repos),
+        "rename_remote" => rename_remote(params, repos),
+        "update_remote_urls" => update_remote_urls(params, repos),
+        "remove_remote" => remove_remote(params, repos),
+        "save_https_credential" => save_https_credential(params, repos),
+        "forget_https_credential" => forget_https_credential(params, repos),
+        "set_remote_auth_mode" => set_remote_auth_mode(params, repos),
+        "set_current_upstream" => set_current_upstream(params, repos),
+        "clear_current_upstream" => clear_current_upstream(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -799,5 +812,296 @@ fn restore_reflog_entry(
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?
         .restore_reflog_entry(params.reference, params.new_id)?;
+    Ok(Value::Null)
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+enum RemoteAuthModeDto {
+    HttpsToken,
+    SshAgent,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteInfoDto {
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+    auth_mode: Option<RemoteAuthModeDto>,
+    auth_username: Option<String>,
+}
+
+impl
+    From<(
+        git_core::remote::RemoteInfo,
+        Option<git_core::remote::RemoteAuthMode>,
+    )> for RemoteInfoDto
+{
+    fn from(
+        (remote, profile): (
+            git_core::remote::RemoteInfo,
+            Option<git_core::remote::RemoteAuthMode>,
+        ),
+    ) -> Self {
+        let (auth_mode, auth_username) = match profile {
+            Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) => {
+                (Some(RemoteAuthModeDto::HttpsToken), Some(username))
+            }
+            Some(git_core::remote::RemoteAuthMode::SshAgent) => {
+                (Some(RemoteAuthModeDto::SshAgent), None)
+            }
+            None => (None, None),
+        };
+        Self {
+            name: remote.name,
+            fetch_url: remote.fetch_url,
+            push_url: remote.push_url,
+            auth_mode,
+            auth_username,
+        }
+    }
+}
+
+fn list_remotes(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let worker = worker_handle(repos, &params.repo_path)?;
+    let remotes: Result<Vec<RemoteInfoDto>, String> = worker
+        .list_remotes()?
+        .into_iter()
+        .map(|remote| {
+            let profile = worker.get_remote_auth_mode(remote.name.clone())?;
+            Ok(RemoteInfoDto::from((remote, profile)))
+        })
+        .collect();
+    serde_json::to_value(remotes?).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteNameParams {
+    repo_path: String,
+    remote_name: String,
+}
+
+fn list_remote_branches(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RemoteNameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let branches =
+        worker_handle(repos, &params.repo_path)?.list_remote_branches(params.remote_name)?;
+    serde_json::to_value(branches).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamInfoDto {
+    local_branch: String,
+    remote_name: String,
+    remote_branch: String,
+}
+
+impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
+    fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
+        Self {
+            local_branch: upstream.local_branch,
+            remote_name: upstream.remote_name,
+            remote_branch: upstream.remote_branch,
+        }
+    }
+}
+
+fn get_current_upstream(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let upstream = worker_handle(repos, &params.repo_path)?
+        .get_current_upstream()?
+        .map(UpstreamInfoDto::from);
+    serde_json::to_value(upstream).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetRemoteUpstreamsParams {
+    repo_path: String,
+    name: String,
+}
+
+fn get_remote_upstreams(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: GetRemoteUpstreamsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let upstreams: Vec<UpstreamInfoDto> = worker_handle(repos, &params.repo_path)?
+        .get_remote_upstreams(params.name)?
+        .into_iter()
+        .map(UpstreamInfoDto::from)
+        .collect();
+    serde_json::to_value(upstreams).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddRemoteParams {
+    repo_path: String,
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+}
+
+fn add_remote(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: AddRemoteParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.add_remote(
+        params.name,
+        params.fetch_url,
+        params.push_url,
+    )?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenameRemoteParams {
+    repo_path: String,
+    old_name: String,
+    new_name: String,
+}
+
+fn rename_remote(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RenameRemoteParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.rename_remote(params.old_name, params.new_name)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateRemoteUrlsParams {
+    repo_path: String,
+    name: String,
+    fetch_url: String,
+    push_url: Option<String>,
+}
+
+fn update_remote_urls(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: UpdateRemoteUrlsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.update_remote_urls(
+        params.name,
+        params.fetch_url,
+        params.push_url,
+    )?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveRemoteParams {
+    repo_path: String,
+    name: String,
+    clear_upstreams: bool,
+}
+
+fn remove_remote(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RemoveRemoteParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.remove_remote(params.name, params.clear_upstreams)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveHttpsCredentialParams {
+    repo_path: String,
+    remote_name: String,
+    username: String,
+    token: String,
+}
+
+fn save_https_credential(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: SaveHttpsCredentialParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.save_https_credential(
+        params.remote_name,
+        params.username,
+        params.token,
+    )?;
+    Ok(Value::Null)
+}
+
+fn forget_https_credential(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RemoteNameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.forget_https_credential(params.remote_name)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetRemoteAuthModeParams {
+    repo_path: String,
+    remote_name: String,
+    mode: RemoteAuthModeDto,
+    username: Option<String>,
+}
+
+fn set_remote_auth_mode(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: SetRemoteAuthModeParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let mode = match params.mode {
+        RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
+            username: params
+                .username
+                .filter(|username| !username.trim().is_empty())
+                .ok_or_else(|| "HTTPS username is required".to_string())?,
+        },
+        RemoteAuthModeDto::SshAgent => git_core::remote::RemoteAuthMode::SshAgent,
+    };
+    worker_handle(repos, &params.repo_path)?.set_remote_auth_mode(params.remote_name, mode)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetCurrentUpstreamParams {
+    repo_path: String,
+    remote_name: String,
+    remote_branch: String,
+}
+
+fn set_current_upstream(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: SetCurrentUpstreamParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?
+        .set_current_upstream(params.remote_name, params.remote_branch)?;
+    Ok(Value::Null)
+}
+
+fn clear_current_upstream(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.clear_current_upstream()?;
     Ok(Value::Null)
 }
