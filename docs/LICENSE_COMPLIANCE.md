@@ -38,8 +38,8 @@ completion (not the full transitive tree).
 | lucide-react | ISC | Icon set adopted in Phase 5 for stage/unstage, merge-conflict, branch, stash, tag, worktree, submodule, PR-status, and theme-toggle iconography. |
 | @tauri-apps/api | Apache-2.0 OR MIT | |
 | vite | MIT | dev only |
-| typescript | Apache-2.0 | dev only |
-| vitest | MIT | dev only |
+| typescript | Apache-2.0 | dev only; shared by the frontend and VSCode extension packages. |
+| vitest | MIT | dev only; shared by the frontend and VSCode extension packages. |
 | @testing-library/react | MIT | dev only |
 | @testing-library/jest-dom | MIT | dev only |
 | jsdom | MIT | dev only |
@@ -51,7 +51,8 @@ completion (not the full transitive tree).
 | typescript-eslint | MIT | dev only |
 | globals | MIT | dev only |
 | @vitejs/plugin-react | MIT | dev only |
-| @types/node | MIT | dev only |
+| @types/node | MIT | dev only; shared by the frontend and VSCode extension packages. |
+| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. Source: `npm info @types/vscode@1.134.0 license`; verified 2026-08-31. |
 | @types/react | MIT | dev only |
 | @types/react-dom | MIT | dev only |
 | @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
