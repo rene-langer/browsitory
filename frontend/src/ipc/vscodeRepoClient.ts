@@ -3,6 +3,7 @@ import type {
   DiffHunk,
   GraphCommit,
   OpenRepoEntry,
+  ReflogEntry,
   RepoClient,
   StatusEntry,
   SubmoduleInfo,
@@ -159,9 +160,11 @@ export const vscodeRepoClient: RepoClient = {
   initSubmodule: (repoPath: string, path: string) => call<void>("init_submodule", { repoPath, path }),
   updateSubmodule: (repoPath: string, path: string, recursive: boolean) =>
     call<void>("update_submodule", { repoPath, path, recursive }),
-  listReflogRefs: notImplemented("listReflogRefs"),
-  getReflog: notImplemented("getReflog"),
-  restoreReflogEntry: notImplemented("restoreReflogEntry"),
+  listReflogRefs: (repoPath: string) => call<string[]>("list_reflog_refs", { repoPath }),
+  getReflog: (repoPath: string, reference: string) =>
+    call<ReflogEntry[]>("get_reflog", { repoPath, reference }),
+  restoreReflogEntry: (repoPath: string, reference: string, newId: string) =>
+    call<void>("restore_reflog_entry", { repoPath, reference, newId }),
   listRemotes: notImplemented("listRemotes"),
   listRemoteBranches: notImplemented("listRemoteBranches"),
   getCurrentUpstream: notImplemented("getCurrentUpstream"),

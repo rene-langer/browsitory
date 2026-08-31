@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listReflogRefs("/repo")).rejects.toThrow(
-      "listReflogRefs is not implemented yet",
+    await expect(vscodeRepoClient.listRemotes("/repo")).rejects.toThrow(
+      "listRemotes is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -354,5 +354,42 @@ describe("vscodeRepoClient", () => {
     });
     respond(3, null);
     await expect(updatePromise).resolves.toBeNull();
+  });
+
+  it("wires listReflogRefs, getReflog, and restoreReflogEntry", async () => {
+    const refsPromise = vscodeRepoClient.listReflogRefs("/repo");
+    respond(1, ["HEAD"]);
+    await expect(refsPromise).resolves.toEqual(["HEAD"]);
+
+    const reflogPromise = vscodeRepoClient.getReflog("/repo", "HEAD");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "get_reflog",
+      params: { repoPath: "/repo", reference: "HEAD" },
+    });
+    respond(2, [
+      {
+        reference: "HEAD",
+        oldId: "1111111",
+        newId: "2222222",
+        committerName: "Test User",
+        committerEmail: "test@example.com",
+        timestamp: 1_725_000_000,
+        message: "commit: second commit",
+        summary: "second commit",
+      },
+    ]);
+    await expect(reflogPromise).resolves.toHaveLength(1);
+
+    const restorePromise = vscodeRepoClient.restoreReflogEntry("/repo", "HEAD", "1111111");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "restore_reflog_entry",
+      params: { repoPath: "/repo", reference: "HEAD", newId: "1111111" },
+    });
+    respond(3, null);
+    await expect(restorePromise).resolves.toBeNull();
   });
 });
