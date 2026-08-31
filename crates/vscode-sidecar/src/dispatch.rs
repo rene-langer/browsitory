@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
+use git_core::reflog::ReflogEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
@@ -52,6 +53,9 @@ pub fn dispatch(
         "list_submodules" => list_submodules(params, repos),
         "init_submodule" => init_submodule(params, repos),
         "update_submodule" => update_submodule(params, repos),
+        "list_reflog_refs" => list_reflog_refs(params, repos),
+        "get_reflog" => get_reflog(params, repos),
+        "restore_reflog_entry" => restore_reflog_entry(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -723,5 +727,73 @@ fn update_submodule(params: Value, repos: &mut HashMap<String, Worker>) -> Resul
     let params: UpdateSubmoduleParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.update_submodule(params.path, params.recursive)?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReflogEntryDto {
+    reference: String,
+    old_id: String,
+    new_id: String,
+    committer_name: String,
+    committer_email: String,
+    timestamp: i64,
+    message: String,
+    summary: Option<String>,
+}
+
+impl From<ReflogEntry> for ReflogEntryDto {
+    fn from(entry: ReflogEntry) -> Self {
+        Self {
+            reference: entry.reference,
+            old_id: entry.old_id,
+            new_id: entry.new_id,
+            committer_name: entry.committer_name,
+            committer_email: entry.committer_email,
+            timestamp: entry.timestamp,
+            message: entry.message,
+            summary: entry.summary,
+        }
+    }
+}
+
+fn list_reflog_refs(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let refs = worker_handle(repos, &params.repo_path)?.list_reflog_refs()?;
+    serde_json::to_value(refs).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetReflogParams {
+    repo_path: String,
+    reference: String,
+}
+
+fn get_reflog(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetReflogParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let entries: Vec<ReflogEntryDto> = worker_handle(repos, &params.repo_path)?
+        .get_reflog(params.reference)?
+        .into_iter()
+        .map(ReflogEntryDto::from)
+        .collect();
+    serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreReflogEntryParams {
+    repo_path: String,
+    reference: String,
+    new_id: String,
+}
+
+fn restore_reflog_entry(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RestoreReflogEntryParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.restore_reflog_entry(params.reference, params.new_id)?;
     Ok(Value::Null)
 }

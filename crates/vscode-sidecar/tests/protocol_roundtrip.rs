@@ -632,3 +632,35 @@ fn submodule_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(after["result"][0]["initialized"], true);
 }
+
+#[test]
+fn reflog_lists_and_restores_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "second commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let refs = sidecar.call(2, "list_reflog_refs", serde_json::json!({"repoPath": repo_path}));
+    let refs_list = refs["result"].as_array().expect("reflog refs");
+    assert!(refs_list.iter().any(|r| r == "HEAD"));
+
+    let entries = sidecar.call(
+        3,
+        "get_reflog",
+        serde_json::json!({"repoPath": repo_path, "reference": "HEAD"}),
+    );
+    let entries_list = entries["result"].as_array().expect("reflog entries");
+    assert_eq!(entries_list[0]["summary"], "second commit");
+    let first_commit_id = entries_list[1]["newId"].as_str().unwrap().to_string();
+
+    let restored = sidecar.call(
+        4,
+        "restore_reflog_entry",
+        serde_json::json!({"repoPath": repo_path, "reference": "HEAD", "newId": first_commit_id}),
+    );
+    assert_eq!(restored["result"], serde_json::Value::Null);
+}
