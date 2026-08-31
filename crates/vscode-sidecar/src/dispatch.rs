@@ -5,6 +5,7 @@ use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::status::StatusEntry;
+use git_core::worktree::WorktreeInfo;
 use repo_service::worker::Worker;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,6 +44,10 @@ pub fn dispatch(
         "switch_branch" => switch_branch(params, repos),
         "delete_branch" => delete_branch(params, repos),
         "rename_branch" => rename_branch(params, repos),
+        "list_worktrees" => list_worktrees(params, repos),
+        "create_worktree" => create_worktree(params, repos),
+        "remove_worktree" => remove_worktree(params, repos),
+        "prune_worktrees" => prune_worktrees(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -581,5 +586,83 @@ fn rename_branch(params: Value, repos: &mut HashMap<String, Worker>) -> Result<V
     let params: RenameBranchParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.rename_branch(params.old_name, params.new_name)?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeInfoDto {
+    name: String,
+    path: String,
+    head: Option<String>,
+    is_main: bool,
+    is_locked: bool,
+    is_prunable: bool,
+}
+
+impl From<WorktreeInfo> for WorktreeInfoDto {
+    fn from(worktree: WorktreeInfo) -> Self {
+        Self {
+            name: worktree.name,
+            path: worktree.path.to_string_lossy().into_owned(),
+            head: (!worktree.head.is_empty()).then_some(worktree.head),
+            is_main: worktree.is_main,
+            is_locked: worktree.is_locked,
+            is_prunable: worktree.is_prunable,
+        }
+    }
+}
+
+fn list_worktrees(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let worktrees: Vec<WorktreeInfoDto> = worker_handle(repos, &params.repo_path)?
+        .list_worktrees()?
+        .into_iter()
+        .map(WorktreeInfoDto::from)
+        .collect();
+    serde_json::to_value(worktrees).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateWorktreeParams {
+    repo_path: String,
+    name: String,
+    path: String,
+    branch: String,
+    start_point: Option<String>,
+}
+
+fn create_worktree(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: CreateWorktreeParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.create_worktree(
+        params.name,
+        PathBuf::from(params.path),
+        params.branch,
+        params.start_point,
+    )?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeNameParams {
+    repo_path: String,
+    name: String,
+}
+
+fn remove_worktree(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: WorktreeNameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.remove_worktree(params.name)?;
+    Ok(Value::Null)
+}
+
+fn prune_worktrees(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.prune_worktrees()?;
     Ok(Value::Null)
 }

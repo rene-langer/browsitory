@@ -511,3 +511,42 @@ fn branch_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(final_branches["result"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn worktree_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let linked = dir.path().join("feature-tree");
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let created = sidecar.call(
+        2,
+        "create_worktree",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "name": "feature-tree",
+            "path": linked.to_str().unwrap(),
+            "branch": "feature",
+            "startPoint": "HEAD",
+        }),
+    );
+    assert_eq!(created["result"], serde_json::Value::Null);
+
+    let listed = sidecar.call(3, "list_worktrees", serde_json::json!({"repoPath": repo_path}));
+    let worktrees = listed["result"].as_array().expect("worktree list");
+    assert!(worktrees.iter().any(|w| w["name"] == "feature-tree" && w["isMain"] == false));
+
+    let removed = sidecar.call(
+        4,
+        "remove_worktree",
+        serde_json::json!({"repoPath": repo_path, "name": "feature-tree"}),
+    );
+    assert_eq!(removed["result"], serde_json::Value::Null);
+    assert!(!linked.exists());
+
+    let pruned = sidecar.call(5, "prune_worktrees", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(pruned["result"], serde_json::Value::Null);
+}
