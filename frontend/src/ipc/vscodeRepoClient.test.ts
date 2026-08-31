@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.commitsSince("/repo", "main")).rejects.toThrow(
-      "commitsSince is not implemented yet",
+    await expect(vscodeRepoClient.detectForgeRepository("/repo")).rejects.toThrow(
+      "detectForgeRepository is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -737,5 +737,40 @@ describe("vscodeRepoClient", () => {
     });
     respond(5, null);
     await expect(resolveAddDeletePromise).resolves.toBeNull();
+  });
+
+  it("wires commitsSince, startRebase, rebaseContinue, abortRebase, and getRebaseProgress", async () => {
+    const sincePromise = vscodeRepoClient.commitsSince("/repo", "main");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "commits_since",
+      params: { repoPath: "/repo", onto: "main" },
+    });
+    respond(1, [{ id: "abc", shortId: "a", summary: "s", authorName: "Test", timestamp: 0 }]);
+    await expect(sincePromise).resolves.toHaveLength(1);
+
+    const plan = [{ commitId: "abc", action: { kind: "Pick" as const }, combinedMessage: null }];
+    const startPromise = vscodeRepoClient.startRebase("/repo", "main", plan);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "start_rebase",
+      params: { repoPath: "/repo", onto: "main", plan },
+    });
+    respond(2, { kind: "Done" });
+    await expect(startPromise).resolves.toEqual({ kind: "Done" });
+
+    const continuePromise = vscodeRepoClient.rebaseContinue("/repo");
+    respond(3, { kind: "Advanced" });
+    await expect(continuePromise).resolves.toEqual({ kind: "Advanced" });
+
+    const abortPromise = vscodeRepoClient.abortRebase("/repo");
+    respond(4, null);
+    await expect(abortPromise).resolves.toBeNull();
+
+    const progressPromise = vscodeRepoClient.getRebaseProgress("/repo");
+    respond(5, { currentStep: 1, totalSteps: 3 });
+    await expect(progressPromise).resolves.toEqual({ currentStep: 1, totalSteps: 3 });
   });
 });

@@ -8,6 +8,9 @@ import type {
   MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
+  RebasePlanCommit,
+  RebasePlanEntry,
+  RebaseStepResult,
   ReflogEntry,
   RemoteAuthMode,
   RemoteInfo,
@@ -272,11 +275,14 @@ export const vscodeRepoClient: RepoClient = {
   getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
   resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
     call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
-  commitsSince: notImplemented("commitsSince"),
-  startRebase: notImplemented("startRebase"),
-  rebaseContinue: notImplemented("rebaseContinue"),
-  abortRebase: notImplemented("abortRebase"),
-  getRebaseProgress: notImplemented("getRebaseProgress"),
+  commitsSince: (repoPath: string, onto: string) =>
+    call<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
+  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
+    call<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
+  rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
+  abortRebase: (repoPath: string) => call<void>("abort_rebase", { repoPath }),
+  getRebaseProgress: (repoPath: string) =>
+    call<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
   detectForgeRepository: notImplemented("detectForgeRepository"),
   saveForgeToken: notImplemented("saveForgeToken"),
   forgetForgeToken: notImplemented("forgetForgeToken"),
