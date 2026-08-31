@@ -9,6 +9,8 @@ import { renderWebviewHtml } from "./webviewHtml";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentBridge: SidecarBridge | undefined;
+let currentMessageSubscription: vscode.Disposable | undefined;
+let currentPanelSubscription: vscode.Disposable | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Browsitory");
@@ -56,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
       appendLine: (message) => output.appendLine(message),
     });
     currentBridge = bridge;
+    context.subscriptions.push(bridge);
 
     const script = vscode.Uri.joinPath(assetRoot, "assets", "vscode-main.js");
     const style = vscode.Uri.joinPath(assetRoot, "assets", "vscode-main.css");
@@ -69,21 +72,37 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       });
     });
+    currentMessageSubscription = messageSubscription;
     context.subscriptions.push(messageSubscription);
 
     const panelSubscription = panel.onDidDispose(() => {
-      bridge.dispose();
+      messageSubscription.dispose();
+      void bridge.dispose();
+      if (currentMessageSubscription === messageSubscription) {
+        currentMessageSubscription = undefined;
+      }
+      if (currentPanelSubscription === panelSubscription) {
+        currentPanelSubscription = undefined;
+      }
       if (currentBridge === bridge) currentBridge = undefined;
       if (currentPanel === panel) currentPanel = undefined;
     });
+    currentPanelSubscription = panelSubscription;
     context.subscriptions.push(panelSubscription);
   });
 
   context.subscriptions.push(command);
 }
 
-export function deactivate(): void {
-  currentBridge?.dispose();
+export async function deactivate(): Promise<void> {
+  const bridge = currentBridge;
+  const messageSubscription = currentMessageSubscription;
+  const panelSubscription = currentPanelSubscription;
   currentBridge = undefined;
+  currentMessageSubscription = undefined;
+  currentPanelSubscription = undefined;
   currentPanel = undefined;
+  messageSubscription?.dispose();
+  panelSubscription?.dispose();
+  await bridge?.dispose();
 }

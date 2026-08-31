@@ -13,10 +13,13 @@ const NATIVE_METHODS = new Set([
 
 interface SidecarReadable {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+  off(event: "data", listener: (chunk: Buffer | string) => void): unknown;
 }
 
 interface SidecarWritable {
   write(chunk: string): boolean;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  off(event: "error", listener: (error: Error) => void): unknown;
 }
 
 export interface SidecarProcess {
@@ -24,6 +27,16 @@ export interface SidecarProcess {
   readonly stdout: SidecarReadable;
   readonly stderr: SidecarReadable;
   kill(): boolean;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  off(event: "error", listener: (error: Error) => void): unknown;
+  off(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
 }
 
 export interface JsonRpcRequest {
@@ -49,8 +62,17 @@ export interface SidecarBridgeDependencies {
 
 class InvalidParamsError extends Error {}
 
+type SidecarBridgeState = "idle" | "running" | "reconnecting" | "failed";
+
+const TRANSPORT_ERROR_CODE = -32001;
+const DISPOSED_MESSAGE = "Browsitory sidecar bridge disposed";
+
 export class SidecarBridge {
   private sidecar: SidecarProcess | undefined;
+  private state: SidecarBridgeState = "idle";
+  private detachSidecarListeners: (() => void) | undefined;
+  private readonly pendingRequestIds = new Set<number>();
+  private disposed = false;
 
   constructor(private readonly dependencies: SidecarBridgeDependencies) {}
 
@@ -65,33 +87,82 @@ export class SidecarBridge {
       return;
     }
 
+    this.pendingRequestIds.add(message.id);
+    if (this.disposed) {
+      this.rejectPendingAndNotify("failed", DISPOSED_MESSAGE);
+      return;
+    }
+
     const sidecar = this.ensureSidecar();
-    sidecar.stdin.write(JSON.stringify(message) + "\n");
+    if (!sidecar) return;
+    try {
+      sidecar.stdin.write(JSON.stringify(message) + "\n");
+    } catch (error) {
+      this.handleProcessLoss(
+        sidecar,
+        "Browsitory sidecar stdin write failed: " + errorMessage(error),
+        true,
+      );
+    }
   }
 
-  dispose(): void {
-    this.sidecar?.kill();
+  dispose(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    this.disposed = true;
+    const sidecar = this.sidecar;
+    this.detachCurrentSidecar();
     this.sidecar = undefined;
+    this.state = "idle";
+    if (sidecar) this.killSidecar(sidecar);
+    if (this.pendingRequestIds.size > 0) {
+      this.rejectPendingAndNotify("failed", DISPOSED_MESSAGE);
+    }
+    return Promise.resolve();
   }
 
-  private ensureSidecar(): SidecarProcess {
-    if (this.sidecar) return this.sidecar;
+  private ensureSidecar(): SidecarProcess | undefined {
+    if (this.state === "running" && this.sidecar) return this.sidecar;
 
-    const sidecar = this.dependencies.spawn(this.dependencies.executablePath);
-    this.sidecar = sidecar;
-    this.attachStdout(sidecar);
-    sidecar.stderr.on("data", (chunk) => {
+    try {
+      const sidecar = this.dependencies.spawn(this.dependencies.executablePath);
+      this.sidecar = sidecar;
+      this.state = "running";
+      this.attachSidecar(sidecar);
+      return sidecar;
+    } catch (error) {
+      const message = "Browsitory sidecar failed to start: " + errorMessage(error);
+      this.state = "failed";
+      this.dependencies.appendLine(message);
+      this.rejectPendingAndNotify("failed", message);
+      return undefined;
+    }
+  }
+
+  private attachSidecar(sidecar: SidecarProcess): void {
+    const onProcessError = (error: Error) => {
+      this.handleProcessLoss(
+        sidecar,
+        "Browsitory sidecar process error: " + errorMessage(error),
+        true,
+      );
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      this.handleProcessLoss(sidecar, sidecarExitMessage(code, signal), false);
+    };
+    const onStdinError = (error: Error) => {
+      this.handleProcessLoss(
+        sidecar,
+        "Browsitory sidecar stdin write failed: " + errorMessage(error),
+        true,
+      );
+    };
+    const onStderrData = (chunk: Buffer | string) => {
       const text = chunkToBuffer(chunk).toString("utf8").trimEnd();
       if (text.length > 0) this.dependencies.appendLine("vscode-sidecar stderr: " + text);
-    });
-    return sidecar;
-  }
-
-  private attachStdout(sidecar: SidecarProcess): void {
+    };
     const decoder = new StringDecoder("utf8");
     let buffered = "";
-
-    sidecar.stdout.on("data", (chunk) => {
+    const onStdoutData = (chunk: Buffer | string) => {
       buffered += decoder.write(chunkToBuffer(chunk));
       const lines = buffered.split("\n");
       buffered = lines.pop() ?? "";
@@ -100,7 +171,87 @@ export class SidecarBridge {
         if (line.trim().length === 0) continue;
         this.relaySidecarLine(line);
       }
+    };
+
+    sidecar.on("error", onProcessError);
+    sidecar.on("exit", onExit);
+    sidecar.stdin.on("error", onStdinError);
+    sidecar.stdout.on("data", onStdoutData);
+    sidecar.stderr.on("data", onStderrData);
+    this.detachSidecarListeners = () => {
+      sidecar.off("error", onProcessError);
+      sidecar.off("exit", onExit);
+      sidecar.stdin.off("error", onStdinError);
+      sidecar.stdout.off("data", onStdoutData);
+      sidecar.stderr.off("data", onStderrData);
+    };
+  }
+
+  private handleProcessLoss(
+    sidecar: SidecarProcess,
+    message: string,
+    kill: boolean,
+  ): void {
+    if (sidecar !== this.sidecar || this.disposed) return;
+    this.detachCurrentSidecar();
+    this.sidecar = undefined;
+    this.state = "reconnecting";
+    if (kill) this.killSidecar(sidecar);
+    this.dependencies.appendLine(message);
+    this.rejectPendingAndNotify("reconnecting", message);
+  }
+
+  private detachCurrentSidecar(): void {
+    const detach = this.detachSidecarListeners;
+    this.detachSidecarListeners = undefined;
+    detach?.();
+  }
+
+  private killSidecar(sidecar: SidecarProcess): void {
+    try {
+      sidecar.kill();
+    } catch (error) {
+      this.dependencies.appendLine(
+        "Browsitory: failed to stop vscode-sidecar: " + errorMessage(error),
+      );
+    }
+  }
+
+  private rejectPendingAndNotify(
+    state: "reconnecting" | "failed",
+    message: string,
+  ): void {
+    const pendingIds = [...this.pendingRequestIds];
+    this.pendingRequestIds.clear();
+    for (const id of pendingIds) {
+      this.postLifecycleMessage({
+        jsonrpc: "2.0",
+        id,
+        error: { code: TRANSPORT_ERROR_CODE, message },
+      });
+    }
+    this.postLifecycleMessage({
+      jsonrpc: "2.0",
+      method: "transportStatus",
+      params: { state, message },
     });
+  }
+
+  private postLifecycleMessage(message: JsonRpcMessage): void {
+    try {
+      const posted = this.dependencies.postToWebview(message);
+      if (isPromiseLike(posted)) {
+        void Promise.resolve(posted).catch((error: unknown) => {
+          this.dependencies.appendLine(
+            "Browsitory: failed to post lifecycle message: " + errorMessage(error),
+          );
+        });
+      }
+    } catch (error) {
+      this.dependencies.appendLine(
+        "Browsitory: failed to post lifecycle message: " + errorMessage(error),
+      );
+    }
   }
 
   private relaySidecarLine(line: string): void {
@@ -108,6 +259,9 @@ export class SidecarBridge {
       const message: unknown = JSON.parse(line);
       if (!isJsonRpcMessage(message)) {
         throw new Error("not a JSON-RPC response or notification");
+      }
+      if (typeof message["id"] === "number") {
+        this.pendingRequestIds.delete(message["id"]);
       }
       this.dependencies.postToWebview(message);
     } catch (error) {
@@ -248,6 +402,19 @@ function requireStringParam(request: JsonRpcRequest, name: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return isRecord(value) && typeof value["then"] === "function";
+}
+
+function sidecarExitMessage(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): string {
+  if (code !== null) return "Browsitory sidecar exited with code " + code;
+  if (signal !== null) return "Browsitory sidecar exited after signal " + signal;
+  return "Browsitory sidecar exited unexpectedly";
 }
 
 function chunkToBuffer(chunk: Buffer | string): Buffer {

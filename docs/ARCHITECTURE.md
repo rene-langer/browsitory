@@ -10,7 +10,8 @@ browsitory/
 │   ├── repo-service/    # transport-agnostic worker threads, credentials, forge/PR API access
 │   ├── tauri-app/        # thin Tauri command adapter over repo-service
 │   └── vscode-sidecar/  # JSON-RPC-over-stdio adapter over repo-service, for the VSCode extension
-└── frontend/              # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
+├── extension/             # VSCode extension host, webview security, and sidecar lifecycle
+└── frontend/              # React + TypeScript + Vite, shared by Tauri and the VSCode webview
 ```
 
 `vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target (Phase 6, spec
@@ -22,10 +23,25 @@ method except the five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
 sidecar — see the spec's "VSCode-native integrations" section. Transfer progress
 (`subscribeTransferProgress`) rides the same JSON-RPC connection as everything else, as
 server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
-`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phase (b) is complete;
-the `extension/` host that will actually spawn this process from VSCode, package it per
-platform, and add the `@vscode/test-electron` E2E layer are sub-phases (c)-(e), still follow-up
-work.
+`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phase (c) now supplies
+the `extension/` host and dedicated `frontend/dist-vscode` webview bundle. Per-target sidecar
+bundling and the `@vscode/test-electron` E2E layer remain sub-phases (d) and (e).
+
+### VSCode host and sidecar lifecycle
+
+One `SidecarBridge` belongs to each open Browsitory webview panel. The host handles the five
+VSCode-native methods above itself; all repository/config/credential requests keep their
+original JSON-RPC id and are forwarded one-per-line to one lazily spawned sidecar. Valid sidecar
+responses remove their ids from the pending set before being relayed unchanged.
+
+The bridge state machine is `idle` → `running` → `reconnecting` or `failed`. Process `exit` or
+`error` and stdin write failure detach the old process, reject every unresolved id with JSON-RPC
+code `-32001`, and emit one id-less `transportStatus` notification carrying the same diagnostic.
+Requests are never retained for replay, because repository methods include mutations whose
+completion is unknowable after transport loss. A later repository request makes one fresh spawn
+attempt; a synchronous spawn failure moves to `failed`, rejects that request, and waits for a
+later user retry rather than scheduling background restarts. Panel closure and extension
+deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
 
 ## Why Tauri + a web frontend, not egui again
 
@@ -54,9 +70,11 @@ which would just go stale again next phase.
 
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
-`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri. A future VSCode
-extension implements the same interface over `postMessage` in a sibling file
-(`vscodeRepoClient.ts`); no component changes.
+`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri.
+`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`;
+`frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
+reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
+status listener and retains its existing updater/error behavior.
 
 The rule is enforced mechanically, not just by review: `frontend/eslint.config.js` has a
 `no-restricted-imports` override banning `@tauri-apps/*` imports from
@@ -102,6 +120,10 @@ command in `commands.rs` that touches the worker or the dialog plugin is therefo
 `StatusError`, ...). `Worker`/Tauri commands map these to `Result<T, String>` crossing the IPC
 boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods return
 `Promise<T>` that reject with that message — no error is swallowed at the boundary.
+The VSCode bridge additionally synthesizes `-32001` JSON-RPC errors for requests interrupted by
+sidecar loss. Its separate `transportStatus` notification rejects any still-pending webview
+promises and presents the diagnostic globally; it does not extend the transport-neutral
+`RepoClient` interface.
 
 ## Testing strategy
 
@@ -117,6 +139,8 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
   like `WorkspaceDto`/`OpenRepoEntryDto`).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
+- `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
+  native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO (`e2e/`) driving
   the built `tauri-app` binary as a black box — `cargo build --workspace --features
   tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
@@ -167,3 +191,7 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
   polish bar the project targets. Must land through `RepoClient` alone (no new backend
   seams) so the same visual system works unmodified in both the Tauri desktop app and
   the future VSCode webview frontend.
+- **Phase 6** (sub-phase c complete): shared `repo-service`, full-parity `vscode-sidecar`,
+  transport-selectable React webview, and VSCode extension host with native-method routing and
+  recoverable sidecar lifecycle. Platform-specific VSIX packaging and real VSCode Electron E2E
+  coverage remain sub-phases d-e.

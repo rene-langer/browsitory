@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A desktop VSCode extension host now loads the shared React frontend in a restricted webview,
+  routes folder/external-URL/version operations through native VSCode APIs, and forwards the
+  remaining `RepoClient` surface to `vscode-sidecar` over JSON-RPC. Sidecar exit, process error,
+  and stdin failure reject pending actions with an in-app diagnostic; a later action lazily
+  starts one fresh process without replaying mutations.
+
 ### Changed
 
 - Extracted the git worker/credential/forge service layer out of `tauri-app` into a new
