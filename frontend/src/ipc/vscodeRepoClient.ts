@@ -1,7 +1,11 @@
 import type {
+  BlameLine,
   BranchInfo,
+  ConflictSegment,
   DiffHunk,
+  FileConflictChoice,
   GraphCommit,
+  MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
   ReflogEntry,
@@ -256,13 +260,18 @@ export const vscodeRepoClient: RepoClient = {
   saveStash: (repoPath: string) => call<void>("save_stash", { repoPath }),
   applyStash: (repoPath: string, index: number) => call<void>("apply_stash", { repoPath, index }),
   dropStash: (repoPath: string, index: number) => call<void>("drop_stash", { repoPath, index }),
-  getBlame: notImplemented("getBlame"),
-  mergeBranch: notImplemented("mergeBranch"),
-  getConflictHunks: notImplemented("getConflictHunks"),
-  resolveConflict: notImplemented("resolveConflict"),
-  abortMerge: notImplemented("abortMerge"),
-  getMergeMessage: notImplemented("getMergeMessage"),
-  resolveAddDeleteConflict: notImplemented("resolveAddDeleteConflict"),
+  getBlame: (repoPath: string, commitId: string, path: string) =>
+    call<BlameLine[]>("get_blame", { repoPath, commitId, path }),
+  mergeBranch: (repoPath: string, branchName: string) =>
+    call<MergeOutcome>("start_merge", { repoPath, branchName }),
+  getConflictHunks: (repoPath: string, path: string) =>
+    call<ConflictSegment[]>("get_conflict_hunks", { repoPath, path }),
+  resolveConflict: (repoPath: string, path: string, resolvedContent: string) =>
+    call<void>("resolve_conflict", { repoPath, path, resolvedContent }),
+  abortMerge: (repoPath: string) => call<void>("abort_merge", { repoPath }),
+  getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
+  resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
+    call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: notImplemented("commitsSince"),
   startRebase: notImplemented("startRebase"),
   rebaseContinue: notImplemented("rebaseContinue"),

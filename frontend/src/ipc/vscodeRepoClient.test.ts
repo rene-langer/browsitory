@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.getBlame("/repo", "abc123", "file.txt")).rejects.toThrow(
-      "getBlame is not implemented yet",
+    await expect(vscodeRepoClient.commitsSince("/repo", "main")).rejects.toThrow(
+      "commitsSince is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -677,5 +677,65 @@ describe("vscodeRepoClient", () => {
     const dropPromise = vscodeRepoClient.dropStash("/repo", 0);
     respond(4, null);
     await expect(dropPromise).resolves.toBeNull();
+  });
+
+  it("wires getBlame", async () => {
+    const promise = vscodeRepoClient.getBlame("/repo", "HEAD", "file.txt");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_blame",
+      params: { repoPath: "/repo", commitId: "HEAD", path: "file.txt" },
+    });
+    respond(1, [
+      { lineNumber: 1, content: "hello", commitId: "abc", shortId: "a", authorName: "Test", timestamp: 0 },
+    ]);
+    await expect(promise).resolves.toHaveLength(1);
+  });
+
+  it("wires mergeBranch onto start_merge", async () => {
+    const promise = vscodeRepoClient.mergeBranch("/repo", "feature");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "start_merge",
+      params: { repoPath: "/repo", branchName: "feature" },
+    });
+    respond(1, { kind: "Conflicted", files: ["file.txt"] });
+    await expect(promise).resolves.toEqual({ kind: "Conflicted", files: ["file.txt"] });
+  });
+
+  it("wires getConflictHunks, resolveConflict, abortMerge, getMergeMessage, and resolveAddDeleteConflict", async () => {
+    const hunksPromise = vscodeRepoClient.getConflictHunks("/repo", "file.txt");
+    respond(1, [{ kind: "Conflict", ours: "a", theirs: "b" }]);
+    await expect(hunksPromise).resolves.toEqual([{ kind: "Conflict", ours: "a", theirs: "b" }]);
+
+    const resolvePromise = vscodeRepoClient.resolveConflict("/repo", "file.txt", "resolved");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "resolve_conflict",
+      params: { repoPath: "/repo", path: "file.txt", resolvedContent: "resolved" },
+    });
+    respond(2, null);
+    await expect(resolvePromise).resolves.toBeNull();
+
+    const abortPromise = vscodeRepoClient.abortMerge("/repo");
+    respond(3, null);
+    await expect(abortPromise).resolves.toBeNull();
+
+    const messagePromise = vscodeRepoClient.getMergeMessage("/repo");
+    respond(4, "Merge branch 'feature'");
+    await expect(messagePromise).resolves.toBe("Merge branch 'feature'");
+
+    const resolveAddDeletePromise = vscodeRepoClient.resolveAddDeleteConflict("/repo", "file.txt", "Ours");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "resolve_add_delete_conflict",
+      params: { repoPath: "/repo", path: "file.txt", choice: "Ours" },
+    });
+    respond(5, null);
+    await expect(resolveAddDeletePromise).resolves.toBeNull();
   });
 });
