@@ -844,3 +844,304 @@ fn tag_lifecycle_round_trips_through_the_sidecar() {
     let tags_after = sidecar.call(5, "list_tags", serde_json::json!({"repoPath": repo_path}));
     assert_eq!(tags_after["result"], serde_json::json!([]));
 }
+
+struct RemoteFixture {
+    source_dir: tempfile::TempDir,
+    _remote_dir: tempfile::TempDir,
+    local_dir: tempfile::TempDir,
+    source: git2::Repository,
+}
+
+impl RemoteFixture {
+    /// Adds a commit to the source clone and pushes it to the bare remote, so the local clone
+    /// has something to fetch/fast-forward to.
+    fn remote_commit(&self, message: &str) {
+        write_file(self.source_dir.path(), "remote.txt", message);
+        commit_all(&self.source, message);
+        self.source
+            .find_remote("origin")
+            .expect("find source remote")
+            .push(&["refs/heads/main:refs/heads/main".to_string()], None)
+            .expect("push source commit");
+    }
+
+    fn local_path(&self) -> String {
+        self.local_dir.path().to_str().unwrap().to_string()
+    }
+}
+
+/// A source repo, a bare remote it has pushed `main` to, and a fresh clone of that remote as the
+/// "local" repo the sidecar operates on. `main` is forced explicitly rather than inherited from
+/// the machine's `init.defaultBranch`, so the fixture is deterministic across git installations —
+/// the same approach `crates/git-core/tests/remote.rs`'s own `local_and_bare_remote` takes.
+fn local_and_bare_remote() -> RemoteFixture {
+    let (source_dir, source) = init_repo();
+    source.set_head("refs/heads/main").expect("set source head");
+    write_file(source_dir.path(), "README.md", "initial commit\n");
+    commit_all(&source, "initial commit");
+
+    let remote_dir = tempfile::TempDir::new().expect("create bare remote dir");
+    let remote = git2::Repository::init_bare(remote_dir.path()).expect("init bare remote");
+    source
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .expect("add source remote");
+    source
+        .find_remote("origin")
+        .expect("find source remote")
+        .push(&["refs/heads/main:refs/heads/main".to_string()], None)
+        .expect("push source commit");
+    remote.set_head("refs/heads/main").expect("set remote head");
+    drop(remote);
+
+    let local_dir = tempfile::TempDir::new().expect("create local dir");
+    let local = git2::Repository::clone(remote_dir.path().to_str().unwrap(), local_dir.path())
+        .expect("clone local repo");
+    {
+        let mut config = local.config().expect("local config");
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    drop(local);
+
+    RemoteFixture {
+        source_dir,
+        _remote_dir: remote_dir,
+        local_dir,
+        source,
+    }
+}
+
+fn is_terminal_notification(line: &serde_json::Value) -> bool {
+    matches!(
+        line["params"]["phase"].as_str(),
+        Some("Completed") | Some("Failed")
+    )
+}
+
+impl Sidecar {
+    fn read_line(&mut self) -> serde_json::Value {
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).expect("read line");
+        // A complete, self-contained JSON object per line is the whole framing contract: if a
+        // notification written by the relay thread ever interleaved with a response written by
+        // the dispatch loop, this parse would fail.
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("parse line {line:?}: {error}"))
+    }
+
+    /// Like `call`, but also collects every JSON-RPC *notification* (no `id`) that arrives around
+    /// the response, and — when `wait_for_terminal_notification` is set — keeps reading past the
+    /// response until a `transferProgress` notification with a terminal phase
+    /// (`Completed`/`Failed`) shows up. `fetch`/`push` reply with the operation id before the
+    /// transfer finishes, so their terminal notification can legitimately arrive either side of
+    /// the response line; this helper tolerates both orderings.
+    fn call_and_collect_notifications(
+        &mut self,
+        id: u64,
+        method: &str,
+        params: serde_json::Value,
+        wait_for_terminal_notification: bool,
+    ) -> (serde_json::Value, Vec<serde_json::Value>) {
+        let request =
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writeln!(self.stdin, "{request}").expect("write request");
+        self.stdin.flush().expect("flush request");
+
+        let mut notifications = Vec::new();
+        let mut response = None;
+        loop {
+            let line = self.read_line();
+            if line.get("id").is_some() {
+                response = Some(line);
+            } else {
+                notifications.push(line);
+            }
+            if response.is_some()
+                && (!wait_for_terminal_notification
+                    || notifications.iter().any(is_terminal_notification))
+            {
+                break;
+            }
+        }
+        (response.expect("response line"), notifications)
+    }
+}
+
+#[test]
+fn fetch_remote_streams_transfer_progress_notifications_through_the_sidecar() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let repo_path = fixture.local_path();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let (response, notifications) = sidecar.call_and_collect_notifications(
+        2,
+        "fetch_remote",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin"}),
+        true,
+    );
+
+    let operation_id = response["result"]
+        .as_str()
+        .expect("operation id")
+        .to_string();
+    assert!(operation_id.starts_with("fetch-"));
+    assert!(!notifications.is_empty());
+    assert!(notifications.iter().all(|n| n["jsonrpc"] == "2.0"
+        && n["method"] == "transferProgress"
+        && n.get("id").is_none()
+        && n["params"]["operationId"] == operation_id
+        && n["params"]["operation"] == "Fetch"));
+    assert!(notifications
+        .iter()
+        .any(|n| n["params"]["phase"] == "Starting"));
+    assert!(notifications
+        .iter()
+        .any(|n| n["params"]["phase"] == "Completed" && n["params"]["errorKind"].is_null()));
+    // Exercise camelCase-only field names so a stray removal of `#[serde(rename_all =
+    // "camelCase")]` on `TransferProgressDto` would actually fail a test.
+    assert!(notifications
+        .iter()
+        .all(|n| n["params"]["receivedBytes"].is_number()));
+    // Sideband/message text is never forwarded, mirroring `crates/tauri-app/src/commands/mod.rs`'s
+    // own redaction — see its `transfer_event_bridge_redacts_sideband_and_failure_messages` test.
+    assert!(notifications
+        .iter()
+        .all(|n| n["params"]["message"].is_null()));
+
+    // The relay for the finished operation has released stdout for good: the next request's
+    // response is the very next line on the wire, with no trailing notification wedged in front
+    // of it. A relay that outlived its operation would surface here.
+    let status = sidecar.call(3, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(status["id"], 3);
+}
+
+#[test]
+fn push_current_branch_and_push_tags_stream_notifications_through_the_sidecar() {
+    let (local_dir, repo) = init_repo();
+    write_file(local_dir.path(), "README.md", "initial commit\n");
+    commit_all(&repo, "initial commit");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel(git2::ObjectType::Commit)
+        .expect("peel head");
+    repo.tag_lightweight("v1.0.0", &head, false)
+        .expect("create tag");
+    let remote_dir = tempfile::TempDir::new().expect("create bare remote dir");
+    git2::Repository::init_bare(remote_dir.path()).expect("init bare remote");
+    repo.remote("origin", remote_dir.path().to_str().unwrap())
+        .expect("add origin");
+    drop(head);
+    drop(repo);
+    let repo_path = local_dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let (push_response, push_notifications) = sidecar.call_and_collect_notifications(
+        2,
+        "push_current_branch",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin"}),
+        true,
+    );
+    let push_id = push_response["result"].as_str().expect("operation id");
+    assert!(push_id.starts_with("push-"));
+    assert!(push_notifications
+        .iter()
+        .all(|n| n["method"] == "transferProgress" && n["params"]["operationId"] == push_id));
+    assert!(push_notifications
+        .iter()
+        .any(|n| n["params"]["phase"] == "Completed" && n["params"]["operation"] == "PushBranch"));
+
+    // A second transfer on the same sidecar process gets its own relay and its own operation id;
+    // no notification from the first operation may still be arriving.
+    let (tags_response, tags_notifications) = sidecar.call_and_collect_notifications(
+        3,
+        "push_tags",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "names": ["v1.0.0"]}),
+        true,
+    );
+    let tags_id = tags_response["result"].as_str().expect("operation id");
+    assert!(tags_id.starts_with("push-"));
+    assert_ne!(tags_id, push_id);
+    assert!(tags_notifications
+        .iter()
+        .all(|n| n["params"]["operationId"] == tags_id));
+    assert!(tags_notifications
+        .iter()
+        .any(|n| n["params"]["phase"] == "Completed" && n["params"]["operation"] == "PushTags"));
+}
+
+#[test]
+fn pull_current_upstream_streams_notifications_and_returns_an_outcome() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let repo_path = fixture.local_path();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let upstream = sidecar.call(
+        2,
+        "set_current_upstream",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "remoteBranch": "main"}),
+    );
+    assert_eq!(upstream["result"], serde_json::Value::Null);
+
+    // `pull_current_upstream` blocks until the whole pull finishes, so every notification up to
+    // (but not necessarily including) the terminal one precedes the response line.
+    let (response, notifications) = sidecar.call_and_collect_notifications(
+        3,
+        "pull_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+        false,
+    );
+
+    assert_eq!(response["result"]["kind"], "FastForwarded");
+    assert!(response["result"]["upstreamRef"]
+        .as_str()
+        .expect("upstream ref")
+        .starts_with("refs/remotes/origin/"));
+    assert!(notifications
+        .iter()
+        .any(|n| n["params"]["phase"] == "Starting" && n["params"]["operation"] == "Pull"));
+}
+
+#[test]
+fn transfer_progress_notifications_carry_no_id_and_are_rejected_as_requests() {
+    // Guards the wire distinction the TypeScript client relies on: a notification has a `method`
+    // and no `id`, so it can never be mistaken for a response to a pending request.
+    let fixture = local_and_bare_remote();
+    let repo_path = fixture.local_path();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let (_response, notifications) = sidecar.call_and_collect_notifications(
+        2,
+        "fetch_remote",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin"}),
+        true,
+    );
+
+    assert!(notifications.iter().all(|n| n.get("id").is_none()));
+    assert!(notifications.iter().all(|n| n.get("result").is_none()));
+    assert!(notifications.iter().all(|n| n.get("error").is_none()));
+}
+
+#[test]
+fn fetch_remote_on_an_unopened_repo_returns_an_error_without_emitting_notifications() {
+    let mut sidecar = Sidecar::spawn();
+
+    let response = sidecar.call(
+        1,
+        "fetch_remote",
+        serde_json::json!({"repoPath": "/no/such/repo", "remoteName": "origin"}),
+    );
+
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("repo not open"));
+    // The relay spawned for the failed call must have shut down when its sender was dropped, so
+    // the next response is the very next line.
+    let next = sidecar.call(2, "does_not_exist", serde_json::json!({}));
+    assert_eq!(next["id"], 2);
+}

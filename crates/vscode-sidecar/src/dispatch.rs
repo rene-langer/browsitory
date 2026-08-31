@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
@@ -9,7 +11,7 @@ use git_core::remote::TagInfo;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::Worker;
+use repo_service::worker::{TransferEvent, Worker};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -17,6 +19,7 @@ pub fn dispatch(
     method: &str,
     params: Value,
     repos: &mut HashMap<String, Worker>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
     match method {
         "open_repo" => open_repo(params, repos),
@@ -73,6 +76,10 @@ pub fn dispatch(
         "list_tags" => list_tags(params, repos),
         "create_tag" => create_tag(params, repos),
         "delete_tag" => delete_tag(params, repos),
+        "fetch_remote" => fetch_remote(params, repos, stdout),
+        "push_current_branch" => push_current_branch(params, repos, stdout),
+        "push_tags" => push_tags(params, repos, stdout),
+        "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1172,4 +1179,385 @@ fn delete_tag(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Valu
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.delete_tag(params.name)?;
     Ok(Value::Null)
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgressDto {
+    operation_id: String,
+    operation: String,
+    phase: String,
+    error_kind: Option<String>,
+    current: usize,
+    total: usize,
+    received_bytes: usize,
+    message: Option<String>,
+}
+
+fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
+    match event {
+        TransferEvent::Started {
+            operation_id,
+            operation,
+        } => TransferProgressDto {
+            operation_id,
+            operation: format!("{operation:?}"),
+            phase: "Starting".to_string(),
+            error_kind: None,
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: None,
+        },
+        TransferEvent::Progress(progress) => TransferProgressDto {
+            operation_id: progress.operation_id,
+            operation: format!("{:?}", progress.operation),
+            phase: format!("{:?}", progress.phase),
+            error_kind: None,
+            current: progress.current,
+            total: progress.total,
+            received_bytes: progress.received_bytes,
+            // Sideband and reference-update text comes from the remote — never safe to forward
+            // over IPC, even when it looks like ordinary progress output. Same redaction
+            // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
+            message: None,
+        },
+        TransferEvent::Completed {
+            operation_id,
+            operation,
+            error,
+        } => {
+            let failed = error.is_some();
+            TransferProgressDto {
+                operation_id,
+                operation: format!("{operation:?}"),
+                phase: if failed { "Failed" } else { "Completed" }.to_string(),
+                error_kind: error.map(|kind| format!("{kind:?}")),
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            }
+        }
+    }
+}
+
+/// Drains `event_rx` on a dedicated thread, writing each event as a `transferProgress` JSON-RPC
+/// notification (no `id`) to the shared `out`. Exits once every `Sender<TransferEvent>` clone
+/// held inside `repo-service` for this operation is dropped — which happens when the worker
+/// thread finishes the operation (or, if the request never reached a worker at all, when the
+/// handler below returns and drops its own sender).
+///
+/// This per-operation thread is the one deliberate exception to the sidecar's otherwise
+/// single-threaded design: it does no git work, it only forwards a channel to stdout. The lock is
+/// taken for the whole write-plus-flush of one line, so notifications can never interleave with
+/// the dispatch loop's responses mid-line.
+fn spawn_progress_relay<W: std::io::Write + Send + 'static>(
+    event_rx: mpsc::Receiver<TransferEvent>,
+    out: Arc<Mutex<W>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for event in event_rx {
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "transferProgress",
+                "params": transfer_progress_dto(event),
+            });
+            let Ok(line) = serde_json::to_string(&notification) else {
+                continue;
+            };
+            let mut out = out.lock().unwrap_or_else(|error| error.into_inner());
+            if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
+                // The reading end has gone away; stop relaying rather than spinning on a broken
+                // pipe. The main loop notices the same failure and exits the process.
+                return;
+            }
+        }
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchRemoteParams {
+    repo_path: String,
+    remote_name: String,
+}
+
+fn fetch_remote(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: FetchRemoteParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id =
+        worker_handle(repos, &params.repo_path)?.fetch_remote(params.remote_name, event_tx)?;
+    Ok(Value::String(operation_id))
+}
+
+fn push_current_branch(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: RemoteNameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?
+        .push_current_branch(params.remote_name, event_tx)?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushTagsParams {
+    repo_path: String,
+    remote_name: String,
+    names: Vec<String>,
+}
+
+fn push_tags(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: PushTagsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.push_tags(
+        params.remote_name,
+        params.names,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+enum PullOutcomeDto {
+    UpToDate,
+    FastForwarded { upstream_ref: String },
+    Diverged { upstream_ref: String },
+}
+
+impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
+    fn from(outcome: git_core::remote::PullOutcome) -> Self {
+        match outcome {
+            git_core::remote::PullOutcome::UpToDate => PullOutcomeDto::UpToDate,
+            git_core::remote::PullOutcome::FastForwarded { upstream_ref } => {
+                PullOutcomeDto::FastForwarded { upstream_ref }
+            }
+            git_core::remote::PullOutcome::Diverged { upstream_ref } => {
+                PullOutcomeDto::Diverged { upstream_ref }
+            }
+        }
+    }
+}
+
+fn pull_current_upstream(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let outcome = worker_handle(repos, &params.repo_path)?.pull_current_upstream(event_tx)?;
+    serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
+
+    fn lines_of(buffer: &Arc<Mutex<Vec<u8>>>) -> Vec<Value> {
+        let written = buffer.lock().expect("buffer lock").clone();
+        String::from_utf8(written)
+            .expect("relay output is utf-8")
+            .lines()
+            .map(|line| {
+                serde_json::from_str(line)
+                    .unwrap_or_else(|error| panic!("incomplete line {line:?}: {error}"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn progress_relay_writes_one_notification_line_per_event_then_exits_when_the_channel_closes() {
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let (event_tx, event_rx) = mpsc::channel();
+        let relay = spawn_progress_relay(event_rx, Arc::clone(&buffer));
+
+        event_tx
+            .send(TransferEvent::Started {
+                operation_id: "fetch-1".to_string(),
+                operation: TransferOperation::Fetch,
+            })
+            .unwrap();
+        event_tx
+            .send(TransferEvent::Progress(TransferProgress {
+                operation_id: "fetch-1".to_string(),
+                operation: TransferOperation::Fetch,
+                phase: TransferPhase::Receiving,
+                current: 3,
+                total: 10,
+                received_bytes: 128,
+                message: Some("remote: sideband text from the server".to_string()),
+            }))
+            .unwrap();
+        event_tx
+            .send(TransferEvent::Completed {
+                operation_id: "fetch-1".to_string(),
+                operation: TransferOperation::Fetch,
+                error: Some(TransferErrorKind::TransferFailed),
+            })
+            .unwrap();
+
+        // Dropping the last sender is the relay's only shutdown signal — exactly what
+        // `repo-service` does once the worker thread finishes the operation. Nothing joins this
+        // thread in production, so if it did not exit on its own it would leak one thread per
+        // transfer; this join is the test that it does.
+        drop(event_tx);
+        relay
+            .join()
+            .expect("relay thread exits once its channel's senders are dropped");
+
+        let lines = lines_of(&buffer);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|line| line["jsonrpc"] == "2.0"
+            && line["method"] == "transferProgress"
+            && line.get("id").is_none()));
+        assert_eq!(
+            lines[0]["params"],
+            serde_json::json!({
+                "operationId": "fetch-1",
+                "operation": "Fetch",
+                "phase": "Starting",
+                "errorKind": null,
+                "current": 0,
+                "total": 0,
+                "receivedBytes": 0,
+                "message": null,
+            })
+        );
+        // The sideband text above is dropped, not forwarded — same redaction
+        // `crates/tauri-app/src/commands/mod.rs` applies on the Tauri transport.
+        assert_eq!(
+            lines[1]["params"],
+            serde_json::json!({
+                "operationId": "fetch-1",
+                "operation": "Fetch",
+                "phase": "Receiving",
+                "errorKind": null,
+                "current": 3,
+                "total": 10,
+                "receivedBytes": 128,
+                "message": null,
+            })
+        );
+        assert_eq!(
+            lines[2]["params"],
+            serde_json::json!({
+                "operationId": "fetch-1",
+                "operation": "Fetch",
+                "phase": "Failed",
+                "errorKind": "TransferFailed",
+                "current": 0,
+                "total": 0,
+                "receivedBytes": 0,
+                "message": null,
+            })
+        );
+    }
+
+    #[test]
+    fn concurrent_relays_sharing_one_writer_never_interleave_a_line() {
+        // Two transfers can be in flight at once, each with its own relay thread, all writing to
+        // the one shared stdout. The mutex is held across write-plus-flush, so every line must
+        // still arrive whole and attributable to exactly one operation.
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let (first_tx, first_rx) = mpsc::channel();
+        let (second_tx, second_rx) = mpsc::channel();
+        let first = spawn_progress_relay(first_rx, Arc::clone(&buffer));
+        let second = spawn_progress_relay(second_rx, Arc::clone(&buffer));
+
+        let senders = [(first_tx, "fetch-1"), (second_tx, "push-2")];
+        let feeders: Vec<_> = senders
+            .into_iter()
+            .map(|(tx, operation_id)| {
+                std::thread::spawn(move || {
+                    for index in 0..200 {
+                        tx.send(TransferEvent::Progress(TransferProgress {
+                            operation_id: operation_id.to_string(),
+                            operation: TransferOperation::Fetch,
+                            phase: TransferPhase::Receiving,
+                            current: index,
+                            total: 200,
+                            received_bytes: index * 16,
+                            message: None,
+                        }))
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for feeder in feeders {
+            feeder.join().expect("feeder thread");
+        }
+        first.join().expect("first relay exits");
+        second.join().expect("second relay exits");
+
+        // `lines_of` parses every line, so a torn write fails here.
+        let lines = lines_of(&buffer);
+        assert_eq!(lines.len(), 400);
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line["params"]["operationId"] == "fetch-1")
+                .count(),
+            200
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line["params"]["operationId"] == "push-2")
+                .count(),
+            200
+        );
+    }
+
+    #[test]
+    fn pull_outcome_serializes_with_a_kind_tag_and_camel_case_fields() {
+        assert_eq!(
+            serde_json::to_value(PullOutcomeDto::from(
+                git_core::remote::PullOutcome::UpToDate
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "UpToDate"})
+        );
+        assert_eq!(
+            serde_json::to_value(PullOutcomeDto::from(
+                git_core::remote::PullOutcome::FastForwarded {
+                    upstream_ref: "refs/remotes/origin/main".to_string(),
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "FastForwarded", "upstreamRef": "refs/remotes/origin/main"})
+        );
+        assert_eq!(
+            serde_json::to_value(PullOutcomeDto::from(
+                git_core::remote::PullOutcome::Diverged {
+                    upstream_ref: "refs/remotes/origin/main".to_string(),
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Diverged", "upstreamRef": "refs/remotes/origin/main"})
+        );
+    }
 }
