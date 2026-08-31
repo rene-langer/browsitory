@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listSubmodules("/repo")).rejects.toThrow(
-      "listSubmodules is not implemented yet",
+    await expect(vscodeRepoClient.listReflogRefs("/repo")).rejects.toThrow(
+      "listReflogRefs is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -326,5 +326,33 @@ describe("vscodeRepoClient", () => {
     const prunePromise = vscodeRepoClient.pruneWorktrees("/repo");
     respond(3, null);
     await expect(prunePromise).resolves.toBeNull();
+  });
+
+  it("wires listSubmodules, initSubmodule, and updateSubmodule", async () => {
+    const listPromise = vscodeRepoClient.listSubmodules("/repo");
+    respond(1, [{ path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null }]);
+    await expect(listPromise).resolves.toEqual([
+      { path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null },
+    ]);
+
+    const initPromise = vscodeRepoClient.initSubmodule("/repo", "deps/child");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "init_submodule",
+      params: { repoPath: "/repo", path: "deps/child" },
+    });
+    respond(2, null);
+    await expect(initPromise).resolves.toBeNull();
+
+    const updatePromise = vscodeRepoClient.updateSubmodule("/repo", "deps/child", true);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "update_submodule",
+      params: { repoPath: "/repo", path: "deps/child", recursive: true },
+    });
+    respond(3, null);
+    await expect(updatePromise).resolves.toBeNull();
   });
 });

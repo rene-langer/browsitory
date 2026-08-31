@@ -5,6 +5,7 @@ import type {
   OpenRepoEntry,
   RepoClient,
   StatusEntry,
+  SubmoduleInfo,
   Workspace,
   WorktreeInfo,
 } from "./RepoClient";
@@ -154,9 +155,10 @@ export const vscodeRepoClient: RepoClient = {
   ) => call<void>("create_worktree", { repoPath, name, path, branch, startPoint }),
   removeWorktree: (repoPath: string, name: string) => call<void>("remove_worktree", { repoPath, name }),
   pruneWorktrees: (repoPath: string) => call<void>("prune_worktrees", { repoPath }),
-  listSubmodules: notImplemented("listSubmodules"),
-  initSubmodule: notImplemented("initSubmodule"),
-  updateSubmodule: notImplemented("updateSubmodule"),
+  listSubmodules: (repoPath: string) => call<SubmoduleInfo[]>("list_submodules", { repoPath }),
+  initSubmodule: (repoPath: string, path: string) => call<void>("init_submodule", { repoPath, path }),
+  updateSubmodule: (repoPath: string, path: string, recursive: boolean) =>
+    call<void>("update_submodule", { repoPath, path, recursive }),
   listReflogRefs: notImplemented("listReflogRefs"),
   getReflog: notImplemented("getReflog"),
   restoreReflogEntry: notImplemented("restoreReflogEntry"),

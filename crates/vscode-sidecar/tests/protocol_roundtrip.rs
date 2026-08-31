@@ -581,7 +581,11 @@ fn submodule_lifecycle_round_trips_through_the_sidecar() {
         config.set_str("user.email", "test@example.com").unwrap();
     }
     let mut submodule = parent
-        .submodule(child_dir.path().to_str().unwrap(), std::path::Path::new("deps/child"), true)
+        .submodule(
+            child_dir.path().to_str().unwrap(),
+            std::path::Path::new("deps/child"),
+            true,
+        )
         .expect("configure submodule");
     submodule.clone(None).expect("clone submodule");
     submodule.add_to_index(true).expect("stage submodule");
@@ -597,7 +601,11 @@ fn submodule_lifecycle_round_trips_through_the_sidecar() {
     let mut sidecar = Sidecar::spawn();
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
-    let before = sidecar.call(2, "list_submodules", serde_json::json!({"repoPath": repo_path}));
+    let before = sidecar.call(
+        2,
+        "list_submodules",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     let list = before["result"].as_array().expect("submodule list");
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["path"], "deps/child");
@@ -617,6 +625,10 @@ fn submodule_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(updated["result"], serde_json::Value::Null);
 
-    let after = sidecar.call(5, "list_submodules", serde_json::json!({"repoPath": repo_path}));
+    let after = sidecar.call(
+        5,
+        "list_submodules",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     assert_eq!(after["result"][0]["initialized"], true);
 }
