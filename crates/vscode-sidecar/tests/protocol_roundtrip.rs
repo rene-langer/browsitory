@@ -1288,3 +1288,59 @@ fn merge_conflict_lifecycle_round_trips_through_the_sidecar() {
     let aborted = sidecar.call(6, "abort_merge", serde_json::json!({"repoPath": repo_path}));
     assert_eq!(aborted["result"], serde_json::Value::Null);
 }
+
+#[test]
+fn rebase_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &base, false).unwrap();
+    drop(base);
+    let feature_ref = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap();
+    repo.set_head(feature_ref.get().name().unwrap()).unwrap();
+    drop(feature_ref);
+    write_file(dir.path(), "other.txt", "v1");
+    commit_all(&repo, "second commit");
+    let second = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    drop(repo);
+
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let since = sidecar.call(
+        2,
+        "commits_since",
+        serde_json::json!({"repoPath": repo_path, "onto": "HEAD~1"}),
+    );
+    let commits = since["result"].as_array().expect("commits since");
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0]["id"], second);
+
+    let started = sidecar.call(
+        3,
+        "start_rebase",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "onto": "HEAD~1",
+            "plan": [{"commitId": second, "action": {"kind": "Pick"}, "combinedMessage": null}],
+        }),
+    );
+    assert_eq!(started["result"]["kind"], "Done");
+
+    let progress = sidecar.call(
+        4,
+        "get_rebase_progress",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(progress["result"], serde_json::Value::Null);
+}

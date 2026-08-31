@@ -8,6 +8,7 @@ use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
+use git_core::rebase::{RebaseAction, RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
 use git_core::reflog::ReflogEntry;
 use git_core::remote::TagInfo;
 use git_core::stash::StashEntry;
@@ -94,6 +95,11 @@ pub fn dispatch(
         "abort_merge" => abort_merge(params, repos),
         "get_merge_message" => get_merge_message(params, repos),
         "resolve_add_delete_conflict" => resolve_add_delete_conflict(params, repos),
+        "commits_since" => commits_since(params, repos),
+        "start_rebase" => start_rebase(params, repos),
+        "rebase_continue" => rebase_continue(params, repos),
+        "abort_rebase" => abort_rebase(params, repos),
+        "get_rebase_progress" => get_rebase_progress(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1612,6 +1618,162 @@ fn resolve_add_delete_conflict(
     worker_handle(repos, &params.repo_path)?
         .resolve_add_delete_conflict(params.path, params.choice.into())?;
     Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RebasePlanCommitDto {
+    id: String,
+    short_id: String,
+    summary: String,
+    author_name: String,
+    timestamp: i64,
+}
+
+impl From<RebasePlanCommit> for RebasePlanCommitDto {
+    fn from(c: RebasePlanCommit) -> Self {
+        Self {
+            id: c.id,
+            short_id: c.short_id,
+            summary: c.summary,
+            author_name: c.author_name,
+            timestamp: c.timestamp,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitsSinceParams {
+    repo_path: String,
+    onto: String,
+}
+
+fn commits_since(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: CommitsSinceParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let commits: Vec<RebasePlanCommitDto> = worker_handle(repos, &params.repo_path)?
+        .commits_since(params.onto)?
+        .into_iter()
+        .map(RebasePlanCommitDto::from)
+        .collect();
+    serde_json::to_value(commits).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+enum RebaseActionDto {
+    Pick,
+    Reword { message: String },
+    Edit,
+    Squash,
+    Fixup,
+    Drop,
+}
+
+impl From<RebaseActionDto> for RebaseAction {
+    fn from(dto: RebaseActionDto) -> Self {
+        match dto {
+            RebaseActionDto::Pick => RebaseAction::Pick,
+            RebaseActionDto::Reword { message } => RebaseAction::Reword { message },
+            RebaseActionDto::Edit => RebaseAction::Edit,
+            RebaseActionDto::Squash => RebaseAction::Squash,
+            RebaseActionDto::Fixup => RebaseAction::Fixup,
+            RebaseActionDto::Drop => RebaseAction::Drop,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RebasePlanEntryDto {
+    commit_id: String,
+    action: RebaseActionDto,
+    combined_message: Option<String>,
+}
+
+impl From<RebasePlanEntryDto> for RebasePlanEntry {
+    fn from(dto: RebasePlanEntryDto) -> Self {
+        RebasePlanEntry {
+            commit_id: dto.commit_id,
+            action: dto.action.into(),
+            combined_message: dto.combined_message,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum RebaseStepResultDto {
+    Conflicted { files: Vec<String> },
+    PausedForEdit,
+    Advanced,
+    Done,
+}
+
+impl From<RebaseStepResult> for RebaseStepResultDto {
+    fn from(result: RebaseStepResult) -> Self {
+        match result {
+            RebaseStepResult::Conflicted { files } => RebaseStepResultDto::Conflicted { files },
+            RebaseStepResult::PausedForEdit => RebaseStepResultDto::PausedForEdit,
+            RebaseStepResult::Advanced => RebaseStepResultDto::Advanced,
+            RebaseStepResult::Done => RebaseStepResultDto::Done,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartRebaseParams {
+    repo_path: String,
+    onto: String,
+    plan: Vec<RebasePlanEntryDto>,
+}
+
+fn start_rebase(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: StartRebaseParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let result = worker_handle(repos, &params.repo_path)?.start_rebase(
+        params.onto,
+        params.plan.into_iter().map(Into::into).collect(),
+    )?;
+    serde_json::to_value(RebaseStepResultDto::from(result)).map_err(|error| error.to_string())
+}
+
+fn rebase_continue(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let result = worker_handle(repos, &params.repo_path)?.rebase_continue()?;
+    serde_json::to_value(RebaseStepResultDto::from(result)).map_err(|error| error.to_string())
+}
+
+fn abort_rebase(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.abort_rebase()?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RebaseProgressDto {
+    current_step: usize,
+    total_steps: usize,
+}
+
+fn get_rebase_progress(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let progress = worker_handle(repos, &params.repo_path)?
+        .get_rebase_progress()?
+        .map(|(current_step, total_steps)| RebaseProgressDto {
+            current_step,
+            total_steps,
+        });
+    serde_json::to_value(progress).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
