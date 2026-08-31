@@ -1870,10 +1870,7 @@ struct ForgetForgeTokenParams {
     account: String,
 }
 
-fn forget_forge_token(
-    params: Value,
-    repos: &mut HashMap<String, Worker>,
-) -> Result<Value, String> {
+fn forget_forge_token(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: ForgetForgeTokenParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?
@@ -1937,10 +1934,7 @@ struct ListPullRequestsParams {
     account: String,
 }
 
-fn list_pull_requests(
-    params: Value,
-    repos: &mut HashMap<String, Worker>,
-) -> Result<Value, String> {
+fn list_pull_requests(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
     let params: ListPullRequestsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let list = worker_handle(repos, &params.repo_path)?
