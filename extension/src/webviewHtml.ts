@@ -14,16 +14,15 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
     "default-src 'none'; " +
     "img-src " +
     webview.cspSource +
-    " https: data:; " +
+    "; " +
     "font-src " +
     webview.cspSource +
     "; " +
     "style-src " +
     webview.cspSource +
     "; " +
-    "script-src " +
-    webview.cspSource +
-    " 'nonce-" +
+    "style-src-attr 'unsafe-inline'; " +
+    "script-src 'nonce-" +
     nonce +
     "';";
 

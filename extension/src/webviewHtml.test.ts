@@ -25,9 +25,9 @@ describe("renderWebviewHtml", () => {
     expect(webview.asWebviewUri).toHaveBeenNthCalledWith(1, script);
     expect(webview.asWebviewUri).toHaveBeenNthCalledWith(2, style);
     expect(html).toContain(
-      "default-src 'none'; img-src vscode-webview://unit-test https: data:; " +
+      "default-src 'none'; img-src vscode-webview://unit-test; " +
         "font-src vscode-webview://unit-test; style-src vscode-webview://unit-test; " +
-        "script-src vscode-webview://unit-test 'nonce-",
+        "style-src-attr 'unsafe-inline'; script-src 'nonce-",
     );
     expect(html).toContain(
       'href="vscode-resource:/workspace/frontend/dist-vscode/assets/vscode-main.css"',
@@ -35,7 +35,9 @@ describe("renderWebviewHtml", () => {
     expect(html).toContain(
       'src="vscode-resource:/workspace/frontend/dist-vscode/assets/vscode-main.js"',
     );
-    expect(html).not.toContain("'unsafe-inline'");
+    expect(html).not.toContain("https: data:");
+    expect(html).not.toMatch(/(?:script-src|style-src) [^;]*'unsafe-inline'/);
+    expect(html).toMatch(/script-src 'nonce-[a-f0-9]{32}';/);
     expect(html).not.toContain("'unsafe-eval'");
     expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
   });
