@@ -5,6 +5,7 @@ use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::reflog::ReflogEntry;
+use git_core::remote::TagInfo;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
@@ -69,6 +70,9 @@ pub fn dispatch(
         "set_remote_auth_mode" => set_remote_auth_mode(params, repos),
         "set_current_upstream" => set_current_upstream(params, repos),
         "clear_current_upstream" => clear_current_upstream(params, repos),
+        "list_tags" => list_tags(params, repos),
+        "create_tag" => create_tag(params, repos),
+        "delete_tag" => delete_tag(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1103,5 +1107,69 @@ fn clear_current_upstream(
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.clear_current_upstream()?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TagInfoDto {
+    name: String,
+    target_id: String,
+    annotated: bool,
+    message: Option<String>,
+    tagger_name: Option<String>,
+    timestamp: Option<i64>,
+}
+
+impl From<TagInfo> for TagInfoDto {
+    fn from(tag: TagInfo) -> Self {
+        Self {
+            name: tag.name,
+            target_id: tag.target_id,
+            annotated: tag.annotated,
+            message: tag.message,
+            tagger_name: tag.tagger_name,
+            timestamp: tag.timestamp,
+        }
+    }
+}
+
+fn list_tags(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let tags: Vec<TagInfoDto> = worker_handle(repos, &params.repo_path)?
+        .list_tags()?
+        .into_iter()
+        .map(TagInfoDto::from)
+        .collect();
+    serde_json::to_value(tags).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTagParams {
+    repo_path: String,
+    name: String,
+    message: Option<String>,
+}
+
+fn create_tag(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: CreateTagParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.create_tag(params.name, params.message)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteTagParams {
+    repo_path: String,
+    name: String,
+}
+
+fn delete_tag(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: DeleteTagParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.delete_tag(params.name)?;
     Ok(Value::Null)
 }

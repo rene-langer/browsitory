@@ -812,3 +812,35 @@ fn add_remote_https_credential_and_current_upstream_round_trip_through_the_sidec
     );
     assert_eq!(branches["result"], serde_json::json!([]));
 }
+
+#[test]
+fn tag_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let created = sidecar.call(
+        2,
+        "create_tag",
+        serde_json::json!({"repoPath": repo_path, "name": "v1.0.0", "message": "first release"}),
+    );
+    assert_eq!(created["result"], serde_json::Value::Null);
+
+    let tags = sidecar.call(3, "list_tags", serde_json::json!({"repoPath": repo_path}));
+    let list = tags["result"].as_array().expect("tag list");
+    assert_eq!(list[0]["name"], "v1.0.0");
+    assert_eq!(list[0]["annotated"], true);
+    assert_eq!(list[0]["message"], "first release");
+
+    let deleted = sidecar.call(
+        4,
+        "delete_tag",
+        serde_json::json!({"repoPath": repo_path, "name": "v1.0.0"}),
+    );
+    assert_eq!(deleted["result"], serde_json::Value::Null);
+    let tags_after = sidecar.call(5, "list_tags", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(tags_after["result"], serde_json::json!([]));
+}
