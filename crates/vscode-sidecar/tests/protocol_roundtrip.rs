@@ -560,3 +560,63 @@ fn worktree_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(pruned["result"], serde_json::Value::Null);
 }
+
+#[test]
+fn submodule_lifecycle_round_trips_through_the_sidecar() {
+    let parent_dir = tempfile::TempDir::new().expect("create parent dir");
+    let child_dir = tempfile::TempDir::new().expect("create child dir");
+    let child = git2::Repository::init(child_dir.path()).expect("init child repo");
+    {
+        let mut config = child.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    write_file(child_dir.path(), "child.txt", "hello");
+    commit_all(&child, "child commit");
+
+    let parent = git2::Repository::init(parent_dir.path()).expect("init parent repo");
+    {
+        let mut config = parent.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    let mut submodule = parent
+        .submodule(child_dir.path().to_str().unwrap(), std::path::Path::new("deps/child"), true)
+        .expect("configure submodule");
+    submodule.clone(None).expect("clone submodule");
+    submodule.add_to_index(true).expect("stage submodule");
+    submodule.add_finalize().expect("finalize submodule");
+    drop(submodule);
+    commit_all(&parent, "add submodule");
+    drop(parent);
+
+    let checkout_dir = tempfile::TempDir::new().expect("create checkout dir");
+    git2::Repository::clone(parent_dir.path().to_str().unwrap(), checkout_dir.path())
+        .expect("clone parent");
+    let repo_path = checkout_dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let before = sidecar.call(2, "list_submodules", serde_json::json!({"repoPath": repo_path}));
+    let list = before["result"].as_array().expect("submodule list");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["path"], "deps/child");
+    assert_eq!(list[0]["initialized"], false);
+
+    let inited = sidecar.call(
+        3,
+        "init_submodule",
+        serde_json::json!({"repoPath": repo_path, "path": "deps/child"}),
+    );
+    assert_eq!(inited["result"], serde_json::Value::Null);
+
+    let updated = sidecar.call(
+        4,
+        "update_submodule",
+        serde_json::json!({"repoPath": repo_path, "path": "deps/child", "recursive": false}),
+    );
+    assert_eq!(updated["result"], serde_json::Value::Null);
+
+    let after = sidecar.call(5, "list_submodules", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(after["result"][0]["initialized"], true);
+}

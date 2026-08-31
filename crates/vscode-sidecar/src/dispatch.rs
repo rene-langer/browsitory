@@ -5,6 +5,7 @@ use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::status::StatusEntry;
+use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
 use repo_service::worker::Worker;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,9 @@ pub fn dispatch(
         "create_worktree" => create_worktree(params, repos),
         "remove_worktree" => remove_worktree(params, repos),
         "prune_worktrees" => prune_worktrees(params, repos),
+        "list_submodules" => list_submodules(params, repos),
+        "init_submodule" => init_submodule(params, repos),
+        "update_submodule" => update_submodule(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -664,5 +668,60 @@ fn prune_worktrees(params: Value, repos: &mut HashMap<String, Worker>) -> Result
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.prune_worktrees()?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmoduleInfoDto {
+    path: String,
+    url: Option<String>,
+    gitlink_id: Option<String>,
+    initialized: bool,
+    head_id: Option<String>,
+}
+
+impl From<SubmoduleInfo> for SubmoduleInfoDto {
+    fn from(submodule: SubmoduleInfo) -> Self {
+        Self {
+            path: submodule.path,
+            url: submodule.url,
+            gitlink_id: submodule.gitlink_id,
+            initialized: submodule.initialized,
+            head_id: submodule.head_id,
+        }
+    }
+}
+
+fn list_submodules(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let submodules: Vec<SubmoduleInfoDto> = worker_handle(repos, &params.repo_path)?
+        .list_submodules()?
+        .into_iter()
+        .map(SubmoduleInfoDto::from)
+        .collect();
+    serde_json::to_value(submodules).map_err(|error| error.to_string())
+}
+
+fn init_submodule(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoFilePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.init_submodule(params.path)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateSubmoduleParams {
+    repo_path: String,
+    path: String,
+    recursive: bool,
+}
+
+fn update_submodule(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: UpdateSubmoduleParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.update_submodule(params.path, params.recursive)?;
     Ok(Value::Null)
 }
