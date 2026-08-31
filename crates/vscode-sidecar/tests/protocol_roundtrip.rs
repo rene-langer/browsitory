@@ -644,7 +644,11 @@ fn reflog_lists_and_restores_through_the_sidecar() {
     let mut sidecar = Sidecar::spawn();
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
-    let refs = sidecar.call(2, "list_reflog_refs", serde_json::json!({"repoPath": repo_path}));
+    let refs = sidecar.call(
+        2,
+        "list_reflog_refs",
+        serde_json::json!({"repoPath": repo_path}),
+    );
     let refs_list = refs["result"].as_array().expect("reflog refs");
     assert!(refs_list.iter().any(|r| r == "HEAD"));
 

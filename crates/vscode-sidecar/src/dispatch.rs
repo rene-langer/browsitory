@@ -791,9 +791,13 @@ struct RestoreReflogEntryParams {
     new_id: String,
 }
 
-fn restore_reflog_entry(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+fn restore_reflog_entry(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
     let params: RestoreReflogEntryParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.restore_reflog_entry(params.reference, params.new_id)?;
+    worker_handle(repos, &params.repo_path)?
+        .restore_reflog_entry(params.reference, params.new_id)?;
     Ok(Value::Null)
 }
