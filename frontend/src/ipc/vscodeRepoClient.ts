@@ -9,6 +9,7 @@ import type {
   RepoClient,
   StatusEntry,
   SubmoduleInfo,
+  TagInfo,
   UpstreamInfo,
   Workspace,
   WorktreeInfo,
@@ -197,9 +198,10 @@ export const vscodeRepoClient: RepoClient = {
   setCurrentUpstream: (repoPath: string, remoteName: string, remoteBranch: string) =>
     call<void>("set_current_upstream", { repoPath, remoteName, remoteBranch }),
   clearCurrentUpstream: (repoPath: string) => call<void>("clear_current_upstream", { repoPath }),
-  listTags: notImplemented("listTags"),
-  createTag: notImplemented("createTag"),
-  deleteTag: notImplemented("deleteTag"),
+  listTags: (repoPath: string) => call<TagInfo[]>("list_tags", { repoPath }),
+  createTag: (repoPath: string, name: string, message: string | null) =>
+    call<void>("create_tag", { repoPath, name, message }),
+  deleteTag: (repoPath: string, name: string) => call<void>("delete_tag", { repoPath, name }),
   fetchRemote: notImplemented("fetchRemote"),
   pushCurrentBranch: notImplemented("pushCurrentBranch"),
   pushTags: notImplemented("pushTags"),

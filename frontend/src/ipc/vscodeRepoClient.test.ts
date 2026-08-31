@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listTags("/repo")).rejects.toThrow(
-      "listTags is not implemented yet",
+    await expect(vscodeRepoClient.fetchRemote("/repo", "origin")).rejects.toThrow(
+      "fetchRemote is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -493,5 +493,33 @@ describe("vscodeRepoClient", () => {
     const clearPromise = vscodeRepoClient.clearCurrentUpstream("/repo");
     respond(2, null);
     await expect(clearPromise).resolves.toBeNull();
+  });
+
+  it("wires listTags, createTag, and deleteTag", async () => {
+    const createPromise = vscodeRepoClient.createTag("/repo", "v1.0.0", "first release");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "create_tag",
+      params: { repoPath: "/repo", name: "v1.0.0", message: "first release" },
+    });
+    respond(1, null);
+    await expect(createPromise).resolves.toBeNull();
+
+    const listPromise = vscodeRepoClient.listTags("/repo");
+    respond(2, [
+      { name: "v1.0.0", targetId: "abc", annotated: true, message: "first release", taggerName: "Test User", timestamp: 1_725_000_000 },
+    ]);
+    await expect(listPromise).resolves.toHaveLength(1);
+
+    const deletePromise = vscodeRepoClient.deleteTag("/repo", "v1.0.0");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "delete_tag",
+      params: { repoPath: "/repo", name: "v1.0.0" },
+    });
+    respond(3, null);
+    await expect(deletePromise).resolves.toBeNull();
   });
 });
