@@ -6,6 +6,7 @@ import type {
   RepoClient,
   StatusEntry,
   Workspace,
+  WorktreeInfo,
 } from "./RepoClient";
 
 // No `vscode` npm package dependency here on purpose — the real extension host's webview API
@@ -143,10 +144,16 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("delete_branch", { repoPath, name, force }),
   renameBranch: (repoPath: string, oldName: string, newName: string) =>
     call<void>("rename_branch", { repoPath, oldName, newName }),
-  listWorktrees: notImplemented("listWorktrees"),
-  createWorktree: notImplemented("createWorktree"),
-  removeWorktree: notImplemented("removeWorktree"),
-  pruneWorktrees: notImplemented("pruneWorktrees"),
+  listWorktrees: (repoPath: string) => call<WorktreeInfo[]>("list_worktrees", { repoPath }),
+  createWorktree: (
+    repoPath: string,
+    name: string,
+    path: string,
+    branch: string,
+    startPoint: string | null,
+  ) => call<void>("create_worktree", { repoPath, name, path, branch, startPoint }),
+  removeWorktree: (repoPath: string, name: string) => call<void>("remove_worktree", { repoPath, name }),
+  pruneWorktrees: (repoPath: string) => call<void>("prune_worktrees", { repoPath }),
   listSubmodules: notImplemented("listSubmodules"),
   initSubmodule: notImplemented("initSubmodule"),
   updateSubmodule: notImplemented("updateSubmodule"),

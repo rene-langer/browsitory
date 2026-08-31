@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listWorktrees("/repo")).rejects.toThrow(
-      "listWorktrees is not implemented yet",
+    await expect(vscodeRepoClient.listSubmodules("/repo")).rejects.toThrow(
+      "listSubmodules is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -296,5 +296,35 @@ describe("vscodeRepoClient", () => {
     });
     respond(4, null);
     await expect(deletePromise).resolves.toBeNull();
+  });
+
+  it("wires listWorktrees", async () => {
+    const promise = vscodeRepoClient.listWorktrees("/repo");
+    respond(1, [
+      { name: "main", path: "/repo", head: "refs/heads/main", isMain: true, isLocked: false, isPrunable: false },
+    ]);
+    await expect(promise).resolves.toEqual([
+      { name: "main", path: "/repo", head: "refs/heads/main", isMain: true, isLocked: false, isPrunable: false },
+    ]);
+  });
+
+  it("wires createWorktree, removeWorktree, and pruneWorktrees", async () => {
+    const createPromise = vscodeRepoClient.createWorktree("/repo", "feature-tree", "/repo-feature", "feature", "HEAD");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "create_worktree",
+      params: { repoPath: "/repo", name: "feature-tree", path: "/repo-feature", branch: "feature", startPoint: "HEAD" },
+    });
+    respond(1, null);
+    await expect(createPromise).resolves.toBeNull();
+
+    const removePromise = vscodeRepoClient.removeWorktree("/repo", "feature-tree");
+    respond(2, null);
+    await expect(removePromise).resolves.toBeNull();
+
+    const prunePromise = vscodeRepoClient.pruneWorktrees("/repo");
+    respond(3, null);
+    await expect(prunePromise).resolves.toBeNull();
   });
 });
