@@ -84,48 +84,69 @@ function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
   );
 }
 
+export interface TransportStatus {
+  state: "reconnecting" | "failed";
+  message: string;
+}
+
+function isTransportStatus(value: unknown): value is TransportStatus {
+  if (typeof value !== "object" || value === null || !("state" in value) || !("message" in value)) {
+    return false;
+  }
+  return (
+    (value.state === "reconnecting" || value.state === "failed") &&
+    typeof value.message === "string"
+  );
+}
+
 let vscode: VsCodeWebviewApi | undefined;
 let listenerRegistered = false;
 let nextRequestId = 1;
-// Entries are only ever removed by a matching reply (see the `message` listener below). If the
-// sidecar process dies, or the host never replies, a pending entry's promise hangs forever —
-// there is no timeout and no "transport closed" signal today. A future task (once the
-// `extension/` host exists and can detect sidecar exit) should add either a per-request timeout
-// or a mechanism to reject every pending entry when the host reports the transport is closed.
 const pending = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
+const transportStatusListeners = new Set<(status: TransportStatus) => void>();
 
-// Lazily acquire the VSCode webview API and register the message listener on first use, rather
-// than at module load, so this module stays safe to statically import into a bundle that
-// doesn't inject `acquireVsCodeApi` (e.g. today's Tauri build).
+function handleMessage(event: MessageEvent) {
+  const message = event.data;
+  if (isJsonRpcResponse(message)) {
+    const waiting = pending.get(message.id);
+    if (!waiting) return;
+    pending.delete(message.id);
+    if ("error" in message) {
+      waiting.reject(new Error(message.error.message));
+    } else {
+      waiting.resolve(message.result);
+    }
+    return;
+  }
+  if (!isJsonRpcNotification(message)) return;
+  if (message.method === "transferProgress") {
+    const progress = message.params as TransferProgress;
+    for (const listener of transferProgressListeners) listener(progress);
+    return;
+  }
+  if (message.method !== "transportStatus" || !isTransportStatus(message.params)) return;
+  const status = message.params;
+  const error = new Error(status.message);
+  const waitingCalls = [...pending.values()];
+  pending.clear();
+  for (const waiting of waitingCalls) waiting.reject(error);
+  for (const listener of transportStatusListeners) listener(status);
+}
+
+function ensureMessageListener() {
+  if (listenerRegistered) return;
+  listenerRegistered = true;
+  window.addEventListener("message", handleMessage);
+}
+
+// Lazily acquire the VSCode API so importing this module remains safe in the Tauri bundle.
 function ensureInitialized(): VsCodeWebviewApi {
-  if (!vscode) {
-    vscode = acquireVsCodeApi();
-  }
-  if (!listenerRegistered) {
-    listenerRegistered = true;
-    window.addEventListener("message", (event: MessageEvent) => {
-      const message = event.data;
-      if (isJsonRpcResponse(message)) {
-        const waiting = pending.get(message.id);
-        if (!waiting) return;
-        pending.delete(message.id);
-        if ("error" in message) {
-          waiting.reject(new Error(message.error.message));
-        } else {
-          waiting.resolve(message.result);
-        }
-        return;
-      }
-      if (isJsonRpcNotification(message) && message.method === "transferProgress") {
-        const progress = message.params as TransferProgress;
-        for (const listener of transferProgressListeners) listener(progress);
-      }
-    });
-  }
+  if (!vscode) vscode = acquireVsCodeApi();
+  ensureMessageListener();
   return vscode;
 }
 
@@ -138,9 +159,25 @@ function call<T>(method: string, params: Record<string, unknown>): Promise<T> {
   });
 }
 
-function notImplemented(method: string) {
-  return (): Promise<never> =>
-    Promise.reject(new Error(`vscodeRepoClient: ${method} is not implemented yet`));
+export function subscribeTransportStatus(listener: (status: TransportStatus) => void) {
+  ensureMessageListener();
+  transportStatusListeners.add(listener);
+  return () => {
+    transportStatusListeners.delete(listener);
+  };
+}
+
+/** Test-only lifecycle cleanup for Vitest's shared window. */
+export function __resetVscodeRepoClientForTests() {
+  if (listenerRegistered) {
+    window.removeEventListener("message", handleMessage);
+    listenerRegistered = false;
+  }
+  vscode = undefined;
+  nextRequestId = 1;
+  pending.clear();
+  transferProgressListeners.clear();
+  transportStatusListeners.clear();
 }
 
 export const vscodeRepoClient: RepoClient = {
@@ -154,11 +191,12 @@ export const vscodeRepoClient: RepoClient = {
   getCommitDiff: (repoPath: string, commitId: string, path: string) =>
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
 
-  pickRepoFolder: notImplemented("pickRepoFolder"),
+  pickRepoFolder: () => call<string | null>("pick_repo_folder", {}),
   listRecentRepos: () => call<string[]>("list_recent_repos", {}),
-  getAppVersion: notImplemented("getAppVersion"),
-  getLastSeenVersion: notImplemented("getLastSeenVersion"),
-  setLastSeenVersion: notImplemented("setLastSeenVersion"),
+  getAppVersion: () => call<string>("get_app_version", {}),
+  getLastSeenVersion: () => call<string | null>("get_last_seen_version", {}),
+  setLastSeenVersion: (version: string) =>
+    call<void>("set_last_seen_version", { version }),
   listOpenRepos: () =>
     call<{ entries: OpenRepoEntry[]; activePath: string | null }>("list_open_repos", {}),
   persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
@@ -298,5 +336,6 @@ export const vscodeRepoClient: RepoClient = {
     call<PullRequestList>("list_pull_requests", { repoPath, remoteName, account }),
   createPullRequest: (repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest) =>
     call<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
-  openExternalUrl: notImplemented("openExternalUrl"),
+  openExternalUrl: (url: string) =>
+    call<void>("open_external_url", { url }),
 };

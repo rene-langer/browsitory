@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "./RepoClient";
 
 describe("vscodeRepoClient", () => {
   let postMessage: ReturnType<typeof vi.fn>;
   let vscodeRepoClient: RepoClient;
+  let resetVscodeRepoClientForTests: (() => void) | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -11,7 +12,13 @@ describe("vscodeRepoClient", () => {
     (
       globalThis as unknown as { acquireVsCodeApi: () => { postMessage: typeof postMessage } }
     ).acquireVsCodeApi = () => ({ postMessage });
-    ({ vscodeRepoClient } = await import("./vscodeRepoClient"));
+    const clientModule = await import("./vscodeRepoClient");
+    vscodeRepoClient = clientModule.vscodeRepoClient;
+    resetVscodeRepoClientForTests = clientModule.__resetVscodeRepoClientForTests;
+  });
+
+  afterEach(() => {
+    resetVscodeRepoClientForTests?.();
   });
 
   function respond(id: number, result: unknown) {
@@ -63,13 +70,91 @@ describe("vscodeRepoClient", () => {
     ]);
   });
 
-  it("rejects unwired methods without touching postMessage", async () => {
-    // VSCode-native-only methods (permanently out of scope for the sidecar per the spec) are the
-    // only ones still unwired once forge repository detection and pull requests are wired below.
-    await expect(vscodeRepoClient.pickRepoFolder()).rejects.toThrow(
-      "pickRepoFolder is not implemented yet",
-    );
-    expect(postMessage).not.toHaveBeenCalled();
+  it("wires VS Code-native host methods", async () => {
+    const methods = [
+      [() => vscodeRepoClient.pickRepoFolder(), "pick_repo_folder", {}, "/repos/a"],
+      [() => vscodeRepoClient.getAppVersion(), "get_app_version", {}, "1.2.3"],
+      [() => vscodeRepoClient.getLastSeenVersion(), "get_last_seen_version", {}, null],
+      [() => vscodeRepoClient.setLastSeenVersion("1.2.3"), "set_last_seen_version", { version: "1.2.3" }, null],
+      [() => vscodeRepoClient.openExternalUrl("https://example.com/pull/1"), "open_external_url", { url: "https://example.com/pull/1" }, null],
+    ] as const;
+
+    for (const [index, [call, method, params, result]] of methods.entries()) {
+      const promise = call();
+      expect(postMessage).toHaveBeenLastCalledWith({ jsonrpc: "2.0", id: index + 1, method, params });
+      respond(index + 1, result);
+      await expect(promise).resolves.toBe(result);
+    }
+  });
+
+  it("rejects pending calls after a transportStatus notification and permits a fresh call", async () => {
+    const first = vscodeRepoClient.getStatus("/repo");
+    const second = vscodeRepoClient.listRecentRepos();
+    const received = vi.fn();
+    const { subscribeTransportStatus } = await import("./vscodeRepoClient");
+    subscribeTransportStatus(received);
+
+    window.dispatchEvent(new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "transportStatus",
+        params: { state: "reconnecting", message: "sidecar is reconnecting" },
+      },
+    }));
+
+    await expect(first).rejects.toThrow("sidecar is reconnecting");
+    await expect(second).rejects.toThrow("sidecar is reconnecting");
+    expect(received).toHaveBeenCalledWith({ state: "reconnecting", message: "sidecar is reconnecting" });
+
+    const afterReconnect = vscodeRepoClient.getStatus("/repo");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0", id: 3, method: "get_status", params: { repoPath: "/repo" },
+    });
+    respond(3, []);
+    await expect(afterReconnect).resolves.toEqual([]);
+  });
+
+
+  it("rejects pending calls after a failed transportStatus notification", async () => {
+    const request = vscodeRepoClient.getStatus("/repo");
+
+    window.dispatchEvent(new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "transportStatus",
+        params: { state: "failed", message: "sidecar failed" },
+      },
+    }));
+
+    await expect(request).rejects.toThrow("sidecar failed");
+  });
+
+  it("stops delivering transport status notifications after unsubscribe", async () => {
+    const received = vi.fn();
+    const { subscribeTransportStatus } = await import("./vscodeRepoClient");
+    const unsubscribe = subscribeTransportStatus(received);
+
+    window.dispatchEvent(new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "transportStatus",
+        params: { state: "reconnecting", message: "sidecar is reconnecting" },
+      },
+    }));
+    unsubscribe();
+    window.dispatchEvent(new MessageEvent("message", {
+      data: {
+        jsonrpc: "2.0",
+        method: "transportStatus",
+        params: { state: "failed", message: "sidecar failed" },
+      },
+    }));
+
+    expect(received).toHaveBeenCalledOnce();
+  });
+
+  it("exports a deterministic test reset", () => {
+    expect(resetVscodeRepoClientForTests).toEqual(expect.any(Function));
   });
 
   it("wires listRecentRepos", async () => {

@@ -21,7 +21,8 @@ import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { WorktreePanel } from "./components/WorktreePanel";
-import { tauriRepoClient } from "./ipc/tauriRepoClient";
+import type { RepoClient } from "./ipc/RepoClient";
+import { subscribeTransportStatus } from "./ipc/vscodeRepoClient";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
@@ -36,12 +37,14 @@ const allReleaseNotes = releaseNotesData as ReleaseNotesEntry[];
 function RepoWorkspace({
   repoPath,
   active,
+  client,
   onOpenRepoTab,
   onBusyChange,
   openRepos,
   onSwitchRepoTab,
 }: {
   repoPath: string;
+  client: RepoClient;
   active: boolean;
   // `Promise<void>` rather than the plan's `void`: `WorktreePanel`'s `onOpenWorktree` is typed
   // `(path: string) => Promise<void>`, and this is the only value passed to it. It stays
@@ -51,7 +54,7 @@ function RepoWorkspace({
   openRepos: OpenRepo[];
   onSwitchRepoTab: (path: string) => void;
 }) {
-  const appState = useAppState(tauriRepoClient, repoPath);
+  const appState = useAppState(client, repoPath);
   const panelVisibility = useSidebarPanelVisibility();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -302,7 +305,7 @@ function RepoWorkspace({
             right={
               <DiffPane
                 repoPath={repoPath}
-                client={tauriRepoClient}
+                client={client}
                 selectedRow={appState.state.selectedRow}
                 status={appState.state.status}
                 onStageFile={appState.stageFile}
@@ -331,7 +334,7 @@ function RepoWorkspace({
         <Overlay onClose={appState.closeRebasePlanner}>
           <RebasePlanner
             repoPath={repoPath}
-            client={tauriRepoClient}
+            client={client}
             onto={appState.state.rebaseOnto}
             onStartRebase={appState.startRebase}
             onCancel={appState.closeRebasePlanner}
@@ -344,9 +347,9 @@ function RepoWorkspace({
   );
 }
 
-export default function App() {
-  const openRepos = useOpenRepos(tauriRepoClient);
-  const workspaces = useWorkspaces(tauriRepoClient);
+export default function App({ client }: { client: RepoClient }) {
+  const openRepos = useOpenRepos(client);
+  const workspaces = useWorkspaces(client);
   const workspaceNames = useMemo(
     () => Object.fromEntries(workspaces.workspaces.map((workspace) => [workspace.id, workspace.name])),
     [workspaces.workspaces],
@@ -378,6 +381,11 @@ export default function App() {
   // that `App` has no `useAppState` of its own, so a failed open would look like nothing
   // happened — the same trap the pre-tabs `App` carried a comment about.
   const [openError, setOpenError] = useState<string | null>(null);
+  const [transportError, setTransportError] = useState<string | null>(null);
+  useEffect(
+    () => subscribeTransportStatus((status) => setTransportError(status.message)),
+    [],
+  );
   const { openRepo } = openRepos;
   const openRepoTab = useCallback(
     // Both branches settle asynchronously on purpose: the E2E auto-open effect below calls this
@@ -403,8 +411,8 @@ export default function App() {
     async function checkVersion() {
       try {
         const [appVersion, lastSeenVersion] = await Promise.all([
-          tauriRepoClient.getAppVersion(),
-          tauriRepoClient.getLastSeenVersion(),
+          client.getAppVersion(),
+          client.getLastSeenVersion(),
         ]);
         if (cancelled || appVersion === lastSeenVersion) return;
         const seenIndex =
@@ -421,15 +429,15 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [client]);
 
   function closeReleaseNotes() {
     const wasAuto = releaseNotesView?.mode === "auto";
     setReleaseNotesView(null);
     if (!wasAuto) return;
-    void tauriRepoClient
+    void client
       .getAppVersion()
-      .then((version) => tauriRepoClient.setLastSeenVersion(version))
+      .then((version) => client.setLastSeenVersion(version))
       .catch((error) => console.error("Failed to record last-seen version", error));
   }
 
@@ -532,6 +540,9 @@ export default function App() {
       {openRepos.restoreError !== null && (
         <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
       )}
+      {transportError !== null && (
+        <InlineError message={transportError} onDismiss={() => setTransportError(null)} />
+      )}
       {openError !== null && <InlineError message={openError} onDismiss={() => setOpenError(null)} />}
       {releaseNotesView !== null && (
         <ReleaseNotesModal entries={releaseNotesView.entries} onClose={closeReleaseNotes} />
@@ -539,7 +550,7 @@ export default function App() {
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
-            client={tauriRepoClient}
+            client={client}
             onOpenRepo={(path) => {
               void openRepoTab(path);
               setPickingRepo(false);
@@ -560,7 +571,7 @@ export default function App() {
       )}
       {openRepos.openRepos.length === 0 ? (
         <RepoPicker
-          client={tauriRepoClient}
+          client={client}
           onOpenRepo={openRepoTab}
           onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
           workspaces={workspaces.workspaces}
@@ -577,6 +588,7 @@ export default function App() {
             key={repo.path}
             repoPath={repo.path}
             active={repo.path === openRepos.activePath}
+            client={client}
             onOpenRepoTab={openRepoTab}
             onBusyChange={onBusyChange}
             openRepos={openRepos.openRepos}
