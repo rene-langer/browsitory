@@ -8,6 +8,7 @@ import type {
   RemoteAuthMode,
   RemoteInfo,
   RepoClient,
+  StashEntry,
   StatusEntry,
   SubmoduleInfo,
   TagInfo,
@@ -251,10 +252,10 @@ export const vscodeRepoClient: RepoClient = {
       transferProgressListeners.delete(listener);
     };
   },
-  listStashes: notImplemented("listStashes"),
-  saveStash: notImplemented("saveStash"),
-  applyStash: notImplemented("applyStash"),
-  dropStash: notImplemented("dropStash"),
+  listStashes: (repoPath: string) => call<StashEntry[]>("list_stashes", { repoPath }),
+  saveStash: (repoPath: string) => call<void>("save_stash", { repoPath }),
+  applyStash: (repoPath: string, index: number) => call<void>("apply_stash", { repoPath, index }),
+  dropStash: (repoPath: string, index: number) => call<void>("drop_stash", { repoPath, index }),
   getBlame: notImplemented("getBlame"),
   mergeBranch: notImplemented("mergeBranch"),
   getConflictHunks: notImplemented("getConflictHunks"),

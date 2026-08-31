@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listStashes("/repo")).rejects.toThrow(
-      "listStashes is not implemented yet",
+    await expect(vscodeRepoClient.getBlame("/repo", "abc123", "file.txt")).rejects.toThrow(
+      "getBlame is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -653,5 +653,29 @@ describe("vscodeRepoClient", () => {
 
     expect(received).toHaveLength(1);
     expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("wires listStashes, saveStash, applyStash, and dropStash", async () => {
+    const savePromise = vscodeRepoClient.saveStash("/repo");
+    respond(1, null);
+    await expect(savePromise).resolves.toBeNull();
+
+    const listPromise = vscodeRepoClient.listStashes("/repo");
+    respond(2, [{ index: 0, message: "WIP", commitId: "abc123" }]);
+    await expect(listPromise).resolves.toHaveLength(1);
+
+    const applyPromise = vscodeRepoClient.applyStash("/repo", 0);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "apply_stash",
+      params: { repoPath: "/repo", index: 0 },
+    });
+    respond(3, null);
+    await expect(applyPromise).resolves.toBeNull();
+
+    const dropPromise = vscodeRepoClient.dropStash("/repo", 0);
+    respond(4, null);
+    await expect(dropPromise).resolves.toBeNull();
   });
 });
