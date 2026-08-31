@@ -1191,3 +1191,100 @@ fn fetch_remote_on_an_unopened_repo_returns_an_error_without_emitting_notificati
     let next = sidecar.call(2, "does_not_exist", serde_json::json!({}));
     assert_eq!(next["id"], 2);
 }
+
+#[test]
+fn get_blame_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello\n");
+    commit_all(&repo, "initial commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let blame = sidecar.call(
+        2,
+        "get_blame",
+        serde_json::json!({"repoPath": repo_path, "commitId": "HEAD", "path": "file.txt"}),
+    );
+    let lines = blame["result"].as_array().expect("blame lines");
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["content"], "hello");
+}
+
+#[test]
+fn merge_conflict_lifecycle_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "base\n");
+    commit_all(&repo, "base commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &base, false).unwrap();
+    drop(base);
+
+    write_file(dir.path(), "file.txt", "main change\n");
+    commit_all(&repo, "main change");
+
+    let feature_ref = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap();
+    repo.set_head(feature_ref.get().name().unwrap()).unwrap();
+    drop(feature_ref);
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "file.txt", "feature change\n");
+    commit_all(&repo, "feature change");
+
+    let main_branch = repo
+        .branches(Some(git2::BranchType::Local))
+        .unwrap()
+        .find_map(|b| {
+            let (branch, _) = b.unwrap();
+            let name = branch.name().unwrap().unwrap().to_string();
+            (name != "feature").then_some(name)
+        })
+        .unwrap();
+    repo.set_head(&format!("refs/heads/{main_branch}")).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    drop(repo);
+
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let merged = sidecar.call(
+        2,
+        "start_merge",
+        serde_json::json!({"repoPath": repo_path, "branchName": "feature"}),
+    );
+    assert_eq!(merged["result"]["kind"], "Conflicted");
+    let conflicted_files = merged["result"]["files"].as_array().unwrap();
+    assert!(conflicted_files.iter().any(|f| f == "file.txt"));
+
+    let hunks = sidecar.call(
+        3,
+        "get_conflict_hunks",
+        serde_json::json!({"repoPath": repo_path, "path": "file.txt"}),
+    );
+    assert!(hunks["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["kind"] == "Conflict"));
+
+    let message = sidecar.call(
+        4,
+        "get_merge_message",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert!(message["result"].as_str().unwrap().contains("feature"));
+
+    let resolved = sidecar.call(
+        5,
+        "resolve_conflict",
+        serde_json::json!({"repoPath": repo_path, "path": "file.txt", "resolvedContent": "resolved\n"}),
+    );
+    assert_eq!(resolved["result"], serde_json::Value::Null);
+
+    let aborted = sidecar.call(6, "abort_merge", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(aborted["result"], serde_json::Value::Null);
+}

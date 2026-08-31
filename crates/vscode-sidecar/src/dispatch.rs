@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
+use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
+use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::reflog::ReflogEntry;
 use git_core::remote::TagInfo;
 use git_core::stash::StashEntry;
@@ -85,6 +87,13 @@ pub fn dispatch(
         "save_stash" => save_stash(params, repos),
         "apply_stash" => apply_stash(params, repos),
         "drop_stash" => drop_stash(params, repos),
+        "get_blame" => get_blame(params, repos),
+        "start_merge" => start_merge(params, repos),
+        "get_conflict_hunks" => get_conflict_hunks(params, repos),
+        "resolve_conflict" => resolve_conflict(params, repos),
+        "abort_merge" => abort_merge(params, repos),
+        "get_merge_message" => get_merge_message(params, repos),
+        "resolve_add_delete_conflict" => resolve_add_delete_conflict(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1430,6 +1439,178 @@ fn drop_stash(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Valu
     let params: StashIndexParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.drop_stash(params.index)?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlameLineDto {
+    line_number: usize,
+    content: String,
+    commit_id: String,
+    short_id: String,
+    author_name: String,
+    timestamp: i64,
+}
+
+impl From<BlameLine> for BlameLineDto {
+    fn from(line: BlameLine) -> Self {
+        Self {
+            line_number: line.line_number,
+            content: line.content,
+            commit_id: line.commit_id,
+            short_id: line.short_id,
+            author_name: line.author_name,
+            timestamp: line.timestamp,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetBlameParams {
+    repo_path: String,
+    commit_id: String,
+    path: String,
+}
+
+fn get_blame(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: GetBlameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let lines: Vec<BlameLineDto> = worker_handle(repos, &params.repo_path)?
+        .get_blame(params.commit_id, params.path)?
+        .into_iter()
+        .map(BlameLineDto::from)
+        .collect();
+    serde_json::to_value(lines).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum MergeOutcomeDto {
+    UpToDate,
+    FastForwarded,
+    Merged,
+    Conflicted { files: Vec<String> },
+}
+
+impl From<MergeOutcome> for MergeOutcomeDto {
+    fn from(outcome: MergeOutcome) -> Self {
+        match outcome {
+            MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
+            MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
+            MergeOutcome::Merged => MergeOutcomeDto::Merged,
+            MergeOutcome::Conflicted { files } => MergeOutcomeDto::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StartMergeParams {
+    repo_path: String,
+    branch_name: String,
+}
+
+fn start_merge(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: StartMergeParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.start_merge(params.branch_name)?;
+    serde_json::to_value(MergeOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum ConflictSegmentDto {
+    Clean { content: String },
+    Conflict { ours: String, theirs: String },
+}
+
+impl From<ConflictSegment> for ConflictSegmentDto {
+    fn from(segment: ConflictSegment) -> Self {
+        match segment {
+            ConflictSegment::Clean { content } => ConflictSegmentDto::Clean { content },
+            ConflictSegment::Conflict { ours, theirs } => {
+                ConflictSegmentDto::Conflict { ours, theirs }
+            }
+        }
+    }
+}
+
+fn get_conflict_hunks(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoFilePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let segments: Vec<ConflictSegmentDto> = worker_handle(repos, &params.repo_path)?
+        .get_conflict_hunks(params.path)?
+        .into_iter()
+        .map(ConflictSegmentDto::from)
+        .collect();
+    serde_json::to_value(segments).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveConflictParams {
+    repo_path: String,
+    path: String,
+    resolved_content: String,
+}
+
+fn resolve_conflict(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: ResolveConflictParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?
+        .resolve_conflict(params.path, params.resolved_content)?;
+    Ok(Value::Null)
+}
+
+fn abort_merge(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.abort_merge()?;
+    Ok(Value::Null)
+}
+
+fn get_merge_message(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let message = worker_handle(repos, &params.repo_path)?.get_merge_message()?;
+    serde_json::to_value(message).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+enum FileConflictChoiceDto {
+    Ours,
+    Theirs,
+    Delete,
+}
+
+impl From<FileConflictChoiceDto> for FileConflictChoice {
+    fn from(dto: FileConflictChoiceDto) -> Self {
+        match dto {
+            FileConflictChoiceDto::Ours => FileConflictChoice::Ours,
+            FileConflictChoiceDto::Theirs => FileConflictChoice::Theirs,
+            FileConflictChoiceDto::Delete => FileConflictChoice::Delete,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveAddDeleteConflictParams {
+    repo_path: String,
+    path: String,
+    choice: FileConflictChoiceDto,
+}
+
+fn resolve_add_delete_conflict(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: ResolveAddDeleteConflictParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?
+        .resolve_add_delete_conflict(params.path, params.choice.into())?;
     Ok(Value::Null)
 }
 
