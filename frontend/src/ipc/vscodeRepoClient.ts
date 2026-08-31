@@ -3,6 +3,7 @@ import type {
   DiffHunk,
   GraphCommit,
   OpenRepoEntry,
+  PullOutcome,
   ReflogEntry,
   RemoteAuthMode,
   RemoteInfo,
@@ -10,6 +11,7 @@ import type {
   StatusEntry,
   SubmoduleInfo,
   TagInfo,
+  TransferProgress,
   UpstreamInfo,
   Workspace,
   WorktreeInfo,
@@ -49,6 +51,26 @@ function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
   );
 }
 
+// A JSON-RPC *notification* is the sidecar pushing something unprompted: a `method` and `params`,
+// and — the load-bearing part — no `id`. That absence is the entire wire distinction from a
+// response, and `isJsonRpcResponse` above already requires `"id" in value`, so the two guards can
+// never both match the same message.
+interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params: unknown;
+}
+
+function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "jsonrpc" in value &&
+    "method" in value &&
+    !("id" in value)
+  );
+}
+
 let vscode: VsCodeWebviewApi | undefined;
 let listenerRegistered = false;
 let nextRequestId = 1;
@@ -61,6 +83,7 @@ const pending = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
+const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
 
 // Lazily acquire the VSCode webview API and register the message listener on first use, rather
 // than at module load, so this module stays safe to statically import into a bundle that
@@ -73,14 +96,20 @@ function ensureInitialized(): VsCodeWebviewApi {
     listenerRegistered = true;
     window.addEventListener("message", (event: MessageEvent) => {
       const message = event.data;
-      if (!isJsonRpcResponse(message)) return;
-      const waiting = pending.get(message.id);
-      if (!waiting) return;
-      pending.delete(message.id);
-      if ("error" in message) {
-        waiting.reject(new Error(message.error.message));
-      } else {
-        waiting.resolve(message.result);
+      if (isJsonRpcResponse(message)) {
+        const waiting = pending.get(message.id);
+        if (!waiting) return;
+        pending.delete(message.id);
+        if ("error" in message) {
+          waiting.reject(new Error(message.error.message));
+        } else {
+          waiting.resolve(message.result);
+        }
+        return;
+      }
+      if (isJsonRpcNotification(message) && message.method === "transferProgress") {
+        const progress = message.params as TransferProgress;
+        for (const listener of transferProgressListeners) listener(progress);
       }
     });
   }
@@ -202,15 +231,25 @@ export const vscodeRepoClient: RepoClient = {
   createTag: (repoPath: string, name: string, message: string | null) =>
     call<void>("create_tag", { repoPath, name, message }),
   deleteTag: (repoPath: string, name: string) => call<void>("delete_tag", { repoPath, name }),
-  fetchRemote: notImplemented("fetchRemote"),
-  pushCurrentBranch: notImplemented("pushCurrentBranch"),
-  pushTags: notImplemented("pushTags"),
-  pullCurrentUpstream: notImplemented("pullCurrentUpstream"),
-  subscribeTransferProgress: () => {
-    console.warn(
-      "vscodeRepoClient: subscribeTransferProgress is not wired up on this transport yet",
-    );
-    return () => {};
+  // Fetch and both pushes resolve with the operation id as soon as the sidecar has one — the
+  // transfer itself is still running, and reports through `subscribeTransferProgress` below.
+  // `pullCurrentUpstream` is the exception: it settles only once the whole pull is done.
+  fetchRemote: (repoPath: string, remoteName: string) =>
+    call<string>("fetch_remote", { repoPath, remoteName }),
+  pushCurrentBranch: (repoPath: string, remoteName: string) =>
+    call<string>("push_current_branch", { repoPath, remoteName }),
+  pushTags: (repoPath: string, remoteName: string, names: string[]) =>
+    call<string>("push_tags", { repoPath, remoteName, names }),
+  pullCurrentUpstream: (repoPath: string) =>
+    call<PullOutcome>("pull_current_upstream", { repoPath }),
+  subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
+    // Initialize eagerly: a caller may subscribe before it ever issues a request, and the
+    // `message` listener registered here is what delivers notifications.
+    ensureInitialized();
+    transferProgressListeners.add(listener);
+    return () => {
+      transferProgressListeners.delete(listener);
+    };
   },
   listStashes: notImplemented("listStashes"),
   saveStash: notImplemented("saveStash"),

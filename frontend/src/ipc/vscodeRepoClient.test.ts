@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.fetchRemote("/repo", "origin")).rejects.toThrow(
-      "fetchRemote is not implemented yet",
+    await expect(vscodeRepoClient.listStashes("/repo")).rejects.toThrow(
+      "listStashes is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -521,5 +521,137 @@ describe("vscodeRepoClient", () => {
     });
     respond(3, null);
     await expect(deletePromise).resolves.toBeNull();
+  });
+
+  function notify(method: string, params: unknown) {
+    window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method, params } }));
+  }
+
+  const progress = (phase: string) => ({
+    operationId: "fetch-1",
+    operation: "Fetch",
+    phase,
+    errorKind: null,
+    current: 0,
+    total: 0,
+    receivedBytes: 0,
+    message: null,
+  });
+
+  it("wires fetchRemote, pushCurrentBranch, and pushTags", async () => {
+    const fetchPromise = vscodeRepoClient.fetchRemote("/repo", "origin");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "fetch_remote",
+      params: { repoPath: "/repo", remoteName: "origin" },
+    });
+    respond(1, "fetch-1");
+    await expect(fetchPromise).resolves.toBe("fetch-1");
+
+    const pushPromise = vscodeRepoClient.pushCurrentBranch("/repo", "origin");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "push_current_branch",
+      params: { repoPath: "/repo", remoteName: "origin" },
+    });
+    respond(2, "push-1");
+    await expect(pushPromise).resolves.toBe("push-1");
+
+    const tagsPromise = vscodeRepoClient.pushTags("/repo", "origin", ["v1.0.0"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "push_tags",
+      params: { repoPath: "/repo", remoteName: "origin", names: ["v1.0.0"] },
+    });
+    respond(3, "push-2");
+    await expect(tagsPromise).resolves.toBe("push-2");
+  });
+
+  it("wires pullCurrentUpstream", async () => {
+    const promise = vscodeRepoClient.pullCurrentUpstream("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "pull_current_upstream",
+      params: { repoPath: "/repo" },
+    });
+    respond(1, { kind: "FastForwarded", upstreamRef: "refs/remotes/origin/main" });
+    await expect(promise).resolves.toEqual({
+      kind: "FastForwarded",
+      upstreamRef: "refs/remotes/origin/main",
+    });
+  });
+
+  it("delivers transferProgress notifications to subscribed listeners and stops after unsubscribe", () => {
+    const received: unknown[] = [];
+    const unsubscribe = vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
+
+    notify("transferProgress", progress("Starting"));
+    expect(received).toEqual([progress("Starting")]);
+
+    unsubscribe();
+    notify("transferProgress", progress("Completed"));
+    expect(received).toHaveLength(1);
+  });
+
+  it("fans a transferProgress notification out to every subscribed listener", () => {
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    const unsubscribeFirst = vscodeRepoClient.subscribeTransferProgress((p) => first.push(p));
+    vscodeRepoClient.subscribeTransferProgress((p) => second.push(p));
+
+    notify("transferProgress", progress("Receiving"));
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+
+    // Unsubscribing one listener leaves the other subscribed.
+    unsubscribeFirst();
+    notify("transferProgress", progress("Completed"));
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(2);
+  });
+
+  it("ignores notifications for methods it doesn't recognize", () => {
+    const received: unknown[] = [];
+    vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
+
+    notify("somethingElse", { anything: true });
+
+    expect(received).toHaveLength(0);
+  });
+
+  it("never settles a pending request from a notification, and vice versa", async () => {
+    const received: unknown[] = [];
+    vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
+    const promise = vscodeRepoClient.fetchRemote("/repo", "origin");
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+
+    // A notification has a `method` and no `id`, so it can never be matched to request 1.
+    notify("transferProgress", progress("Starting"));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(received).toHaveLength(1);
+
+    // ...and the response, which has an `id`, is never mistaken for a notification.
+    respond(1, "fetch-1");
+    await expect(promise).resolves.toBe("fetch-1");
+    expect(received).toHaveLength(1);
+  });
+
+  it("registers the message listener even when subscribeTransferProgress runs before any call", () => {
+    const received: unknown[] = [];
+    vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
+
+    notify("transferProgress", progress("Starting"));
+
+    expect(received).toHaveLength(1);
+    expect(postMessage).not.toHaveBeenCalled();
   });
 });
