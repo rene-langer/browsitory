@@ -4,12 +4,16 @@ import type {
   GraphCommit,
   OpenRepoEntry,
   ReflogEntry,
+  RemoteAuthMode,
+  RemoteInfo,
   RepoClient,
   StatusEntry,
   SubmoduleInfo,
+  UpstreamInfo,
   Workspace,
   WorktreeInfo,
 } from "./RepoClient";
+import { validateRemoteUrls } from "./tauriRepoClient";
 
 // No `vscode` npm package dependency here on purpose — the real extension host's webview API
 // typings arrive with sub-phase (c)'s `extension/` package. This ambient declaration is the
@@ -165,19 +169,34 @@ export const vscodeRepoClient: RepoClient = {
     call<ReflogEntry[]>("get_reflog", { repoPath, reference }),
   restoreReflogEntry: (repoPath: string, reference: string, newId: string) =>
     call<void>("restore_reflog_entry", { repoPath, reference, newId }),
-  listRemotes: notImplemented("listRemotes"),
-  listRemoteBranches: notImplemented("listRemoteBranches"),
-  getCurrentUpstream: notImplemented("getCurrentUpstream"),
-  getRemoteUpstreams: notImplemented("getRemoteUpstreams"),
-  addRemote: notImplemented("addRemote"),
-  renameRemote: notImplemented("renameRemote"),
-  updateRemoteUrls: notImplemented("updateRemoteUrls"),
-  removeRemote: notImplemented("removeRemote"),
-  saveHttpsCredential: notImplemented("saveHttpsCredential"),
-  forgetHttpsCredential: notImplemented("forgetHttpsCredential"),
-  setRemoteAuthMode: notImplemented("setRemoteAuthMode"),
-  setCurrentUpstream: notImplemented("setCurrentUpstream"),
-  clearCurrentUpstream: notImplemented("clearCurrentUpstream"),
+  listRemotes: (repoPath: string) => call<RemoteInfo[]>("list_remotes", { repoPath }),
+  listRemoteBranches: (repoPath: string, remoteName: string) =>
+    call<string[]>("list_remote_branches", { repoPath, remoteName }),
+  getCurrentUpstream: (repoPath: string) =>
+    call<UpstreamInfo | null>("get_current_upstream", { repoPath }),
+  getRemoteUpstreams: (repoPath: string, name: string) =>
+    call<UpstreamInfo[]>("get_remote_upstreams", { repoPath, name }),
+  addRemote: (repoPath: string, name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return call<void>("add_remote", { repoPath, name, fetchUrl, pushUrl });
+  },
+  renameRemote: (repoPath: string, oldName: string, newName: string) =>
+    call<void>("rename_remote", { repoPath, oldName, newName }),
+  updateRemoteUrls: (repoPath: string, name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return call<void>("update_remote_urls", { repoPath, name, fetchUrl, pushUrl });
+  },
+  removeRemote: (repoPath: string, name: string, clearUpstreams: boolean) =>
+    call<void>("remove_remote", { repoPath, name, clearUpstreams }),
+  saveHttpsCredential: (repoPath: string, remoteName: string, username: string, token: string) =>
+    call<void>("save_https_credential", { repoPath, remoteName, username, token }),
+  forgetHttpsCredential: (repoPath: string, remoteName: string) =>
+    call<void>("forget_https_credential", { repoPath, remoteName }),
+  setRemoteAuthMode: (repoPath: string, remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+    call<void>("set_remote_auth_mode", { repoPath, remoteName, mode, username }),
+  setCurrentUpstream: (repoPath: string, remoteName: string, remoteBranch: string) =>
+    call<void>("set_current_upstream", { repoPath, remoteName, remoteBranch }),
+  clearCurrentUpstream: (repoPath: string) => call<void>("clear_current_upstream", { repoPath }),
   listTags: notImplemented("listTags"),
   createTag: notImplemented("createTag"),
   deleteTag: notImplemented("deleteTag"),

@@ -64,8 +64,8 @@ describe("vscodeRepoClient", () => {
   });
 
   it("rejects unwired methods without touching postMessage", async () => {
-    await expect(vscodeRepoClient.listRemotes("/repo")).rejects.toThrow(
-      "listRemotes is not implemented yet",
+    await expect(vscodeRepoClient.listTags("/repo")).rejects.toThrow(
+      "listTags is not implemented yet",
     );
     expect(postMessage).not.toHaveBeenCalled();
   });
@@ -391,5 +391,107 @@ describe("vscodeRepoClient", () => {
     });
     respond(3, null);
     await expect(restorePromise).resolves.toBeNull();
+  });
+
+  it("wires listRemotes, listRemoteBranches, and upstream methods", async () => {
+    const remotesPromise = vscodeRepoClient.listRemotes("/repo");
+    respond(1, [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }]);
+    await expect(remotesPromise).resolves.toHaveLength(1);
+
+    const branchesPromise = vscodeRepoClient.listRemoteBranches("/repo", "origin");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "list_remote_branches",
+      params: { repoPath: "/repo", remoteName: "origin" },
+    });
+    respond(2, ["main"]);
+    await expect(branchesPromise).resolves.toEqual(["main"]);
+
+    const currentPromise = vscodeRepoClient.getCurrentUpstream("/repo");
+    respond(3, null);
+    await expect(currentPromise).resolves.toBeNull();
+
+    const upstreamsPromise = vscodeRepoClient.getRemoteUpstreams("/repo", "origin");
+    respond(4, []);
+    await expect(upstreamsPromise).resolves.toEqual([]);
+  });
+
+  it("wires addRemote and rejects embedded credentials before posting", async () => {
+    const promise = vscodeRepoClient.addRemote("/repo", "origin", "https://example.com/r.git", null);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "add_remote",
+      params: { repoPath: "/repo", name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+
+    expect(() =>
+      vscodeRepoClient.addRemote("/repo", "origin", "https://alice:secret@example.com/r.git", null),
+    ).toThrow("Remote URLs must not contain embedded credentials");
+  });
+
+  it("wires renameRemote, updateRemoteUrls, and removeRemote", async () => {
+    const renamePromise = vscodeRepoClient.renameRemote("/repo", "origin", "upstream");
+    respond(1, null);
+    await expect(renamePromise).resolves.toBeNull();
+
+    const updatePromise = vscodeRepoClient.updateRemoteUrls("/repo", "upstream", "https://example.com/r2.git", null);
+    respond(2, null);
+    await expect(updatePromise).resolves.toBeNull();
+
+    const removePromise = vscodeRepoClient.removeRemote("/repo", "upstream", true);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "remove_remote",
+      params: { repoPath: "/repo", name: "upstream", clearUpstreams: true },
+    });
+    respond(3, null);
+    await expect(removePromise).resolves.toBeNull();
+  });
+
+  it("wires https credential and auth mode methods", async () => {
+    const savePromise = vscodeRepoClient.saveHttpsCredential("/repo", "origin", "alice", "secret");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_https_credential",
+      params: { repoPath: "/repo", remoteName: "origin", username: "alice", token: "secret" },
+    });
+    respond(1, null);
+    await expect(savePromise).resolves.toBeNull();
+
+    const forgetPromise = vscodeRepoClient.forgetHttpsCredential("/repo", "origin");
+    respond(2, null);
+    await expect(forgetPromise).resolves.toBeNull();
+
+    const authPromise = vscodeRepoClient.setRemoteAuthMode("/repo", "origin", "HttpsToken", "alice");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "set_remote_auth_mode",
+      params: { repoPath: "/repo", remoteName: "origin", mode: "HttpsToken", username: "alice" },
+    });
+    respond(3, null);
+    await expect(authPromise).resolves.toBeNull();
+  });
+
+  it("wires setCurrentUpstream and clearCurrentUpstream", async () => {
+    const setPromise = vscodeRepoClient.setCurrentUpstream("/repo", "origin", "main");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "set_current_upstream",
+      params: { repoPath: "/repo", remoteName: "origin", remoteBranch: "main" },
+    });
+    respond(1, null);
+    await expect(setPromise).resolves.toBeNull();
+
+    const clearPromise = vscodeRepoClient.clearCurrentUpstream("/repo");
+    respond(2, null);
+    await expect(clearPromise).resolves.toBeNull();
   });
 });
