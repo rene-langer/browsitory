@@ -184,7 +184,7 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("unstage_hunk", { repoPath, path, oldStart, newStart }),
   discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
     call<void>("discard_hunk", { repoPath, path, oldStart, newStart }),
-  commit: (repoPath: string, message: string) => call<string>("commit", { repoPath, message }),
+  commit: (repoPath: string, message: string) => call<void>("commit", { repoPath, message }),
   listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
     call<void>("create_branch", { repoPath, name, startPoint }),

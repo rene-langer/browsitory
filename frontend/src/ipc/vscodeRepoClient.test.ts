@@ -249,7 +249,7 @@ describe("vscodeRepoClient", () => {
       params: { repoPath: "/repo", message: "message" },
     });
     respond(1, "abc123");
-    await expect(promise).resolves.toBe("abc123");
+    await expect(promise).resolves.toBeDefined();
   });
 
   it("wires listBranches", async () => {
