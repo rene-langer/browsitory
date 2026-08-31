@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
+use git_core::forge::{ForgeProvider, ForgeRepository};
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebaseAction, RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
@@ -100,6 +101,11 @@ pub fn dispatch(
         "rebase_continue" => rebase_continue(params, repos),
         "abort_rebase" => abort_rebase(params, repos),
         "get_rebase_progress" => get_rebase_progress(params, repos),
+        "detect_forge_repository" => detect_forge_repository(params, repos),
+        "save_forge_token" => save_forge_token(params, repos),
+        "forget_forge_token" => forget_forge_token(params, repos),
+        "list_pull_requests" => list_pull_requests(params, repos),
+        "create_pull_request" => create_pull_request(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1774,6 +1780,215 @@ fn get_rebase_progress(
             total_steps,
         });
     serde_json::to_value(progress).map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+enum ForgeProviderDto {
+    GitHub,
+    Bitbucket,
+}
+
+impl From<ForgeProvider> for ForgeProviderDto {
+    fn from(provider: ForgeProvider) -> Self {
+        match provider {
+            ForgeProvider::GitHub => ForgeProviderDto::GitHub,
+            ForgeProvider::Bitbucket => ForgeProviderDto::Bitbucket,
+        }
+    }
+}
+
+impl From<ForgeProviderDto> for ForgeProvider {
+    fn from(dto: ForgeProviderDto) -> Self {
+        match dto {
+            ForgeProviderDto::GitHub => ForgeProvider::GitHub,
+            ForgeProviderDto::Bitbucket => ForgeProvider::Bitbucket,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ForgeRepositoryDto {
+    provider: ForgeProviderDto,
+    host: String,
+    owner: String,
+    name: String,
+    remote_name: String,
+}
+
+impl From<ForgeRepository> for ForgeRepositoryDto {
+    fn from(repository: ForgeRepository) -> Self {
+        Self {
+            provider: repository.provider.into(),
+            host: repository.host,
+            owner: repository.owner,
+            name: repository.name,
+            remote_name: repository.remote_name,
+        }
+    }
+}
+
+fn detect_forge_repository(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let repositories: Vec<ForgeRepositoryDto> = worker_handle(repos, &params.repo_path)?
+        .detect_forge_repository()?
+        .into_iter()
+        .map(ForgeRepositoryDto::from)
+        .collect();
+    serde_json::to_value(repositories).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ForgeTokenParams {
+    repo_path: String,
+    provider: ForgeProviderDto,
+    account: String,
+    token: String,
+}
+
+fn save_forge_token(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: ForgeTokenParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.save_forge_token(
+        params.provider.into(),
+        params.account,
+        params.token,
+    )?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ForgetForgeTokenParams {
+    repo_path: String,
+    provider: ForgeProviderDto,
+    account: String,
+}
+
+fn forget_forge_token(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: ForgetForgeTokenParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?
+        .forget_forge_token(params.provider.into(), params.account)?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PullRequestDto {
+    id: String,
+    number: u64,
+    title: String,
+    url: String,
+    author: String,
+    source_branch: String,
+    target_branch: String,
+    state: String,
+}
+
+impl From<repo_service::pull_requests::PullRequest> for PullRequestDto {
+    fn from(pull_request: repo_service::pull_requests::PullRequest) -> Self {
+        Self {
+            id: pull_request.id,
+            number: pull_request.number,
+            title: pull_request.title,
+            url: pull_request.url,
+            author: pull_request.author,
+            source_branch: pull_request.source_branch,
+            target_branch: pull_request.target_branch,
+            state: pull_request.state,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PullRequestListDto {
+    pull_requests: Vec<PullRequestDto>,
+    truncated: bool,
+}
+
+impl From<repo_service::pull_requests::PullRequestList> for PullRequestListDto {
+    fn from(list: repo_service::pull_requests::PullRequestList) -> Self {
+        Self {
+            pull_requests: list
+                .pull_requests
+                .into_iter()
+                .map(PullRequestDto::from)
+                .collect(),
+            truncated: list.truncated,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListPullRequestsParams {
+    repo_path: String,
+    remote_name: String,
+    account: String,
+}
+
+fn list_pull_requests(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: ListPullRequestsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let list = worker_handle(repos, &params.repo_path)?
+        .list_pull_requests(params.remote_name, params.account)?;
+    serde_json::to_value(PullRequestListDto::from(list)).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreatePullRequestInputDto {
+    title: String,
+    description: Option<String>,
+    source_branch: String,
+    target_branch: String,
+}
+
+impl From<CreatePullRequestInputDto> for repo_service::pull_requests::CreatePullRequest {
+    fn from(dto: CreatePullRequestInputDto) -> Self {
+        Self {
+            title: dto.title,
+            description: dto.description,
+            source_branch: dto.source_branch,
+            target_branch: dto.target_branch,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreatePullRequestParams {
+    repo_path: String,
+    remote_name: String,
+    account: String,
+    pull_request: CreatePullRequestInputDto,
+}
+
+fn create_pull_request(
+    params: Value,
+    repos: &mut HashMap<String, Worker>,
+) -> Result<Value, String> {
+    let params: CreatePullRequestParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let created = worker_handle(repos, &params.repo_path)?.create_pull_request(
+        params.remote_name,
+        params.account,
+        params.pull_request.into(),
+    )?;
+    serde_json::to_value(PullRequestDto::from(created)).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

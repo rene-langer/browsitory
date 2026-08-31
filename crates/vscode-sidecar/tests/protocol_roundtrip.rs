@@ -1344,3 +1344,61 @@ fn rebase_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(progress["result"], serde_json::Value::Null);
 }
+
+#[test]
+fn detect_forge_repository_and_forge_token_lifecycle_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    repo.remote("origin", "https://github.com/acme/widget.git")
+        .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let detected = sidecar.call(
+        2,
+        "detect_forge_repository",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    let repos = detected["result"].as_array().expect("forge repositories");
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0]["provider"], "GitHub");
+    assert_eq!(repos[0]["owner"], "acme");
+    assert_eq!(repos[0]["name"], "widget");
+
+    let saved = sidecar.call(
+        3,
+        "save_forge_token",
+        serde_json::json!({"repoPath": repo_path, "provider": "GitHub", "account": "alice", "token": "secret"}),
+    );
+    assert_eq!(saved["result"], serde_json::Value::Null);
+
+    let forgotten = sidecar.call(
+        4,
+        "forget_forge_token",
+        serde_json::json!({"repoPath": repo_path, "provider": "GitHub", "account": "alice"}),
+    );
+    assert_eq!(forgotten["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn list_pull_requests_on_a_non_forge_remote_fails_before_any_http_call() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    repo.remote("origin", "https://example.com/not-a-forge/repo.git")
+        .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let listed = sidecar.call(
+        2,
+        "list_pull_requests",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "account": "alice"}),
+    );
+
+    assert!(listed.get("result").is_none());
+    assert!(listed["error"]["message"].as_str().is_some());
+}
