@@ -8,6 +8,7 @@ use git_core::diff::DiffHunk;
 use git_core::graph::GraphCommit;
 use git_core::reflog::ReflogEntry;
 use git_core::remote::TagInfo;
+use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
@@ -80,6 +81,10 @@ pub fn dispatch(
         "push_current_branch" => push_current_branch(params, repos, stdout),
         "push_tags" => push_tags(params, repos, stdout),
         "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
+        "list_stashes" => list_stashes(params, repos),
+        "save_stash" => save_stash(params, repos),
+        "apply_stash" => apply_stash(params, repos),
+        "drop_stash" => drop_stash(params, repos),
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1369,6 +1374,63 @@ fn pull_current_upstream(
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let outcome = worker_handle(repos, &params.repo_path)?.pull_current_upstream(event_tx)?;
     serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StashEntryDto {
+    index: usize,
+    message: String,
+    commit_id: String,
+}
+
+impl From<StashEntry> for StashEntryDto {
+    fn from(entry: StashEntry) -> Self {
+        Self {
+            index: entry.index,
+            message: entry.message,
+            commit_id: entry.commit_id,
+        }
+    }
+}
+
+fn list_stashes(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let stashes: Vec<StashEntryDto> = worker_handle(repos, &params.repo_path)?
+        .list_stashes()?
+        .into_iter()
+        .map(StashEntryDto::from)
+        .collect();
+    serde_json::to_value(stashes).map_err(|error| error.to_string())
+}
+
+fn save_stash(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.save_stash()?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StashIndexParams {
+    repo_path: String,
+    index: usize,
+}
+
+fn apply_stash(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: StashIndexParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.apply_stash(params.index)?;
+    Ok(Value::Null)
+}
+
+fn drop_stash(params: Value, repos: &mut HashMap<String, Worker>) -> Result<Value, String> {
+    let params: StashIndexParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.drop_stash(params.index)?;
+    Ok(Value::Null)
 }
 
 #[cfg(test)]

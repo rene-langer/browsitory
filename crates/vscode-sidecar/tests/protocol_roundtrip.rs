@@ -249,6 +249,36 @@ impl Sidecar {
 }
 
 #[test]
+fn stash_lifecycle_round_trips_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "file.txt", "v2");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let saved = sidecar.call(2, "save_stash", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(saved["result"], serde_json::Value::Null);
+
+    let stashes = sidecar.call(3, "list_stashes", serde_json::json!({"repoPath": repo_path}));
+    let list = stashes["result"].as_array().expect("stash list");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["index"], 0);
+
+    let applied = sidecar.call(4, "apply_stash", serde_json::json!({"repoPath": repo_path, "index": 0}));
+    assert_eq!(applied["result"], serde_json::Value::Null);
+    let on_disk = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
+    assert_eq!(on_disk, "v2");
+
+    let dropped = sidecar.call(5, "drop_stash", serde_json::json!({"repoPath": repo_path, "index": 0}));
+    assert_eq!(dropped["result"], serde_json::Value::Null);
+    let stashes_after = sidecar.call(6, "list_stashes", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(stashes_after["result"], serde_json::json!([]));
+}
+
+#[test]
 fn opening_a_repo_adds_it_to_recent_repos() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, _repo) = init_repo();
