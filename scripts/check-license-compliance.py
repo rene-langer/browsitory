@@ -2,7 +2,7 @@
 """Fail if a direct dependency isn't documented in docs/LICENSE_COMPLIANCE.md.
 
 Compares the direct dependencies declared in crates/*/Cargo.toml and
-frontend/package.json / e2e/package.json against the first column of that
+frontend/package.json / extension/package.json / e2e/package.json against the first column of that
 doc's Rust/JavaScript tables. Doesn't check license values themselves (that
 step is still manual, per the doc's "Process" section) — only that nothing
 shipped has silently gone undocumented, per SEC-004/MAINT-003
@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "LICENSE_COMPLIANCE.md"
 
-WORKSPACE_CRATES = {"git-core", "config", "tauri-app"}
+WORKSPACE_CRATES = {"git-core", "config", "repo-service", "tauri-app", "vscode-sidecar"}
 
 
 def rust_deps() -> set[str]:
@@ -71,11 +71,20 @@ def main() -> int:
         problems.append(f"Rust dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_rust)}")
 
     documented_frontend = doc_table_names(
-        doc_text, "## JavaScript (`npm info <package> license`)", ("\n## JavaScript, `e2e/`",)
+        doc_text,
+        "## JavaScript (`npm info <package> license`)",
+        ("\n## JavaScript, `extension/`", "\n## JavaScript, `e2e/`"),
     )
     missing_frontend = js_deps(ROOT / "frontend" / "package.json") - documented_frontend
     if missing_frontend:
         problems.append(f"frontend/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_frontend)}")
+
+    documented_extension = doc_table_names(
+        doc_text, "## JavaScript, `extension/` (`npm info <package> license`)", ("\n## JavaScript, `e2e/`",)
+    )
+    missing_extension = js_deps(ROOT / "extension" / "package.json") - documented_extension
+    if missing_extension:
+        problems.append(f"extension/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_extension)}")
 
     documented_e2e = doc_table_names(doc_text, "## JavaScript, `e2e/` (`npm info <package> license`)", ("\n## ",))
     missing_e2e = js_deps(ROOT / "e2e" / "package.json") - documented_e2e
