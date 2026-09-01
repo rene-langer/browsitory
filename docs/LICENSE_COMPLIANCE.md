@@ -94,9 +94,11 @@ and are dev-only test tooling, but are recorded here for completeness.
 ## JavaScript, `extension/e2e/` (`npm info <package> license`)
 
 `extension/e2e/` is a separate pnpm package from `extension/`, a standalone Electron E2E
-harness (`@vscode/test-electron` + Mocha + Playwright's `playwright-core` over CDP) that
-drives the packaged extension in a real VSCode Extension Development Host; none of its
-dependencies are shipped in the extension itself.
+harness (`@vscode/test-electron` + Mocha) that drives the packaged extension in a real VSCode
+Extension Development Host; none of its dependencies are shipped in the extension itself. The
+webview panel is driven over a raw Chrome DevTools Protocol connection hand-rolled in
+`support/webviewPage.ts` on Node's built-in `WebSocket`/`fetch` globals — no browser-automation
+library is involved, so this table has no dependency row for one.
 
 | Package | License | Notes |
 |---|---|---|
@@ -105,7 +107,6 @@ dependencies are shipped in the extension itself.
 | @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types, for typechecking the `vscode.commands`/`vscode.workspace` calls in `specs/first-flow.spec.ts`. Same package already verified for `extension/`'s own row above — not re-verified here. |
 | @vscode/test-electron 2.5.2 | MIT | dev only; downloads/launches a real VSCode Extension Development Host for the harness. Source: `npm info @vscode/test-electron@2.5.2 license`, verified 2026-09-01. |
 | mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
-| playwright-core 1.62.1 | Apache-2.0 | dev only; connects to the Extension Development Host's webview over CDP (`support/webviewPage.ts`). Source: `npm info playwright-core@1.62.1 license`, verified 2026-09-01. |
 | typescript 6.0.3 | Apache-2.0 | dev only; same package as the frontend row above. |
 
 ## The one exception: libgit2 via `git2`
