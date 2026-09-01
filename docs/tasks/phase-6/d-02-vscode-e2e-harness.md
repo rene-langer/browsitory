@@ -40,3 +40,32 @@ against this scaffold; this task's own bar is that the harness compiles and type
 The actual first-flow E2E spec (open the extension, connect to the webview, assert something
 about it) — that is Task 6.D.03. Wiring this harness into CI. Per-spec fixture files beyond the
 base fixture repo `runTests.ts` creates (added in a Mocha `before` hook in Task 6.D.03).
+
+## Task 6.D.03 update: first-flow spec added
+
+- [x] `extension/e2e/src/specs/first-flow.spec.ts` written (open repo via `browsitory.open`,
+  stage `first-flow-fixture.txt`, commit, assert it shows up in history), consuming
+  `connectToWebview` from this scaffold.
+- [x] `@types/vscode@^1.134.0` added to `extension/e2e/package.json` devDependencies (same
+  version `extension/package.json` pins) for typechecking the `vscode.*` calls in the spec;
+  `pnpm --dir extension/e2e install` run standalone (`--ignore-workspace`, to avoid the outer
+  `extension/pnpm-workspace.yaml` folding it into `extension/`'s own lockfile — see the note in
+  this scaffold's acceptance criteria about `extension/e2e` staying a standalone package).
+  `pnpm --dir extension/e2e typecheck` passes.
+- [ ] **Not verified: a passing run of `xvfb-run --auto-servernum pnpm test`.** `cargo build
+  --workspace`, both frontend builds (`pnpm build` and `vite build --config
+  vite.vscode.config.ts`), and `extension`'s `pnpm run compile` all succeed. The harness itself
+  runs — `@vscode/test-electron` downloads VSCode 1.135.0, launches the Extension Development
+  Host under Xvfb with `--remote-debugging-port=9229`, and the extension activates and loads —
+  but the test times out (30s) before `connectToWebview` finds a `vscode-webview://` page (first
+  attempt: `connectToWebview`'s own 15s timeout fired directly with "No vscode-webview:// page
+  found within 15000ms"; a second attempt hit the outer 30s Mocha timeout instead). While
+  debugging, port 9229's CDP HTTP endpoint became completely unresponsive to plain `curl
+  http://127.0.0.1:9229/json/list` as well (not just to Playwright) — `ss -ltnp` showed the
+  listening socket attributed to a `dconf watch /system/proxy/` child process rather than the
+  Electron/VSCode process, suggesting the fd got inherited into that helper process without
+  `CLOEXEC` in this sandboxed environment, breaking the debug port for *any* client, not just
+  this test. This looks like an environment/sandboxing quirk of the container this was run in
+  (GTK/Electron's proxy-resolver helper stealing the listening fd) rather than a defect in
+  `connectToWebview` or the spec's selectors — the same code should be re-tried in CI or a
+  different sandbox before concluding the selectors themselves are wrong.

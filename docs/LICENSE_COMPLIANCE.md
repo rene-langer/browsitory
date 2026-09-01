@@ -102,6 +102,7 @@ dependencies are shipped in the extension itself.
 |---|---|---|
 | @types/mocha 10.0.10 | MIT | dev only; same package as `e2e/`'s row above. |
 | @types/node 24.13.3 | MIT | dev only; same package as the frontend row above. |
+| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types, for typechecking the `vscode.commands`/`vscode.workspace` calls in `specs/first-flow.spec.ts`. Same package already verified for `extension/`'s own row above — not re-verified here. |
 | @vscode/test-electron 2.5.2 | MIT | dev only; downloads/launches a real VSCode Extension Development Host for the harness. Source: `npm info @vscode/test-electron@2.5.2 license`, verified 2026-09-01. |
 | mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
 | playwright-core 1.62.1 | Apache-2.0 | dev only; connects to the Extension Development Host's webview over CDP (`support/webviewPage.ts`). Source: `npm info playwright-core@1.62.1 license`, verified 2026-09-01. |
