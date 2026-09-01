@@ -1,0 +1,17 @@
+{
+  "name": "browsitory-vscode-e2e",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "test": "tsc -p tsconfig.json && node out/runTests.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "24.13.3",
+    "@vscode/test-electron": "2.5.2",
+    "mocha": "11.8.0",
+    "playwright-core": "1.62.1",
+    "typescript": "6.0.3"
+  }
+}

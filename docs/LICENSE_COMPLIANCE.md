@@ -3,7 +3,7 @@
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
 ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
-in `crates/*/Cargo.toml`, `frontend/package.json`, and `e2e/package.json` as of Phase 1's
+in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, and `e2e/package.json` as of Phase 1's
 completion (not the full transitive tree).
 
 ## Rust (`cargo info <crate>`)
@@ -59,6 +59,19 @@ completion (not the full transitive tree).
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 | @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
 
+## JavaScript, `extension/` (`npm info <package> license`)
+
+`extension/` is a separate pnpm package. Its dependencies are development tooling and VSCode
+extension-host typings; none are loaded by the packaged extension itself.
+
+| Package | License | Notes |
+|---|---|---|
+| @types/node | MIT | dev only; same package as the frontend row above. |
+| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. |
+| @vscode/vsce 3.9.2 | MIT | dev only; packages target-specific VSIX artifacts. Source: `npm info @vscode/vsce@3.9.2 license`, verified 2026-08-31. |
+| typescript | Apache-2.0 | dev only; same package as the frontend row above. |
+| vitest | MIT | dev only; same package as the frontend row above. |
+
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
 `e2e/` is a separate pnpm package from `frontend/`; its dependencies aren't shipped in the app
@@ -78,6 +91,22 @@ and are dev-only test tooling, but are recorded here for completeness.
 | @types/node | MIT | same package as `frontend/`'s row above |
 | @types/mocha | MIT | |
 
+## JavaScript, `extension/e2e/` (`npm info <package> license`)
+
+`extension/e2e/` is a separate pnpm package from `extension/`, a standalone Electron E2E
+harness (`@vscode/test-electron` + Mocha + Playwright's `playwright-core` over CDP) that
+drives the packaged extension in a real VSCode Extension Development Host; none of its
+dependencies are shipped in the extension itself.
+
+| Package | License | Notes |
+|---|---|---|
+| @types/mocha 10.0.10 | MIT | dev only; same package as `e2e/`'s row above. |
+| @types/node 24.13.3 | MIT | dev only; same package as the frontend row above. |
+| @vscode/test-electron 2.5.2 | MIT | dev only; downloads/launches a real VSCode Extension Development Host for the harness. Source: `npm info @vscode/test-electron@2.5.2 license`, verified 2026-09-01. |
+| mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
+| playwright-core 1.62.1 | Apache-2.0 | dev only; connects to the Extension Development Host's webview over CDP (`support/webviewPage.ts`). Source: `npm info playwright-core@1.62.1 license`, verified 2026-09-01. |
+| typescript 6.0.3 | Apache-2.0 | dev only; same package as the frontend row above. |
+
 ## The one exception: libgit2 via `git2`
 
 `git2` vendors libgit2, which is GPL-2.0-with-linking-exception, not MIT. The linking
@@ -94,6 +123,6 @@ confirm it's permissive, and add a row to the relevant table above in the same c
 adds the dependency.
 
 CI's `audit` job runs `scripts/check-license-compliance.py`, which fails the build if any
-direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, or `e2e/package.json` has
+direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, or `e2e/package.json` has
 no matching row here — it checks presence, not the license value itself, so the manual
 `cargo info`/`npm info` step above still applies.
