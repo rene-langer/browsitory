@@ -36,6 +36,26 @@ pnpm install
 pnpm test                                          # spawns/reaps tauri-driver itself; needs a display (xvfb-run on headless CI)
 ```
 
+```bash
+cd extension
+pnpm install
+pnpm test -- --run
+pnpm run compile
+```
+
+```bash
+# VSCode E2E (@vscode/test-electron), from the repo root:
+cargo build --workspace
+cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-vscode-e2e-repo pnpm exec vite build --config vite.vscode.config.ts && cd ..
+cd extension && pnpm install && pnpm run compile && cd ..
+cd extension/e2e
+pnpm install --ignore-workspace                    # NOT plain `pnpm install` — extension/e2e isn't
+                                                    # listed in extension/pnpm-workspace.yaml's
+                                                    # `packages:`, so a plain install silently
+                                                    # resolves to extension/node_modules instead
+pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
+```
+
 ### Git hooks
 
 One-time setup, per clone/worktree:
@@ -87,6 +107,14 @@ core commit-review loop (`CommitBox`, `CommitGraph`, `DiffPane`/`DiffView`/`Blam
 Remaining: the rollout of that system to every other component, and a new app icon —
 see `docs/superpowers/specs/2026-08-18-browsitory-phase5-design.md` and its plans.
 
+Phase 6 (shipping Browsitory as a VSCode extension) is complete: a `crates/vscode-sidecar`
+binary that gives the extension host the same `repo-service` functionality the Tauri app has,
+an `extension/` VSCode extension (host + `postMessage`-based webview bridge, following the same
+`RepoClient` pattern the Tauri app uses so the existing frontend components are reused
+unmodified), recoverable sidecar-process lifecycle handling, four target-specific VSIX
+package/release artifacts, and a `@vscode/test-electron`-based E2E layer (`extension/e2e/`)
+wired into CI — see `docs/ARCHITECTURE.md`'s Roadmap for the sub-phase (a-e) breakdown.
+
 ## Versioning & releases
 
 Semantic versioning (`MAJOR.MINOR.PATCH`). Pushing a `release/MAJOR.MINOR.PATCH` tag (no `v`
@@ -103,8 +131,11 @@ See `docs/ARCHITECTURE.md` for the full crate/package layout, the `RepoClient` I
 and the threading model. Summary: `crates/git-core` (git2, UI-agnostic, DI'd per function,
 tested against real temp-dir repos) + `crates/config` (TOML-backed recent-repos registry) +
 `crates/repo-service` (transport-agnostic worker threads, credentials, forge/PR API access) +
-`crates/tauri-app` (a thin Tauri command adapter over `repo-service`) + `frontend/` (React/TS,
-talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
+`crates/tauri-app` (a thin Tauri command adapter over `repo-service`) + `crates/vscode-sidecar`
+(a sibling adapter over `repo-service` for the VSCode extension target) + `frontend/` (React/TS,
+talks to the backend only through `frontend/src/ipc/RepoClient.ts`) + `extension/` (the VSCode
+extension host and webview bridge, talking to `vscode-sidecar` over the same `RepoClient`
+interface via a second `RepoClient` implementation).
 
 Building `tauri-app` standalone (no dev server) requires the `custom-protocol` Cargo feature —
 see the "Commands" section's E2E block and `crates/tauri-app/Cargo.toml`'s comment on it. Plain

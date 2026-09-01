@@ -3,8 +3,8 @@
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
 ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
-in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, and `e2e/package.json` as of Phase 1's
-completion (not the full transitive tree).
+in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
+and `extension/e2e/package.json` as of Phase 1's completion (not the full transitive tree).
 
 ## Rust (`cargo info <crate>`)
 
@@ -52,7 +52,6 @@ completion (not the full transitive tree).
 | globals | MIT | dev only |
 | @vitejs/plugin-react | MIT | dev only |
 | @types/node | MIT | dev only; shared by the frontend and VSCode extension packages. |
-| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. Source: `npm info @types/vscode@1.134.0 license`; verified 2026-08-31. |
 | @types/react | MIT | dev only |
 | @types/react-dom | MIT | dev only |
 | @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
@@ -94,8 +93,9 @@ and are dev-only test tooling, but are recorded here for completeness.
 ## JavaScript, `extension/e2e/` (`npm info <package> license`)
 
 `extension/e2e/` is a separate pnpm package from `extension/`, a standalone Electron E2E
-harness (`@vscode/test-electron` + Mocha) that drives the packaged extension in a real VSCode
-Extension Development Host; none of its dependencies are shipped in the extension itself. The
+harness (`@vscode/test-electron` + Mocha) that launches a real VSCode Extension Development Host
+against the unpacked, dev-mode extension (`vscode.ExtensionMode.Test`), never a packaged
+`.vsix`; none of its dependencies are shipped in the extension itself. The
 webview panel is driven over a raw Chrome DevTools Protocol connection hand-rolled in
 `support/webviewPage.ts` on Node's built-in `WebSocket`/`fetch` globals — no browser-automation
 library is involved, so this table has no dependency row for one.

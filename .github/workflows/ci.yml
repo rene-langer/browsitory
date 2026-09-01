@@ -240,7 +240,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 11
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -263,7 +263,11 @@ jobs:
           pnpm run compile
       - name: Install e2e dependencies
         working-directory: extension/e2e
-        run: pnpm install --frozen-lockfile
+        # extension/e2e isn't listed in any workspace's `packages:` field, so plain `pnpm
+        # install` resolves upward to the ancestor extension/pnpm-workspace.yaml and silently
+        # installs into extension/node_modules instead of extension/e2e/node_modules.
+        # --ignore-workspace forces pnpm to treat extension/e2e as standalone.
+        run: pnpm install --frozen-lockfile --ignore-workspace
       - name: Run VSCode E2E suite
         working-directory: extension/e2e
         # A `dconf watch /system/proxy/` helper process (GTK/GLib's proxy-resolver mechanism,

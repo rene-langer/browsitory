@@ -9,7 +9,8 @@ import { runTests } from "@vscode/test-electron";
 // above) rather than the `fileURLToPath(import.meta.url)` ESM idiom.
 const extensionDevelopmentPath = path.resolve(__dirname, "..", "..");
 const extensionTestsPath = path.resolve(__dirname, "suite", "index.js");
-const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-vscode-e2e-repo");
+const E2E_REPO_PATH =
+  process.env["VSCODE_E2E_REPO_PATH"] ?? path.join(os.tmpdir(), "browsitory-vscode-e2e-repo");
 
 function setupFixtureRepo() {
   fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });

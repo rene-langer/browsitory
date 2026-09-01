@@ -31,9 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   user-visible behavior change.
 - `crates/vscode-sidecar` now wires the full `RepoClient` method surface (every method except
   the five VSCode-native ones — repo folder picking, app/last-seen version, and opening an
-  external URL — which a later phase wires directly against VSCode APIs), including a
-  transfer-progress JSON-RPC notification mechanism for fetch/push/pull — internal only, not
-  yet wired into any shipped product.
+  external URL — which the extension host wires directly against VSCode APIs), including a
+  transfer-progress JSON-RPC notification mechanism for fetch/push/pull.
 
 ## [0.2.0] - 2026-08-29
 
