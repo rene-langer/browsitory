@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   remaining `RepoClient` surface to `vscode-sidecar` over JSON-RPC. Sidecar exit, process error,
   and stdin failure reject pending actions with an in-app diagnostic; a later action lazily
   starts one fresh process without replaying mutations.
+- Target-specific VSIX packages now bundle the compiled extension, package-local webview assets,
+  and exactly one matching `vscode-sidecar` binary for Linux x64, macOS x64/arm64, or Windows x64.
+  Main-branch CI retains all four packages as artifacts, and tag releases attach them to the draft
+  GitHub Release.
 
 ### Changed
 

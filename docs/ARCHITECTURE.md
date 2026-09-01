@@ -23,9 +23,10 @@ method except the five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
 sidecar — see the spec's "VSCode-native integrations" section. Transfer progress
 (`subscribeTransferProgress`) rides the same JSON-RPC connection as everything else, as
 server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
-`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phase (c) now supplies
-the `extension/` host and dedicated `frontend/dist-vscode` webview bundle. Per-target sidecar
-bundling and the `@vscode/test-electron` E2E layer remain sub-phases (d) and (e).
+`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phases (c-d) now supply
+the `extension/` host, dedicated `frontend/dist-vscode` webview bundle, and target-specific VSIX
+packages carrying exactly one matching sidecar. Real `@vscode/test-electron` E2E coverage remains
+sub-phase (e).
 
 ### VSCode host and sidecar lifecycle
 
@@ -191,7 +192,7 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
   polish bar the project targets. Must land through `RepoClient` alone (no new backend
   seams) so the same visual system works unmodified in both the Tauri desktop app and
   the future VSCode webview frontend.
-- **Phase 6** (sub-phase c complete): shared `repo-service`, full-parity `vscode-sidecar`,
-  transport-selectable React webview, and VSCode extension host with native-method routing and
-  recoverable sidecar lifecycle. Platform-specific VSIX packaging and real VSCode Electron E2E
-  coverage remain sub-phases d-e.
+- **Phase 6** (sub-phases c-d complete): shared `repo-service`, full-parity `vscode-sidecar`,
+  transport-selectable React webview, VSCode extension host with native-method routing and
+  recoverable sidecar lifecycle, plus four target-specific VSIX package/release artifacts. Real
+  VSCode Electron E2E coverage remains sub-phase e.
