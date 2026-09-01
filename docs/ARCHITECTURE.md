@@ -23,10 +23,10 @@ method except the five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
 sidecar — see the spec's "VSCode-native integrations" section. Transfer progress
 (`subscribeTransferProgress`) rides the same JSON-RPC connection as everything else, as
 server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
-`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phases (c-d) now supply
-the `extension/` host, dedicated `frontend/dist-vscode` webview bundle, and target-specific VSIX
-packages carrying exactly one matching sidecar. Real `@vscode/test-electron` E2E coverage remains
-sub-phase (e).
+`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phases (c-d) supply the
+`extension/` host, dedicated `frontend/dist-vscode` webview bundle, and target-specific VSIX
+packages carrying exactly one matching sidecar; sub-phase (e) adds `extension/e2e/`, a real
+`@vscode/test-electron` Electron E2E layer for it (see "Testing strategy" below).
 
 ### VSCode host and sidecar lifecycle
 
@@ -156,6 +156,22 @@ promises and presents the diagnostic globally; it does not extend the transport-
   `packageManager: "pnpm@9.15.9"` — a CI-vs-local pnpm major-version mismatch broke `e2e/`'s
   frozen-lockfile install during Phase 1; a contributor running a different pnpm major without
   Corepack honoring this pin can hit the same failure.
+- E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
+  a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
+  Development Host against the unpacked dev-mode extension and drives `vscode.*` commands
+  directly (`browsitory.open`, staging, commit) via Mocha specs under `extension/e2e/src/specs/`,
+  mirroring `e2e/`'s one-flow-per-feature-area black-box pattern (currently: open repo → stage a
+  file → commit → see it in history). The webview panel itself isn't reachable through
+  `vscode.*` APIs, so `extension/e2e/src/support/webviewPage.ts` attaches over a hand-rolled raw
+  Chrome DevTools Protocol connection (Node's built-in `WebSocket`/`fetch`, no browser-automation
+  library — an initial `playwright-core`-based attempt was fully removed after proving unable to
+  reliably locate VSCode's nested webview content frame, which sits behind an outer sandbox
+  wrapper frame with no DOM of its own; see `docs/tasks/phase-6/d-02-vscode-e2e-harness.md` for
+  the two bugs that shape found and fixed). `extension/e2e/src/runTests.ts` is the outer harness:
+  it sets `GSETTINGS_BACKEND=memory`/`GIO_USE_PROXY_RESOLVER=dummy` and best-effort `pkill`s any
+  leftover `dconf watch` process before launch, then picks a dynamically free CDP port, to
+  mitigate a GTK/GLib proxy-resolver helper that can otherwise squat the debug port. CI runs it
+  under `xvfb-run` as its own `e2e-vscode` job (`.github/workflows/ci.yml`), parallel to `e2e`.
 
 ### Credential release acceptance
 
@@ -192,7 +208,7 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
   polish bar the project targets. Must land through `RepoClient` alone (no new backend
   seams) so the same visual system works unmodified in both the Tauri desktop app and
   the future VSCode webview frontend.
-- **Phase 6** (sub-phases c-d complete): shared `repo-service`, full-parity `vscode-sidecar`,
+- **Phase 6** (complete): shared `repo-service`, full-parity `vscode-sidecar`,
   transport-selectable React webview, VSCode extension host with native-method routing and
-  recoverable sidecar lifecycle, plus four target-specific VSIX package/release artifacts. Real
-  VSCode Electron E2E coverage remains sub-phase e.
+  recoverable sidecar lifecycle, four target-specific VSIX package/release artifacts, and a
+  `@vscode/test-electron` + raw-CDP Electron E2E layer (`extension/e2e/`) wired into CI.

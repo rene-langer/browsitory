@@ -177,7 +177,7 @@ jobs:
   # main-branch CI validate the installable package without creating a GitHub Release.
   build-vsix:
     if: github.ref == 'refs/heads/main'
-    needs: [rust, frontend, extension, e2e]
+    needs: [rust, frontend, extension, e2e, e2e-vscode]
     strategy:
       fail-fast: false
       matrix:
@@ -228,6 +228,53 @@ jobs:
           name: browsitory-vsix-${{ matrix.vsix_target }}
           path: extension/artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
           retention-days: 7
+
+  e2e-vscode:
+    runs-on: ubuntu-latest
+    env:
+      VSCODE_E2E_REPO_PATH: /tmp/browsitory-vscode-e2e-repo
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+            extension/e2e/pnpm-lock.yaml
+      - name: Build dev sidecar
+        run: cargo build --workspace
+      - name: Build vscode frontend (with E2E fixture auto-open baked in)
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          VITE_E2E_REPO_PATH="$VSCODE_E2E_REPO_PATH" pnpm exec vite build --config vite.vscode.config.ts
+      - name: Compile extension
+        working-directory: extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run compile
+      - name: Install e2e dependencies
+        working-directory: extension/e2e
+        run: pnpm install --frozen-lockfile
+      - name: Run VSCode E2E suite
+        working-directory: extension/e2e
+        # A `dconf watch /system/proxy/` helper process (GTK/GLib's proxy-resolver mechanism,
+        # triggered by Electron) can squat the harness's CDP debug port; runTests.ts mitigates
+        # this with GSETTINGS_BACKEND=memory, GIO_USE_PROXY_RESOLVER=dummy, a best-effort
+        # `pkill -f "dconf watch"` before launch, and a dynamically chosen free port, but that
+        # cleanup only runs *before* launch, not after — see docs/tasks/phase-6/d-02-vscode-e2e-harness.md.
+        # GitHub-hosted ubuntu-latest runners are fresh VMs per job, so there's no leftover
+        # process from a prior job to squat this run's port; this is a known limitation to keep
+        # in mind if this job ever moves to a self-hosted or reused runner, not a live bug here.
+        run: xvfb-run --auto-servernum pnpm test
 
   e2e:
     runs-on: ubuntu-latest

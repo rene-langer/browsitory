@@ -125,6 +125,7 @@ confirm it's permissive, and add a row to the relevant table above in the same c
 adds the dependency.
 
 CI's `audit` job runs `scripts/check-license-compliance.py`, which fails the build if any
-direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, or `e2e/package.json` has
-no matching row here — it checks presence, not the license value itself, so the manual
-`cargo info`/`npm info` step above still applies.
+direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`,
+`e2e/package.json`, or `extension/e2e/package.json` has no matching row here — it checks
+presence, not the license value itself, so the manual `cargo info`/`npm info` step above still
+applies.

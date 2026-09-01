@@ -17,6 +17,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and exactly one matching `vscode-sidecar` binary for Linux x64, macOS x64/arm64, or Windows x64.
   Main-branch CI retains all four packages as artifacts, and tag releases attach them to the draft
   GitHub Release.
+- A new `extension/e2e/` layer gives the VSCode extension its own black-box E2E coverage:
+  `@vscode/test-electron` drives the unpacked extension inside a real Extension Development
+  Host, and a hand-rolled raw Chrome DevTools Protocol client (no Playwright or other
+  browser-automation library) attaches to the webview's nested content frame for DOM assertions.
+  One flow so far — open repo → stage a file → commit → see it in history — mirroring `e2e/`'s
+  existing pattern. Wired into CI as a new `e2e-vscode` job that gates `build-vsix`.
 
 ### Changed
 

@@ -34,7 +34,7 @@
   "scripts": {
     "compile": "tsc -p tsconfig.build.json",
     "lint": "tsc -p . --noEmit --pretty false",
-    "test": "vitest --exclude 'scripts/**'",
+    "test": "vitest --exclude 'scripts/**' --exclude 'e2e/**'",
     "test:package": "node --test scripts/package-vsix.staging.test.mjs",
     "package:vsix": "node scripts/package-vsix.mjs"
   },

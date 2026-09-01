@@ -2,9 +2,9 @@
 """Fail if a direct dependency isn't documented in docs/LICENSE_COMPLIANCE.md.
 
 Compares the direct dependencies declared in crates/*/Cargo.toml and
-frontend/package.json / extension/package.json / e2e/package.json against the first column of that
-doc's Rust/JavaScript tables. Doesn't check license values themselves (that
-step is still manual, per the doc's "Process" section) — only that nothing
+frontend/package.json / extension/package.json / e2e/package.json / extension/e2e/package.json
+against the first column of that doc's Rust/JavaScript tables. Doesn't check license values
+themselves (that step is still manual, per the doc's "Process" section) — only that nothing
 shipped has silently gone undocumented, per SEC-004/MAINT-003
 (github.com/rene-langer/browsitory/issues/25).
 """
@@ -86,10 +86,21 @@ def main() -> int:
     if missing_extension:
         problems.append(f"extension/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_extension)}")
 
-    documented_e2e = doc_table_names(doc_text, "## JavaScript, `e2e/` (`npm info <package> license`)", ("\n## ",))
+    documented_e2e = doc_table_names(
+        doc_text, "## JavaScript, `e2e/` (`npm info <package> license`)", ("\n## JavaScript, `extension/e2e/`",)
+    )
     missing_e2e = js_deps(ROOT / "e2e" / "package.json") - documented_e2e
     if missing_e2e:
         problems.append(f"e2e/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_e2e)}")
+
+    documented_extension_e2e = doc_table_names(
+        doc_text, "## JavaScript, `extension/e2e/` (`npm info <package> license`)", ("\n## ",)
+    )
+    missing_extension_e2e = js_deps(ROOT / "extension" / "e2e" / "package.json") - documented_extension_e2e
+    if missing_extension_e2e:
+        problems.append(
+            f"extension/e2e/package.json dependencies missing from docs/LICENSE_COMPLIANCE.md: {sorted(missing_extension_e2e)}"
+        )
 
     if problems:
         for problem in problems:
