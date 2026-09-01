@@ -24,6 +24,12 @@ function setupFixtureRepo() {
 
 async function main() {
   setupFixtureRepo();
+  // Without this, VSCode/Electron's GTK proxy-resolver helper (`dconf watch /system/proxy/`)
+  // can end up holding the `--remote-debugging-port` listening socket (inherited via fork
+  // without CLOEXEC), which leaves the CDP HTTP endpoint unresponsive to any client — not just
+  // Playwright. Forcing the in-memory GSettings backend skips that dconf watch entirely and
+  // makes the port bind cleanly every time.
+  process.env["GSETTINGS_BACKEND"] = "memory";
   process.env["BROWSITORY_VSCODE_E2E_CDP_PORT"] = String(CDP_PORT);
   await runTests({
     extensionDevelopmentPath,
