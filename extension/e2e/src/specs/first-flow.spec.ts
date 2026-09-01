@@ -14,20 +14,21 @@ describe("Browsitory VSCode extension first flow", () => {
 
     const cdpPort = process.env["BROWSITORY_VSCODE_E2E_CDP_PORT"];
     if (!cdpPort) throw new Error("BROWSITORY_VSCODE_E2E_CDP_PORT not set");
-    const page = await connectToWebview(`http://127.0.0.1:${cdpPort}`);
+    // Driven via raw CDP `Runtime.evaluate` (see `support/webviewPage.ts`) rather than
+    // Playwright Locators — the webview's real content lives in a nested same-process iframe
+    // that Playwright's own frame discovery doesn't reliably surface when connected externally
+    // via `connectOverCDP` to this Electron instance. A plain DOM `.click()` also sidesteps the
+    // old Playwright-actionability concern (the stage control is `opacity: 0` until its row is
+    // hovered/focused, mirroring `e2e/specs/first-flow.spec.ts`'s own comment) since there's no
+    // actionability check at this level.
+    const webview = await connectToWebview(`http://127.0.0.1:${cdpPort}`);
 
-    // The stage control is `opacity: 0` until its row is hovered/focused (mirrors
-    // `e2e/specs/first-flow.spec.ts`'s own comment), and Playwright's own actionability check
-    // (like WebdriverIO's) rejects a fully transparent element for a plain `.click()`.
-    const stageButton = page.locator('button[aria-label="Stage first-flow-fixture.txt"]');
-    await stageButton.waitFor({ state: "attached", timeout: 10000 });
-    await stageButton.evaluate((el) => (el as HTMLElement).click());
+    await webview.waitForSelector('button[aria-label="Stage first-flow-fixture.txt"]', 10000);
+    await webview.click('button[aria-label="Stage first-flow-fixture.txt"]');
 
-    const commitMessageInput = page.locator("textarea[placeholder='Commit message']");
-    await commitMessageInput.fill("e2e: first commit");
-    await page.locator("button", { hasText: "Commit" }).click();
+    await webview.fill("textarea[placeholder='Commit message']", "e2e: first commit");
+    await webview.clickByText("button", "Commit");
 
-    const historyEntry = page.locator("li", { hasText: "e2e: first commit" });
-    await historyEntry.waitFor({ state: "attached", timeout: 10000 });
+    await webview.waitForText("li", "e2e: first commit", 10000);
   });
 });
