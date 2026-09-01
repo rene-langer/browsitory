@@ -12,6 +12,15 @@ let currentBridge: SidecarBridge | undefined;
 let currentMessageSubscription: vscode.Disposable | undefined;
 let currentPanelSubscription: vscode.Disposable | undefined;
 
+export function resolveWebviewAssetRoot(
+  extensionUri: vscode.Uri,
+  mode: vscode.ExtensionMode,
+): vscode.Uri {
+  return mode !== vscode.ExtensionMode.Production
+    ? vscode.Uri.joinPath(extensionUri, "..", "frontend", "dist-vscode")
+    : vscode.Uri.joinPath(extensionUri, "webview");
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Browsitory");
   context.subscriptions.push(output);
@@ -22,12 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const assetRoot = vscode.Uri.joinPath(
-      context.extensionUri,
-      "..",
-      "frontend",
-      "dist-vscode",
-    );
+    const assetRoot = resolveWebviewAssetRoot(context.extensionUri, context.extensionMode);
     const panel = vscode.window.createWebviewPanel(
       "browsitory",
       "Browsitory",
@@ -41,7 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
     currentPanel = panel;
 
     const executablePath =
-      context.extensionMode === vscode.ExtensionMode.Development
+      context.extensionMode !== vscode.ExtensionMode.Production
         ? resolveDevelopmentSidecarPath(context.extensionUri.fsPath)
         : resolvePackagedSidecarPath(context.extensionUri.fsPath);
 
