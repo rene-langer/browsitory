@@ -105,13 +105,34 @@ jobs:
       - run: pnpm build
       - run: pnpm test -- --run
 
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test -- --run
+      - run: pnpm run test:package
+      - run: pnpm run compile
+      - run: pnpm run lint
+
   # Builds standalone distributables on every push to main (not PRs) so a build is always
   # test-drivable without waiting for a release tag. Short-retention CI artifacts, distinct
   # from release.yml's tag-triggered draft GitHub Release, which is the permanent distribution
   # path.
   build-dist:
     if: github.ref == 'refs/heads/main'
-    needs: [rust, frontend, e2e]
+    needs: [rust, frontend, extension, e2e]
     strategy:
       fail-fast: false
       matrix:
@@ -150,6 +171,62 @@ jobs:
         with:
           name: browsitory-dist-${{ matrix.os }}
           path: ${{ matrix.os == 'macos-latest' && 'target/universal-apple-darwin/release/bundle/' || 'target/release/bundle/' }}
+          retention-days: 7
+
+  # The extension needs one VSIX per native sidecar target. These short-retention artifacts let
+  # main-branch CI validate the installable package without creating a GitHub Release.
+  build-vsix:
+    if: github.ref == 'refs/heads/main'
+    needs: [rust, frontend, extension, e2e]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            vsix_target: linux-x64
+            sidecar_suffix: ""
+          - os: macos-13
+            rust_target: x86_64-apple-darwin
+            vsix_target: darwin-x64
+            sidecar_suffix: ""
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            vsix_target: darwin-arm64
+            sidecar_suffix: ""
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            vsix_target: win32-x64
+            sidecar_suffix: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
+      - run: pnpm --dir extension install --frozen-lockfile
+      - run: pnpm --dir extension run compile
+      - run: cargo build --release -p vscode-sidecar --target ${{ matrix.rust_target }}
+      - run: >-
+          pnpm --dir extension run package:vsix -- --target ${{ matrix.vsix_target }}
+          --sidecar target/${{ matrix.rust_target }}/release/vscode-sidecar${{ matrix.sidecar_suffix }}
+          --out artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browsitory-vsix-${{ matrix.vsix_target }}
+          path: extension/artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
           retention-days: 7
 
   e2e:

@@ -108,3 +108,83 @@ jobs:
           # the main tauri.conf.json so ci.yml's plain build-dist smoke-test job (which has no
           # signing secrets) doesn't also try to sign an updater manifest on every push to main.
           args: ${{ matrix.args }} --config tauri.release.conf.json
+
+  build-vsix-release:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            vsix_target: linux-x64
+            sidecar_suffix: ""
+          - os: macos-13
+            rust_target: x86_64-apple-darwin
+            vsix_target: darwin-x64
+            sidecar_suffix: ""
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            vsix_target: darwin-arm64
+            sidecar_suffix: ""
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            vsix_target: win32-x64
+            sidecar_suffix: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: release-version
+        name: Set extension package version from tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#release/}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          node -e "
+            const fs = require('fs');
+            const p = 'extension/package.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.version = '${version}';
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          "
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
+      - run: pnpm --dir extension install --frozen-lockfile
+      - run: pnpm --dir extension run compile
+      - run: cargo build --release -p vscode-sidecar --target ${{ matrix.rust_target }}
+      - run: >-
+          pnpm --dir extension run package:vsix -- --target ${{ matrix.vsix_target }}
+          --sidecar target/${{ matrix.rust_target }}/release/vscode-sidecar${{ matrix.sidecar_suffix }}
+          --out artifacts/browsitory-${{ steps.release-version.outputs.version }}-${{ matrix.vsix_target }}.vsix
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browsitory-vsix-${{ matrix.vsix_target }}
+          path: extension/artifacts/browsitory-${{ steps.release-version.outputs.version }}-${{ matrix.vsix_target }}.vsix
+
+  publish-vsix-release:
+    needs: [build-release, build-vsix-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: browsitory-vsix-*
+          merge-multiple: true
+          path: release-vsix
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: release-vsix/*.vsix
