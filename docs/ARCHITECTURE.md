@@ -14,19 +14,17 @@ browsitory/
 └── frontend/              # React + TypeScript + Vite, shared by Tauri and the VSCode webview
 ```
 
-`vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target (Phase 6, spec
-`docs/superpowers/specs/2026-08-30-vscode-extension-design.md`): a standalone binary speaking
-line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. It now wires every `RepoClient`
-method except the five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
-`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`), which sub-phase (c)'s
-`extension/` host implements directly against VSCode APIs instead of round-tripping through the
-sidecar — see the spec's "VSCode-native integrations" section. Transfer progress
-(`subscribeTransferProgress`) rides the same JSON-RPC connection as everything else, as
-server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
-`spawn_progress_relay`) rather than request/response calls. Phase 6 sub-phases (c-d) supply the
-`extension/` host, dedicated `frontend/dist-vscode` webview bundle, and target-specific VSIX
-packages carrying exactly one matching sidecar; sub-phase (e) adds `extension/e2e/`, a real
-`@vscode/test-electron` Electron E2E layer for it (see "Testing strategy" below).
+`vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target: a standalone binary
+speaking line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. It wires every
+`RepoClient` method except five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
+`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`), which the `extension/` host
+implements directly against VSCode APIs instead of round-tripping through the sidecar — see
+`docs/superpowers/specs/2026-08-30-vscode-extension-design.md`'s "VSCode-native integrations"
+section. Transfer progress (`subscribeTransferProgress`) rides the same JSON-RPC connection as
+everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
+`spawn_progress_relay`) rather than request/response calls. Target-specific VSIX packages each
+bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
+sidecar binary.
 
 ### VSCode host and sidecar lifecycle
 
@@ -64,10 +62,8 @@ pragmatic choice; the libgit2 license deviation is documented, not silently acce
 
 ## The `RepoClient` IPC boundary
 
-`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on. It grows
-with each feature phase (11 methods as of Phase 1: repo picking/opening, status, log, diffs,
-stage/unstage, commit) — see that file directly for the current shape rather than a copy here,
-which would just go stale again next phase.
+`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
+file directly for the current method list rather than a copy here, which would just go stale.
 
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
@@ -81,6 +77,22 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 `no-restricted-imports` override banning `@tauri-apps/*` imports from
 `frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
 (and CI).
+
+## git2 API gotchas
+
+- `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
+  `Result<&str, Error>` — never `Option`, not even nested. Handle with `let Ok(x) = ... else {
+  continue };` in a loop, or `.ok().unwrap_or_default()` otherwise (no `.flatten()` — there's no
+  `Option` layer to flatten; it won't compile). See `crates/git-core/src/status.rs`,
+  `crates/git-core/src/log.rs`.
+- `Commit::summary()` is the one in this family that's actually `Result<Option<&str>, Error>` —
+  `Ok(None)` means no summary, not an error. This is the one that wants
+  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/log.rs`.
+- Both shapes coexist in this crate — check the actual signature rather than assuming from a
+  similar-sounding accessor; a plain-`Result` accessor rejects `.flatten()` and fails to compile
+  with an unhelpful error at the call site.
+- `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>` per
+  slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`.
 
 ## Threading model
 
@@ -142,7 +154,7 @@ promises and presents the diagnostic globally; it does not extend the transport-
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
-- E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO (`e2e/`) driving
+- E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving
   the built `tauri-app` binary as a black box — `cargo build --workspace --features
   tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
   `frontend/dist` instead of the Vite dev server; plain `cargo build` stays in dev-server mode
@@ -153,9 +165,8 @@ promises and presents the diagnostic globally; it does not extend the transport-
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
   actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
-  `packageManager: "pnpm@9.15.9"` — a CI-vs-local pnpm major-version mismatch broke `e2e/`'s
-  frozen-lockfile install during Phase 1; a contributor running a different pnpm major without
-  Corepack honoring this pin can hit the same failure.
+  `packageManager: "pnpm@9.15.9"` — a contributor running a different pnpm major without
+  Corepack honoring this pin can break `e2e/`'s frozen-lockfile install.
 - E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
   a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
   Development Host against the unpacked dev-mode extension and drives `vscode.*` commands
@@ -191,24 +202,14 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
    non-secret username. Confirm the test token is absent from config, progress, errors, and all
    visible UI before treating the release as accepted.
 
-## Roadmap
+## Current scope
 
-- **Phase 0**: workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal status view
-  proving the IPC boundary.
-- **Phase 1** (this pass, complete): full repo view — `git-core::log`/`diff`/`stage`/`commit`;
-  `config` turned into a real recent-repos registry; `RepoPicker`/`HistoryList`/`DiffPane`/
-  `CommitBox` frontend, replacing `StatusView`; first GUI E2E layer (`e2e/`, `tauri-driver` +
-  WebdriverIO) plus a CI job for it. See `CLAUDE.md`'s "Project status" for the short version.
-- **Phase 2**: branch management, stash, merge with conflict resolution, interactive rebase,
-  blame viewer, multi-branch commit graph.
-- **Phase 3**: push/pull/fetch with progress, multi-remote, tag push, credential handling.
-- **Phase 4** (complete): worktrees, submodules, reflog viewer, PR integration.
-- **Phase 5**: UI/UX polish pass over the full feature set built in Phases 1-4 — visual
-  design, typography, keyboard-driven interaction, and motion, matching the speed and
-  polish bar the project targets. Must land through `RepoClient` alone (no new backend
-  seams) so the same visual system works unmodified in both the Tauri desktop app and
-  the future VSCode webview frontend.
-- **Phase 6** (complete): shared `repo-service`, full-parity `vscode-sidecar`,
-  transport-selectable React webview, VSCode extension host with native-method routing and
-  recoverable sidecar lifecycle, four target-specific VSIX package/release artifacts, and a
-  `@vscode/test-electron` + raw-CDP Electron E2E layer (`extension/e2e/`) wired into CI.
+Full Git GUI feature set: repo view (log/diff/stage/commit), branch management, stash, merge
+conflict resolution, interactive rebase, blame, multi-branch commit graph, push/pull/fetch with
+progress, multi-remote and tag push, OS-keychain credentials, worktrees, submodules, reflog, and
+GitHub/Bitbucket PR integration — all reachable identically from the Tauri desktop app and the
+VSCode extension via `RepoClient`. Design system (tokens, layout primitives, iconography) is
+rolled out across the core commit-review views; extending it to the rest is in progress.
+
+For what shipped when, see `CHANGELOG.md`. For in-flight and planned work, see
+`docs/superpowers/plans/` and `docs/tasks/`.

@@ -4,7 +4,8 @@ Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT,
 ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
 in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
-and `extension/e2e/package.json` as of Phase 1's completion (not the full transitive tree).
+and `extension/e2e/package.json` (not the full transitive tree); dependencies added later carry
+their own verification date in the Notes column.
 
 ## Rust (`cargo info <crate>`)
 
