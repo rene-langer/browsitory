@@ -38,7 +38,7 @@ mod tag;
 mod worktree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TransferEvent {
+pub enum TransferEvent {
     Started {
         operation_id: String,
         operation: TransferOperation,

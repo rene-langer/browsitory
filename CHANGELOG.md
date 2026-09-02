@@ -6,6 +6,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A desktop VSCode extension host now loads the shared React frontend in a restricted webview,
+  routes folder/external-URL/version operations through native VSCode APIs, and forwards the
+  remaining `RepoClient` surface to `vscode-sidecar` over JSON-RPC. Sidecar exit, process error,
+  and stdin failure reject pending actions with an in-app diagnostic; a later action lazily
+  starts one fresh process without replaying mutations.
+- Target-specific VSIX packages now bundle the compiled extension, package-local webview assets,
+  and exactly one matching `vscode-sidecar` binary for Linux x64, macOS x64/arm64, or Windows x64.
+  Main-branch CI retains all four packages as artifacts, and tag releases attach them to the draft
+  GitHub Release.
+- A new `extension/e2e/` layer gives the VSCode extension its own black-box E2E coverage:
+  `@vscode/test-electron` drives the unpacked extension inside a real Extension Development
+  Host, and a hand-rolled raw Chrome DevTools Protocol client (no Playwright or other
+  browser-automation library) attaches to the webview's nested content frame for DOM assertions.
+  One flow so far — open repo → stage a file → commit → see it in history — mirroring `e2e/`'s
+  existing pattern. Wired into CI as a new `e2e-vscode` job that gates `build-vsix`.
+
+### Changed
+
+- Extracted the git worker/credential/forge service layer out of `tauri-app` into a new
+  internal `repo-service` crate, in preparation for a future VSCode extension — no
+  user-visible behavior change.
+- `crates/vscode-sidecar` now wires the full `RepoClient` method surface (every method except
+  the five VSCode-native ones — repo folder picking, app/last-seen version, and opening an
+  external URL — which the extension host wires directly against VSCode APIs), including a
+  transfer-progress JSON-RPC notification mechanism for fetch/push/pull.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added

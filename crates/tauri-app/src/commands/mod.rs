@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::worker::{TransferEvent, Worker};
+use repo_service::worker::{TransferEvent, Worker};
 
 mod branch;
 mod forge;
@@ -701,8 +701,8 @@ pub struct PullRequestDto {
     pub state: String,
 }
 
-impl From<crate::pull_requests::PullRequest> for PullRequestDto {
-    fn from(pull_request: crate::pull_requests::PullRequest) -> Self {
+impl From<repo_service::pull_requests::PullRequest> for PullRequestDto {
+    fn from(pull_request: repo_service::pull_requests::PullRequest) -> Self {
         Self {
             id: pull_request.id,
             number: pull_request.number,
@@ -717,7 +717,7 @@ impl From<crate::pull_requests::PullRequest> for PullRequestDto {
 }
 
 /// A page of listed pull requests, plus whether the provider indicated more exist beyond this
-/// page (see `crate::pull_requests::PullRequestList`) — the frontend uses `truncated` to show
+/// page (see `repo_service::pull_requests::PullRequestList`) — the frontend uses `truncated` to show
 /// an explicit "more available" notice instead of silently displaying a partial list.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -726,8 +726,8 @@ pub struct PullRequestListDto {
     pub truncated: bool,
 }
 
-impl From<crate::pull_requests::PullRequestList> for PullRequestListDto {
-    fn from(list: crate::pull_requests::PullRequestList) -> Self {
+impl From<repo_service::pull_requests::PullRequestList> for PullRequestListDto {
+    fn from(list: repo_service::pull_requests::PullRequestList) -> Self {
         Self {
             pull_requests: list
                 .pull_requests
@@ -740,7 +740,7 @@ impl From<crate::pull_requests::PullRequestList> for PullRequestListDto {
 }
 
 /// The fields a caller supplies to open a new pull request. Never carries a token — see
-/// `crate::pull_requests::CreatePullRequest`'s doc comment, which this DTO mirrors field-for-
+/// `repo_service::pull_requests::CreatePullRequest`'s doc comment, which this DTO mirrors field-for-
 /// field.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -751,7 +751,7 @@ pub struct CreatePullRequestDto {
     pub target_branch: String,
 }
 
-impl From<CreatePullRequestDto> for crate::pull_requests::CreatePullRequest {
+impl From<CreatePullRequestDto> for repo_service::pull_requests::CreatePullRequest {
     fn from(dto: CreatePullRequestDto) -> Self {
         Self {
             title: dto.title,
@@ -934,7 +934,7 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
 fn worker_handle(
     state: &State<AppState>,
     repo_path: &str,
-) -> Result<crate::worker::WorkerHandle, String> {
+) -> Result<repo_service::worker::WorkerHandle, String> {
     let guard = state.workers.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .get(repo_path)
@@ -957,14 +957,12 @@ mod tests {
     use std::path::PathBuf;
 
     use config::{OpenRepoEntry, Workspace};
-    use git_core::diff::DiffLineOrigin;
     use git_core::reflog::ReflogEntry;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
-    use git_core::status::StatusKind;
     use git_core::submodule::SubmoduleInfo;
     use git_core::worktree::WorktreeInfo;
 
-    use crate::worker::TransferEvent;
+    use repo_service::worker::TransferEvent;
 
     use super::{
         transfer_event_payload, ForgeProviderDto, OpenRepoEntryDto, OpenRepoEntryInput,
@@ -1289,67 +1287,9 @@ mod tests {
         );
     }
 
-    /// The `kind` field of `StatusEntryDto` is produced by `format!("{:?}", kind)`, so the
-    /// `Debug` output *is* the wire format. Its counterpart contract is the `StatusKind`
-    /// union in `frontend/src/ipc/RepoClient.ts`
-    /// (`"New" | "Modified" | "Deleted" | "Renamed" | "TypeChange"`) — these must stay in
-    /// sync. The match below is exhaustive on purpose: adding a `StatusKind` variant breaks
-    /// compilation here, which is the reminder to extend the TypeScript union too.
-    fn expected_wire_value(kind: StatusKind) -> &'static str {
-        match kind {
-            StatusKind::New => "New",
-            StatusKind::Modified => "Modified",
-            StatusKind::Deleted => "Deleted",
-            StatusKind::Renamed => "Renamed",
-            StatusKind::TypeChange => "TypeChange",
-            StatusKind::Conflicted => "Conflicted",
-        }
-    }
-
-    #[test]
-    fn status_kind_wire_values_match_the_typescript_union() {
-        for kind in [
-            StatusKind::New,
-            StatusKind::Modified,
-            StatusKind::Deleted,
-            StatusKind::Renamed,
-            StatusKind::TypeChange,
-            StatusKind::Conflicted,
-        ] {
-            assert_eq!(format!("{:?}", kind), expected_wire_value(kind));
-        }
-    }
-
-    /// `DiffLineDto::origin` is produced by `format!("{:?}", origin)`, so the `Debug`
-    /// output *is* the wire format. Counterpart contract: the `DiffLineOrigin` union in
-    /// `frontend/src/ipc/RepoClient.ts` (`"Add" | "Remove" | "Context"`) — these must stay
-    /// in sync. Exhaustive on purpose: adding a `DiffLineOrigin` variant breaks compilation
-    /// here, which is the reminder to extend the TypeScript union too.
-    fn expected_diff_origin_wire_value(origin: DiffLineOrigin) -> &'static str {
-        match origin {
-            DiffLineOrigin::Add => "Add",
-            DiffLineOrigin::Remove => "Remove",
-            DiffLineOrigin::Context => "Context",
-        }
-    }
-
-    #[test]
-    fn diff_line_origin_wire_values_match_the_typescript_union() {
-        for origin in [
-            DiffLineOrigin::Add,
-            DiffLineOrigin::Remove,
-            DiffLineOrigin::Context,
-        ] {
-            assert_eq!(
-                format!("{:?}", origin),
-                expected_diff_origin_wire_value(origin)
-            );
-        }
-    }
-
     #[test]
     fn two_open_repos_have_independent_worker_state() {
-        use crate::worker::Worker;
+        use repo_service::worker::Worker;
         use std::collections::HashMap;
 
         let dir_a = tempfile::TempDir::new().unwrap();

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 // A minimal loopback HTTP server standing in for GitHub's and Bitbucket's real pull-request
-// APIs during `e2e/specs/pull-requests.spec.ts`. `crates/tauri-app/src/pull_requests.rs`
+// APIs during `e2e/specs/pull-requests.spec.ts`. `crates/repo-service/src/pull_requests.rs`
 // otherwise always builds requests against the hardcoded real hosts (see that module's doc
 // comment: unit tests use an in-process `ForgeApi` fake instead, precisely so they never need a
 // mock HTTP server) — a black-box WebDriver E2E test has no seam inside the running process to

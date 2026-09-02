@@ -1,0 +1,337 @@
+import type {
+  BlameLine,
+  BranchInfo,
+  ConflictSegment,
+  CreatePullRequest,
+  DiffHunk,
+  FileConflictChoice,
+  ForgeProvider,
+  ForgeRepository,
+  GraphCommit,
+  MergeOutcome,
+  OpenRepoEntry,
+  PullOutcome,
+  PullRequest,
+  PullRequestList,
+  RebasePlanCommit,
+  RebasePlanEntry,
+  RebaseStepResult,
+  ReflogEntry,
+  RemoteAuthMode,
+  RemoteInfo,
+  RepoClient,
+  StashEntry,
+  StatusEntry,
+  SubmoduleInfo,
+  TagInfo,
+  TransferProgress,
+  UpstreamInfo,
+  Workspace,
+  WorktreeInfo,
+} from "./RepoClient";
+import { validateRemoteUrls } from "./validateRemoteUrls";
+import {
+  __resetTransportStatusForTests,
+  publishTransportStatus,
+  type TransportStatus,
+} from "./transportStatus";
+
+// No `vscode` npm package dependency here on purpose — the real extension host's webview API
+// typings arrive with sub-phase (c)'s `extension/` package. This ambient declaration is the
+// minimal shape this file actually calls.
+interface VsCodeWebviewApi {
+  postMessage(message: unknown): void;
+}
+
+declare function acquireVsCodeApi(): VsCodeWebviewApi;
+
+interface JsonRpcSuccess {
+  jsonrpc: "2.0";
+  id: number;
+  result: unknown;
+}
+
+interface JsonRpcFailure {
+  jsonrpc: "2.0";
+  id: number;
+  error: { code: number; message: string };
+}
+
+type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
+
+function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "jsonrpc" in value &&
+    "id" in value &&
+    ("result" in value || "error" in value)
+  );
+}
+
+// A JSON-RPC *notification* is the sidecar pushing something unprompted: a `method` and `params`,
+// and — the load-bearing part — no `id`. That absence is the entire wire distinction from a
+// response, and `isJsonRpcResponse` above already requires `"id" in value`, so the two guards can
+// never both match the same message.
+interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params: unknown;
+}
+
+function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "jsonrpc" in value &&
+    "method" in value &&
+    !("id" in value)
+  );
+}
+
+
+function isTransportStatus(value: unknown): value is TransportStatus {
+  if (typeof value !== "object" || value === null || !("state" in value) || !("message" in value)) {
+    return false;
+  }
+  return (
+    (value.state === "reconnecting" || value.state === "failed") &&
+    typeof value.message === "string"
+  );
+}
+
+let vscode: VsCodeWebviewApi | undefined;
+let listenerRegistered = false;
+let nextRequestId = 1;
+const pending = new Map<
+  number,
+  { resolve: (value: unknown) => void; reject: (error: Error) => void }
+>();
+const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
+
+function handleMessage(event: MessageEvent) {
+  const message = event.data;
+  if (isJsonRpcResponse(message)) {
+    const waiting = pending.get(message.id);
+    if (!waiting) return;
+    pending.delete(message.id);
+    if ("error" in message) {
+      waiting.reject(new Error(message.error.message));
+    } else {
+      waiting.resolve(message.result);
+    }
+    return;
+  }
+  if (!isJsonRpcNotification(message)) return;
+  if (message.method === "transferProgress") {
+    const progress = message.params as TransferProgress;
+    for (const listener of transferProgressListeners) listener(progress);
+    return;
+  }
+  if (message.method !== "transportStatus" || !isTransportStatus(message.params)) return;
+  const status = message.params;
+  const error = new Error(status.message);
+  const waitingCalls = [...pending.values()];
+  pending.clear();
+  for (const waiting of waitingCalls) waiting.reject(error);
+  publishTransportStatus(status);
+}
+
+function ensureMessageListener() {
+  if (listenerRegistered) return;
+  listenerRegistered = true;
+  window.addEventListener("message", handleMessage);
+}
+
+// Importing the VS Code adapter activates its inbound notification bridge.
+ensureMessageListener();
+
+// Lazily acquire the VSCode API so importing this module remains safe in the Tauri bundle.
+function ensureInitialized(): VsCodeWebviewApi {
+  if (!vscode) vscode = acquireVsCodeApi();
+  ensureMessageListener();
+  return vscode;
+}
+
+function call<T>(method: string, params: Record<string, unknown>): Promise<T> {
+  const api = ensureInitialized();
+  const id = nextRequestId++;
+  return new Promise<T>((resolve, reject) => {
+    pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+    api.postMessage({ jsonrpc: "2.0", id, method, params });
+  });
+}
+
+
+/** Test-only lifecycle cleanup for Vitest's shared window. */
+export function __resetVscodeRepoClientForTests() {
+  if (listenerRegistered) {
+    window.removeEventListener("message", handleMessage);
+    listenerRegistered = false;
+  }
+  vscode = undefined;
+  nextRequestId = 1;
+  pending.clear();
+  transferProgressListeners.clear();
+  __resetTransportStatusForTests();
+}
+
+export const vscodeRepoClient: RepoClient = {
+  openRepo: (path: string) => call<void>("open_repo", { path }),
+  closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
+  getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
+  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
+    call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
+  getWorkingDiff: (repoPath: string, path: string, staged: boolean) =>
+    call<DiffHunk[]>("get_working_diff", { repoPath, path, staged }),
+  getCommitDiff: (repoPath: string, commitId: string, path: string) =>
+    call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
+
+  pickRepoFolder: () => call<string | null>("pick_repo_folder", {}),
+  listRecentRepos: () => call<string[]>("list_recent_repos", {}),
+  getAppVersion: () => call<string>("get_app_version", {}),
+  getLastSeenVersion: () => call<string | null>("get_last_seen_version", {}),
+  setLastSeenVersion: (version: string) =>
+    call<void>("set_last_seen_version", { version }),
+  listOpenRepos: () =>
+    call<{ entries: OpenRepoEntry[]; activePath: string | null }>("list_open_repos", {}),
+  persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
+    call<void>("persist_open_repos", { entries, activePath }),
+  scanReposInRoot: (root: string) => call<string[]>("scan_repos_in_root", { root }),
+  listWorkspaces: () => call<Workspace[]>("list_workspaces", {}),
+  saveWorkspace: (name: string, root: string, members: string[]) =>
+    call<string>("save_workspace", { name, root, members }),
+  updateWorkspace: (id: string, name: string, members: string[]) =>
+    call<void>("update_workspace", { id, name, members }),
+  deleteWorkspace: (id: string) => call<void>("delete_workspace", { id }),
+  getGraphBranchSelection: (repoPath: string) =>
+    call<string[] | null>("get_graph_branch_selection", { repoPath }),
+  setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
+    call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
+  getCommitFiles: (repoPath: string, commitId: string) =>
+    call<string[]>("get_commit_files", { repoPath, commitId }),
+  stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
+  unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("stage_hunk", { repoPath, path, oldStart, newStart }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
+    call<void>("discard_hunk", { repoPath, path, oldStart, newStart }),
+  commit: (repoPath: string, message: string) => call<void>("commit", { repoPath, message }),
+  listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
+  createBranch: (repoPath: string, name: string, startPoint: string) =>
+    call<void>("create_branch", { repoPath, name, startPoint }),
+  switchBranch: (repoPath: string, name: string) => call<void>("switch_branch", { repoPath, name }),
+  deleteBranch: (repoPath: string, name: string, force: boolean) =>
+    call<void>("delete_branch", { repoPath, name, force }),
+  renameBranch: (repoPath: string, oldName: string, newName: string) =>
+    call<void>("rename_branch", { repoPath, oldName, newName }),
+  listWorktrees: (repoPath: string) => call<WorktreeInfo[]>("list_worktrees", { repoPath }),
+  createWorktree: (
+    repoPath: string,
+    name: string,
+    path: string,
+    branch: string,
+    startPoint: string | null,
+  ) => call<void>("create_worktree", { repoPath, name, path, branch, startPoint }),
+  removeWorktree: (repoPath: string, name: string) => call<void>("remove_worktree", { repoPath, name }),
+  pruneWorktrees: (repoPath: string) => call<void>("prune_worktrees", { repoPath }),
+  listSubmodules: (repoPath: string) => call<SubmoduleInfo[]>("list_submodules", { repoPath }),
+  initSubmodule: (repoPath: string, path: string) => call<void>("init_submodule", { repoPath, path }),
+  updateSubmodule: (repoPath: string, path: string, recursive: boolean) =>
+    call<void>("update_submodule", { repoPath, path, recursive }),
+  listReflogRefs: (repoPath: string) => call<string[]>("list_reflog_refs", { repoPath }),
+  getReflog: (repoPath: string, reference: string) =>
+    call<ReflogEntry[]>("get_reflog", { repoPath, reference }),
+  restoreReflogEntry: (repoPath: string, reference: string, newId: string) =>
+    call<void>("restore_reflog_entry", { repoPath, reference, newId }),
+  listRemotes: (repoPath: string) => call<RemoteInfo[]>("list_remotes", { repoPath }),
+  listRemoteBranches: (repoPath: string, remoteName: string) =>
+    call<string[]>("list_remote_branches", { repoPath, remoteName }),
+  getCurrentUpstream: (repoPath: string) =>
+    call<UpstreamInfo | null>("get_current_upstream", { repoPath }),
+  getRemoteUpstreams: (repoPath: string, name: string) =>
+    call<UpstreamInfo[]>("get_remote_upstreams", { repoPath, name }),
+  addRemote: (repoPath: string, name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return call<void>("add_remote", { repoPath, name, fetchUrl, pushUrl });
+  },
+  renameRemote: (repoPath: string, oldName: string, newName: string) =>
+    call<void>("rename_remote", { repoPath, oldName, newName }),
+  updateRemoteUrls: (repoPath: string, name: string, fetchUrl: string, pushUrl: string | null) => {
+    validateRemoteUrls(fetchUrl, pushUrl);
+    return call<void>("update_remote_urls", { repoPath, name, fetchUrl, pushUrl });
+  },
+  removeRemote: (repoPath: string, name: string, clearUpstreams: boolean) =>
+    call<void>("remove_remote", { repoPath, name, clearUpstreams }),
+  saveHttpsCredential: (repoPath: string, remoteName: string, username: string, token: string) =>
+    call<void>("save_https_credential", { repoPath, remoteName, username, token }),
+  forgetHttpsCredential: (repoPath: string, remoteName: string) =>
+    call<void>("forget_https_credential", { repoPath, remoteName }),
+  setRemoteAuthMode: (repoPath: string, remoteName: string, mode: RemoteAuthMode, username: string | null) =>
+    call<void>("set_remote_auth_mode", { repoPath, remoteName, mode, username }),
+  setCurrentUpstream: (repoPath: string, remoteName: string, remoteBranch: string) =>
+    call<void>("set_current_upstream", { repoPath, remoteName, remoteBranch }),
+  clearCurrentUpstream: (repoPath: string) => call<void>("clear_current_upstream", { repoPath }),
+  listTags: (repoPath: string) => call<TagInfo[]>("list_tags", { repoPath }),
+  createTag: (repoPath: string, name: string, message: string | null) =>
+    call<void>("create_tag", { repoPath, name, message }),
+  deleteTag: (repoPath: string, name: string) => call<void>("delete_tag", { repoPath, name }),
+  // Fetch and both pushes resolve with the operation id as soon as the sidecar has one — the
+  // transfer itself is still running, and reports through `subscribeTransferProgress` below.
+  // `pullCurrentUpstream` is the exception: it settles only once the whole pull is done.
+  fetchRemote: (repoPath: string, remoteName: string) =>
+    call<string>("fetch_remote", { repoPath, remoteName }),
+  pushCurrentBranch: (repoPath: string, remoteName: string) =>
+    call<string>("push_current_branch", { repoPath, remoteName }),
+  pushTags: (repoPath: string, remoteName: string, names: string[]) =>
+    call<string>("push_tags", { repoPath, remoteName, names }),
+  pullCurrentUpstream: (repoPath: string) =>
+    call<PullOutcome>("pull_current_upstream", { repoPath }),
+  subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
+    // Initialize eagerly: a caller may subscribe before it ever issues a request, and the
+    // `message` listener registered here is what delivers notifications.
+    ensureInitialized();
+    transferProgressListeners.add(listener);
+    return () => {
+      transferProgressListeners.delete(listener);
+    };
+  },
+  listStashes: (repoPath: string) => call<StashEntry[]>("list_stashes", { repoPath }),
+  saveStash: (repoPath: string) => call<void>("save_stash", { repoPath }),
+  applyStash: (repoPath: string, index: number) => call<void>("apply_stash", { repoPath, index }),
+  dropStash: (repoPath: string, index: number) => call<void>("drop_stash", { repoPath, index }),
+  getBlame: (repoPath: string, commitId: string, path: string) =>
+    call<BlameLine[]>("get_blame", { repoPath, commitId, path }),
+  mergeBranch: (repoPath: string, branchName: string) =>
+    call<MergeOutcome>("start_merge", { repoPath, branchName }),
+  getConflictHunks: (repoPath: string, path: string) =>
+    call<ConflictSegment[]>("get_conflict_hunks", { repoPath, path }),
+  resolveConflict: (repoPath: string, path: string, resolvedContent: string) =>
+    call<void>("resolve_conflict", { repoPath, path, resolvedContent }),
+  abortMerge: (repoPath: string) => call<void>("abort_merge", { repoPath }),
+  getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
+  resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
+    call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
+  commitsSince: (repoPath: string, onto: string) =>
+    call<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
+  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
+    call<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
+  rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
+  abortRebase: (repoPath: string) => call<void>("abort_rebase", { repoPath }),
+  getRebaseProgress: (repoPath: string) =>
+    call<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
+  detectForgeRepository: (repoPath: string) =>
+    call<ForgeRepository[]>("detect_forge_repository", { repoPath }),
+  saveForgeToken: (repoPath: string, provider: ForgeProvider, account: string, token: string) =>
+    call<void>("save_forge_token", { repoPath, provider, account, token }),
+  forgetForgeToken: (repoPath: string, provider: ForgeProvider, account: string) =>
+    call<void>("forget_forge_token", { repoPath, provider, account }),
+  listPullRequests: (repoPath: string, remoteName: string, account: string) =>
+    call<PullRequestList>("list_pull_requests", { repoPath, remoteName, account }),
+  createPullRequest: (repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest) =>
+    call<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
+  openExternalUrl: (url: string) =>
+    call<void>("open_external_url", { url }),
+};

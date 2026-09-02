@@ -5,11 +5,42 @@
 ```
 browsitory/
 ├── crates/
-│   ├── git-core/    # git2-based service layer, UI-agnostic, unit-tested headlessly
-│   ├── config/      # repo registry + preferences: recent-repos list, backed by TOML
-│   └── tauri-app/    # Tauri commands + per-repo worker threads
-└── frontend/          # React + TypeScript + Vite, the only crate/package that talks to a UI toolkit
+│   ├── git-core/        # git2-based service layer, UI-agnostic, unit-tested headlessly
+│   ├── config/          # repo registry + preferences: recent-repos list, backed by TOML
+│   ├── repo-service/    # transport-agnostic worker threads, credentials, forge/PR API access
+│   ├── tauri-app/        # thin Tauri command adapter over repo-service
+│   └── vscode-sidecar/  # JSON-RPC-over-stdio adapter over repo-service, for the VSCode extension
+├── extension/             # VSCode extension host, webview security, and sidecar lifecycle
+└── frontend/              # React + TypeScript + Vite, shared by Tauri and the VSCode webview
 ```
+
+`vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target: a standalone binary
+speaking line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. It wires every
+`RepoClient` method except five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
+`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`), which the `extension/` host
+implements directly against VSCode APIs instead of round-tripping through the sidecar — see
+`docs/superpowers/specs/2026-08-30-vscode-extension-design.md`'s "VSCode-native integrations"
+section. Transfer progress (`subscribeTransferProgress`) rides the same JSON-RPC connection as
+everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
+`spawn_progress_relay`) rather than request/response calls. Target-specific VSIX packages each
+bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
+sidecar binary.
+
+### VSCode host and sidecar lifecycle
+
+One `SidecarBridge` belongs to each open Browsitory webview panel. The host handles the five
+VSCode-native methods above itself; all repository/config/credential requests keep their
+original JSON-RPC id and are forwarded one-per-line to one lazily spawned sidecar. Valid sidecar
+responses remove their ids from the pending set before being relayed unchanged.
+
+The bridge state machine is `idle` → `running` → `reconnecting` or `failed`. Process `exit` or
+`error` and stdin write failure detach the old process, reject every unresolved id with JSON-RPC
+code `-32001`, and emit one id-less `transportStatus` notification carrying the same diagnostic.
+Requests are never retained for replay, because repository methods include mutations whose
+completion is unknowable after transport loss. A later repository request makes one fresh spawn
+attempt; a synchronous spawn failure moves to `failed`, rejects that request, and waits for a
+later user retry rather than scheduling background restarts. Panel closure and extension
+deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
 
 ## Why Tauri + a web frontend, not egui again
 
@@ -31,21 +62,37 @@ pragmatic choice; the libgit2 license deviation is documented, not silently acce
 
 ## The `RepoClient` IPC boundary
 
-`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on. It grows
-with each feature phase (11 methods as of Phase 1: repo picking/opening, status, log, diffs,
-stage/unstage, commit) — see that file directly for the current shape rather than a copy here,
-which would just go stale again next phase.
+`frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
+file directly for the current method list rather than a copy here, which would just go stale.
 
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
-`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri. A future VSCode
-extension implements the same interface over `postMessage` in a sibling file
-(`vscodeRepoClient.ts`); no component changes.
+`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri.
+`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`;
+`frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
+reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
+status listener and retains its existing updater/error behavior.
 
 The rule is enforced mechanically, not just by review: `frontend/eslint.config.js` has a
 `no-restricted-imports` override banning `@tauri-apps/*` imports from
 `frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
 (and CI).
+
+## git2 API gotchas
+
+- `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
+  `Result<&str, Error>` — never `Option`, not even nested. Handle with `let Ok(x) = ... else {
+  continue };` in a loop, or `.ok().unwrap_or_default()` otherwise (no `.flatten()` — there's no
+  `Option` layer to flatten; it won't compile). See `crates/git-core/src/status.rs`,
+  `crates/git-core/src/log.rs`.
+- `Commit::summary()` is the one in this family that's actually `Result<Option<&str>, Error>` —
+  `Ok(None)` means no summary, not an error. This is the one that wants
+  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/log.rs`.
+- Both shapes coexist in this crate — check the actual signature rather than assuming from a
+  similar-sounding accessor; a plain-`Result` accessor rejects `.flatten()` and fails to compile
+  with an unhelpful error at the call site.
+- `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>` per
+  slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`.
 
 ## Threading model
 
@@ -58,11 +105,11 @@ bare `Repository` can't be `State` at all, and `State<Mutex<Repository>>` (which
 duration of blocking git work.
 
 The `!Sync` constraint is what message-passing answers. Each opened repository gets one
-dedicated OS thread (`crates/tauri-app/src/worker.rs`'s `Worker::spawn`) that opens its own
-`Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved in
-once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands.rs`) send a
-`Command` enum value over a `std::sync::mpsc` channel to that thread and receive the result
-over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
+dedicated OS thread (`crates/repo-service/src/worker/mod.rs`'s `Worker::spawn`) that opens its
+own `Repository` handle and owns it exclusively for the thread's lifetime — the handle is moved
+in once and never shared by reference. Tauri commands (`crates/tauri-app/src/commands/mod.rs`)
+send a `Command` enum value over a `std::sync::mpsc` channel to that thread and receive the
+result over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
 Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
 on a reply, so one slow repository operation can't serialize unrelated commands. One worker
 thread per open repo also means multiple repos never contend on a shared handle.
@@ -86,17 +133,28 @@ command in `commands.rs` that touches the worker or the dialog plugin is therefo
 `StatusError`, ...). `Worker`/Tauri commands map these to `Result<T, String>` crossing the IPC
 boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods return
 `Promise<T>` that reject with that message — no error is swallowed at the boundary.
+The VSCode bridge additionally synthesizes `-32001` JSON-RPC errors for requests interrupted by
+sidecar loss. Its separate `transportStatus` notification rejects any still-pending webview
+promises and presents the diagnostic globally; it does not extend the transport-neutral
+`RepoClient` interface.
 
 ## Testing strategy
 
 - `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
-- `tauri-app`: inline unit tests for logic that isn't thin delegation (see `worker.rs`'s tests,
-  which spawn a real worker thread against a real temp-dir repo). Pass-through Tauri commands
-  don't get separate tests, except for the DTO wire format: `commands.rs` has a test pinning
-  the `StatusKind` strings it serializes to the `StatusKind` union in
+- `repo-service`: inline unit tests next to the code they cover (worker, credential store, and
+  forge/PR API logic), including `crates/repo-service/src/worker/mod.rs`'s tests, which spawn a
+  real worker thread against a real temp-dir repo — no mocks. It also owns the DTO wire-format
+  contract: `crates/repo-service/src/lib.rs`'s `wire_format_tests` module pins the `StatusKind`
+  and `DiffLineOrigin` `Debug` output against the matching unions in
   `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
+- `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
+  delegation tests of its own. It keeps `crates/tauri-app/src/commands/mod.rs`'s inline tests
+  for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
+  like `WorkspaceDto`/`OpenRepoEntryDto`).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
-- E2E (added from Phase 1 onward, not in Phase 0): `tauri-driver` + WebdriverIO (`e2e/`) driving
+- `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
+  native-method routing, process-loss recovery, webview security, and deterministic disposal.
+- E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving
   the built `tauri-app` binary as a black box — `cargo build --workspace --features
   tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
   `frontend/dist` instead of the Vite dev server; plain `cargo build` stays in dev-server mode
@@ -107,9 +165,24 @@ boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
   actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
-  `packageManager: "pnpm@9.15.9"` — a CI-vs-local pnpm major-version mismatch broke `e2e/`'s
-  frozen-lockfile install during Phase 1; a contributor running a different pnpm major without
-  Corepack honoring this pin can hit the same failure.
+  `packageManager: "pnpm@9.15.9"` — a contributor running a different pnpm major without
+  Corepack honoring this pin can break `e2e/`'s frozen-lockfile install.
+- E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
+  a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
+  Development Host against the unpacked dev-mode extension and drives `vscode.*` commands
+  directly (`browsitory.open`, staging, commit) via Mocha specs under `extension/e2e/src/specs/`,
+  mirroring `e2e/`'s one-flow-per-feature-area black-box pattern (currently: open repo → stage a
+  file → commit → see it in history). The webview panel itself isn't reachable through
+  `vscode.*` APIs, so `extension/e2e/src/support/webviewPage.ts` attaches over a hand-rolled raw
+  Chrome DevTools Protocol connection (Node's built-in `WebSocket`/`fetch`, no browser-automation
+  library — an initial `playwright-core`-based attempt was fully removed after proving unable to
+  reliably locate VSCode's nested webview content frame, which sits behind an outer sandbox
+  wrapper frame with no DOM of its own; see `docs/tasks/phase-6/d-02-vscode-e2e-harness.md` for
+  the two bugs that shape found and fixed). `extension/e2e/src/runTests.ts` is the outer harness:
+  it sets `GSETTINGS_BACKEND=memory`/`GIO_USE_PROXY_RESOLVER=dummy` and best-effort `pkill`s any
+  leftover `dconf watch` process before launch, then picks a dynamically free CDP port, to
+  mitigate a GTK/GLib proxy-resolver helper that can otherwise squat the debug port. CI runs it
+  under `xvfb-run` as its own `e2e-vscode` job (`.github/workflows/ci.yml`), parallel to `e2e`.
 
 ### Credential release acceptance
 
@@ -129,20 +202,14 @@ put a token in a remote URL, Git config, issue, screenshot, or terminal transcri
    non-secret username. Confirm the test token is absent from config, progress, errors, and all
    visible UI before treating the release as accepted.
 
-## Roadmap
+## Current scope
 
-- **Phase 0**: workspace scaffold, `git-core::repo`/`status`, Tauri shell + minimal status view
-  proving the IPC boundary.
-- **Phase 1** (this pass, complete): full repo view — `git-core::log`/`diff`/`stage`/`commit`;
-  `config` turned into a real recent-repos registry; `RepoPicker`/`HistoryList`/`DiffPane`/
-  `CommitBox` frontend, replacing `StatusView`; first GUI E2E layer (`e2e/`, `tauri-driver` +
-  WebdriverIO) plus a CI job for it. See `CLAUDE.md`'s "Project status" for the short version.
-- **Phase 2**: branch management, stash, merge with conflict resolution, interactive rebase,
-  blame viewer, multi-branch commit graph.
-- **Phase 3**: push/pull/fetch with progress, multi-remote, tag push, credential handling.
-- **Phase 4** (complete): worktrees, submodules, reflog viewer, PR integration.
-- **Phase 5**: UI/UX polish pass over the full feature set built in Phases 1-4 — visual
-  design, typography, keyboard-driven interaction, and motion, matching the speed and
-  polish bar the project targets. Must land through `RepoClient` alone (no new backend
-  seams) so the same visual system works unmodified in both the Tauri desktop app and
-  the future VSCode webview frontend.
+Full Git GUI feature set: repo view (log/diff/stage/commit), branch management, stash, merge
+conflict resolution, interactive rebase, blame, multi-branch commit graph, push/pull/fetch with
+progress, multi-remote and tag push, OS-keychain credentials, worktrees, submodules, reflog, and
+GitHub/Bitbucket PR integration — all reachable identically from the Tauri desktop app and the
+VSCode extension via `RepoClient`. Design system (tokens, layout primitives, iconography) is
+rolled out across the core commit-review views; extending it to the rest is in progress.
+
+For what shipped when, see `CHANGELOG.md`. For in-flight and planned work, see
+`docs/superpowers/plans/` and `docs/tasks/`.

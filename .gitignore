@@ -9,9 +9,21 @@ __pycache__/
 # Frontend
 frontend/node_modules
 frontend/dist
+frontend/dist-vscode
+
+# VSCode extension
+extension/node_modules
+extension/dist
+extension/bin
+extension/webview
+extension/artifacts
+extension/*.vsix
 
 # E2E
 e2e/node_modules
+extension/e2e/node_modules
+extension/e2e/out
+extension/e2e/.vscode-test
 
 # Claude Code worktrees (nested checkouts for parallel/background agents)
 .claude/worktrees/

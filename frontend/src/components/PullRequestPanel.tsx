@@ -13,7 +13,7 @@ import { Toolbar } from "./primitives/Toolbar";
 import styles from "./PullRequestPanel.module.css";
 
 // Providers report state as free-form strings ("open"/"closed" from GitHub, "OPEN"/"MERGED"/…
-// from Bitbucket, lowercased by the backend — see `crates/tauri-app/src/pull_requests.rs`), so
+// from Bitbucket, lowercased by the backend — see `crates/repo-service/src/pull_requests.rs`), so
 // this only special-cases the two states worth a distinct glyph and falls back to a generic
 // closed icon for everything else (declined, superseded, …).
 function pullRequestStateIcon(state: string) {

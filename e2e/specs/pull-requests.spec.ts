@@ -3,7 +3,7 @@ import { ForgeFixtureClient } from "../support/forgeFixtureServer";
 import { expandSidebarSection } from "../support/sidebar";
 
 // Canned provider responses, matching the exact JSON shapes
-// `crates/tauri-app/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
+// `crates/repo-service/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
 // `GITHUB_LIST_FIXTURE`/`BITBUCKET_LIST_FIXTURE`/etc. unit-test constants, mirrored here).
 const GITHUB_LIST_FIXTURE = [
   {

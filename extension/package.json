@@ -1,0 +1,49 @@
+{
+  "name": "browsitory",
+  "displayName": "Browsitory",
+  "description": "A full Git repository browser inside VSCode.",
+  "version": "0.1.0",
+  "publisher": "browsitory",
+  "private": true,
+  "engines": {
+    "vscode": "^1.134.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "activationEvents": [
+    "onCommand:browsitory.open"
+  ],
+  "main": "./dist/extension.js",
+  "license": "MIT",
+  "files": [
+    "dist/**",
+    "bin/**",
+    "webview/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "browsitory.open",
+        "title": "Browsitory: Open"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.build.json",
+    "lint": "tsc -p . --noEmit --pretty false",
+    "test": "vitest --exclude 'scripts/**' --exclude 'e2e/**'",
+    "test:package": "node --test scripts/package-vsix.staging.test.mjs",
+    "package:vsix": "node scripts/package-vsix.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/vscode": "^1.134.0",
+    "@vscode/vsce": "3.9.2",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.10"
+  },
+  "packageManager": "pnpm@11.24.0"
+}

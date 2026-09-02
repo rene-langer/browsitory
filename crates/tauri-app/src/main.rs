@@ -1,9 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-mod credentials;
-mod pull_requests;
-mod worker;
 
 use commands::{
     abort_merge, abort_rebase, add_remote, apply_stash, clear_current_upstream, close_repo, commit,
