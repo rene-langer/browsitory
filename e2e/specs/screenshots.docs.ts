@@ -29,7 +29,9 @@ describe("Browsitory screenshots (docs)", () => {
     fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
     // Base history: two commits on the default branch, a tag on the tip, then a feature branch
-    // with its own commit, back on the default branch — enough for the graph to show a fork.
+    // with its own commit — and the default branch ALSO advances past the fork point, so the
+    // two branches genuinely diverge (not just one strictly ahead of the other) and the graph
+    // renders real, separate lanes rather than a single straight line.
     fs.writeFileSync(
       path.join(E2E_REPO_PATH, "README.md"),
       "# Demo Project\n\nA sample repository used to capture Browsitory's documentation screenshots.\n",
@@ -50,6 +52,10 @@ describe("Browsitory screenshots (docs)", () => {
     git(["add", "feature.txt"]);
     git(["commit", "-m", "feat: add feature work"]);
     git(["checkout", defaultBranch]);
+
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "CONTRIBUTING.md"), "See CONTRIBUTING for guidelines.\n");
+    git(["add", "CONTRIBUTING.md"]);
+    git(["commit", "-m", "docs: add contributing guide"]);
 
     // `resetFixtureRepo` in wdio.conf.ts clones the parent source, which already leaves an
     // "origin" remote pointing at a local tmp path — repoint it at a demo-looking URL for the

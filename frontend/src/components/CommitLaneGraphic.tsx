@@ -28,18 +28,42 @@ export function CommitLaneGraphic({
   const width = totalLanes * LANE_WIDTH;
   const midY = ROW_HEIGHT / 2;
 
-  const upperLines = layout.passThroughLanes.map((lane) => (
+  // This row's own lane, if something above is already waiting for this commit, only needs its
+  // upper half drawn here — the lower half is whatever `connectionLines` below draws for it
+  // (straight, diagonal, or nothing, depending on this commit's own parents). Splitting that
+  // lower half off is fine because it always meets this row's own dot exactly at the seam,
+  // which masks the hairline gap two independently-antialiased strokes can leave where they abut.
+  const ownUpperLine = layout.passThroughLanes.includes(layout.lane) ? (
     <line
-      key={`up-${lane}`}
-      x1={laneCenterX(lane)}
+      key="up-own"
+      x1={laneCenterX(layout.lane)}
       y1={0}
-      x2={laneCenterX(lane)}
+      x2={laneCenterX(layout.lane)}
       y2={midY}
-      stroke={laneColor(lane)}
+      stroke={laneColor(layout.lane)}
       strokeWidth={2}
-      opacity={opacityFor(lane, hoveredLane)}
+      opacity={opacityFor(layout.lane, hoveredLane)}
     />
-  ));
+  ) : null;
+
+  // Every OTHER pass-through lane is just passing straight through this row, untouched by
+  // whatever this commit's own connections do — draw it as a single line spanning the full row
+  // height rather than splitting it at the midpoint. Nothing sits on top of that seam to mask
+  // it (unlike the own-lane case above), so a split there is a visible rendering gap.
+  const otherPassThroughLines = layout.passThroughLanes
+    .filter((lane) => lane !== layout.lane)
+    .map((lane) => (
+      <line
+        key={`through-${lane}`}
+        x1={laneCenterX(lane)}
+        y1={0}
+        x2={laneCenterX(lane)}
+        y2={ROW_HEIGHT}
+        stroke={laneColor(lane)}
+        strokeWidth={2}
+        opacity={opacityFor(lane, hoveredLane)}
+      />
+    ));
 
   const connectionLines = layout.parentConnections.map((conn) => (
     <line
@@ -54,24 +78,6 @@ export function CommitLaneGraphic({
     />
   ));
 
-  const untouchedPassThroughLines = layout.passThroughLanes
-    .filter(
-      (lane) =>
-        lane !== layout.lane && !layout.parentConnections.some((conn) => conn.lane === lane),
-    )
-    .map((lane) => (
-      <line
-        key={`through-${lane}`}
-        x1={laneCenterX(lane)}
-        y1={midY}
-        x2={laneCenterX(lane)}
-        y2={ROW_HEIGHT}
-        stroke={laneColor(lane)}
-        strokeWidth={2}
-        opacity={opacityFor(lane, hoveredLane)}
-      />
-    ));
-
   return (
     <svg
       width={width}
@@ -80,9 +86,9 @@ export function CommitLaneGraphic({
       preserveAspectRatio="none"
       style={{ flexShrink: 0 }}
     >
-      {upperLines}
+      {otherPassThroughLines}
+      {ownUpperLine}
       {connectionLines}
-      {untouchedPassThroughLines}
       <circle
         cx={laneCenterX(layout.lane)}
         cy={midY}
