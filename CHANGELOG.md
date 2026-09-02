@@ -34,6 +34,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   external URL — which the extension host wires directly against VSCode APIs), including a
   transfer-progress JSON-RPC notification mechanism for fetch/push/pull.
 
+### Fixed
+
+- The commit graph's lane lines could render broken: a lane-shifting connector could be cut by
+  a later-painted, unrelated pass-through line crossing it, a pass-through lane's straight
+  continuation could be dropped entirely when another commit's connector happened to land on
+  the same lane, and even once both were fixed, a straight pass-through line split into two
+  segments at the row's midpoint could still show a hairline rendering seam. `CommitLaneGraphic`
+  now paints connectors last and draws each non-own pass-through lane as a single unbroken line.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added
