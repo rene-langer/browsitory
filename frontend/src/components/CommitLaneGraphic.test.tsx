@@ -96,6 +96,63 @@ describe("CommitLaneGraphic", () => {
     expect(circle?.getAttribute("opacity")).toBe("0.25");
   });
 
+  it("paints a lane-shifting connector line on top of an untouched pass-through line it crosses", () => {
+    // Own lane 0 connects down to lane 2, diagonally crossing lane 1's column. Lane 1 is an
+    // unrelated branch just passing through (no connection of its own here) so it also draws a
+    // plain vertical line through the same row. SVG paints later siblings on top of earlier
+    // ones with no blending, so whichever line is later in DOM order wins visually at the
+    // crossing point. The vertical pass-through must not be allowed to cut the diagonal in two.
+    const layout: CommitLayout = {
+      commitId: "a",
+      lane: 0,
+      parentConnections: [{ parentId: "p", lane: 2 }],
+      passThroughLanes: [0, 1, 2],
+    };
+
+    const { container } = render(<CommitLaneGraphic layout={layout} totalLanes={3} />);
+
+    const lines = Array.from(container.querySelectorAll("line"));
+    const diagonalIndex = lines.findIndex((line) => line.getAttribute("x1") !== line.getAttribute("x2"));
+    const untouchedLane1Index = lines.findIndex(
+      (line) =>
+        line.getAttribute("x1") === line.getAttribute("x2") &&
+        line.getAttribute("x1") === String(1 * 16 + 8) &&
+        line.getAttribute("y1") === "0" &&
+        line.getAttribute("y2") === "24",
+    );
+
+    expect(diagonalIndex).toBeGreaterThanOrEqual(0);
+    expect(untouchedLane1Index).toBeGreaterThanOrEqual(0);
+    expect(diagonalIndex).toBeGreaterThan(untouchedLane1Index);
+  });
+
+  it("draws an unrelated lane's pass-through as one unbroken line, not two segments meeting at the row's midpoint", () => {
+    // Lane 0 is another branch waiting on a parent this row's own commit (lane 1) also happens
+    // to connect to (a fork: two children of the same parent). Splitting lane 0's pass-through
+    // into an upper (0..mid) and lower (mid..bottom) segment — even with matching endpoints —
+    // can show a hairline rendering seam where the two independently-antialiased strokes meet,
+    // since nothing here (unlike this row's own dot) sits on top of that exact point to mask it.
+    // It must be a single line spanning the full row height instead.
+    const layout: CommitLayout = {
+      commitId: "a",
+      lane: 1,
+      parentConnections: [{ parentId: "shared-parent", lane: 0 }],
+      passThroughLanes: [0, 1],
+    };
+
+    const { container } = render(<CommitLaneGraphic layout={layout} totalLanes={2} />);
+
+    const fullHeightLane0 = Array.from(container.querySelectorAll("line")).find(
+      (line) =>
+        line.getAttribute("x1") === line.getAttribute("x2") &&
+        line.getAttribute("x1") === String(0 * 16 + 8) &&
+        line.getAttribute("y1") === "0" &&
+        line.getAttribute("y2") === "24",
+    );
+
+    expect(fullHeightLane0).not.toBeUndefined();
+  });
+
   it("dims nothing when no lane is hovered", () => {
     const layout: CommitLayout = {
       commitId: "a",
