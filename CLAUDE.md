@@ -46,7 +46,7 @@ pnpm run compile
 ```bash
 # VSCode E2E (@vscode/test-electron), from the repo root:
 cargo build --workspace
-cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-vscode-e2e-repo pnpm exec vite build --config vite.vscode.config.ts && cd ..
+cd frontend && pnpm run generate:release-notes && VITE_E2E_REPO_PATH=/tmp/browsitory-vscode-e2e-repo pnpm exec vite build --config vite.vscode.config.ts && cd ..
 cd extension && pnpm install && pnpm run compile && cd ..
 cd extension/e2e
 pnpm install --ignore-workspace                    # NOT plain `pnpm install` — extension/e2e isn't

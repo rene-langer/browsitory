@@ -161,6 +161,7 @@ jobs:
             frontend/pnpm-lock.yaml
             extension/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run generate:release-notes
       - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
       - run: pnpm --dir extension install --frozen-lockfile
       - run: pnpm --dir extension run compile
