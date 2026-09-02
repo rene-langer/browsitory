@@ -3,25 +3,26 @@
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
 ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
-in `crates/*/Cargo.toml`, `frontend/package.json`, and `e2e/package.json` as of Phase 1's
-completion (not the full transitive tree).
+in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
+and `extension/e2e/package.json` (not the full transitive tree); dependencies added later carry
+their own verification date in the Notes column.
 
 ## Rust (`cargo info <crate>`)
 
 | Crate | License | Notes |
 |---|---|---|
 | git2 | MIT OR Apache-2.0 (binding); vendored libgit2 is GPL-2.0-with-linking-exception | Deliberate exception — see below. Direct dep of `git-core`; dev-dependency of `tauri-app`. |
-| keyring 4.1.6 | MIT OR Apache-2.0 | `tauri-app` — cross-platform operating-system credential storage. Source: [crates.io](https://crates.io/crates/keyring/4.1.6); verified with `cargo info keyring@4.1.6` on 2026-08-15. |
-| reqwest 0.12.28 | MIT OR Apache-2.0 | `tauri-app` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
+| keyring 4.1.6 | MIT OR Apache-2.0 | `repo-service` — cross-platform operating-system credential storage. Source: [crates.io](https://crates.io/crates/keyring/4.1.6); verified with `cargo info keyring@4.1.6` on 2026-08-15. |
+| reqwest 0.12.28 | MIT OR Apache-2.0 | `repo-service` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
 | thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
-| url | MIT OR Apache-2.0 | `git-core` and `tauri-app` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
-| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core` and `tauri-app`; runtime dependency of `config` (atomic config-file writes) |
+| url | MIT OR Apache-2.0 | `git-core` and `repo-service` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
+| tempfile | MIT OR Apache-2.0 | dev-dependency of `git-core`, `tauri-app`, and `repo-service`; runtime dependency of `config` (atomic config-file writes) |
 | tauri | Apache-2.0 OR MIT | `tauri-app` |
 | tauri-build | Apache-2.0 OR MIT | build-dependency of `tauri-app` |
 | tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
 | tauri-plugin-opener 2.5.4 | Apache-2.0 OR MIT | `tauri-app` — opens a pull request's provider URL in the user's default external browser instead of navigating the app's own webview away. Source: [crates.io](https://crates.io/crates/tauri-plugin-opener/2.5.4); verified with `cargo info tauri-plugin-opener` on 2026-08-17. |
-| serde | MIT OR Apache-2.0 | `tauri-app`; also `config` |
-| serde_json | MIT OR Apache-2.0 | `tauri-app` |
+| serde | MIT OR Apache-2.0 | `tauri-app` and `repo-service`; also `config` |
+| serde_json | MIT OR Apache-2.0 | `tauri-app` and `repo-service` |
 | directories | MIT OR Apache-2.0 | `config` |
 | toml | MIT OR Apache-2.0 | `config` |
 | tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |
@@ -38,8 +39,8 @@ completion (not the full transitive tree).
 | lucide-react | ISC | Icon set adopted in Phase 5 for stage/unstage, merge-conflict, branch, stash, tag, worktree, submodule, PR-status, and theme-toggle iconography. |
 | @tauri-apps/api | Apache-2.0 OR MIT | |
 | vite | MIT | dev only |
-| typescript | Apache-2.0 | dev only |
-| vitest | MIT | dev only |
+| typescript | Apache-2.0 | dev only; shared by the frontend and VSCode extension packages. |
+| vitest | MIT | dev only; shared by the frontend and VSCode extension packages. |
 | @testing-library/react | MIT | dev only |
 | @testing-library/jest-dom | MIT | dev only |
 | jsdom | MIT | dev only |
@@ -51,12 +52,25 @@ completion (not the full transitive tree).
 | typescript-eslint | MIT | dev only |
 | globals | MIT | dev only |
 | @vitejs/plugin-react | MIT | dev only |
-| @types/node | MIT | dev only |
+| @types/node | MIT | dev only; shared by the frontend and VSCode extension packages. |
 | @types/react | MIT | dev only |
 | @types/react-dom | MIT | dev only |
 | @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 | @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
+
+## JavaScript, `extension/` (`npm info <package> license`)
+
+`extension/` is a separate pnpm package. Its dependencies are development tooling and VSCode
+extension-host typings; none are loaded by the packaged extension itself.
+
+| Package | License | Notes |
+|---|---|---|
+| @types/node | MIT | dev only; same package as the frontend row above. |
+| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. |
+| @vscode/vsce 3.9.2 | MIT | dev only; packages target-specific VSIX artifacts. Source: `npm info @vscode/vsce@3.9.2 license`, verified 2026-08-31. |
+| typescript | Apache-2.0 | dev only; same package as the frontend row above. |
+| vitest | MIT | dev only; same package as the frontend row above. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
@@ -77,6 +91,25 @@ and are dev-only test tooling, but are recorded here for completeness.
 | @types/node | MIT | same package as `frontend/`'s row above |
 | @types/mocha | MIT | |
 
+## JavaScript, `extension/e2e/` (`npm info <package> license`)
+
+`extension/e2e/` is a separate pnpm package from `extension/`, a standalone Electron E2E
+harness (`@vscode/test-electron` + Mocha) that launches a real VSCode Extension Development Host
+against the unpacked, dev-mode extension (`vscode.ExtensionMode.Test`), never a packaged
+`.vsix`; none of its dependencies are shipped in the extension itself. The
+webview panel is driven over a raw Chrome DevTools Protocol connection hand-rolled in
+`support/webviewPage.ts` on Node's built-in `WebSocket`/`fetch` globals — no browser-automation
+library is involved, so this table has no dependency row for one.
+
+| Package | License | Notes |
+|---|---|---|
+| @types/mocha 10.0.10 | MIT | dev only; same package as `e2e/`'s row above. |
+| @types/node 24.13.3 | MIT | dev only; same package as the frontend row above. |
+| @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types, for typechecking the `vscode.commands`/`vscode.workspace` calls in `specs/first-flow.spec.ts`. Same package already verified for `extension/`'s own row above — not re-verified here. |
+| @vscode/test-electron 2.5.2 | MIT | dev only; downloads/launches a real VSCode Extension Development Host for the harness. Source: `npm info @vscode/test-electron@2.5.2 license`, verified 2026-09-01. |
+| mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
+| typescript 6.0.3 | Apache-2.0 | dev only; same package as the frontend row above. |
+
 ## The one exception: libgit2 via `git2`
 
 `git2` vendors libgit2, which is GPL-2.0-with-linking-exception, not MIT. The linking
@@ -93,6 +126,7 @@ confirm it's permissive, and add a row to the relevant table above in the same c
 adds the dependency.
 
 CI's `audit` job runs `scripts/check-license-compliance.py`, which fails the build if any
-direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, or `e2e/package.json` has
-no matching row here — it checks presence, not the license value itself, so the manual
-`cargo info`/`npm info` step above still applies.
+direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`,
+`e2e/package.json`, or `extension/e2e/package.json` has no matching row here — it checks
+presence, not the license value itself, so the manual `cargo info`/`npm info` step above still
+applies.

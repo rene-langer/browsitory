@@ -329,7 +329,7 @@ pub(super) fn push_tags<S: CredentialStore>(
 }
 
 impl WorkerHandle {
-    pub(crate) fn fetch_remote(
+    pub fn fetch_remote(
         &self,
         remote_name: String,
         events: Sender<TransferEvent>,
@@ -347,7 +347,7 @@ impl WorkerHandle {
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
-    pub(crate) fn pull_current_upstream(
+    pub fn pull_current_upstream(
         &self,
         events: Sender<TransferEvent>,
     ) -> Result<PullOutcome, String> {
@@ -363,7 +363,7 @@ impl WorkerHandle {
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
-    pub(crate) fn push_current_branch(
+    pub fn push_current_branch(
         &self,
         remote_name: String,
         events: Sender<TransferEvent>,
@@ -381,7 +381,7 @@ impl WorkerHandle {
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
-    pub(crate) fn push_tags(
+    pub fn push_tags(
         &self,
         remote_name: String,
         names: Vec<String>,

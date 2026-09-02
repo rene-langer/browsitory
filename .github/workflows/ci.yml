@@ -105,13 +105,41 @@ jobs:
       - run: pnpm build
       - run: pnpm test -- --run
 
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and only builds it
+      # itself as a fallback if missing; on a cold CI runner that inline `cargo build` blows
+      # the test's own timeout, so prebuild it here instead.
+      - name: Build dev sidecar
+        working-directory: .
+        run: cargo build -p vscode-sidecar
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test -- --run
+      - run: pnpm run test:package
+      - run: pnpm run compile
+      - run: pnpm run lint
+
   # Builds standalone distributables on every push to main (not PRs) so a build is always
   # test-drivable without waiting for a release tag. Short-retention CI artifacts, distinct
   # from release.yml's tag-triggered draft GitHub Release, which is the permanent distribution
   # path.
   build-dist:
     if: github.ref == 'refs/heads/main'
-    needs: [rust, frontend, e2e]
+    needs: [rust, frontend, extension, e2e]
     strategy:
       fail-fast: false
       matrix:
@@ -151,6 +179,121 @@ jobs:
           name: browsitory-dist-${{ matrix.os }}
           path: ${{ matrix.os == 'macos-latest' && 'target/universal-apple-darwin/release/bundle/' || 'target/release/bundle/' }}
           retention-days: 7
+
+  # The extension needs one VSIX per native sidecar target. These short-retention artifacts let
+  # main-branch CI validate the installable package without creating a GitHub Release.
+  build-vsix:
+    if: github.ref == 'refs/heads/main'
+    needs: [rust, frontend, extension, e2e, e2e-vscode]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            vsix_target: linux-x64
+            sidecar_suffix: ""
+          - os: macos-13
+            rust_target: x86_64-apple-darwin
+            vsix_target: darwin-x64
+            sidecar_suffix: ""
+          - os: macos-14
+            rust_target: aarch64-apple-darwin
+            vsix_target: darwin-arm64
+            sidecar_suffix: ""
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            vsix_target: win32-x64
+            sidecar_suffix: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run generate:release-notes
+      - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
+      - run: pnpm --dir extension install --frozen-lockfile
+      - run: pnpm --dir extension run compile
+      - run: cargo build --release -p vscode-sidecar --target ${{ matrix.rust_target }}
+      - run: >-
+          pnpm --dir extension run package:vsix -- --target ${{ matrix.vsix_target }}
+          --sidecar target/${{ matrix.rust_target }}/release/vscode-sidecar${{ matrix.sidecar_suffix }}
+          --out artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browsitory-vsix-${{ matrix.vsix_target }}
+          path: extension/artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
+          retention-days: 7
+
+  e2e-vscode:
+    runs-on: ubuntu-latest
+    env:
+      VSCODE_E2E_REPO_PATH: /tmp/browsitory-vscode-e2e-repo
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install Tauri system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+            extension/e2e/pnpm-lock.yaml
+      - name: Build dev sidecar
+        run: cargo build --workspace
+      - name: Build vscode frontend (with E2E fixture auto-open baked in)
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run generate:release-notes
+          VITE_E2E_REPO_PATH="$VSCODE_E2E_REPO_PATH" pnpm exec vite build --config vite.vscode.config.ts
+      - name: Compile extension
+        working-directory: extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run compile
+      - name: Install e2e dependencies
+        working-directory: extension/e2e
+        # extension/e2e isn't listed in any workspace's `packages:` field, so plain `pnpm
+        # install` resolves upward to the ancestor extension/pnpm-workspace.yaml and silently
+        # installs into extension/node_modules instead of extension/e2e/node_modules.
+        # --ignore-workspace forces pnpm to treat extension/e2e as standalone.
+        run: pnpm install --frozen-lockfile --ignore-workspace
+      - name: Run VSCode E2E suite
+        working-directory: extension/e2e
+        # A `dconf watch /system/proxy/` helper process (GTK/GLib's proxy-resolver mechanism,
+        # triggered by Electron) can squat the harness's CDP debug port; runTests.ts mitigates
+        # this with GSETTINGS_BACKEND=memory, GIO_USE_PROXY_RESOLVER=dummy, a best-effort
+        # `pkill -f "dconf watch"` before launch, and a dynamically chosen free port, but that
+        # cleanup only runs *before* launch, not after — see docs/tasks/phase-6/d-02-vscode-e2e-harness.md.
+        # GitHub-hosted ubuntu-latest runners are fresh VMs per job, so there's no leftover
+        # process from a prior job to squat this run's port; this is a known limitation to keep
+        # in mind if this job ever moves to a self-hosted or reused runner, not a live bug here.
+        run: xvfb-run --auto-servernum pnpm test
 
   e2e:
     runs-on: ubuntu-latest
