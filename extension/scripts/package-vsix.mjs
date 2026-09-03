@@ -72,9 +72,10 @@ export function parseOptions(args) {
   }
   const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
   const extensionRoot = path.resolve(scriptDirectory, "..");
+  const sidecarPath = values.get("--sidecar");
   return {
     target: values.get("--target"),
-    sidecarPath: values.get("--sidecar"),
+    sidecarPath: sidecarPath && path.resolve(extensionRoot, "..", sidecarPath),
     outputPath: values.get("--out"),
     extensionRoot,
     frontendDist: path.resolve(extensionRoot, "..", "frontend", "dist-vscode"),
