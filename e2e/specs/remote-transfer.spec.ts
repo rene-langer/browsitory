@@ -65,10 +65,11 @@ async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
   await menuItem.click();
 }
 
-// "Set upstream…" is a context-menu item on the *current* local branch's row (its button carries
-// the " (current)" suffix), opening a dialog with the remote/branch fields.
+// "Set upstream…" is a context-menu item on the *current* local branch's row (its text carries
+// the " (current)" suffix, and the row itself is the interactive element — a `role="button"`
+// `<li>`, not a nested `<button>` — see `ListRow.tsx`).
 async function openSetUpstreamDialog() {
-  const currentBranchButton = await $("//button[contains(., ' (current)')]");
+  const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
   await currentBranchButton.waitForExist({ timeout: 10000 });
   await browser.execute((el) => {
     el.dispatchEvent(

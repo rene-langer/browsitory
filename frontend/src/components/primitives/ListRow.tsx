@@ -42,6 +42,7 @@ export function ListRow({
   id,
   selected,
   onClick,
+  onDoubleClick,
   onContextMenu,
   onMouseEnter,
   onMouseLeave,
@@ -51,6 +52,9 @@ export function ListRow({
   id?: string;
   selected?: boolean;
   onClick?: (event?: MouseEvent) => void;
+  // Standalone rows only (see below) — a row whose container owns selection has no use for a
+  // second, "activate" action distinct from `onClick`.
+  onDoubleClick?: (event?: MouseEvent) => void;
   onContextMenu?: (event: MouseEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
@@ -67,7 +71,11 @@ export function ListRow({
     if (onClick === undefined) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onClick();
+      // Mirrors mouse behavior for a row with a distinct double-click "activate" action (e.g. a
+      // tree row where a single click only selects): Enter activates rather than merely
+      // selecting, since a keyboard user has no way to "double-press" Enter.
+      if (onDoubleClick !== undefined) onDoubleClick();
+      else onClick();
     }
   };
 
@@ -81,6 +89,7 @@ export function ListRow({
       tabIndex={standalone ? 0 : undefined}
       aria-selected={selected}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onKeyDown={standalone ? handleKeyDown : undefined}
       onContextMenu={onContextMenu}
       onMouseEnter={onMouseEnter}

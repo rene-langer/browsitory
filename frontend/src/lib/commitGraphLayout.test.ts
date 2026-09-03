@@ -33,14 +33,16 @@ describe("assignLanes", () => {
     expect(layouts[0]).toEqual({
       commitId: "F1",
       lane: 0,
-      parentConnections: [{ parentId: "M1", lane: 0 }],
+      laneSegmentId: 0,
+      parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
       passThroughLanes: [],
     });
     expect(layouts[1]).toEqual({
       commitId: "M2",
       lane: 1,
-      parentConnections: [{ parentId: "M1", lane: 0 }],
-      passThroughLanes: [0],
+      laneSegmentId: 1,
+      parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
+      passThroughLanes: [{ lane: 0, segmentId: 0 }],
     });
     expect(layouts[2].lane).toBe(0);
   });
@@ -52,17 +54,45 @@ describe("assignLanes", () => {
 
     expect(layouts[0].lane).toBe(0);
     expect(layouts[0].parentConnections).toEqual([
-      { parentId: "M1", lane: 0 },
-      { parentId: "F1", lane: 1 },
+      { parentId: "M1", lane: 0, segmentId: 0 },
+      { parentId: "F1", lane: 1, segmentId: 1 },
     ]);
     // F1's own lane (1) closes right after it, since its parent M1 is already tracked in lane 0
     // (opened by M2's first-parent connection) — F1 doesn't need to keep waiting for anything.
     expect(layouts[1]).toEqual({
       commitId: "F1",
       lane: 1,
-      parentConnections: [{ parentId: "M1", lane: 0 }],
-      passThroughLanes: [0, 1],
+      laneSegmentId: 1,
+      parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
+      passThroughLanes: [
+        { lane: 0, segmentId: 0 },
+        { lane: 1, segmentId: 1 },
+      ],
     });
+  });
+
+  it("gives an unrelated branch that reuses a freed lane a different segment id", () => {
+    // F1 forks off Trunk1 and closes immediately (Trunk1 is already tracked by Top's lane).
+    // Later, F2 forks off Trunk2 and lands on the same numeric lane (1) that F1 freed. F1 and
+    // F2 are unrelated branches sharing a lane number, so they must get different segment ids —
+    // otherwise hovering one would also highlight the other (and any row using that lane number
+    // would render at full opacity for both).
+    const commits = [
+      commit("Top", ["Trunk1"]),
+      commit("F1", ["Trunk1"]),
+      commit("Trunk1", ["Trunk2"]),
+      commit("F2", ["Trunk2"]),
+      commit("Trunk2", []),
+    ];
+
+    const layouts = assignLanes(commits);
+    const byId = (commitId: string) => layouts.find((l) => l.commitId === commitId)!;
+
+    const f1 = byId("F1");
+    const f2 = byId("F2");
+    expect(f1.lane).toBe(1);
+    expect(f2.lane).toBe(1);
+    expect(f1.laneSegmentId).not.toBe(f2.laneSegmentId);
   });
 });
 
