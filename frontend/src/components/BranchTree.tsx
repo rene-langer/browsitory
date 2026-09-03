@@ -250,8 +250,28 @@ export function BranchTree({
       const branch = node.value;
       const rowKey = `local:${branch.name}`;
       const shownInGraph = (graphBranchSelection ?? branches.map((b) => b.name)).includes(branch.name);
+      const isRenaming = renaming === branch.name;
       return (
-        <ListRow key={branch.name} className={selectedRow === rowKey ? styles.selectedRow : undefined}>
+        <ListRow
+          key={branch.name}
+          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          onClick={isRenaming ? undefined : () => setSelectedRow(rowKey)}
+          onDoubleClick={
+            isRenaming
+              ? undefined
+              : () => {
+                  if (!isRebasing) onSwitchBranch(branch.name);
+                }
+          }
+          onContextMenu={
+            isRenaming
+              ? undefined
+              : (event) => {
+                  event.preventDefault();
+                  openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
+                }
+          }
+        >
           <Toolbar>
             <button
               type="button"
@@ -259,29 +279,22 @@ export function BranchTree({
               aria-label={`Show ${branch.name} in graph`}
               aria-pressed={shownInGraph}
               style={{ backgroundColor: branchSwatchColor(branch.name), opacity: shownInGraph ? 1 : 0.3 }}
-              onClick={() => toggleGraphBranch(branch.name)}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleGraphBranch(branch.name);
+              }}
             />
-            {renaming === branch.name ? (
+            {isRenaming ? (
               <input
                 value={renameValue}
                 onChange={(event) => setRenameValue(event.target.value)}
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
             ) : (
-              <button
-                disabled={isRebasing}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
-                }}
-                onClick={() => setSelectedRow(rowKey)}
-                onDoubleClick={() => {
-                  if (!isRebasing) onSwitchBranch(branch.name);
-                }}
-              >
+              <span>
                 {node.name}
                 {branch.isCurrent && " (current)"}
-              </button>
+              </span>
             )}
           </Toolbar>
         </ListRow>
@@ -317,20 +330,19 @@ export function BranchTree({
       const branchName = node.value;
       const rowKey = `remote:${remoteName}:${branchName}`;
       return (
-        <ListRow key={branchName} className={selectedRow === rowKey ? styles.selectedRow : undefined}>
-          <button
-            type="button"
-            onContextMenu={(event) => {
-              event.preventDefault();
-              openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
-            }}
-            onClick={() => setSelectedRow(rowKey)}
-            onDoubleClick={() => {
-              if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
-            }}
-          >
-            {node.name}
-          </button>
+        <ListRow
+          key={branchName}
+          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          onClick={() => setSelectedRow(rowKey)}
+          onDoubleClick={() => {
+            if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
+          }}
+        >
+          {node.name}
         </ListRow>
       );
     });

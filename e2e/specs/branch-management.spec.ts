@@ -48,8 +48,10 @@ describe("Browsitory branch management", () => {
 
     // Switching happens automatically on create. The branch tree splits a "/"-containing name
     // into nested folders, so "feature/e2e-branch" renders as a "feature" folder containing an
-    // "e2e-branch" leaf row — only that leaf's own text carries the " (current)" suffix.
-    const branchButton = await $("button*=e2e-branch");
+    // "e2e-branch" leaf row — only that leaf's own text carries the " (current)" suffix. The row
+    // itself is the interactive element (a `role="button"` `<li>`, not a nested `<button>` — see
+    // `ListRow.tsx`), so it's matched by role rather than tag.
+    const branchButton = await $('//li[@role="button" and contains(., "e2e-branch")]');
     await browser.waitUntil(
       async () => (await branchButton.getText()) === "e2e-branch (current)",
       { timeout: 10000, timeoutMsg: "expected the new branch to show as current in the tree" },

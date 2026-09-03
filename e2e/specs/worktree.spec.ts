@@ -41,10 +41,11 @@ async function activeElement(selector: string, timeout = 10000) {
   throw new Error(`unreachable: activeElement's own waitUntil already confirmed a visible match for ${selector}`);
 }
 
-// BranchTree has no separate switcher control — the current branch is just the row in the
-// Local folder whose button text carries the " (current)" suffix (`BranchTree.tsx`).
+// BranchTree has no separate switcher control — the current branch is just the row in the Local
+// folder whose text carries the " (current)" suffix. The row itself is the interactive element
+// (a `role="button"` `<li>`, not a nested `<button>` — see `ListRow.tsx`).
 function activeCurrentBranchButton() {
-  return activeElement("//button[contains(., ' (current)')]");
+  return activeElement('//li[@role="button" and contains(., \' (current)\')]');
 }
 
 describe("Browsitory worktrees", () => {
@@ -64,7 +65,7 @@ describe("Browsitory worktrees", () => {
 
     const createForm = await $("aria/Create worktree");
     await createForm.waitForExist({ timeout: 10000 });
-    const currentBranchButton = await $("//button[contains(., ' (current)')]");
+    const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist({ timeout: 10000 });
     const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\)$/, "");
     const nameInput = await $("aria/Worktree name");
