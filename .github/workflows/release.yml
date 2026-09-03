@@ -119,7 +119,7 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
             vsix_target: linux-x64
             sidecar_suffix: ""
-          - os: macos-13
+          - os: macos-latest
             rust_target: x86_64-apple-darwin
             vsix_target: darwin-x64
             sidecar_suffix: ""
