@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -7,6 +7,8 @@ import type {
   RemoteInfo,
   UpstreamInfo,
 } from "../ipc/RepoClient";
+import { branchSwatchColor } from "../lib/laneColors";
+import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
@@ -133,6 +135,15 @@ export function BranchTree({
   const [renameValue, setRenameValue] = useState("");
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
   const [localOpen, setLocalOpen] = useState(() => loadPersistedOpen(LOCAL_FOLDER_KEY, true));
+  // Selection for a single row in the local/remote branch tree — a plain visual highlight, not a
+  // listbox/roving-tabindex pattern: see ListRow.tsx's doc comment for why that heavier pattern
+  // is reserved for containers that also own keyboard navigation, which this tree doesn't (yet).
+  // Keyed "local:<branch>" or "remote:<remoteName>:<branchName>" so the two namespaces can't collide.
+  const [selectedRow, setSelectedRow] = useState<string | null>(null);
+  // Open/closed state for the "/"-split subfolders inside the Local tree and inside each remote's
+  // tree — distinct from `localOpen` (the top-level "Local" folder) and `openRemotes` (the
+  // top-level remote folders, which also trigger the lazy branch-list fetch on first expand).
+  const [openSubfolders, setOpenSubfolders] = useState<Record<string, boolean>>({});
 
   const [openRemotes, setOpenRemotes] = useState<Record<string, boolean>>({});
   const [remoteBranches, setRemoteBranches] = useState<Record<string, string[]>>({});
@@ -199,6 +210,130 @@ export function BranchTree({
 
   function isRemoteOpen(remoteName: string): boolean {
     return openRemotes[remoteName] ?? loadPersistedOpen(remoteFolderKey(remoteName), false);
+  }
+
+  function isSubfolderOpen(folderPath: string): boolean {
+    return openSubfolders[folderPath] ?? loadPersistedOpen(`branchtree.folder.${folderPath}`, true);
+  }
+
+  function toggleSubfolder(folderPath: string): void {
+    const next = !isSubfolderOpen(folderPath);
+    setOpenSubfolders((prev) => ({ ...prev, [folderPath]: next }));
+    persistOpen(`branchtree.folder.${folderPath}`, next);
+  }
+
+  function renderLocalNodes(nodes: BranchTreeNode<BranchInfo>[]): ReactElement[] {
+    return nodes.map((node) => {
+      if (node.kind === "folder") {
+        const folderPath = `local/${node.path}`;
+        const open = isSubfolderOpen(folderPath);
+        return (
+          <li key={node.path} className={styles.folder}>
+            <button
+              type="button"
+              className={styles.folderHeader}
+              aria-expanded={open}
+              onClick={() => toggleSubfolder(folderPath)}
+            >
+              <ChevronRight
+                size={14}
+                aria-hidden="true"
+                className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+              />
+              {node.name}
+            </button>
+            {open && <ul className={styles.folderBody}>{renderLocalNodes(node.children)}</ul>}
+          </li>
+        );
+      }
+
+      const branch = node.value;
+      const rowKey = `local:${branch.name}`;
+      const shownInGraph = (graphBranchSelection ?? branches.map((b) => b.name)).includes(branch.name);
+      return (
+        <ListRow key={branch.name} className={selectedRow === rowKey ? styles.selectedRow : undefined}>
+          <Toolbar>
+            <button
+              type="button"
+              className={styles.swatch}
+              aria-label={`Show ${branch.name} in graph`}
+              aria-pressed={shownInGraph}
+              style={{ backgroundColor: branchSwatchColor(branch.name), opacity: shownInGraph ? 1 : 0.3 }}
+              onClick={() => toggleGraphBranch(branch.name)}
+            />
+            {renaming === branch.name ? (
+              <input
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
+              />
+            ) : (
+              <button
+                disabled={isRebasing}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
+                }}
+                onClick={() => setSelectedRow(rowKey)}
+                onDoubleClick={() => {
+                  if (!isRebasing) onSwitchBranch(branch.name);
+                }}
+              >
+                {node.name}
+                {branch.isCurrent && " (current)"}
+              </button>
+            )}
+          </Toolbar>
+        </ListRow>
+      );
+    });
+  }
+
+  function renderRemoteNodes(remoteName: string, nodes: BranchTreeNode<string>[]): ReactElement[] {
+    return nodes.map((node) => {
+      if (node.kind === "folder") {
+        const folderPath = `remote/${remoteName}/${node.path}`;
+        const open = isSubfolderOpen(folderPath);
+        return (
+          <li key={node.path} className={styles.folder}>
+            <button
+              type="button"
+              className={styles.folderHeader}
+              aria-expanded={open}
+              onClick={() => toggleSubfolder(folderPath)}
+            >
+              <ChevronRight
+                size={14}
+                aria-hidden="true"
+                className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+              />
+              {node.name}
+            </button>
+            {open && <ul className={styles.folderBody}>{renderRemoteNodes(remoteName, node.children)}</ul>}
+          </li>
+        );
+      }
+
+      const branchName = node.value;
+      const rowKey = `remote:${remoteName}:${branchName}`;
+      return (
+        <ListRow key={branchName} className={selectedRow === rowKey ? styles.selectedRow : undefined}>
+          <button
+            type="button"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
+            }}
+            onClick={() => setSelectedRow(rowKey)}
+            onDoubleClick={() => {
+              if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
+            }}
+          >
+            {node.name}
+          </button>
+        </ListRow>
+      );
+    });
   }
 
   // Shared by the initial lazy-expand fetch and by the Fetch context-menu item's cache
@@ -549,39 +684,7 @@ export function BranchTree({
           </button>
           {localOpen && (
           <ul className={styles.folderBody}>
-            {branches.map((branch) => (
-              <ListRow key={branch.name}>
-                <Toolbar>
-                  <input
-                    type="checkbox"
-                    aria-label={`Show ${branch.name} in graph`}
-                    checked={(graphBranchSelection ?? branches.map((b) => b.name)).includes(branch.name)}
-                    onChange={() => toggleGraphBranch(branch.name)}
-                  />
-                  {renaming === branch.name ? (
-                    <input
-                      value={renameValue}
-                      onChange={(event) => setRenameValue(event.target.value)}
-                      onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
-                    />
-                  ) : (
-                    <button
-                      disabled={isRebasing}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
-                      }}
-                      onClick={() => {
-                        if (!isRebasing) onSwitchBranch(branch.name);
-                      }}
-                    >
-                      {branch.name}
-                      {branch.isCurrent && " (current)"}
-                    </button>
-                  )}
-                </Toolbar>
-              </ListRow>
-            ))}
+            {renderLocalNodes(buildBranchTree(branches.map((branch) => ({ path: branch.name, value: branch }))))}
           </ul>
           )}
         </li>
@@ -608,24 +711,10 @@ export function BranchTree({
             </button>
             {isRemoteOpen(remote.name) && (
               <ul className={styles.folderBody}>
-                {(remoteBranches[remote.name] ?? []).map((branchName) => (
-                  <ListRow key={branchName}>
-                    <span
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        openRowMenu({
-                          kind: "remote-branch",
-                          remoteName: remote.name,
-                          branchName,
-                          x: event.clientX,
-                          y: event.clientY,
-                        });
-                      }}
-                    >
-                      {branchName}
-                    </span>
-                  </ListRow>
-                ))}
+                {renderRemoteNodes(
+                  remote.name,
+                  buildBranchTree((remoteBranches[remote.name] ?? []).map((name) => ({ path: name, value: name }))),
+                )}
               </ul>
             )}
           </li>

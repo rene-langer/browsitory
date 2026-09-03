@@ -68,18 +68,31 @@ describe("BranchTree — local branches", () => {
     // "main"'s row renders its name and " (current)" as a single run of text (see BranchTree.tsx),
     // so it is matched together via regex rather than as two independent exact-text queries.
     expect(screen.getByText(/^main.*\(current\)$/)).toBeInTheDocument();
-    expect(screen.getByText("feat/foo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "foo" })).toBeInTheDocument();
   });
 
-  it("clicking a non-current branch switches to it", () => {
+  it("double-clicking a non-current branch switches to it", () => {
     const { props } = renderTree();
-    fireEvent.click(screen.getByRole("button", { name: "feat/foo" }));
+    fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
     expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/foo");
+  });
+
+  it("single-clicking a branch selects it without switching", () => {
+    const { props } = renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "foo" }));
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
+  });
+
+  it("branches whose name contains a / are nested under a folder split on each segment", () => {
+    renderTree();
+    expect(screen.getByRole("button", { name: "feat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "foo" })).toBeInTheDocument();
+    expect(screen.queryByText("feat/foo")).not.toBeInTheDocument();
   });
 
   it("right-clicking a branch opens a context menu with Rename/Delete, and Merge for non-current branches", () => {
     renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeInTheDocument();
@@ -93,7 +106,7 @@ describe("BranchTree — local branches", () => {
 
   it("Delete calls onDeleteBranch with force=false, then confirming Force Delete calls it again with force=true", async () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
     fireEvent.click(await screen.findByRole("button", { name: "Force Delete" }));
@@ -109,7 +122,7 @@ describe("BranchTree — local branches", () => {
   it("does not show the force-delete dialog after a successful delete (branch removed from branches)", async () => {
     const { props, rerender } = renderTree();
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
     await Promise.resolve();
@@ -123,7 +136,7 @@ describe("BranchTree — local branches", () => {
 
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     const input = screen.getByDisplayValue("feat/foo");
     fireEvent.change(input, { target: { value: "feat/bar" } });
@@ -133,28 +146,28 @@ describe("BranchTree — local branches", () => {
 
   it("Merge into current branch calls onMergeBranch with that branch's name", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch" }));
     expect(props.onMergeBranch).toHaveBeenCalledWith("feat/foo");
   });
 
   it("disables Rename/Delete/Merge menu items while a rebase is in progress", () => {
     renderTree({ isRebasing: true });
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
   });
 
-  it("with no saved graph selection, every branch's graph checkbox is checked by default", () => {
+  it("with no saved graph selection, every branch's graph swatch is pressed (shown) by default", () => {
     renderTree();
-    expect(screen.getByRole("checkbox", { name: "Show main in graph" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Show feat/foo in graph" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Show main in graph" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Show feat/foo in graph" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("unchecking a branch's graph checkbox while showing all calls onSetGraphBranchSelection with every other branch", () => {
+  it("toggling off a branch's graph swatch while showing all calls onSetGraphBranchSelection with every other branch", () => {
     const { props } = renderTree();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show feat/foo in graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show feat/foo in graph" }));
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["main"]);
   });
 
@@ -167,7 +180,7 @@ describe("BranchTree — local branches", () => {
 
   it("a branch's context menu Isolate branch calls onSetGraphBranchSelection with only that branch", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["feat/foo"]);
   });
@@ -248,14 +261,14 @@ describe("BranchTree — local branches", () => {
 
   // The graph checkboxes stay visible inline regardless of the popover/menu, so this transfers
   // unchanged too.
-  it("a branch absent from an explicit selection renders unchecked; checking it adds it back", () => {
+  it("a branch absent from an explicit selection renders its swatch unpressed; toggling it adds it back", () => {
     const onSetGraphBranchSelection = vi.fn();
     renderTree({ graphBranchSelection: ["main"], onSetGraphBranchSelection });
 
-    expect(screen.getByRole("checkbox", { name: "Show main in graph" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Show feat/foo in graph" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Show main in graph" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Show feat/foo in graph" })).toHaveAttribute("aria-pressed", "false");
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show feat/foo in graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show feat/foo in graph" }));
 
     expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
   });
@@ -264,7 +277,7 @@ describe("BranchTree — local branches", () => {
   it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
     const { props } = renderTree();
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await Promise.resolve();
 
@@ -277,14 +290,14 @@ describe("BranchTree — local branches", () => {
 
     // "leaving Delete in place": right-clicking again still offers Delete, not a stale
     // force-delete state.
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("Enter on an empty/whitespace-only rename value does not call onRenameBranch", () => {
     const { props } = renderTree();
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     const input = screen.getByDisplayValue("feat/foo");
     fireEvent.change(input, { target: { value: "   " } });
@@ -296,7 +309,7 @@ describe("BranchTree — local branches", () => {
   it("disables the merge action while a merge is already in progress", () => {
     renderTree({ isMerging: true });
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
     expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
   });
@@ -304,7 +317,7 @@ describe("BranchTree — local branches", () => {
   it("disables the merge action while another repository operation is pending", () => {
     renderTree({ operationDisabled: true });
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
     expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
   });
@@ -313,7 +326,7 @@ describe("BranchTree — local branches", () => {
   it("explains why the merge action is disabled via its title", () => {
     renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
 
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
     expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toHaveAttribute(
       "title",
@@ -324,7 +337,7 @@ describe("BranchTree — local branches", () => {
   it("does not switch branches while a rebase is in progress", () => {
     const { props } = renderTree({ isRebasing: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "feat/foo" }));
+    fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
 
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
@@ -335,7 +348,7 @@ describe("BranchTree — local branches", () => {
   // stale per-branch edit state rather than leaving it attached to the wrong row.
   it("right-clicking a different branch after starting a rename on one clears that rename's input", () => {
     renderTree();
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect(screen.getByDisplayValue("feat/foo")).toBeInTheDocument();
     fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
@@ -368,7 +381,7 @@ describe("BranchTree — remotes", () => {
     expect(onListRemoteBranches).toHaveBeenCalledWith("origin");
     // Scoped to the remote's own <li>, not `screen`: `baseBranches` (the default local branches)
     // already has a "feat/foo" branch, so an unscoped query would ambiguously match either row.
-    expect(await within(remoteFolder).findByText("feat/foo")).toBeInTheDocument();
+    expect(await within(remoteFolder).findByText("foo")).toBeInTheDocument();
   });
 
   it("does not re-fetch remote branches on a second expand", async () => {
@@ -402,7 +415,7 @@ describe("BranchTree — remotes", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Fetch" }));
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
 
-    expect(await within(remoteFolder).findByText("feat/new-on-remote")).toBeInTheDocument();
+    expect(await within(remoteFolder).findByText("new-on-remote")).toBeInTheDocument();
     expect(onListRemoteBranches).toHaveBeenCalledTimes(2);
   });
 
@@ -418,9 +431,23 @@ describe("BranchTree — remotes", () => {
     const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     // Scoped to the remote's own <li> — `baseBranches` already has a local "feat/foo".
-    fireEvent.contextMenu(await within(remoteFolder).findByText("feat/foo"));
+    fireEvent.contextMenu(await within(remoteFolder).findByText("foo"));
     expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
+  });
+
+  it("double-clicking a remote branch checks it out the same way the context menu's Checkout does", async () => {
+    const onSwitchBranch = vi.fn();
+    renderTree({
+      branches: [...baseBranches],
+      remotes: oneRemote,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
+      onSwitchBranch,
+    });
+    const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.doubleClick(await within(remoteFolder).findByText("foo"));
+    expect(onSwitchBranch).toHaveBeenCalledWith("feat/foo");
   });
 
   it("Checkout switches to an existing same-named local branch instead of creating a new one", async () => {
@@ -436,7 +463,7 @@ describe("BranchTree — remotes", () => {
     const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     // Scoped to the remote's own <li> — `baseBranches` already has a local "feat/foo".
-    fireEvent.contextMenu(await within(remoteFolder).findByText("feat/foo"));
+    fireEvent.contextMenu(await within(remoteFolder).findByText("foo"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Checkout" }));
     expect(onSwitchBranch).toHaveBeenCalledWith("feat/foo");
     expect(onCreateBranch).not.toHaveBeenCalled();
@@ -453,7 +480,7 @@ describe("BranchTree — remotes", () => {
       onSetUpstream,
     });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    fireEvent.contextMenu(await screen.findByText("feat/only-remote"));
+    fireEvent.contextMenu(await screen.findByText("only-remote"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Checkout" }));
     await Promise.resolve();
     expect(onCreateBranch).toHaveBeenCalledWith("feat/only-remote", "origin/feat/only-remote");
@@ -584,7 +611,7 @@ describe("BranchTree — remotes", () => {
 
   it("does not offer Set upstream… or Push on a non-current branch's context menu", () => {
     renderTree({ remotes: oneRemote, upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
-    fireEvent.contextMenu(screen.getByText("feat/foo"));
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.queryByRole("menuitem", { name: "Set upstream…" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^Push to/ })).not.toBeInTheDocument();
   });

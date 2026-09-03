@@ -23,6 +23,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   browser-automation library) attaches to the webview's nested content frame for DOM assertions.
   One flow so far — open repo → stage a file → commit → see it in history — mirroring `e2e/`'s
   existing pattern. Wired into CI as a new `e2e-vscode` job that gates `build-vsix`.
+- The branch tree (local and each remote) now nests branches into folders split on each `/` in
+  their name, matching a filesystem-style tree view. Checkout is now double-click instead of
+  single-click (single click just selects/highlights a row); the graph-visibility control is now
+  a per-branch colored swatch button instead of a checkbox.
 
 ### Changed
 

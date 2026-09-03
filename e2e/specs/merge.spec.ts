@@ -50,10 +50,11 @@ describe("Browsitory merge with conflict resolution", () => {
     // BranchTree's mutating actions live on each row's right-click context menu (see
     // rebase.spec.ts's comment on why a synthetic `contextmenu` DOM event is used instead of
     // WebdriverIO's `.click({ button: "right" })`). The handler is bound to the branch-name
-    // `<button>` inside the row, not the row `<li>` itself, so dispatch on that button.
+    // `<button>` inside the row — not the row `<li>` itself, and not the row's other button (the
+    // graph-visibility swatch), so select by the branch name rather than "first button in the row".
     const branchRow = await $("li*=e2e-merge-feature");
     await branchRow.waitForExist({ timeout: 10000 });
-    const branchButton = await branchRow.$("button");
+    const branchButton = await branchRow.$("button*=e2e-merge-feature");
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -146,7 +147,9 @@ describe("Browsitory merge with conflict resolution", () => {
 
     const branchRow = await $("li*=e2e-merge-adddelete-feature");
     await branchRow.waitForExist({ timeout: 10000 });
-    const branchButton = await branchRow.$("button");
+    // Select by branch name, not "first button in the row" — that first button is now the row's
+    // graph-visibility swatch, not the branch-name button (see the previous test's comment).
+    const branchButton = await branchRow.$("button*=e2e-merge-adddelete-feature");
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
