@@ -9,6 +9,7 @@ const NATIVE_METHODS = new Set([
   "get_app_version",
   "get_last_seen_version",
   "set_last_seen_version",
+  "log_frontend_error",
 ]);
 
 interface SidecarReadable {
@@ -377,6 +378,13 @@ export class SidecarBridge {
           }
           return;
         }
+        if (!this.pendingRequestIds.has(message["id"])) {
+          // No internal waiter and no recorded pending webview request for this id — a stray or
+          // duplicate response from the sidecar (or one that arrived after `handleProcessLoss`
+          // already cleared `pendingRequestIds`). Drop it rather than forwarding it to the
+          // webview as if it answered a request the webview actually made.
+          return;
+        }
         this.pendingRequestIds.delete(message["id"]);
       }
       this.dependencies.postToWebview(message);
@@ -425,6 +433,12 @@ export class SidecarBridge {
         case "set_last_seen_version": {
           const version = requireStringParam(request, "version");
           await this.dependencies.context.globalState.update(LAST_SEEN_VERSION_KEY, version);
+          result = null;
+          break;
+        }
+        case "log_frontend_error": {
+          const { context, message } = requireLogFrontendErrorParams(request);
+          this.dependencies.appendLine(`${context}: ${message}`);
           result = null;
           break;
         }
@@ -514,6 +528,25 @@ function requireStringParam(request: JsonRpcRequest, name: string): string {
     throw new InvalidParamsError(request.method + " requires a string " + name);
   }
   return value;
+}
+
+function requireLogFrontendErrorParams(
+  request: JsonRpcRequest,
+): { context: string; message: string } {
+  const { context, message } = request.params;
+  const keys = Object.keys(request.params);
+  if (
+    typeof context !== "string" ||
+    typeof message !== "string" ||
+    keys.length !== 2 ||
+    !keys.includes("context") ||
+    !keys.includes("message")
+  ) {
+    throw new InvalidParamsError(
+      request.method + " requires string context and message params",
+    );
+  }
+  return { context, message };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

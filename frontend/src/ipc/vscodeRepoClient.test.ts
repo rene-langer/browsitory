@@ -893,6 +893,19 @@ describe("vscodeRepoClient", () => {
     await expect(forgetPromise).resolves.toBeNull();
   });
 
+  it("wires logFrontendError onto the native log_frontend_error method", async () => {
+    const promise = vscodeRepoClient.logFrontendError("Uncaught error", new Error("boom"));
+
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "log_frontend_error",
+      params: { context: "Uncaught error", message: "Error: boom" },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
   it("wires listPullRequests and createPullRequest", async () => {
     const listPromise = vscodeRepoClient.listPullRequests("/repo", "origin", "alice");
     expect(postMessage).toHaveBeenCalledWith({

@@ -334,4 +334,8 @@ export const vscodeRepoClient: RepoClient = {
     call<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
   openExternalUrl: (url: string) =>
     call<void>("open_external_url", { url }),
+  // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`), which
+  // writes into the "Browsitory" output channel rather than forwarding to the sidecar process.
+  logFrontendError: (context: string, error: unknown) =>
+    call<void>("log_frontend_error", { context, message: String(error) }),
 };

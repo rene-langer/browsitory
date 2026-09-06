@@ -65,6 +65,7 @@ export function CommitBox({
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Commit message"
+        aria-label="Commit message"
       />
       <Toolbar>
         <button onClick={commitIfReady} disabled={disabled || message.trim() === ""}>

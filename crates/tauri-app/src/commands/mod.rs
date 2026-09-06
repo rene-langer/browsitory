@@ -769,20 +769,11 @@ pub struct AppState {
 
 #[tauri::command]
 pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    {
-        let guard = state.workers.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.contains_key(&path) {
-            drop(guard);
-            let _ = config::add_recent_repo(Path::new(&path));
-            return Ok(());
-        }
-    }
-    let worker = Worker::spawn(PathBuf::from(&path))?;
-    state
-        .workers
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(path.clone(), worker);
+    // `ensure_worker` evicts a dead worker (its thread having exited, e.g. from a panic inside
+    // a `Command` match arm) before deciding whether to reuse or respawn — a plain
+    // `contains_key` fast path would keep handing back a dead entry forever. See
+    // AUD-2026-09-05-CONC-001.
+    repo_service::worker::ensure_worker(&state.workers, &path)?;
     // Best-effort: a repo that opened successfully should count as "recent" even if we can't
     // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
     // over it.

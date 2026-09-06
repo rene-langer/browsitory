@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { ChevronRight, Cloud, Copy, GitBranch, Plus } from "lucide-react";
+import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
   PullOutcome,
@@ -610,20 +610,47 @@ export function BranchTree({
               <ul className={styles.folderBody}>
                 {(remoteBranches[remote.name] ?? []).map((branchName) => (
                   <ListRow key={branchName}>
-                    <span
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        openRowMenu({
-                          kind: "remote-branch",
-                          remoteName: remote.name,
-                          branchName,
-                          x: event.clientX,
-                          y: event.clientY,
-                        });
-                      }}
-                    >
-                      {branchName}
-                    </span>
+                    <Toolbar>
+                      <button
+                        type="button"
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          openRowMenu({
+                            kind: "remote-branch",
+                            remoteName: remote.name,
+                            branchName,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
+                        }}
+                      >
+                        {branchName}
+                      </button>
+                      {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
+                          native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
+                          name button has focus) — without this, a keyboard/screen-reader user has no
+                          visible indication those actions exist at all (AUD-2026-09-05-FE-001). A
+                          native `<button>` already opens on Enter/Space via its own `onClick`, so no
+                          extra key handling is needed here. */}
+                      <button
+                        type="button"
+                        className={styles.iconButton}
+                        aria-label={`Actions for ${branchName}`}
+                        aria-haspopup="menu"
+                        onClick={(event) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          openRowMenu({
+                            kind: "remote-branch",
+                            remoteName: remote.name,
+                            branchName,
+                            x: rect.left,
+                            y: rect.bottom,
+                          });
+                        }}
+                      >
+                        <MoreHorizontal size={12} aria-hidden="true" />
+                      </button>
+                    </Toolbar>
                   </ListRow>
                 ))}
               </ul>

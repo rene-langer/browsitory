@@ -72,6 +72,7 @@ const remoteManagementClient = {
   openExternalUrl: async () => unimplemented(),
   getGraphBranchSelection: async () => null,
   setGraphBranchSelection: async () => {},
+  logFrontendError: async () => {},
 };
 
 function transferClient(overrides: Partial<RepoClient>): RepoClient {
@@ -142,6 +143,50 @@ describe("useAppState", () => {
 
     expect(configured).toBe(false);
     expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+  });
+
+  // AUD-2026-09-05-CONC-002: the per-repo worker thread can die mid-session, and every
+  // `WorkerHandle` method in `crates/repo-service/src/worker/*` then rejects every subsequent
+  // call on that repo with one of two verbatim strings ("worker thread stopped" / "worker thread
+  // stopped before replying" — see `branch.rs`, `status.rs`, etc.). Retrying the same action can
+  // never help there (the worker is gone for good), so both should surface as a distinct
+  // reconnect message instead of the raw string riding the generic error path unchanged.
+  it.each([
+    "worker thread stopped",
+    "worker thread stopped before replying",
+  ])("reports a %s failure as a reconnect message, not the raw worker error", async (workerError) => {
+    const client = transferClient({
+      setRemoteAuthMode: async () => {
+        throw new Error(workerError);
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let configured = true;
+    await act(async () => {
+      configured = await result.current.setRemoteAuthMode("origin", "HttpsToken", "rene");
+    });
+
+    expect(configured).toBe(false);
+    expect(result.current.state.error).toBe(
+      "Connection to this repository was lost. Close and reopen the repository to reconnect.",
+    );
+    expect(result.current.state.error).not.toBe(workerError);
+  });
+
+  it("reports a worker-death failure hit during refresh as the same reconnect message", async () => {
+    const client = transferClient({
+      getStatus: async () => {
+        throw new Error("worker thread stopped before replying");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+
+    expect(result.current.state.error).toBe(
+      "Connection to this repository was lost. Close and reopen the repository to reconnect.",
+    );
   });
 
   it("forwards a credential token directly to the client without placing it in state", async () => {

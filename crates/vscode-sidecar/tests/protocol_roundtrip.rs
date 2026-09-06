@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::time::{Duration, Instant};
 
 struct Sidecar {
     child: Child,
@@ -39,6 +40,44 @@ impl Drop for Sidecar {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+impl Sidecar {
+    /// Spawns the sidecar with extra environment variables set — used to arm the
+    /// `BROWSITORY_SIDECAR_TEST_DELAY_METHOD`/`BROWSITORY_SIDECAR_TEST_DELAY_MS` test-only hook
+    /// (see `dispatch.rs`'s `test_delay_before_dispatch`) that lets a test deterministically
+    /// simulate one slow method without a real large repository.
+    fn spawn_with_envs(envs: &[(&str, &str)]) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vscode-sidecar"))
+            .envs(envs.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn vscode-sidecar");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+
+    /// Writes a request without reading its response, so the caller can send a second request
+    /// before the first one's response has necessarily arrived.
+    fn send(&mut self, id: u64, method: &str, params: serde_json::Value) {
+        let request =
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writeln!(self.stdin, "{request}").expect("write request");
+        self.stdin.flush().expect("flush request");
+    }
+
+    fn read_response(&mut self) -> serde_json::Value {
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).expect("read response");
+        serde_json::from_str(&line).expect("parse response")
     }
 }
 
@@ -1401,4 +1440,66 @@ fn list_pull_requests_on_a_non_forge_remote_fails_before_any_http_call() {
 
     assert!(listed.get("result").is_none());
     assert!(listed["error"]["message"].as_str().is_some());
+}
+
+/// AUD-2026-09-05-VSCE-003 regression test: two repos are open in the same sidecar process. A
+/// slow request against repo A must not delay a concurrent, unrelated fast request against
+/// repo B — the whole point of dispatching each request on its own thread (see `main.rs`'s module
+/// doc comment) rather than the old single-threaded `for line in stdin.lock().lines()` loop that
+/// only returned to read the next line once the previous request's `dispatch` call had returned.
+///
+/// The "slow" request is a `get_commit_graph` call against repo A with the
+/// `BROWSITORY_SIDECAR_TEST_DELAY_METHOD`/`BROWSITORY_SIDECAR_TEST_DELAY_MS` test-only hook armed
+/// (see `dispatch.rs`'s `test_delay_before_dispatch`), rather than a large synthetic history:
+/// deterministic and fast to set up, where a real large repo's timing would be far less reliable
+/// across machines/CI.
+#[test]
+fn a_slow_request_on_one_repo_does_not_delay_a_fast_request_on_another() {
+    const SLOW_DELAY_MS: u64 = 500;
+    const SLOW_DELAY: &str = "500";
+
+    let (dir_a, _repo_a) = init_repo();
+    let (dir_b, _repo_b) = init_repo();
+    let repo_path_a = dir_a.path().to_str().unwrap().to_string();
+    let repo_path_b = dir_b.path().to_str().unwrap().to_string();
+
+    let mut sidecar = Sidecar::spawn_with_envs(&[
+        ("BROWSITORY_SIDECAR_TEST_DELAY_METHOD", "get_commit_graph"),
+        ("BROWSITORY_SIDECAR_TEST_DELAY_MS", SLOW_DELAY),
+    ]);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path_a}));
+    sidecar.call(2, "open_repo", serde_json::json!({"path": repo_path_b}));
+
+    let start = Instant::now();
+    // Slow request against repo A — sent but not waited on, so the fast request below can be
+    // sent immediately after it while it's still (artificially) in flight.
+    sidecar.send(
+        3,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path_a, "limit": 10, "selectedBranches": null}),
+    );
+    // Fast request against the unrelated repo B, sent right behind it on the same stdin pipe.
+    sidecar.send(
+        4,
+        "get_status",
+        serde_json::json!({"repoPath": repo_path_b}),
+    );
+
+    // Whichever response arrives first on stdout should be the fast one, and it should arrive
+    // in well under the slow request's artificial delay — proving it was never queued behind it.
+    let first = sidecar.read_response();
+    let elapsed = start.elapsed();
+    assert_eq!(
+        first["id"], 4,
+        "fast get_status response should arrive before the slow get_commit_graph response, got {first:?}"
+    );
+    assert_eq!(first["result"], serde_json::json!([]));
+    assert!(
+        elapsed < Duration::from_millis(SLOW_DELAY_MS / 2),
+        "fast response took {elapsed:?}, which means it was delayed by the slow request"
+    );
+
+    let second = sidecar.read_response();
+    assert_eq!(second["id"], 3);
+    assert!(start.elapsed() >= Duration::from_millis(SLOW_DELAY_MS));
 }

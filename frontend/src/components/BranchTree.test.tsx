@@ -423,6 +423,31 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
   });
 
+  // AUD-2026-09-05-FE-001: a remote-tracking branch row used to render as a bare `<span>`, which
+  // is never a Tab stop — its context menu was mouse-only. It's now a real `<button>`, so it must
+  // land in the tab order.
+  it("a remote-tracking branch row is a real focusable button, reachable in the tab order", async () => {
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const branchButton = await screen.findByRole("button", { name: "feat/foo" });
+    expect(branchButton.tabIndex).not.toBe(-1);
+    branchButton.focus();
+    expect(branchButton).toHaveFocus();
+  });
+
+  // The row's context menu is otherwise only reachable via a native contextmenu event
+  // (right-click, or Shift+F10/Menu-key). This "…" button is the visible, discoverable affordance
+  // for the same actions, and a plain click on it must open the identical menu.
+  it("a remote-tracking branch row exposes an explicit '…' actions button that opens its context menu", async () => {
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const actionsButton = await screen.findByRole("button", { name: "Actions for feat/foo" });
+    expect(actionsButton).toHaveAttribute("aria-haspopup", "menu");
+    fireEvent.click(actionsButton);
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
+  });
+
   it("Checkout switches to an existing same-named local branch instead of creating a new one", async () => {
     const onSwitchBranch = vi.fn();
     const onCreateBranch = vi.fn();
