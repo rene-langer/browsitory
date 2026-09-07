@@ -12,18 +12,21 @@ function laneCenterX(lane: number): number {
   return lane * LANE_WIDTH + LANE_WIDTH / 2;
 }
 
-function opacityFor(lane: number, hoveredLane: number | null | undefined): number {
-  return hoveredLane == null || lane === hoveredLane ? 1 : 0.25;
+// Highlighting keys off the lane *segment* id, not the raw lane number — lane numbers get freed
+// and reused by later, unrelated branches, and matching on the number alone would highlight
+// those unrelated branches too whenever they land on the same reused lane.
+function opacityFor(segmentId: number, hoveredSegmentId: number | null | undefined): number {
+  return hoveredSegmentId == null || segmentId === hoveredSegmentId ? 1 : 0.25;
 }
 
 export function CommitLaneGraphic({
   layout,
   totalLanes,
-  hoveredLane,
+  hoveredSegmentId,
 }: {
   layout: CommitLayout;
   totalLanes: number;
-  hoveredLane?: number | null;
+  hoveredSegmentId?: number | null;
 }) {
   const width = totalLanes * LANE_WIDTH;
   const midY = ROW_HEIGHT / 2;
@@ -33,7 +36,9 @@ export function CommitLaneGraphic({
   // (straight, diagonal, or nothing, depending on this commit's own parents). Splitting that
   // lower half off is fine because it always meets this row's own dot exactly at the seam,
   // which masks the hairline gap two independently-antialiased strokes can leave where they abut.
-  const ownUpperLine = layout.passThroughLanes.includes(layout.lane) ? (
+  const ownUpperLine = layout.passThroughLanes.some(
+    (entry) => entry.segmentId === layout.laneSegmentId,
+  ) ? (
     <line
       key="up-own"
       x1={laneCenterX(layout.lane)}
@@ -42,7 +47,7 @@ export function CommitLaneGraphic({
       y2={midY}
       stroke={laneColor(layout.lane)}
       strokeWidth={2}
-      opacity={opacityFor(layout.lane, hoveredLane)}
+      opacity={opacityFor(layout.laneSegmentId, hoveredSegmentId)}
     />
   ) : null;
 
@@ -51,17 +56,17 @@ export function CommitLaneGraphic({
   // height rather than splitting it at the midpoint. Nothing sits on top of that seam to mask
   // it (unlike the own-lane case above), so a split there is a visible rendering gap.
   const otherPassThroughLines = layout.passThroughLanes
-    .filter((lane) => lane !== layout.lane)
-    .map((lane) => (
+    .filter((entry) => entry.segmentId !== layout.laneSegmentId)
+    .map((entry) => (
       <line
-        key={`through-${lane}`}
-        x1={laneCenterX(lane)}
+        key={`through-${entry.lane}`}
+        x1={laneCenterX(entry.lane)}
         y1={0}
-        x2={laneCenterX(lane)}
+        x2={laneCenterX(entry.lane)}
         y2={ROW_HEIGHT}
-        stroke={laneColor(lane)}
+        stroke={laneColor(entry.lane)}
         strokeWidth={2}
-        opacity={opacityFor(lane, hoveredLane)}
+        opacity={opacityFor(entry.segmentId, hoveredSegmentId)}
       />
     ));
 
@@ -74,7 +79,7 @@ export function CommitLaneGraphic({
       y2={ROW_HEIGHT}
       stroke={laneColor(conn.lane)}
       strokeWidth={2}
-      opacity={opacityFor(conn.lane, hoveredLane)}
+      opacity={opacityFor(conn.segmentId, hoveredSegmentId)}
     />
   ));
 
@@ -94,7 +99,7 @@ export function CommitLaneGraphic({
         cy={midY}
         r={4}
         fill={laneColor(layout.lane)}
-        opacity={opacityFor(layout.lane, hoveredLane)}
+        opacity={opacityFor(layout.laneSegmentId, hoveredSegmentId)}
       />
     </svg>
   );

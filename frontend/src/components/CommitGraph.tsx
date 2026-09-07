@@ -44,7 +44,7 @@ export function CommitGraph({
     x: number;
     y: number;
   } | null>(null);
-  const [hoveredLane, setHoveredLane] = useState<number | null>(null);
+  const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   const [squashAnchorIndex, setSquashAnchorIndex] = useState<number | null>(null);
   const [squashRange, setSquashRange] = useState<{ start: number; end: number } | null>(null);
 
@@ -102,7 +102,7 @@ export function CommitGraph({
     Math.max(
       0,
       ...commitLayouts.map((l) => l.lane),
-      ...commitLayouts.flatMap((l) => l.passThroughLanes),
+      ...commitLayouts.flatMap((l) => l.passThroughLanes.map((entry) => entry.lane)),
       ...commitLayouts.flatMap((l) => l.parentConnections.map((c) => c.lane)),
     ) + 1;
 
@@ -125,14 +125,14 @@ export function CommitGraph({
           selected={typeof selectedRow === "object" && selectedRow.commitId === commit.id}
           onClick={(event) => handleCommitClick(event, index, commit.id)}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
-          onMouseEnter={() => setHoveredLane(commitLayouts[index].lane)}
-          onMouseLeave={() => setHoveredLane(null)}
+          onMouseEnter={() => setHoveredSegmentId(commitLayouts[index].laneSegmentId)}
+          onMouseLeave={() => setHoveredSegmentId(null)}
         >
           <div className={styles.graphCell}>
             <CommitLaneGraphic
               layout={commitLayouts[index]}
               totalLanes={laneCount}
-              hoveredLane={hoveredLane}
+              hoveredSegmentId={hoveredSegmentId}
             />
           </div>
           {commit.branchRefs.map((ref) => (

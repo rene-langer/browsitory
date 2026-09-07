@@ -78,3 +78,21 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+.selectedRow {
+  background: var(--color-selected-bg);
+}
+
+.swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swatch:hover {
+  filter: brightness(1.15);
+}
