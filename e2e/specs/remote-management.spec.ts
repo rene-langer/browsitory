@@ -49,8 +49,9 @@ describe("Browsitory remote management", () => {
     await remoteFolderHeader.waitForExist({ timeout: 10000 });
 
     // Setting upstream is a context-menu action on the *current* local branch (its row carries
-    // the " (current)" suffix), opening a dialog with the remote/branch fields.
-    const currentBranchButton = await $("//button[contains(., ' (current)')]");
+    // the " (current)" suffix, and the row itself is the interactive element — a `role="button"`
+    // `<li>`, not a nested `<button>` — see `ListRow.tsx`).
+    const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => {
       el.dispatchEvent(

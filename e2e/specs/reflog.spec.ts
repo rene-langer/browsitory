@@ -58,9 +58,10 @@ describe("Browsitory reflog recovery", () => {
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
     await (await dialog.$("button=Restore reflog entry")).click();
 
-    // BranchTree has no separate switcher control any more — the current branch is just the
-    // row in the Local folder carrying the " (current)" suffix.
-    const currentBranchRow = await $(`button=${branchName} (current)`);
+    // BranchTree has no separate switcher control any more — the current branch is just the row
+    // in the Local folder carrying the " (current)" suffix. The row itself is the interactive
+    // element (a `role="button"` `<li>`, not a nested `<button>` — see `ListRow.tsx`).
+    const currentBranchRow = await $(`//li[@role="button" and normalize-space(.)="${branchName} (current)"]`);
     await currentBranchRow.waitForExist({ timeout: 10000 });
     await browser.waitUntil(
       async () => await graphHasSummary(FIRST_SUMMARY),

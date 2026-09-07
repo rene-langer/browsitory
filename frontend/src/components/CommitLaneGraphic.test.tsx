@@ -8,6 +8,7 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 1,
+      laneSegmentId: 1,
       parentConnections: [],
       passThroughLanes: [],
     };
@@ -23,11 +24,12 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
+      laneSegmentId: 0,
       parentConnections: [
-        { parentId: "b", lane: 0 },
-        { parentId: "c", lane: 1 },
+        { parentId: "b", lane: 0, segmentId: 0 },
+        { parentId: "c", lane: 1, segmentId: 1 },
       ],
-      passThroughLanes: [0],
+      passThroughLanes: [{ lane: 0, segmentId: 0 }],
     };
 
     const { container } = render(<CommitLaneGraphic layout={layout} totalLanes={2} />);
@@ -41,6 +43,7 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
+      laneSegmentId: 0,
       parentConnections: [],
       passThroughLanes: [],
     };
@@ -59,6 +62,7 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
+      laneSegmentId: 0,
       parentConnections: [],
       passThroughLanes: [],
     };
@@ -75,12 +79,16 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 1,
+      laneSegmentId: 1,
       parentConnections: [],
-      passThroughLanes: [0, 1],
+      passThroughLanes: [
+        { lane: 0, segmentId: 0 },
+        { lane: 1, segmentId: 1 },
+      ],
     };
 
     const { container } = render(
-      <CommitLaneGraphic layout={layout} totalLanes={2} hoveredLane={0} />,
+      <CommitLaneGraphic layout={layout} totalLanes={2} hoveredSegmentId={0} />,
     );
 
     const lane0Line = Array.from(container.querySelectorAll("line")).find(
@@ -96,6 +104,27 @@ describe("CommitLaneGraphic", () => {
     expect(circle?.getAttribute("opacity")).toBe("0.25");
   });
 
+  it("dims a same-numbered lane that belongs to a different, unrelated segment", () => {
+    // Lane numbers get freed and reused by unrelated branches (see commitGraphLayout.test.ts).
+    // This row's own lane happens to be numbered 1, same as the hovered row's lane, but it's a
+    // different segment (a different, unrelated branch occupancy) — it must still get dimmed,
+    // since matching only on the numeric lane would wrongly light up the unrelated branch too.
+    const layout: CommitLayout = {
+      commitId: "a",
+      lane: 1,
+      laneSegmentId: 7,
+      parentConnections: [],
+      passThroughLanes: [],
+    };
+
+    const { container } = render(
+      <CommitLaneGraphic layout={layout} totalLanes={2} hoveredSegmentId={1} />,
+    );
+
+    const circle = container.querySelector("circle");
+    expect(circle?.getAttribute("opacity")).toBe("0.25");
+  });
+
   it("paints a lane-shifting connector line on top of an untouched pass-through line it crosses", () => {
     // Own lane 0 connects down to lane 2, diagonally crossing lane 1's column. Lane 1 is an
     // unrelated branch just passing through (no connection of its own here) so it also draws a
@@ -105,8 +134,13 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
-      parentConnections: [{ parentId: "p", lane: 2 }],
-      passThroughLanes: [0, 1, 2],
+      laneSegmentId: 0,
+      parentConnections: [{ parentId: "p", lane: 2, segmentId: 2 }],
+      passThroughLanes: [
+        { lane: 0, segmentId: 0 },
+        { lane: 1, segmentId: 1 },
+        { lane: 2, segmentId: 2 },
+      ],
     };
 
     const { container } = render(<CommitLaneGraphic layout={layout} totalLanes={3} />);
@@ -136,8 +170,12 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 1,
-      parentConnections: [{ parentId: "shared-parent", lane: 0 }],
-      passThroughLanes: [0, 1],
+      laneSegmentId: 1,
+      parentConnections: [{ parentId: "shared-parent", lane: 0, segmentId: 0 }],
+      passThroughLanes: [
+        { lane: 0, segmentId: 0 },
+        { lane: 1, segmentId: 1 },
+      ],
     };
 
     const { container } = render(<CommitLaneGraphic layout={layout} totalLanes={2} />);
@@ -157,12 +195,13 @@ describe("CommitLaneGraphic", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
+      laneSegmentId: 0,
       parentConnections: [],
-      passThroughLanes: [0],
+      passThroughLanes: [{ lane: 0, segmentId: 0 }],
     };
 
     const { container } = render(
-      <CommitLaneGraphic layout={layout} totalLanes={1} hoveredLane={null} />,
+      <CommitLaneGraphic layout={layout} totalLanes={1} hoveredSegmentId={null} />,
     );
 
     const line = container.querySelector("line");
