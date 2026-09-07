@@ -123,7 +123,7 @@ thread. So anything that parks the calling thread — `reply_rx.recv()` on a wor
 sync. In `blocking_pick_folder()`'s case it doesn't merely freeze, it *deadlocks*: the dialog
 is posted back to the main thread via `run_on_main_thread` and then waited on, so when the main
 thread is the caller the dialog can never be dispatched and the app hangs forever. Every
-command in `commands.rs` that touches the worker or the dialog plugin is therefore an
+command in `commands/mod.rs` that touches the worker or the dialog plugin is therefore an
 `async fn`. Note that an `async fn` command taking a borrowed argument (e.g.
 `state: State<'_, AppState>`) must return a `Result`, which is why they all do.
 

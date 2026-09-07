@@ -96,6 +96,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     unstageHunk: unused,
     discardHunk: unused,
     commit: unused,
+    logFrontendError: unused,
     ...overrides,
   };
 }

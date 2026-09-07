@@ -174,12 +174,32 @@ describe("SidecarBridge", () => {
     });
     postToWebview.mockClear();
     appendLine.mockClear();
-    const valid = { jsonrpc: "2.0", id: 3, result: null };
+    // id 2 is the one actually pending (from the request above) — using a never-requested id here
+    // would now be silently dropped per AUD-2026-09-05-VSCE-004's fix, which isn't what this test
+    // is checking (that a malformed line doesn't stop later valid lines from relaying).
+    const valid = { jsonrpc: "2.0", id: 2, result: null };
 
     child.stdout.push(`not-json\n${JSON.stringify(valid)}\n`);
 
     expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("malformed sidecar stdout"));
     expect(postToWebview).toHaveBeenCalledWith(valid);
+  });
+
+  it("drops a sidecar response whose id was never requested by the webview", async () => {
+    const { bridge, child, postToWebview } = createBridge();
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 91, method: "get_status", params: { repoPath: "/repo" },
+    });
+    postToWebview.mockClear();
+
+    // id 999 was never sent via handleWebviewMessage (only 91 was, and it's still pending), so
+    // this is exactly the "stray or duplicate sidecar response" case AUD-2026-09-05-VSCE-004
+    // flags: relaySidecarLine must not forward it just because it's a well-formed JSON-RPC
+    // response with a numeric id.
+    const stray = { jsonrpc: "2.0", id: 999, result: "unsolicited" };
+    child.stdout.push(`${JSON.stringify(stray)}\n`);
+
+    expect(postToWebview).not.toHaveBeenCalled();
   });
 
   it("routes the five VSCode-native methods without spawning the sidecar", async () => {
@@ -238,6 +258,21 @@ describe("SidecarBridge", () => {
     expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 11, result: null });
   });
 
+  it("logs a frontend error into the output channel without spawning the sidecar", async () => {
+    const { bridge, spawn, postToWebview, appendLine } = createBridge();
+
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "log_frontend_error",
+      params: { context: "Uncaught error", message: "Error: boom" },
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(appendLine).toHaveBeenCalledWith("Uncaught error: Error: boom");
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 6, result: null });
+  });
+
   it("returns an invalid-params error with the incoming id", async () => {
     const { bridge, spawn, postToWebview, openExternal, update } = createBridge();
 
@@ -253,6 +288,12 @@ describe("SidecarBridge", () => {
       method: "set_last_seen_version",
       params: {},
     });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 23,
+      method: "log_frontend_error",
+      params: { context: "Uncaught error" },
+    });
 
     expect(spawn).not.toHaveBeenCalled();
     expect(openExternal).not.toHaveBeenCalled();
@@ -267,6 +308,14 @@ describe("SidecarBridge", () => {
         jsonrpc: "2.0",
         id: 22,
         error: { code: -32602, message: "set_last_seen_version requires a string version" },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 23,
+        error: {
+          code: -32602,
+          message: "log_frontend_error requires string context and message params",
+        },
       },
     ]);
   });

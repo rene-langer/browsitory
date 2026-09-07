@@ -1,19 +1,26 @@
-import { error as logError } from "@tauri-apps/plugin-log";
+import type { RepoClient } from "../ipc/RepoClient";
 
 /**
- * Single choke point for frontend failure logging: writes into the same rotated log file
- * as the Rust backend (see crates/tauri-app/src/main.rs's log plugin setup), so a bug report
- * doesn't need console access to a running dev session to diagnose.
+ * Global choke point for frontend failure logging, shared by both transports: routes through
+ * `RepoClient.logFrontendError` so a bug report doesn't need console access to a running
+ * session to diagnose, regardless of whether the app is running as the Tauri desktop app or
+ * the VSCode extension's webview (which has no Tauri plugins available). See
+ * `tauriRepoClient.ts` and `vscodeRepoClient.ts`/`sidecarBridge.ts` for where each transport
+ * actually persists the message.
  */
-export function logFrontendError(context: string, error: unknown): void {
-  void logError(`${context}: ${String(error)}`);
-}
+export function installGlobalErrorLogging(client: RepoClient): () => void {
+  const onError = (event: ErrorEvent) => {
+    void client.logFrontendError("Uncaught error", event.error ?? event.message);
+  };
+  const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+    void client.logFrontendError("Unhandled rejection", event.reason);
+  };
 
-export function installGlobalErrorLogging(): void {
-  window.addEventListener("error", (event) => {
-    logFrontendError("Uncaught error", event.error ?? event.message);
-  });
-  window.addEventListener("unhandledrejection", (event) => {
-    logFrontendError("Unhandled rejection", event.reason);
-  });
+  window.addEventListener("error", onError);
+  window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+  return () => {
+    window.removeEventListener("error", onError);
+    window.removeEventListener("unhandledrejection", onUnhandledRejection);
+  };
 }

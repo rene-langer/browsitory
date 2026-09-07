@@ -303,4 +303,11 @@ export interface RepoClient {
   // app's own window away from the app entirely (see `tauriRepoClient.ts` and
   // `PullRequestPanel.tsx`, the only caller).
   openExternalUrl(url: string): Promise<void>;
+  // Single choke point for frontend failure logging (see `frontend/src/lib/logger.ts`'s global
+  // `error`/`unhandledrejection` handlers, the only caller): each transport routes it into its
+  // own durable log sink — `tauriRepoClient.ts` writes to the same rotated log file as the Rust
+  // backend via `@tauri-apps/plugin-log`, `vscodeRepoClient.ts` forwards it to the extension
+  // host's "Browsitory" output channel — so a bug report doesn't need console access to a
+  // running session to diagnose, regardless of transport.
+  logFrontendError(context: string, error: unknown): Promise<void>;
 }
