@@ -127,3 +127,13 @@ palette: a fuzzy-searchable list of every action above, ranked by recent
 use.
 
 ![The command palette, filtered to branch-related commands](assets/command-palette.png)
+
+## Diagnosing a failure
+
+Browsitory writes a rotated failure log (keeping the 5 most recent files) to the OS log
+directory, so a bug report doesn't require a live dev session to reproduce. Attach the
+newest file there to a bug report:
+
+- **Linux:** `~/.local/share/com.browsitory.browsitory/logs`
+- **macOS:** `~/Library/Logs/com.browsitory.Browsitory`
+- **Windows:** `%APPDATA%\com.browsitory.Browsitory\logs`

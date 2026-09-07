@@ -27,6 +27,17 @@ describe("CommitBox", () => {
     expect(textarea).toHaveValue("");
   });
 
+  // AUD-2026-09-05-FE-002: the textarea previously relied on `placeholder` alone for its
+  // accessible name (jsdom's role-name computation happens to fall back to placeholder, but
+  // that's not a reliable substitute for a real label per the ARIA accessible-name spec) — an
+  // explicit `aria-label` makes it robust regardless of how a given assistive-tech implementation
+  // computes fallback names.
+  it("exposes the textarea as a labeled 'Commit message' textbox", () => {
+    render(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} />);
+
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toBeInTheDocument();
+  });
+
   it("Cmd/Ctrl+Enter in the textarea commits", () => {
     const onCommit = vi.fn();
     render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={vi.fn()} />);

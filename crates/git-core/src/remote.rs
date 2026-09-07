@@ -467,6 +467,13 @@ pub fn update_remote_urls(
 }
 
 pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, RemoteError> {
+    // Unlike `current_local_branch_name`'s other callers (pull, set/clear upstream — all
+    // genuine user actions that don't make sense without a current branch), this is a read-only
+    // status query polled on every `refresh()`. A detached HEAD (normal mid-rebase or mid-merge)
+    // just has no upstream to report, not an error.
+    if repo.head_detached()? {
+        return Ok(None);
+    }
     let local_branch = current_local_branch_name(repo)?;
     let config = repo.config()?;
     let remote_key = format!("branch.{local_branch}.remote");

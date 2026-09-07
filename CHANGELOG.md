@@ -6,6 +6,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- `resolve_conflict` now validates that the given path is an actual index conflict before
+  writing to the working directory, closing a gap where any path (including one under `.git/`)
+  would be written and staged unconditionally.
+
+### Fixed
+
+- `current_upstream` no longer errors on a detached HEAD (the normal state during an in-progress
+  rebase); it returns "no upstream" instead. Previously this rejected the frontend's whole
+  per-mutation state refresh, leaving the UI stuck showing stale pre-rebase content after a
+  rebase paused on a conflict or was aborted.
+- The VSCode extension's `vscode-sidecar` process now dispatches each JSON-RPC request on its
+  own thread instead of one shared blocking loop, so a slow operation against one open repo (a
+  large blame, a big commit graph) no longer freezes every other open repo's requests.
+- `sidecarBridge.ts` no longer forwards a JSON-RPC response to the webview unless it actually
+  matches a pending request.
+- A worker thread that panics is now detected and evicted, so reopening the affected repository
+  respawns a fresh worker instead of leaving the repository permanently stuck.
+- A worker-thread failure now surfaces as "connection to this repository was lost, reopen it"
+  instead of the raw internal error string.
+- Remote-tracking branch rows in the Branches tree are now keyboard-focusable, and the shared
+  `ContextMenu` widget implements standard menu keyboard navigation (arrow keys, Home/End,
+  initial focus on open) instead of only closing on Escape.
+- The commit-message textarea now has an explicit accessible name.
+- The frontend's global error/rejection logging now goes through `RepoClient` instead of
+  importing a Tauri-only plugin directly, so uncaught errors are actually logged from the
+  VSCode webview too (previously silently dropped there).
+
+### Changed
+
+- The transport-isolation ESLint rule now covers all of `frontend/src/**` (previously missed
+  `src/lib/**`) and also bans `vscode` imports outside `vscodeRepoClient.ts`/`extension/`.
+
 ### Added
 
 - A desktop VSCode extension host now loads the shared React frontend in a restricted webview,

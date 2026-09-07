@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { AppState } from "./useAppState";
-import { useMutationRunner } from "./useMutationRunner";
+import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 
 const BASE_STATE: AppState = {
   repoPath: "/repo",
@@ -44,6 +44,28 @@ function setupRunner() {
     return { state, ...runner };
   });
 }
+
+describe("credentialFailureMessage", () => {
+  // AUD-2026-09-05-CONC-002: `WorkerHandle` methods across `crates/repo-service/src/worker/*`
+  // reject every subsequent call on a repo whose worker thread has died with one of these two
+  // verbatim strings. Both should map to a distinct reconnect message — retrying the same
+  // mutation can't help once the worker itself is gone.
+  it.each([
+    "worker thread stopped",
+    "worker thread stopped before replying",
+  ])("maps %s to the reconnect message instead of surfacing it verbatim", (workerError) => {
+    expect(credentialFailureMessage(new Error(workerError))).toBe(
+      "Connection to this repository was lost. Close and reopen the repository to reconnect.",
+    );
+  });
+
+  it("leaves unrelated errors and existing credential remediations untouched", () => {
+    expect(credentialFailureMessage(new Error("some other failure"))).toBe("some other failure");
+    expect(credentialFailureMessage("missing credential")).toBe(
+      "Save an HTTPS token for this remote before retrying.",
+    );
+  });
+});
 
 describe("useMutationRunner's optimistic variants", () => {
   it("runOptimisticMutation applies the update before the mutation resolves, keeps it after success", async () => {

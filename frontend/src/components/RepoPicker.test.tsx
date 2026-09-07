@@ -94,6 +94,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     unstageHunk: async () => unimplemented(),
     discardHunk: async () => unimplemented(),
     commit: async () => unimplemented(),
+    logFrontendError: async () => unimplemented(),
     ...overrides,
   };
 }

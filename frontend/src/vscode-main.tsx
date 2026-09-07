@@ -3,9 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { vscodeRepoClient } from "./ipc/vscodeRepoClient";
-import { installWebviewErrorLogging } from "./lib/webviewLogger";
+import { installGlobalErrorLogging } from "./lib/logger";
 
-installWebviewErrorLogging();
+installGlobalErrorLogging(vscodeRepoClient);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

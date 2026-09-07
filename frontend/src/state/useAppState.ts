@@ -21,7 +21,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
-import { useMutationRunner } from "./useMutationRunner";
+import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
 import { useMergeRebaseActions } from "./useMergeRebaseActions";
@@ -266,7 +266,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         error: null,
       }));
     } catch (err) {
-      setState((prev) => ({ ...prev, error: String(err) }));
+      // Runs the same worker-death/credential classification as every mutation's catch block
+      // (`useMutationRunner`'s `credentialFailureMessage`) — a `refresh()` call after a
+      // successful mutation can hit a worker that died in between just as easily as the mutation
+      // itself, and it shouldn't fall back to a raw, unclassified message just because it's this
+      // call site instead of one of `runMutation`'s. See AUD-2026-09-05-CONC-002.
+      setState((prev) => ({ ...prev, error: credentialFailureMessage(err) }));
     }
   }, [client, repoPath]);
 

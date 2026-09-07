@@ -96,6 +96,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     openExternalUrl: unused,
     getGraphBranchSelection: async () => null,
     setGraphBranchSelection: unused,
+    logFrontendError: unused,
     ...overrides,
   };
 }

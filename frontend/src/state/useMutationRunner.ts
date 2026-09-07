@@ -21,12 +21,24 @@ export interface MutationRunner {
   runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome;
 }
 
+// The message shown for `WorkerHandle`'s two worker-death errors (`crates/repo-service/src/
+// worker/*`: "worker thread stopped" / "worker thread stopped before replying", raised whenever
+// the per-repo worker thread has crashed and can no longer take requests). Checking for the
+// shorter string alone is enough — the longer variant contains it as a substring — and a plain
+// retry of the same action can't help here: the worker is gone, so every subsequent call on this
+// repo will keep failing the same way until the repository is closed and reopened (which spawns a
+// fresh worker). AUD-2026-09-05-CONC-002.
+const WORKER_DEATH_MESSAGE = "worker thread stopped";
+export const REPO_CONNECTION_LOST_MESSAGE =
+  "Connection to this repository was lost. Close and reopen the repository to reconnect.";
+
 export function credentialFailureMessage(error: unknown): string {
   // `Error`s are unwrapped rather than stringified: `String(new Error("x"))` is `"Error: x"`, and
   // that literal prefix is now user-visible — `RemotePanel` renders this message inline under the
   // Fetch URL field, not just in the generic error banner. Tauri's `invoke` rejects with a bare
   // string, so the `String` branch stays the common production path.
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes(WORKER_DEATH_MESSAGE)) return REPO_CONNECTION_LOST_MESSAGE;
   if (message.includes("missing credential")) return "Save an HTTPS token for this remote before retrying.";
   if (message.includes("credential keychain failure")) return "The operating-system credential store is unavailable. Unlock it and try again.";
   if (message.includes("SSH agent failure")) return "Load a key into your SSH agent and try again.";

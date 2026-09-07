@@ -64,4 +64,126 @@ describe("ContextMenu", () => {
     fireEvent.mouseLeave(screen.getByRole("menu"));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  // WAI-ARIA APG menu pattern — AUD-2026-09-05-FE-001.
+  describe("keyboard navigation", () => {
+    it("focuses the first item as soon as the menu opens", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {} },
+            { label: "Second", onSelect: () => {} },
+          ]}
+        />,
+      );
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveFocus();
+    });
+
+    it("skips a disabled item when placing initial focus", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {}, disabled: true },
+            { label: "Second", onSelect: () => {} },
+          ]}
+        />,
+      );
+      expect(screen.getByRole("menuitem", { name: "Second" })).toHaveFocus();
+    });
+
+    it("ArrowDown/ArrowUp move focus between items, wrapping at each end", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {} },
+            { label: "Second", onSelect: () => {} },
+            { label: "Third", onSelect: () => {} },
+          ]}
+        />,
+      );
+      const menu = screen.getByRole("menu");
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveFocus();
+
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "Second" })).toHaveFocus();
+
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "Third" })).toHaveFocus();
+
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveFocus();
+
+      fireEvent.keyDown(menu, { key: "ArrowUp" });
+      expect(screen.getByRole("menuitem", { name: "Third" })).toHaveFocus();
+    });
+
+    it("ArrowDown skips disabled items", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {} },
+            { label: "Second", onSelect: () => {}, disabled: true },
+            { label: "Third", onSelect: () => {} },
+          ]}
+        />,
+      );
+      const menu = screen.getByRole("menu");
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "Third" })).toHaveFocus();
+    });
+
+    it("Home/End jump to the first/last item", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {} },
+            { label: "Second", onSelect: () => {} },
+            { label: "Third", onSelect: () => {} },
+          ]}
+        />,
+      );
+      const menu = screen.getByRole("menu");
+      fireEvent.keyDown(menu, { key: "End" });
+      expect(screen.getByRole("menuitem", { name: "Third" })).toHaveFocus();
+
+      fireEvent.keyDown(menu, { key: "Home" });
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveFocus();
+    });
+
+    it("only one item is in the tab order at a time (roving tabindex)", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "First", onSelect: () => {} },
+            { label: "Second", onSelect: () => {} },
+          ]}
+        />,
+      );
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveAttribute("tabindex", "0");
+      expect(screen.getByRole("menuitem", { name: "Second" })).toHaveAttribute("tabindex", "-1");
+
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "ArrowDown" });
+
+      expect(screen.getByRole("menuitem", { name: "First" })).toHaveAttribute("tabindex", "-1");
+      expect(screen.getByRole("menuitem", { name: "Second" })).toHaveAttribute("tabindex", "0");
+    });
+  });
 });

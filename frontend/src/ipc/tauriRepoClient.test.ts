@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { error as logError } from "@tauri-apps/plugin-log";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriRepoClient } from "./tauriRepoClient";
 
@@ -9,6 +10,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-log", () => ({
+  error: vi.fn(async () => {}),
 }));
 
 const TEST_REPO_PATH = "/repo";
@@ -44,6 +49,27 @@ describe("tauriRepoClient remote URL validation", () => {
       "Remote URLs must not contain embedded credentials",
     );
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("tauriRepoClient failure logging", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(logError).mockClear();
+  });
+
+  it("writes logFrontendError calls into the Tauri plugin-log sink", async () => {
+    await tauriRepoClient.logFrontendError("Uncaught error", new Error("boom"));
+
+    expect(logError).toHaveBeenCalledWith("Uncaught error: Error: boom");
+  });
+
+  it("logs a failed invoke through the same sink and still rejects", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("backend exploded"));
+
+    await expect(tauriRepoClient.getStatus(TEST_REPO_PATH)).rejects.toThrow("backend exploded");
+
+    expect(logError).toHaveBeenCalledWith("IPC get_status failed: Error: backend exploded");
   });
 });
 

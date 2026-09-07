@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { logFrontendError } from "../lib/logger";
+import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import type {
   BlameLine,
@@ -36,12 +36,21 @@ import type {
 
 let transferListenersReady: Promise<void> = Promise.resolve();
 
+// Single choke point for frontend failure logging: writes into the same rotated log file as
+// the Rust backend (see crates/tauri-app/src/main.rs's log plugin setup), so a bug report
+// doesn't need console access to a running dev session to diagnose. Backs both this module's
+// own `loggedInvoke` below and the `RepoClient.logFrontendError` method exposed to
+// `frontend/src/lib/logger.ts`'s global `error`/`unhandledrejection` handlers.
+function logFrontendError(context: string, error: unknown): Promise<void> {
+  return logError(`${context}: ${String(error)}`);
+}
+
 // Every backend command failure surfaces to the UI as a rejected `invoke` promise, so this
 // is the single point that can log all of them (including ones a component only shows in its
 // own error state, never in the browser console) without instrumenting each RepoClient method.
 function loggedInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args).catch((error: unknown) => {
-    logFrontendError(`IPC ${command} failed`, error);
+    void logFrontendError(`IPC ${command} failed`, error);
     throw error;
   });
 }
@@ -213,4 +222,5 @@ export const tauriRepoClient: RepoClient = {
   createPullRequest: (repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest) =>
     loggedInvoke<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
   openExternalUrl: (url: string) => loggedInvoke("open_external_url", { url }),
+  logFrontendError: (context: string, error: unknown) => logFrontendError(context, error),
 };

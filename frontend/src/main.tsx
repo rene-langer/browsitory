@@ -6,7 +6,7 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { installGlobalErrorLogging } from './lib/logger'
 import { tauriRepoClient } from './ipc/tauriRepoClient'
 
-installGlobalErrorLogging()
+installGlobalErrorLogging(tauriRepoClient)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

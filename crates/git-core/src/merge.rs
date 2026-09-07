@@ -171,6 +171,8 @@ pub fn resolve_conflict(
     path: &str,
     resolved_content: &str,
 ) -> Result<(), MergeError> {
+    find_conflict(repo, path)?;
+
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     std::fs::write(workdir.join(path), resolved_content)?;
 

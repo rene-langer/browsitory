@@ -95,6 +95,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listPullRequests: unused,
     createPullRequest: unused,
     openExternalUrl: unused,
+    logFrontendError: unused,
     ...overrides,
   };
 }

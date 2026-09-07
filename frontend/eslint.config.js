@@ -24,8 +24,12 @@ export default defineConfig([
   },
   {
     // Transport-isolation rule: UI code depends only on `RepoClient`, never on a
-    // concrete transport. Only `src/ipc/` may import `@tauri-apps/*`.
-    files: ['src/components/**/*.{ts,tsx}', 'src/state/**/*.{ts,tsx}'],
+    // concrete transport. Only files under `src/ipc/` (the transport implementations
+    // themselves) may import `@tauri-apps/*` or `vscode` directly — scoped to all of `src/`
+    // so any future directory (not just today's `src/components`/`src/state`) is covered
+    // by construction.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/ipc/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -33,6 +37,10 @@ export default defineConfig([
           patterns: [
             {
               group: ['@tauri-apps/*'],
+              message: 'UI code must go through frontend/src/ipc/RepoClient.',
+            },
+            {
+              group: ['vscode'],
               message: 'UI code must go through frontend/src/ipc/RepoClient.',
             },
           ],

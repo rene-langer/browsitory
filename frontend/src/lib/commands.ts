@@ -48,6 +48,37 @@ function sidebarSectionPanelId(title: (typeof SIDEBAR_SECTIONS)[number]): Sideba
   }
 }
 
+// Remote-tracking branches (Checkout / Set as upstream, from BranchTree's `remoteBranchItems`)
+// have no keyboard path at all: their rows only render once a remote's folder is expanded, and
+// the folder is never expanded until then, so there's nothing in the DOM yet for a command to act
+// on directly (see AUD-2026-09-05-FE-001). Mirroring the destructive-command pattern below —
+// navigate to where the real UI lives rather than reimplementing it — this expands the named
+// remote's folder inside the Branches section so its branch rows (now real keyboard-focusable
+// buttons, each with a "…" affordance) become reachable by Tab immediately after running the
+// command.
+function expandRemoteBranches(remoteName: string): void {
+  const workspace = document.querySelector(`[data-active-repo="true"]`);
+  if (workspace === null) return;
+  const branchesSection = workspace.querySelector<HTMLElement>(`section[aria-label="Branches"]`);
+  if (branchesSection === null) return;
+
+  // First toggle in document order is the "Branches" AccordionSection's own header — expand it
+  // before looking for the remote's folder header, which only renders once this is open.
+  const sectionToggle = branchesSection.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  if (sectionToggle !== null && sectionToggle.getAttribute("aria-expanded") === "false") {
+    sectionToggle.click();
+  }
+
+  const remoteToggle = Array.from(branchesSection.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")).find(
+    (button) => button.textContent?.trim() === remoteName,
+  );
+  if (remoteToggle === undefined) return;
+  if (remoteToggle.getAttribute("aria-expanded") === "false") {
+    remoteToggle.click();
+  }
+  remoteToggle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function goToSidebarSection(title: string): void {
   // Scoped to the active tab's workspace, not the whole document: every open repo's
   // `RepoWorkspace` stays mounted simultaneously (inactive ones are only `display: none`), so a
@@ -170,6 +201,15 @@ export function buildCommands(
         label: `Push all tags to ${remote.name}`,
         keywords: ["push", "tags", "remote", remote.name],
         run: () => void appState.pushTags(remote.name, []),
+      });
+      // Checkout/Set-as-upstream for a specific remote-tracking branch (BranchTree's
+      // `remoteBranchItems`) have no keyboard path at all otherwise — see
+      // AUD-2026-09-05-FE-001 and `expandRemoteBranches` above.
+      commands.push({
+        id: `browse-remote-branches:${remote.name}`,
+        label: `Browse branches on ${remote.name}`,
+        keywords: ["remote", "branch", "checkout", "upstream", "browse", remote.name],
+        run: () => expandRemoteBranches(remote.name),
       });
     }
 
