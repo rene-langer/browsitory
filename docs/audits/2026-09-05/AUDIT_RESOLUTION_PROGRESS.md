@@ -41,34 +41,53 @@ Verified clean after all fixes: `cargo build/test/clippy/fmt --workspace`, `pnpm
 in `frontend/`, `extension`'s test/compile/lint, and `pnpm audit --prod` across all four JS
 packages (`frontend`, `e2e`, `extension`, `extension/e2e`) — no known vulnerabilities.
 
-## Deferred — needs something this environment didn't reliably have
+## Resolved in this follow-up session (2026-09-06)
 
-| Item | Needs | Status |
-|------|-------|--------|
-| TEST-001 (broaden E2E: rebase-abort/conflict-resume, complex merge topologies) | A display server to write new specs against safely (not blind/untested) | Not started. `Xvfb`/`xvfb-run` and `tauri-driver` are present on this machine, but the desktop/VSCode E2E build pipelines (`cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override`, the two frontend E2E builds, `extension/e2e`'s `pnpm install --ignore-workspace && pnpm test`) haven't yet completed — see "Blocked" below. |
-| `cargo audit` | Installing `cargo-audit` (network + compile time) | Not completed — see "Blocked" below. `pnpm audit --prod` (the JS half of this roadmap item) is done and clean. |
-| Live "credential release acceptance" checklist (`docs/ARCHITECTURE.md`) | Disposable git-hosting credentials (HTTPS token + SSH key) the user provisions | Not started — needs the user to supply throwaway credentials, or to run the manual checklist themselves. |
+The background-task kills described below did not recur on retry — `free -h` showed swap with
+headroom again, and every pipeline ran to completion:
 
-## Blocked, actively being investigated
+| Item | Result |
+|------|--------|
+| `cargo audit` | Installed `cargo-audit v0.22.2` (`cargo install cargo-audit --locked`), ran clean: exit 0, zero `Vulnerability` entries, only 19 allowed advisory warnings (unmaintained/unsound/yanked crates — no fix action implied). |
+| TEST-001 build prerequisite: Tauri E2E pipeline | `cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override` and the frontend E2E build now complete cleanly. Along the way, `pnpm build`'s `tsc -b` step caught 5 test files with `fakeClient()` mocks not updated for ARCH-002's new required `RepoClient.logFrontendError` method (`App.test.tsx`, `RebasePlanner.test.tsx`, `RepoPicker.test.tsx`, `DiffPane.test.tsx`, `ConflictResolutionPane.test.tsx`) — fixed by adding the field to each mock. Full suite then run under `xvfb-run`: **17/17 specs passing**. |
+| TEST-001 build prerequisite: VSCode extension E2E pipeline | `cargo build --workspace`, the VSCode-target frontend build (`vite.vscode.config.ts`), and `extension`'s `pnpm run compile` all completed cleanly (no stale-mock issues here — extension has no unit tests using `fakeClient`). `extension/e2e`'s `pnpm install --ignore-workspace && pnpm test` run under `xvfb-run`: **1/1 passing**, exit code 0. |
 
-Every background shell task started for the deferred items above (`cargo install cargo-audit`,
-`cargo build --workspace --features ...`, the VSCode-target frontend build) has been killed
-almost immediately after starting — including a solo run with no other background job competing.
+## Resolved: TEST-001 (2026-09-07)
 
-- First round: plausibly explained by genuine memory pressure — `free -h` showed swap fully
-  exhausted (2.0Gi/2.0Gi used) and several cgroups' `memory.events` showed `oom_kill 2`.
-- Second round (solo `cargo-audit` install, no parallel jobs): the `oom_kill` counters were
-  **unchanged** from before the attempt, and the job died before any `Compiling` output
-  appeared — much faster than the kernel OOM killer usually acts, and faster than the earlier
-  attempt that ran for 240s before being manually cut off. This rules out the kernel OOM killer
-  for that specific kill.
+Added the two highest-risk paths the remediation named — rebase abort/conflict-resume and an
+abort-merge-from-UI path — to `e2e/specs/rebase.spec.ts` and `e2e/specs/merge.spec.ts`:
 
-Conclusion so far: something outside the kernel and outside this session's own tool calls is
-terminating backgrounded Bash tasks near-instantly and consistently. No `dmesg` access and no
-passwordless `sudo` in this environment, so it can't be confirmed from inside the sandbox.
-Asked the user to check their end (an accidental interrupt/stop gesture, or a background-task
-policy in this terminal session) — awaiting a retry or diagnosis before re-attempting the
-build/install pipelines above.
+- `rebase.spec.ts`: "pauses on a rebase conflict, resolves it, and continues to completion" and
+  "aborts a rebase mid-conflict and restores the pre-rebase state". Both construct a genuine
+  cherry-pick conflict (drop a commit whose content a later kept commit depends on, matching
+  `git-core::rebase`'s own `a_conflicting_pick_pauses_and_resolving_then_continuing_lands_it`
+  test) and drive it entirely through the UI.
+- `merge.spec.ts`: "aborts a conflicted merge from the UI, leaving the working tree clean" — the
+  "no abort-merge-from-UI path" gap the deep-dive called out (octopus merges aren't supported by
+  `git-core` at all, so that half of the finding doesn't apply).
+
+Writing the conflict-resume test surfaced a real integration bug exactly as TEST-001 predicted:
+`current_upstream` (`crates/git-core/src/remote.rs`) reused `current_local_branch_name`, which
+returns `RemoteError::DetachedHead` ("cannot pull while HEAD is detached") for *any* detached
+HEAD — including the normal detached-HEAD state of an in-progress rebase. `useAppState.ts`'s
+`refresh()` calls `getCurrentUpstream` inside the same `Promise.all` as `getStatus`/
+`getRebaseProgress` on every mutation, so this error rejected the whole refresh, silently
+discarding the freshly-fetched conflict state and leaving the UI stuck on stale pre-rebase
+content with a confusing "cannot pull while HEAD is detached" banner. Fixed by having
+`current_upstream` return `Ok(None)` on a detached HEAD instead of erroring (it's a read-only
+status query with every legitimate reason to tolerate a state `pull`/`set_current_upstream`
+correctly still reject) — covered by a new `git-core` test,
+`current_upstream_returns_none_on_a_detached_head_instead_of_erroring`.
+
+Verified: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --all -- --check` all clean; full `e2e` suite (`xvfb-run -a pnpm test`) **17/17 spec
+files passing**.
+
+## Not yet started
+
+| Item | Needs |
+|------|-------|
+| Live "credential release acceptance" checklist (`docs/ARCHITECTURE.md`) | Disposable git-hosting credentials (HTTPS token + SSH key) the user provisions — needs the user to supply throwaway credentials, or to run the manual checklist themselves. |
 
 ## Not attempted (out of this remediation's scope)
 

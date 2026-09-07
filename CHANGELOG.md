@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `current_upstream` no longer errors on a detached HEAD (the normal state during an in-progress
+  rebase); it returns "no upstream" instead. Previously this rejected the frontend's whole
+  per-mutation state refresh, leaving the UI stuck showing stale pre-rebase content after a
+  rebase paused on a conflict or was aborted.
 - The VSCode extension's `vscode-sidecar` process now dispatches each JSON-RPC request on its
   own thread instead of one shared blocking loop, so a slow operation against one open repo (a
   large blame, a big commit graph) no longer freezes every other open repo's requests.
