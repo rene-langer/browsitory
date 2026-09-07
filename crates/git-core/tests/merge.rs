@@ -190,6 +190,43 @@ fn resolve_conflict_clears_the_conflict_and_stages_the_result() {
 }
 
 #[test]
+fn resolve_conflict_rejects_a_path_with_no_index_conflict() {
+    let (dir, repo) = make_conflicted_repo();
+
+    let result =
+        git_core::merge::resolve_conflict(&repo, "does-not-exist.txt", "malicious content\n");
+
+    assert!(matches!(
+        result,
+        Err(git_core::merge::MergeError::NoConflict(ref p)) if p == "does-not-exist.txt"
+    ));
+    // Nothing should have been written or staged — the rejection must happen before any
+    // working-directory or index mutation.
+    assert!(!dir.path().join("does-not-exist.txt").exists());
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn resolve_conflict_rejects_a_git_relative_path_even_though_it_resolves_under_the_workdir() {
+    let (dir, repo) = make_conflicted_repo();
+
+    // Regression for AUD-2026-09-05-GIT-001: `resolve_conflict` used to write
+    // `resolved_content` straight to `workdir.join(path)` and stage it without first checking
+    // `path` was an actual conflicted path in the index. A path like ".git/config" joins to a
+    // real, sensitive file under the workdir but is never a conflicted index entry — it must be
+    // rejected before any write happens.
+    let result = git_core::merge::resolve_conflict(&repo, ".git/config", "[core]\n\tbogus = 1\n");
+
+    assert!(matches!(
+        result,
+        Err(git_core::merge::MergeError::NoConflict(ref p)) if p == ".git/config"
+    ));
+    let git_config_contents = std::fs::read_to_string(dir.path().join(".git/config")).unwrap();
+    assert!(!git_config_contents.contains("bogus"));
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+#[test]
 fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
     let (dir, repo) = make_conflicted_repo();
 

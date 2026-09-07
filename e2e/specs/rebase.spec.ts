@@ -105,4 +105,173 @@ describe("Browsitory interactive rebase", () => {
     const droppedEntry = await $("li*=rebase commit b (to drop)");
     await expect(droppedEntry).not.toBeExisting();
   });
+
+  // Sets up a rebase that pauses on a real conflict: `onto` introduces a file, one commit edits
+  // a line, a second commit edits the same line again. Dropping the middle commit forces the
+  // final commit's patch to apply against `onto`'s original content instead of the edit it was
+  // actually written on top of — same construction as `git-core::rebase`'s
+  // `a_conflicting_pick_pauses_and_resolving_then_continuing_lands_it` test, driven through the
+  // UI instead of the API.
+  function writeConflictCommit(fileName: string, content: string, message: string) {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, fileName), content);
+    execFileSync("git", ["add", fileName], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", message], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  }
+
+  it("pauses on a rebase conflict, resolves it, and continues to completion", async () => {
+    writeConflictCommit(
+      "rebase-conflict-resume.txt",
+      "line one\nline two\n",
+      "e2e: conflict-resume onto point",
+    );
+    writeConflictCommit(
+      "rebase-conflict-resume.txt",
+      "line one\nchanged on top\n",
+      "e2e: conflict-resume change on top",
+    );
+    writeConflictCommit(
+      "rebase-conflict-resume.txt",
+      "line one\nchanged again\n",
+      "e2e: conflict-resume conflicting change",
+    );
+
+    await browser.refresh();
+
+    const ontoEntry = await $("li*=e2e: conflict-resume onto point");
+    await ontoEntry.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, ontoEntry);
+
+    const rebaseButton = await $("button*=Rebase onto here");
+    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.click();
+
+    // Drop "change on top" so replaying "conflicting change" lands on `onto`'s original content
+    // instead of the edit it actually followed — the same file, same context lines, real conflict.
+    const dropRowSelect = await $(
+      "//li[contains(., 'e2e: conflict-resume change on top')]//select[@aria-label='Action']",
+    );
+    await dropRowSelect.waitForExist({ timeout: 10000 });
+    await dropRowSelect.selectByVisibleText("Drop");
+
+    const startButton = await $("button=Start Rebase");
+    await startButton.click();
+
+    const rebasePanel = await $("h2*=Rebase in progress");
+    await rebasePanel.waitForExist({ timeout: 10000 });
+
+    const conflictedRow = await $("span*=rebase-conflict-resume.txt (Conflicted)");
+    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.scrollIntoView({ block: "center" });
+    await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
+
+    const acceptTheirs = await $("button=Accept Theirs");
+    await acceptTheirs.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
+    const saveResolution = await $("button=Save resolution");
+    await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
+
+    const continueButton = await $("button=Continue Rebase");
+    await continueButton.waitForEnabled({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), continueButton);
+
+    await browser.waitUntil(
+      async () => !(await $("h2*=Rebase in progress").isExisting()),
+      { timeout: 10000 },
+    );
+    const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
+    await landedEntry.waitForExist({ timeout: 10000 });
+    const droppedStillGone = await $("li*=e2e: conflict-resume change on top");
+    await expect(droppedStillGone).not.toBeExisting();
+
+    const headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
+      cwd: E2E_REPO_PATH,
+    })
+      .toString()
+      .trim();
+    expect(headMessage).toBe("e2e: conflict-resume conflicting change");
+  });
+
+  it("aborts a rebase mid-conflict and restores the pre-rebase state", async () => {
+    writeConflictCommit(
+      "rebase-conflict-abort.txt",
+      "line one\nline two\n",
+      "e2e: conflict-abort onto point",
+    );
+    writeConflictCommit(
+      "rebase-conflict-abort.txt",
+      "line one\nchanged on top\n",
+      "e2e: conflict-abort change on top",
+    );
+    writeConflictCommit(
+      "rebase-conflict-abort.txt",
+      "line one\nchanged again\n",
+      "e2e: conflict-abort conflicting change",
+    );
+
+    const headBeforeRebase = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: E2E_REPO_PATH,
+    })
+      .toString()
+      .trim();
+
+    await browser.refresh();
+
+    const ontoEntry = await $("li*=e2e: conflict-abort onto point");
+    await ontoEntry.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => {
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+      );
+    }, ontoEntry);
+
+    const rebaseButton = await $("button*=Rebase onto here");
+    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.click();
+
+    const dropRowSelect = await $(
+      "//li[contains(., 'e2e: conflict-abort change on top')]//select[@aria-label='Action']",
+    );
+    await dropRowSelect.waitForExist({ timeout: 10000 });
+    await dropRowSelect.selectByVisibleText("Drop");
+
+    const startButton = await $("button=Start Rebase");
+    await startButton.click();
+
+    const rebasePanel = await $("h2*=Rebase in progress");
+    await rebasePanel.waitForExist({ timeout: 10000 });
+    const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
+    await conflictedRow.waitForExist({ timeout: 10000 });
+
+    const abortButton = await $("button=Abort Rebase");
+    await abortButton.click();
+
+    await browser.waitUntil(
+      async () => !(await $("h2*=Rebase in progress").isExisting()),
+      { timeout: 10000 },
+    );
+
+    const headAfterAbort = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: E2E_REPO_PATH,
+    })
+      .toString()
+      .trim();
+    expect(headAfterAbort).toBe(headBeforeRebase);
+
+    const fileContents = fs.readFileSync(
+      path.join(E2E_REPO_PATH, "rebase-conflict-abort.txt"),
+      "utf8",
+    );
+    expect(fileContents).toBe("line one\nchanged again\n");
+
+    for (const dir of ["rebase-merge", "rebase-apply"]) {
+      expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", dir))).toBe(false);
+    }
+
+    const stillOnTopEntry = await $("li*=e2e: conflict-abort conflicting change");
+    await stillOnTopEntry.waitForExist({ timeout: 10000 });
+  });
 });

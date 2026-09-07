@@ -156,6 +156,59 @@ describe("buildCommands", () => {
     expect(appState.pushTags).toHaveBeenCalledWith("origin", []);
   });
 
+  // AUD-2026-09-05-FE-001: remote-tracking branch Checkout/Set-upstream (BranchTree's
+  // `remoteBranchItems`) have no keyboard path at all — their rows only exist in the DOM once the
+  // remote's folder is expanded. This command expands that folder so the (now keyboard-focusable)
+  // branch rows become reachable, mirroring the existing "navigate instead of mutating directly"
+  // pattern below.
+  describe("browse-remote-branches", () => {
+    function mountBranchesWithRemoteFolder(remoteName: string): HTMLButtonElement {
+      const workspace = document.createElement("div");
+      workspace.setAttribute("data-active-repo", "true");
+      document.body.appendChild(workspace);
+
+      const section = document.createElement("section");
+      section.setAttribute("aria-label", "Branches");
+      workspace.appendChild(section);
+
+      const sectionToggle = document.createElement("button");
+      sectionToggle.setAttribute("aria-expanded", "true");
+      sectionToggle.textContent = "Branches";
+      section.appendChild(sectionToggle);
+
+      const remoteToggle = document.createElement("button");
+      remoteToggle.setAttribute("aria-expanded", "false");
+      remoteToggle.textContent = remoteName;
+      remoteToggle.scrollIntoView = vi.fn();
+      remoteToggle.addEventListener("click", () => remoteToggle.setAttribute("aria-expanded", "true"));
+      section.appendChild(remoteToggle);
+
+      return remoteToggle;
+    }
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("includes one browse-remote-branches command per remote", () => {
+      const commands = buildCommands(makeAppState());
+      const command = commands.find((c) => c.id === "browse-remote-branches:origin");
+      expect(command?.label).toBe("Browse branches on origin");
+    });
+
+    it("expands the named remote's folder instead of mutating anything", () => {
+      const remoteToggle = mountBranchesWithRemoteFolder("origin");
+      const commands = buildCommands(makeAppState());
+      commands.find((c) => c.id === "browse-remote-branches:origin")?.run();
+      expect(remoteToggle.getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("is omitted while a repository operation is in progress", () => {
+      const commands = buildCommands(makeAppState({ pending: true }));
+      expect(commands.some((c) => c.id.startsWith("browse-remote-branches:"))).toBe(false);
+    });
+  });
+
   it("only includes pull when an upstream is set", () => {
     const withUpstream = buildCommands(makeAppState());
     expect(withUpstream.some((c) => c.id === "pull")).toBe(true);

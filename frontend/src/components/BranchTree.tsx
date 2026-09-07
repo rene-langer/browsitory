@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
-import { ChevronRight, Cloud, Copy, GitBranch, Plus } from "lucide-react";
+import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
   PullOutcome,
@@ -342,7 +342,25 @@ export function BranchTree({
             openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
           }}
         >
-          {node.name}
+          <Toolbar>
+            <span>{node.name}</span>
+            {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
+                native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
+                name button has focus) — without this, a keyboard/screen-reader user has no
+                visible indication those actions exist at all (AUD-2026-09-05-FE-001). */}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label={`Actions for ${branchName}`}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                openRowMenu({ kind: "remote-branch", remoteName, branchName, x: rect.left, y: rect.bottom });
+              }}
+            >
+              <MoreHorizontal size={12} aria-hidden="true" />
+            </button>
+          </Toolbar>
         </ListRow>
       );
     });

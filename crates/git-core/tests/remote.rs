@@ -517,6 +517,21 @@ fn remote_crud_and_upstream_round_trip() {
 }
 
 #[test]
+fn current_upstream_returns_none_on_a_detached_head_instead_of_erroring() {
+    // A detached HEAD is normal mid-rebase/mid-checkout-of-a-commit state, not a user error —
+    // `refresh()`'s status poll (frontend `useAppState.ts`) calls this on every mutation via
+    // `Promise.all`, and a detached HEAD literally has no upstream to report, so this must
+    // succeed with `None` rather than reuse `pull`'s "cannot pull while HEAD is detached" error.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let head_id = repo.head().unwrap().target().unwrap();
+    repo.set_head_detached(head_id).unwrap();
+
+    assert_eq!(current_upstream(&repo).unwrap(), None);
+}
+
+#[test]
 fn remote_auth_metadata_is_local_non_secret_and_follows_remote_lifecycle() {
     // Removing profile persistence or failing to move/remove it with the remote must fail this.
     let (_dir, repo) = common::init_repo();
