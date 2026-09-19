@@ -15,7 +15,6 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
-import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
@@ -586,17 +585,27 @@ export function BranchTree({
   }
 
   return (
-    <AccordionSection title="Branches" storageKey="sidebar-branches" icon={GitBranch} count={branches.length} defaultOpen>
-      <Toolbar aria-label="Branches actions">
+    <AccordionSection
+      title="Branches"
+      storageKey="sidebar-branches"
+      icon={GitBranch}
+      count={branches.length}
+      defaultOpen
+      actions={
         <button
           type="button"
+          className={styles.iconButton}
           aria-label="Add"
-          onClick={(event) => openRowMenu({ kind: "add", x: event.clientX, y: event.clientY })}
+          aria-haspopup="menu"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openRowMenu({ kind: "add", x: rect.left, y: rect.bottom });
+          }}
         >
           <Plus size={14} aria-hidden="true" />
         </button>
-      </Toolbar>
-
+      }
+    >
       {createBranchDraft !== null && (
         <div className={styles.draftForm}>
           <input

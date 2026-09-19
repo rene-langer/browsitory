@@ -11,6 +11,24 @@
   min-height: 12rem;
 }
 
+.headerRow {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.headerRow .heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding-right: var(--space-2);
+}
+
 /* The heading only carries the role; the button inside owns all the spacing. */
 .heading {
   margin: 0;

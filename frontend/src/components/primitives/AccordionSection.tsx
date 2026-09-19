@@ -11,6 +11,7 @@ export function AccordionSection({
   icon: Icon,
   count,
   headingLevel = 2,
+  actions,
   children,
 }: {
   title: string;
@@ -19,6 +20,8 @@ export function AccordionSection({
   icon?: LucideIcon;
   count?: number;
   headingLevel?: 2 | 3;
+  /** Controls shown at the right of the header row, beside (not inside) the toggle button. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(() => loadPersistedOpen(storageKey, defaultOpen));
@@ -51,6 +54,7 @@ export function AccordionSection({
           `AccordionGroup`. Open state itself is independent per section by design (not mutual
           exclusion) — each section persists its own open/closed state under its own
           `storageKey`, so opening one is not meant to close its siblings. */}
+      <div className={styles.headerRow}>
       {createElement(
         `h${headingLevel}`,
         { className: styles.heading },
@@ -79,6 +83,8 @@ export function AccordionSection({
           )}
         </button>,
       )}
+      {actions !== undefined && <div className={styles.actions}>{actions}</div>}
+      </div>
       {open && <div className={styles.body}>{children}</div>}
     </section>
   );

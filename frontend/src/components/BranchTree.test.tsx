@@ -1039,3 +1039,13 @@ describe("BranchTree — row layout", () => {
     expect(await screen.findByTitle("feat/bar")).toHaveTextContent("bar");
   });
 });
+
+describe("BranchTree — add button placement", () => {
+  it("the Add button lives in the section header, not the scrolling body", () => {
+    renderTree();
+    const add = screen.getByRole("button", { name: "Add" });
+    const heading = screen.getByRole("heading", { name: /Branches/ });
+    expect(add.closest("section")?.firstElementChild).toContainElement(heading);
+    expect(add.closest("section")?.firstElementChild).toContainElement(add);
+  });
+});
