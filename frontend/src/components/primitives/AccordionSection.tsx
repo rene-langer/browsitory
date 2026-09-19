@@ -55,35 +55,35 @@ export function AccordionSection({
           exclusion) — each section persists its own open/closed state under its own
           `storageKey`, so opening one is not meant to close its siblings. */}
       <div className={styles.headerRow}>
-      {createElement(
-        `h${headingLevel}`,
-        { className: styles.heading },
-        <button
-          ref={headerRef}
-          type="button"
-          className={styles.header}
-          aria-expanded={open}
-          aria-label={title}
-          tabIndex={headerTabIndex}
-          onFocus={() => group?.onHeaderFocus(headerRef)}
-          onKeyDown={(event) => group?.onHeaderKeyDown(event, headerRef)}
-          onClick={() => setOpenState(!open)}
-        >
-          <ChevronRight
-            size={14}
-            aria-hidden="true"
-            className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
-          />
-          {Icon !== undefined && <Icon size={14} aria-hidden="true" className={styles.icon} />}
-          <span className={styles.title}>{title}</span>
-          {count !== undefined && (
-            <span className={styles.count} aria-hidden="true">
-              {count}
-            </span>
-          )}
-        </button>,
-      )}
-      {actions !== undefined && <div className={styles.actions}>{actions}</div>}
+        {createElement(
+          `h${headingLevel}`,
+          { className: styles.heading },
+          <button
+            ref={headerRef}
+            type="button"
+            className={styles.header}
+            aria-expanded={open}
+            aria-label={title}
+            tabIndex={headerTabIndex}
+            onFocus={() => group?.onHeaderFocus(headerRef)}
+            onKeyDown={(event) => group?.onHeaderKeyDown(event, headerRef)}
+            onClick={() => setOpenState(!open)}
+          >
+            <ChevronRight
+              size={14}
+              aria-hidden="true"
+              className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+            />
+            {Icon !== undefined && <Icon size={14} aria-hidden="true" className={styles.icon} />}
+            <span className={styles.title}>{title}</span>
+            {count !== undefined && (
+              <span className={styles.count} aria-hidden="true">
+                {count}
+              </span>
+            )}
+          </button>,
+        )}
+        {actions !== undefined && <div className={styles.actions}>{actions}</div>}
       </div>
       {open && <div className={styles.body}>{children}</div>}
     </section>
