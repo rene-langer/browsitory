@@ -6,6 +6,7 @@
   min-width: 0;
   overflow-x: auto;
   margin: 0 var(--space-4);
+  scrollbar-width: thin;
 }
 
 .tab {
@@ -54,6 +55,7 @@
 }
 
 .tabLabel {
+  min-width: 0;
   background: none;
   border: none;
   color: var(--color-text);
@@ -74,6 +76,14 @@
   cursor: pointer;
   padding: var(--space-1);
   border-radius: var(--radius-sm);
+}
+
+/* Fixed footprint so a truncated label's ellipsis never jitters against the "x". */
+.closeButton {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
 }
 
 .closeButton:hover,
