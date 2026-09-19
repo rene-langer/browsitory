@@ -285,8 +285,14 @@ export function BranchTree({
             />
             {isRenaming ? (
               <input
+                autoFocus
+                aria-label={`Rename ${branch.name}`}
                 value={renameValue}
                 onChange={(event) => setRenameValue(event.target.value)}
+                onFocus={(event) => event.currentTarget.select()}
+                onBlur={() => {
+                  if (renameValue === branch.name) setRenaming(null);
+                }}
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
             ) : (
@@ -550,6 +556,9 @@ export function BranchTree({
       if (renameValue.trim() === "") return;
       onRenameBranch(oldName, renameValue);
       setRenaming(null);
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      setRenaming(null);
     }
   };
 
@@ -629,6 +638,7 @@ export function BranchTree({
       {createBranchDraft !== null && (
         <div className={styles.draftForm}>
           <input
+            autoFocus
             value={newBranchName}
             onChange={(event) => {
               setNewBranchName(event.target.value);
@@ -637,6 +647,10 @@ export function BranchTree({
             placeholder="New branch name"
             onKeyDown={(event) => {
               if (event.key === "Enter") void submitCreate();
+              else if (event.key === "Escape") {
+                setCreateError(null);
+                onCloseCreateBranchDraft();
+              }
             }}
           />
           <button onClick={() => void submitCreate()} disabled={newBranchName.trim() === "" || isRebasing}>
@@ -658,6 +672,9 @@ export function BranchTree({
         <form
           className={styles.form}
           aria-label="Add remote"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onCloseAddRemoteDraft();
+          }}
           onSubmit={(event) => {
             event.preventDefault();
             void submitAddRemote();
@@ -666,6 +683,7 @@ export function BranchTree({
           <label className={styles.label}>
             Remote name
             <input
+              autoFocus
               placeholder="origin"
               value={newRemoteName}
               onChange={(event) => {

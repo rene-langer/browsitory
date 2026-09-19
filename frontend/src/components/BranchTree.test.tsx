@@ -1070,3 +1070,51 @@ describe("BranchTree — local row actions button", () => {
     expect(marker.closest("span[title='main']")).not.toBeNull();
   });
 });
+
+describe("BranchTree — inline forms focus and Escape", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  function startRename() {
+    const utils = renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    return utils;
+  }
+
+  it("focuses the new-branch input on open and Escape cancels", () => {
+    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    const input = screen.getByPlaceholderText("New branch name");
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(props.onCloseCreateBranchDraft).toHaveBeenCalled();
+  });
+
+  it("focuses the add-remote name field on open and Escape cancels", () => {
+    const { props } = renderTree({ addRemoteDraftOpen: true });
+    const input = screen.getByPlaceholderText("origin");
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(props.onCloseAddRemoteDraft).toHaveBeenCalled();
+  });
+
+  it("the rename input is labelled, focused, and Escape cancels", () => {
+    startRename();
+    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+  });
+
+  it("blurring the rename input with an unchanged value cancels, a changed value stays", () => {
+    startRename();
+    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    fireEvent.blur(input);
+    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "feat/foo" } });
+    fireEvent.blur(input);
+    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+  });
+});
