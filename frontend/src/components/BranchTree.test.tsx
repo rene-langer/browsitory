@@ -557,6 +557,7 @@ describe("BranchTree — remotes", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
     expect(within(dialog).getByDisplayValue("git@github.com:user/repo.git")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Remote name")).toHaveFocus();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save remote" }));
     expect(onUpdateRemoteUrls).toHaveBeenCalledWith("origin", "git@github.com:user/repo.git", null);
   });

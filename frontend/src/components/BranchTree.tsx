@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement, type RefObject } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -11,6 +11,7 @@ import { branchSwatchColor } from "../lib/laneColors";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { FormDialog } from "./primitives/FormDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -156,9 +157,6 @@ export function BranchTree({
   const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
   const [credentialUsername, setCredentialUsername] = useState("");
   const accessTokenRef = useRef<HTMLInputElement>(null);
-  const editDialogRef = useRef<HTMLDialogElement>(null);
-  const credentialDialogRef = useRef<HTMLDialogElement>(null);
-  const upstreamFormDialogRef = useRef<HTMLDialogElement>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
@@ -172,38 +170,6 @@ export function BranchTree({
   const [addError, setAddError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [remoteBranchesError, setRemoteBranchesError] = useState<string | null>(null);
-  const pullDialogRef = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = pullDialogRef.current;
-    if (pendingPull === null || dialog === null) return;
-    if (!dialog.open && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else if (!dialog.open) {
-      dialog.setAttribute("open", "");
-    }
-    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
-  }, [pendingPull]);
-
-  function openNativeDialog(ref: RefObject<HTMLDialogElement | null>): void {
-    const dialog = ref.current;
-    if (dialog === null || dialog.open) return;
-    if (typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else {
-      dialog.setAttribute("open", "");
-    }
-  }
-
-  useEffect(() => {
-    if (editingRemote !== null) openNativeDialog(editDialogRef);
-  }, [editingRemote]);
-  useEffect(() => {
-    if (credentialRemote !== null) openNativeDialog(credentialDialogRef);
-  }, [credentialRemote]);
-  useEffect(() => {
-    if (upstreamDialogOpen) openNativeDialog(upstreamFormDialogRef);
-  }, [upstreamDialogOpen]);
 
   function remoteFolderKey(remoteName: string): string {
     return `branchtree.remote.${remoteName}`;
@@ -912,14 +878,7 @@ export function BranchTree({
       )}
 
       {editingRemote !== null && (
-        <dialog
-          ref={editDialogRef}
-          aria-label={`Edit ${editingRemote.name}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setEditingRemote(null);
-          }}
-        >
+        <FormDialog ariaLabel={`Edit ${editingRemote.name}`} onCancel={() => setEditingRemote(null)}>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
@@ -970,18 +929,11 @@ export function BranchTree({
               Cancel
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
       {credentialRemote !== null && (
-        <dialog
-          ref={credentialDialogRef}
-          aria-label={`Credentials for ${credentialRemote}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setCredentialRemote(null);
-          }}
-        >
+        <FormDialog ariaLabel={`Credentials for ${credentialRemote}`} onCancel={() => setCredentialRemote(null)}>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
@@ -1040,7 +992,7 @@ export function BranchTree({
               Cancel credentials
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
       <section className={styles.upstreamBlock}>
@@ -1094,13 +1046,9 @@ export function BranchTree({
       )}
 
       {upstreamDialogOpen && (
-        <dialog
-          ref={upstreamFormDialogRef}
-          aria-label={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setUpstreamDialogOpen(false);
-          }}
+        <FormDialog
+          ariaLabel={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
+          onCancel={() => setUpstreamDialogOpen(false)}
         >
           <form
             onSubmit={async (event) => {
@@ -1150,18 +1098,11 @@ export function BranchTree({
               Cancel
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
       {pendingPull !== null && (
-        <dialog
-          ref={pullDialogRef}
-          aria-label="Pull has diverged"
-          onCancel={(event) => {
-            event.preventDefault();
-            onCancelPull();
-          }}
-        >
+        <FormDialog ariaLabel="Pull has diverged" onCancel={onCancelPull}>
           <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
           <button type="button" disabled={operationDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>
             Merge
@@ -1172,7 +1113,7 @@ export function BranchTree({
           <button type="button" data-autofocus onClick={onCancelPull}>
             Cancel
           </button>
-        </dialog>
+        </FormDialog>
       )}
     </AccordionSection>
   );
