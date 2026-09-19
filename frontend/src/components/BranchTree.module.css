@@ -84,13 +84,33 @@
 }
 
 .swatch {
+  position: relative;
   flex: 0 0 auto;
+  box-sizing: border-box;
   width: 10px;
   height: 10px;
   padding: 0;
-  border: none;
+  border: 2px solid var(--swatch);
   border-radius: 50%;
+  background: var(--swatch);
   cursor: pointer;
+}
+
+/* Hidden from the graph: hollow ring instead of a filled dot (not just dimmed). */
+.swatch[aria-pressed="false"] {
+  background: transparent;
+}
+
+/* Invisible 20x20 hit area around the 10px dot. */
+.swatch::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+
+.swatch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .swatch:hover {

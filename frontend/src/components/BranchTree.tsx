@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -277,7 +277,7 @@ export function BranchTree({
               className={styles.swatch}
               aria-label={`Show ${branch.name} in graph`}
               aria-pressed={shownInGraph}
-              style={{ backgroundColor: branchSwatchColor(branch.name), opacity: shownInGraph ? 1 : 0.3 }}
+              style={{ "--swatch": branchSwatchColor(branch.name) } as CSSProperties}
               onClick={(event) => {
                 event.stopPropagation();
                 toggleGraphBranch(branch.name);
