@@ -35,3 +35,11 @@
   border: 1px solid var(--color-border);
   flex-shrink: 0;
 }
+
+/* Match the commit rows' size and face; the selected tint comes from ListRow's shared token. */
+li.uncommittedRow {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--color-text-muted);
+}

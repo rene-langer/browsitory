@@ -170,6 +170,7 @@ export function CommitGraph({
       aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10"
     >
       <ListRow
+        className={styles.uncommittedRow}
         selected={selectedRow === "uncommitted"}
         onClick={() => {
           setSquashAnchorIndex(null);
