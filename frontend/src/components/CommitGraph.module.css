@@ -40,6 +40,4 @@
 li.uncommittedRow {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  font-style: italic;
-  color: var(--color-text-muted);
 }

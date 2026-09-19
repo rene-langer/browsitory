@@ -91,7 +91,7 @@ export function RepoPicker({
         </Toolbar>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
         {recentRepos.length === 0 ? (
-          <p>No recent repositories</p>
+          <p className={styles.empty}>No recent repositories</p>
         ) : (
           <ul className={styles.list}>
             {recentRepos.map((path) => (
@@ -107,7 +107,7 @@ export function RepoPicker({
               <InlineError message={workspacesError} onDismiss={onDismissWorkspacesError} />
             )}
             {!workspacesLoading && workspaces.length === 0 ? (
-              <p>No saved workspaces</p>
+              <p className={styles.empty}>No saved workspaces</p>
             ) : (
               <ul className={styles.list}>
                 {workspaces.map((workspace) => (

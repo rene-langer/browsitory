@@ -543,6 +543,7 @@ export default function App({
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
         />
+        {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
         {openRepos.openRepos.length > 0 && <ShortcutHint />}
         {themeToggle}
         <button

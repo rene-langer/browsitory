@@ -42,6 +42,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Release notes no longer truncate a changelog bullet that wraps across lines, and wrapped diff
   lines get a hanging indent.
 - The window no longer flashes blank while open repositories restore.
+- Commit, Continue rebase and Abort rebase/merge buttons are pinned to the bottom of the diff pane
+  instead of sitting below every file section, where a large change set pushed them thousands of
+  pixels off screen.
+- Modal dialogs (release notes, command palette, repo picker) open scrolled to the top instead of
+  to whichever control received focus. The command palette also fills its dialog width, and the
+  empty-state header, empty-state text and Uncommitted Changes row match the rest of the UI.
 
 ### Changed
 
