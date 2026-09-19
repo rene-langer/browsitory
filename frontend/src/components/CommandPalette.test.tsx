@@ -102,4 +102,37 @@ describe("CommandPalette", () => {
     expect(input).toHaveAttribute("aria-expanded", "false");
     expect(input).not.toHaveAttribute("aria-activedescendant");
   });
+
+  describe("grouping and hints", () => {
+    const grouped = (): Command[] => [
+      { id: "fetch-remote:origin", label: "Fetch origin", keywords: [], run: vi.fn() },
+      { id: "switch-branch:dev", label: "Switch to dev", keywords: [], run: vi.fn() },
+      { id: "go-to:Tags", label: "Go to Tags", keywords: [], run: vi.fn() },
+      { id: "apply-stash:0", label: "Apply stash: wip", keywords: [], run: vi.fn() },
+    ];
+
+    it("groups commands under kind headings when the query is empty", () => {
+      render(<CommandPalette commands={grouped()} onRun={vi.fn()} />);
+      for (const name of ["Branches", "Remotes", "Stash", "Go to"]) {
+        expect(screen.getByText(name)).toBeInTheDocument();
+      }
+      // Keyboard order follows the displayed (grouped) order: Branches comes first.
+      const input = screen.getByRole("combobox");
+      expect(input.getAttribute("aria-activedescendant")).toBe(
+        screen.getByText("Switch to dev").closest("li")!.id,
+      );
+    });
+
+    it("shows a flat, headingless list while a query is typed", () => {
+      render(<CommandPalette commands={grouped()} onRun={vi.fn()} />);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "s" } });
+      expect(screen.queryByText("Branches")).not.toBeInTheDocument();
+    });
+
+    it("shows a footer hint for the keys", () => {
+      render(<CommandPalette commands={grouped()} onRun={vi.fn()} />);
+      expect(screen.getByText(/Enter to run/)).toBeInTheDocument();
+      expect(screen.getByText(/Esc to close/)).toBeInTheDocument();
+    });
+  });
 });
