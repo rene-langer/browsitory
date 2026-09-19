@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
@@ -345,6 +345,21 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       expect(screen.getByText("Stash")).toBeDisabled();
+    });
+
+    it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
+      renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByText("Stash")).toBeInTheDocument();
+      expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
+    });
+
+    it("keeps the commit box in the pinned commit-actions group", () => {
+      renderUncommitted(fakeClient({}), status);
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("textbox", { name: "Commit message" })).toBeInTheDocument();
     });
 
     it("renders a Blame button per file", () => {
