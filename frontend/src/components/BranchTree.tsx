@@ -254,7 +254,7 @@ export function BranchTree({
       return (
         <ListRow
           key={branch.name}
-          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
           onClick={isRenaming ? undefined : () => setSelectedRow(rowKey)}
           onDoubleClick={
             isRenaming
@@ -272,7 +272,7 @@ export function BranchTree({
                 }
           }
         >
-          <Toolbar>
+          <div className={styles.rowInner}>
             <button
               type="button"
               className={styles.swatch}
@@ -291,12 +291,12 @@ export function BranchTree({
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
             ) : (
-              <span>
+              <span className={styles.name} title={branch.name}>
                 {node.name}
                 {branch.isCurrent && " (current)"}
               </span>
             )}
-          </Toolbar>
+          </div>
         </ListRow>
       );
     });
@@ -332,7 +332,7 @@ export function BranchTree({
       return (
         <ListRow
           key={branchName}
-          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
           onClick={() => setSelectedRow(rowKey)}
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
@@ -342,8 +342,10 @@ export function BranchTree({
             openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
           }}
         >
-          <Toolbar>
-            <span>{node.name}</span>
+          <div className={styles.rowInner}>
+            <span className={styles.name} title={branchName}>
+              {node.name}
+            </span>
             {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
                 native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
                 name button has focus) — without this, a keyboard/screen-reader user has no
@@ -360,7 +362,7 @@ export function BranchTree({
             >
               <MoreHorizontal size={12} aria-hidden="true" />
             </button>
-          </Toolbar>
+          </div>
         </ListRow>
       );
     });

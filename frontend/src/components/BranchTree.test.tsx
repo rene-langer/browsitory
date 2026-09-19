@@ -1016,3 +1016,26 @@ describe("BranchTree — keys from inner controls", () => {
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 });
+
+describe("BranchTree — row layout", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("a local row keeps its swatch and name in one container and titles the name with the full branch name", () => {
+    renderTree();
+    const swatch = screen.getByRole("button", { name: "Show feat/foo in graph" });
+    const name = screen.getByTitle("feat/foo");
+    expect(name).toHaveTextContent("foo");
+    expect(swatch.parentElement).toBe(name.parentElement);
+  });
+
+  it("a remote row titles its name with the full branch name", async () => {
+    renderTree({
+      remotes: [{ name: "origin", fetchUrl: "u", pushUrl: null, authMode: null, authUsername: null }],
+      onListRemoteBranches: vi.fn().mockResolvedValue(["feat/bar"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    expect(await screen.findByTitle("feat/bar")).toHaveTextContent("bar");
+  });
+});
