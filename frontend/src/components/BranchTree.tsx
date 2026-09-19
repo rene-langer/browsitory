@@ -15,6 +15,7 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
+import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
@@ -159,6 +160,7 @@ export function BranchTree({
   const credentialDialogRef = useRef<HTMLDialogElement>(null);
   const upstreamFormDialogRef = useRef<HTMLDialogElement>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
+  const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
   const [upstreamBranchField, setUpstreamBranchField] = useState("");
   const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
@@ -790,6 +792,10 @@ export function BranchTree({
             </button>
             {isRemoteOpen(remote.name) && (
               <ul className={styles.folderBody}>
+                {remoteBranches[remote.name] === undefined && remoteBranchesError === null && (
+                  <li className={styles.statusRow}>Loading…</li>
+                )}
+                {remoteBranches[remote.name]?.length === 0 && <li className={styles.statusRow}>No branches</li>}
                 {renderRemoteNodes(
                   remote.name,
                   buildBranchTree((remoteBranches[remote.name] ?? []).map((name) => ({ path: name, value: name }))),
@@ -1037,24 +1043,55 @@ export function BranchTree({
         </dialog>
       )}
 
-      <section>
-        <h3>Upstream</h3>
-        {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
-        <button
-          type="button"
-          disabled={operationDisabled || upstream === null || pendingPull !== null}
-          title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          onClick={() => void onPull()}
-        >
-          Pull
-        </button>
-        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
-        {upstream !== null && (
-          <button type="button" onClick={() => void onClearUpstream()}>
-            Clear upstream
-          </button>
+      <section className={styles.upstreamBlock}>
+        <h3 className={styles.upstreamHeading}>Upstream</h3>
+        {upstream === null ? (
+          <p className={styles.helperText}>No upstream for the current branch.</p>
+        ) : (
+          <p className={styles.helperText}>
+            {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
+          </p>
         )}
+        <Toolbar aria-label="Upstream actions">
+          <button
+            type="button"
+            disabled={operationDisabled || upstream === null || pendingPull !== null}
+            title={
+              operationDisabled
+                ? (operationDisabledReason ?? undefined)
+                : upstream === null
+                  ? "No upstream set for the current branch."
+                  : undefined
+            }
+            onClick={() => void onPull()}
+          >
+            Pull
+          </button>
+          {upstream !== null && (
+            <button type="button" onClick={() => setClearUpstreamConfirm(true)}>
+              Clear upstream
+            </button>
+          )}
+        </Toolbar>
+        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
       </section>
+
+      {clearUpstreamConfirm && upstream !== null && (
+        <ConfirmDialog
+          ariaLabel="Clear upstream confirmation"
+          message={
+            <p>
+              Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
+            </p>
+          }
+          confirmLabel="Clear upstream"
+          onConfirm={() => {
+            setClearUpstreamConfirm(false);
+            void onClearUpstream();
+          }}
+          onCancel={() => setClearUpstreamConfirm(false)}
+        />
+      )}
 
       {upstreamDialogOpen && (
         <dialog

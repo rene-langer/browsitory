@@ -1118,3 +1118,41 @@ describe("BranchTree — inline forms focus and Escape", () => {
     expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
   });
 });
+
+describe("BranchTree — remote list states and upstream block", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  const remote = [{ name: "origin", fetchUrl: "u", pushUrl: null, authMode: null, authUsername: null }];
+  const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
+
+  it("shows a non-interactive Loading row while a remote's branches load", async () => {
+    renderTree({ remotes: remote, onListRemoteBranches: vi.fn().mockReturnValue(new Promise(() => {})) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = await screen.findByText("Loading…");
+    expect(row.closest("[role=button]")).toBeNull();
+  });
+
+  it("shows 'No branches' for an empty remote", async () => {
+    renderTree({ remotes: remote, onListRemoteBranches: vi.fn().mockResolvedValue([]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    expect(await screen.findByText("No branches")).toBeInTheDocument();
+  });
+
+  it("explains the disabled Pull button when there is no upstream", () => {
+    renderTree();
+    expect(screen.getByRole("button", { name: "Pull" })).toHaveAttribute(
+      "title",
+      "No upstream set for the current branch.",
+    );
+  });
+
+  it("asks for confirmation before clearing the upstream", async () => {
+    const { props } = renderTree({ upstream: up });
+    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    expect(props.onClearUpstream).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
+    expect(props.onClearUpstream).toHaveBeenCalledOnce();
+  });
+});
