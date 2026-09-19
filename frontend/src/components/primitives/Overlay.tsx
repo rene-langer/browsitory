@@ -20,6 +20,9 @@ export function Overlay({ onClose, children }: { onClose?: () => void; children:
     if (!dialog.open && typeof dialog.showModal === "function") {
       dialog.showModal();
       openedViaShowModal.current = true;
+      // `showModal()` focuses the first focusable control, which scrolls a long dialog to it
+      // (e.g. a Close button at the bottom) instead of leaving the top visible.
+      dialog.scrollTop = 0;
     } else if (!dialog.open) {
       dialog.setAttribute("open", "");
     }
