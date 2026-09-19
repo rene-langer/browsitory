@@ -143,3 +143,17 @@ li.treeRow {
 .rowInner > .iconButton {
   flex: 0 0 auto;
 }
+
+.currentName {
+  font-weight: 700;
+}
+
+.currentMarker {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+  background: var(--color-accent);
+  vertical-align: middle;
+}

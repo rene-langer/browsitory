@@ -290,10 +290,30 @@ export function BranchTree({
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
             ) : (
-              <span className={styles.name} title={branch.name}>
+              <span
+                className={branch.isCurrent ? `${styles.name} ${styles.currentName}` : styles.name}
+                title={branch.name}
+              >
+                {branch.isCurrent && (
+                  <span className={styles.currentMarker} role="img" aria-label="current branch" />
+                )}
                 {node.name}
                 {branch.isCurrent && " (current)"}
               </span>
+            )}
+            {!isRenaming && (
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label={`Actions for ${branch.name}`}
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openRowMenu({ kind: "local-branch", name: branch.name, x: rect.left, y: rect.bottom });
+                }}
+              >
+                <MoreHorizontal size={12} aria-hidden="true" />
+              </button>
             )}
           </div>
         </ListRow>

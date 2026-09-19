@@ -471,7 +471,7 @@ describe("BranchTree — remotes", () => {
   it("a remote-tracking branch row exposes an explicit '…' actions button that opens its context menu", async () => {
     renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    const actionsButton = await screen.findByRole("button", { name: "Actions for feat/foo" });
+    const actionsButton = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
     expect(actionsButton).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(actionsButton);
     expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
@@ -1011,7 +1011,7 @@ describe("BranchTree — keys from inner controls", () => {
       onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
     });
     fireEvent.click(screen.getByRole("button", { name: /origin/ }));
-    const actions = await screen.findByRole("button", { name: "Actions for feat/foo" });
+    const actions = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
     fireEvent.keyDown(actions, { key: "Enter" });
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
@@ -1047,5 +1047,26 @@ describe("BranchTree — add button placement", () => {
     const heading = screen.getByRole("heading", { name: /Branches/ });
     expect(add.closest("section")?.firstElementChild).toContainElement(heading);
     expect(add.closest("section")?.firstElementChild).toContainElement(add);
+  });
+});
+
+describe("BranchTree — local row actions button", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("a local row's '...' button opens the branch context menu", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
+    expect(actions).toHaveAttribute("aria-haspopup", "menu");
+    fireEvent.click(actions);
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("the current branch is marked with a bold weight and a marker", () => {
+    renderTree();
+    const marker = screen.getByLabelText("current branch");
+    expect(marker.closest("span[title='main']")).not.toBeNull();
   });
 });
