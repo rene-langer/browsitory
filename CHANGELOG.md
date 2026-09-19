@@ -34,6 +34,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The frontend's global error/rejection logging now goes through `RepoClient` instead of
   importing a Tauri-only plugin directly, so uncaught errors are actually logged from the
   VSCode webview too (previously silently dropped there).
+- Pressing Enter or Space on a branch row's graph-visibility swatch or "..." button no longer
+  checks the branch out; key events from controls nested in a row stay with that control.
+- Branch tree rows stay on one line with truncating names (full name in the tooltip), the "+"
+  button moved into the Branches header, and the graph-visibility swatch has a larger hit area
+  and a hollow "hidden" state.
+- Release notes no longer truncate a changelog bullet that wraps across lines, and wrapped diff
+  lines get a hanging indent.
+- The window no longer flashes blank while open repositories restore.
 
 ### Changed
 
@@ -42,6 +50,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Branch tree: local branches get an "Actions" button and a bold current-branch marker; inline
+  new-branch/add-remote/rename forms focus on open and cancel on Escape; remote lists show
+  "Loading..." and "No branches"; the Upstream block is styled, explains a disabled Pull, and
+  confirms before clearing the upstream.
+- Commit graph keyboard access: Enter, the Menu key or Shift+F10 open the commit menu; Home/End,
+  PageUp/PageDown navigate; Shift+Arrow extends the squash range.
+- Command palette groups commands by kind, uses the UI font size and shows key hints; the header
+  shows a Ctrl/Cmd+K hint; the empty-state repository picker is a styled row list.
+- BranchTree's edit-remote, credentials, set-upstream and diverged-pull dialogs now share a
+  `FormDialog` primitive that focuses the first field.
 - A desktop VSCode extension host now loads the shared React frontend in a restricted webview,
   routes folder/external-URL/version operations through native VSCode APIs, and forwards the
   remaining `RepoClient` surface to `vscode-sidecar` over JSON-RPC. Sidecar exit, process error,
