@@ -991,3 +991,28 @@ describe("BranchTree — remotes", () => {
     expect(optionValues).toEqual(["main", "develop"]);
   });
 });
+
+describe("BranchTree — keys from inner controls", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("Enter and Space on the swatch do not switch branches", () => {
+    const { props } = renderTree();
+    const swatch = screen.getByRole("button", { name: "Show feat/foo in graph" });
+    fireEvent.keyDown(swatch, { key: "Enter" });
+    fireEvent.keyDown(swatch, { key: " " });
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
+  });
+
+  it("Enter on a remote row's actions button does not check the branch out", async () => {
+    const { props } = renderTree({
+      remotes: [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }],
+      onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: /origin/ }));
+    const actions = await screen.findByRole("button", { name: "Actions for feat/foo" });
+    fireEvent.keyDown(actions, { key: "Enter" });
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
+  });
+});
