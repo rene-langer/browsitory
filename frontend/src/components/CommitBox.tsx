@@ -1,5 +1,4 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./CommitBox.module.css";
 
@@ -58,7 +57,7 @@ export function CommitBox({
   };
 
   return (
-    <Panel>
+    <div>
       <textarea
         className={styles.textarea}
         value={message}
@@ -73,6 +72,6 @@ export function CommitBox({
         </button>
         {initialMessage !== undefined && <button onClick={onAbortMerge}>Abort merge</button>}
       </Toolbar>
-    </Panel>
+    </div>
   );
 }

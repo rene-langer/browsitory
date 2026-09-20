@@ -16,6 +16,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
+  loads; empty diffs now read "No text differences (binary file or mode-only change)".
+  Collapsed file sections no longer fetch their diff until expanded.
+- Diff hunk actions are no longer tab stops. The diff is one tab stop with `[`/`]` (prev/next
+  hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm Discard" is
+  styled as danger and disarms on blur, Escape or after 5 seconds.
+- Diff lines show old/new line-number gutters; long tokens wrap and hunk headers wrap cleanly
+  at narrow widths.
+- Commit dock is lighter (single border, no nested panel) and no longer lets diff content show
+  beneath it.
 - Sidebar section header buttons (such as the Branches "+") no longer sit under the sidebar's
   overlay scrollbar, which swallowed clicks on them once the sections overflowed; this also
   fixes the remote e2e specs that go through that button.

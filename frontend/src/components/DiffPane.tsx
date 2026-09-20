@@ -105,7 +105,7 @@ function UncommittedFileSection({
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const isConflicted = entry.kind === "Conflicted";
@@ -117,7 +117,8 @@ function UncommittedFileSection({
   // `status` stays a dependency for the same reason the old single-pane version needed it: a new
   // `status` array (by reference) is the only signal that this file's own diff may be stale.
   useEffect(() => {
-    if (mode !== "diff" || isConflicted) return;
+    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
+    if (mode !== "diff" || isConflicted || collapsed) return;
     let ignore = false;
     client
       .getWorkingDiff(repoPath, entry.path, entry.staged)
@@ -135,7 +136,7 @@ function UncommittedFileSection({
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status, collapsed]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -596,12 +597,12 @@ function CommitFileSection({
   onSelectRow: (row: SelectedRow) => void;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (mode !== "diff") return;
+    if (mode !== "diff" || collapsed) return;
     let ignore = false;
     client
       .getCommitDiff(repoPath, commitId, path)
@@ -619,7 +620,7 @@ function CommitFileSection({
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, commitId, path, mode]);
+  }, [repoPath, client, commitId, path, mode, collapsed]);
 
   useEffect(() => {
     if (mode !== "blame") return;
