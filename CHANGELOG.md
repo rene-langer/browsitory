@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `resolve_conflict` now validates that the given path is an actual index conflict before
   writing to the working directory, closing a gap where any path (including one under `.git/`)
   would be written and staged unconditionally.
+- Updated `rustls` to 0.23.45 to pick up the fix for RUSTSEC-2026-0285 (TLS 1.3 handshake
+  messages accepted across encryption-level boundaries).
 
 ### Fixed
 
