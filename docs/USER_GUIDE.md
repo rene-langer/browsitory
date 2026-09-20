@@ -59,7 +59,16 @@ aside — expand **Stashes** in the sidebar to get them back.
 
 Click any commit in the graph to see the files it touched; click a file to
 view its diff, or **Blame** to see per-line authorship. Commits from every
-local branch are shown, each tagged with the branches that point at it.
+local branch are shown, each tagged with the branches that point at it, with
+the author and date on each row (they hide when the pane is narrow). Selecting
+a commit shows its full message, author, date, full SHA (with a **Copy**
+button) and parents above the file list; click a parent to jump to it. The
+graph loads the latest 300 commits; choose **Load more** at the bottom (or
+keep arrowing past the last row) to fetch the next page.
+
+The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
+current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
+based on the last fetch.
 
 ![Viewing a past commit's diff](assets/commit-diff.png)
 
@@ -67,9 +76,10 @@ local branch are shown, each tagged with the branches that point at it.
 
 **Branches** is a single tree: a **Local** folder holding your local
 branches, and one folder per remote holding that remote's branches (fetched
-lazily the first time you expand it). Click a local branch to switch to it;
+lazily the first time you expand it). Double-click a local branch, or choose
+**Checkout** from its context menu, to switch to it;
 right-click a branch, a remote folder, or a remote branch to bring up its
-actions — rename, delete, or merge a local branch; checkout or set a remote
+actions — checkout, rename, delete, or merge a local branch; checkout or set a remote
 branch as upstream; fetch, push, edit, manage credentials for, or remove a
 remote. The **+** button in the section header opens **New Branch…** or
 **Add Remote…**. Creating a branch from a specific commit, or starting a

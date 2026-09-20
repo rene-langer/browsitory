@@ -65,6 +65,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Selecting a commit now shows a header with its full message, author, date, full SHA (copyable)
+  and parents (click to jump), backed by a new `get_commit_message` IPC command wired through
+  git-core, repo-service, tauri-app and the VSCode sidecar (UX-001). History rows also show
+  author and date columns that hide when the pane is narrow.
+- History pagination: the graph loads 300 commits at a time with a "Load more" row, and
+  arrowing past the last row loads the next page instead of silently stopping (UX-002).
+- Sync bar above the commit graph with Fetch, Pull and Push buttons and ahead/behind counts;
+  `UpstreamInfo` gains optional `ahead`/`behind` (null until the tracking ref is fetched)
+  (UX-008).
+- "Checkout" is now the first item of a local branch's context menu; the user guide documents
+  double-click checkout too (UX-003).
+- The "Uncommitted Changes" row now has a hollow lane node and aligns with commit rows
+  (VIS-004).
 - Branch tree: local branches get an "Actions" button and a bold current-branch marker; inline
   new-branch/add-remote/rename forms focus on open and cancel on Escape; remote lists show
   "Loading..." and "No branches"; the Upstream block is styled, explains a disabled Pull, and

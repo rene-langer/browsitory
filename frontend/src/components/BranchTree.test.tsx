@@ -178,6 +178,21 @@ describe("BranchTree — local branches", () => {
     expect(props.onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
+  it("a local branch's context menu lists Checkout first and calls onSwitchBranch", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items[0]).toHaveAccessibleName("Checkout");
+    fireEvent.click(items[0]);
+    expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/foo");
+  });
+
+  it("Checkout is disabled for the current branch", () => {
+    renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /main \(current\)/ }));
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
+  });
+
   it("a branch's context menu Isolate branch calls onSetGraphBranchSelection with only that branch", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));

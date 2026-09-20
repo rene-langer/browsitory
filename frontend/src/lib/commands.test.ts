@@ -15,6 +15,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       selectedRow: "uncommitted",
       status: [],
       commits: [],
+      graphLimit: 300,
+      hasMoreHistory: false,
       graphBranchSelection: null,
       branches: [
         { name: "main", isCurrent: true },
@@ -122,6 +124,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     createPullRequest: vi.fn(),
     openExternalUrl: vi.fn(),
     setGraphBranchSelection: vi.fn(),
+    loadMoreHistory: vi.fn(),
     refresh: vi.fn(),
     dismissError: vi.fn(),
   };

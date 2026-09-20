@@ -533,6 +533,12 @@ export function BranchTree({
   function branchContextItems(branch: BranchInfo): ContextMenuItem[] {
     const items: ContextMenuItem[] = [
       {
+        label: "Checkout",
+        title: branch.isCurrent ? "Already the current branch." : "Same as double-clicking the branch.",
+        disabled: isRebasing || branch.isCurrent,
+        onSelect: () => onSwitchBranch(branch.name),
+      },
+      {
         label: "Rename",
         disabled: isRebasing,
         onSelect: () => {

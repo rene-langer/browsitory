@@ -4,6 +4,7 @@ import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutHint } from "./components/ShortcutHint";
 import { CommitGraph } from "./components/CommitGraph";
+import { SyncBar } from "./components/SyncBar";
 import { DiffPane } from "./components/DiffPane";
 import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
@@ -291,7 +292,19 @@ function RepoWorkspace({
             maxWidth={800}
             label="History and diff width"
             left={
+              <>
+              <SyncBar
+                remotes={appState.state.remotes}
+                upstream={appState.state.upstream}
+                operationDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
+                onFetch={appState.fetchRemote}
+                onPull={appState.pullCurrentUpstream}
+                onPush={appState.pushCurrentBranch}
+              />
               <CommitGraph
+                hasMore={appState.state.hasMoreHistory}
+                onLoadMore={() => void appState.loadMoreHistory()}
                 status={appState.state.status}
                 commits={appState.state.commits}
                 selectedRow={appState.state.selectedRow}
@@ -301,12 +314,14 @@ function RepoWorkspace({
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onSquashCommits={appState.openSquashPlanner}
               />
+              </>
             }
             right={
               <DiffPane
                 repoPath={repoPath}
                 client={client}
                 selectedRow={appState.state.selectedRow}
+                commits={appState.state.commits}
                 status={appState.state.status}
                 onStageFile={appState.stageFile}
                 onUnstageFile={appState.unstageFile}

@@ -9,6 +9,8 @@ const BASE_STATE: AppState = {
   selectedRow: "uncommitted",
   status: [],
   commits: [],
+  graphLimit: 300,
+  hasMoreHistory: false,
   graphBranchSelection: null,
   branches: [],
   worktrees: [],

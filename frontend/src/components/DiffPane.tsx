@@ -11,11 +11,12 @@ import {
   Plus,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
   FileConflictChoice,
+  GraphCommit,
   RepoClient,
   StatusEntry,
   StatusKind,
@@ -23,6 +24,7 @@ import type {
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
+import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
@@ -267,10 +269,13 @@ export function DiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  commits,
 }: {
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
+  // Loaded history, used for the selected commit's header (author, date, parents).
+  commits?: GraphCommit[];
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
@@ -322,6 +327,7 @@ export function DiffPane({
       repoPath={repoPath}
       client={client}
       commitId={selectedRow.commitId}
+      commits={commits}
       onSelectRow={onSelectRow}
     />
   );
@@ -679,13 +685,16 @@ function CommitDiffPane({
   repoPath,
   client,
   commitId,
+  commits,
   onSelectRow,
 }: {
   repoPath: string;
   client: RepoClient;
   commitId: string;
+  commits?: GraphCommit[];
   onSelectRow: (row: SelectedRow) => void;
 }) {
+  const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const [files, setFiles] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
@@ -734,6 +743,14 @@ function CommitDiffPane({
 
   return (
     <div>
+      <CommitHeader
+        repoPath={repoPath}
+        client={client}
+        commitId={commitId}
+        commit={commits?.find((c) => c.id === commitId)}
+        knownCommitIds={knownCommitIds}
+        onSelectRow={onSelectRow}
+      />
       {files.length > 0 && (
         <div className={styles.groupHeading}>
           <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
