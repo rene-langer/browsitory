@@ -128,6 +128,17 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
 }
 
 describe("buildCommands", () => {
+  it("includes a shortcuts command only when a handler is supplied", () => {
+    const onShow = vi.fn();
+    expect(buildCommands(makeAppState()).some((c) => c.id === "show-shortcuts")).toBe(false);
+    const cmd = buildCommands(makeAppState(), undefined, undefined, undefined, undefined, onShow).find(
+      (c) => c.id === "show-shortcuts",
+    );
+    expect(cmd?.label).toBe("Show keyboard shortcuts");
+    cmd?.run();
+    expect(onShow).toHaveBeenCalled();
+  });
+
   it("includes one switch-branch command per non-current branch", () => {
     const appState = makeAppState();
     const commands = buildCommands(appState);

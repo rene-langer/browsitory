@@ -16,6 +16,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Narrow windows: the Tauri window has a minimum size (800x500), the diff pane keeps a minimum
+  width instead of collapsing to zero, and the sidebar auto-collapses below 900px (RESP-001).
+- The header "+" (open repository) button is pinned outside the scrolling tab strip (RESP-002).
+- Transfer progress shows MB/GB instead of ever-larger KB values (PERF-002). Transfer cancel is
+  not added: the backend has no cancellation support yet.
+
+- Keyboard shortcut sheet, opened with `?` or the "Show keyboard shortcuts" palette command
+  (UX-006).
 - Sidebar section header buttons (such as the Branches "+") no longer sit under the sidebar's
   overlay scrollbar, which swallowed clicks on them once the sections overflowed; this also
   fixes the remote e2e specs that go through that button.

@@ -1,12 +1,24 @@
-.tabs {
+.strip {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
   margin: 0 var(--space-4);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.addButton {
+  flex: 0 0 auto;
 }
 
 .tab {

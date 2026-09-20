@@ -73,6 +73,7 @@ export function RepoTabs({
   };
 
   return (
+    <div className={styles.strip}>
     <div className={styles.tabs} role="tablist" aria-label="Open repositories">
       {groupContiguousTabs(openRepos, workspaceNames).map((group, index) =>
         group.workspaceName !== null ? (
@@ -96,6 +97,8 @@ export function RepoTabs({
           renderTab(group.repos[0])
         ),
       )}
+    </div>
+      {/* Outside the scrolling tablist so it stays reachable when tabs overflow. */}
       <button type="button" className={styles.addButton} aria-label="Open another repository" onClick={onAddTab}>
         <Plus size={14} aria-hidden="true" />
       </button>
