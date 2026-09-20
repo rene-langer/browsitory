@@ -36,6 +36,7 @@ export function SplitView({
   minWidth = 160,
   maxWidth = 480,
   collapsible = false,
+  forceCollapsed = false,
   label = "Resize",
 }: {
   left: ReactNode;
@@ -45,6 +46,8 @@ export function SplitView({
   minWidth?: number;
   maxWidth?: number;
   collapsible?: boolean;
+  /** Hides the left pane regardless of the stored width (adaptive narrow layouts); stored width is untouched. */
+  forceCollapsed?: boolean;
   label?: string;
 }) {
   const [width, setWidth] = useState(() =>
@@ -113,11 +116,13 @@ export function SplitView({
     persist(next);
   }
 
+  const shownWidth = forceCollapsed ? 0 : width;
+
   return (
     <div className={styles.splitView}>
       {/* `hidden` keeps a collapsed pane mounted (no remount cost when it is
           re-expanded) while removing it from the tab order and a11y tree. */}
-      <div className={styles.left} hidden={width === 0} style={{ width: `${width}px` }}>
+      <div className={styles.left} hidden={shownWidth === 0} style={{ width: `${shownWidth}px` }}>
         {left}
       </div>
       <div

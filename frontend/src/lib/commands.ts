@@ -111,9 +111,19 @@ export function buildCommands(
   otherOpenRepos: OpenRepo[] = [],
   onSwitchRepoTab: (path: string) => void = () => {},
   panelVisibility: Record<SidebarPanelId, boolean> = defaultPanelVisibility(),
+  onShowShortcuts?: () => void,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
+
+  if (onShowShortcuts !== undefined) {
+    commands.push({
+      id: "show-shortcuts",
+      label: "Show keyboard shortcuts",
+      keywords: ["keyboard", "shortcuts", "help", "keys"],
+      run: onShowShortcuts,
+    });
+  }
 
   // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
   // sidebar mutation button behind. Mutating command families must be omitted

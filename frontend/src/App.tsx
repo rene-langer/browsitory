@@ -3,6 +3,9 @@ import { HelpCircle, Moon, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutHint } from "./components/ShortcutHint";
+import { ShortcutSheet } from "./components/ShortcutSheet";
+
+const NARROW_BREAKPOINT = 900;
 import { CommitGraph } from "./components/CommitGraph";
 import { SyncBar } from "./components/SyncBar";
 import { DiffPane } from "./components/DiffPane";
@@ -59,6 +62,14 @@ function RepoWorkspace({
   const appState = useAppState(client, repoPath);
   const panelVisibility = useSidebarPanelVisibility();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
+  const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_BREAKPOINT);
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < NARROW_BREAKPOINT);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // Populate this tab's state as soon as it mounts. `useAppState` no longer fetches anything on
   // its own — its old `openRepo` method (removed when repo-opening moved out to `useOpenRepos`)
@@ -79,6 +90,14 @@ function RepoWorkspace({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen((prev) => !prev);
+        return;
+      }
+      if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const target = event.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+        event.preventDefault();
+        setShortcutsOpen(true);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -155,9 +174,15 @@ function RepoWorkspace({
               openRepos.filter((repo) => repo.path !== repoPath),
               onSwitchRepoTab,
               panelVisibility.visibility,
+              () => setShortcutsOpen(true),
             )}
             onRun={() => setPaletteOpen(false)}
           />
+        </Overlay>
+      )}
+      {active && shortcutsOpen && (
+        <Overlay onClose={() => setShortcutsOpen(false)}>
+          <ShortcutSheet onClose={() => setShortcutsOpen(false)} />
         </Overlay>
       )}
       <SplitView
@@ -166,6 +191,7 @@ function RepoWorkspace({
         minWidth={200}
         maxWidth={420}
         collapsible
+        forceCollapsed={narrow}
         label="Sidebar width"
         left={
           <Sidebar

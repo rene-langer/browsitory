@@ -7,7 +7,9 @@
 }
 
 .left {
-  flex: 0 0 auto;
+  /* Shrinkable so the right pane's min-width below wins in narrow windows. */
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -44,6 +46,8 @@
    min-height: 0`) can fill it. Padding and scrolling live on .rightInner. */
 .right {
   flex: 1 1 auto;
+  /* Never let the right (diff) pane collapse to zero width. */
+  min-width: 320px;
   display: flex;
   flex-direction: column;
   min-height: 0;
