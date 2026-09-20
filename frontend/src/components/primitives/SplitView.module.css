@@ -13,10 +13,18 @@
 }
 
 .divider {
+  position: relative;
   flex: 0 0 4px;
   cursor: col-resize;
   background: var(--color-border);
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+/* Invisible extra grab area either side of the 4px line. */
+.divider::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
 }
 
 .divider:hover {

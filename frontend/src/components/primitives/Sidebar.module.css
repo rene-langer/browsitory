@@ -19,6 +19,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
   padding: var(--space-1);
   border: none;
   background: transparent;

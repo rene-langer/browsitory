@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./FormDialog.module.css";
 
 /**
@@ -20,6 +21,7 @@ export function FormDialog({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  useRestoreFocus();
 
   useEffect(() => {
     const dialog = dialogRef.current;

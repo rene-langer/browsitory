@@ -26,6 +26,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   at narrow widths.
 - Commit dock is lighter (single border, no nested panel) and no longer lets diff content show
   beneath it.
+- Accessibility pass: confirm and form dialogs return focus to the invoking control when they
+  close; workspace deletion uses the shared modal `ConfirmDialog`; repo tabs use roving tabindex
+  with Left/Right/Home/End navigation and link to their workspace panel; swatches, tab close
+  buttons, sidebar toolbar buttons and split dividers have at least 24x24 pointer targets
+  (`--size-target-min`); context menus no longer close on mouse leave and stay inside the
+  viewport; reduced-motion preference disables smooth scrolling and transitions; sidebar toolbar
+  icons have tooltips. Added a shared `Field` primitive (label, hint, error, `aria-invalid`,
+  `aria-describedby`, `required`).
 - Sidebar section header buttons (such as the Branches "+") no longer sit under the sidebar's
   overlay scrollbar, which swallowed clicks on them once the sections overflowed; this also
   fixes the remote e2e specs that go through that button.

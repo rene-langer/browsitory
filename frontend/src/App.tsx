@@ -11,6 +11,7 @@ import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { InlineError } from "./components/primitives/InlineError";
 import { Overlay } from "./components/primitives/Overlay";
@@ -121,7 +122,13 @@ function RepoWorkspace({
     // always hit whichever tab is first in document order — `commands.ts`'s `goToSidebarSection`
     // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
     // actually looking at.
-    <div style={{ display: active ? "contents" : "none" }} data-active-repo={active ? "true" : "false"}>
+    <div
+      style={{ display: active ? "contents" : "none" }}
+      data-active-repo={active ? "true" : "false"}
+      role="tabpanel"
+      id={repoPanelId(repoPath)}
+      aria-labelledby={repoTabId(repoPath)}
+    >
       {appState.state.error !== null && (
         <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
       )}
