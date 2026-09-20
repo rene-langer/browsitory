@@ -42,3 +42,17 @@
 .iconButton:hover {
   background: var(--color-bg-subtle);
 }
+
+/* Global error banners float over the workspace instead of pushing it down (no layout shift). */
+.errorLayer {
+  position: relative;
+  height: 0;
+  z-index: 40;
+}
+
+.errorLayer > * {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}

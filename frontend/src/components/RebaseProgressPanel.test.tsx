@@ -64,4 +64,20 @@ describe("RebaseProgressPanel", () => {
 
     expect(onAbort).toHaveBeenCalled();
   });
+
+  it("shows why Continue is disabled and ties it to the button", () => {
+    render(
+      <RebaseProgressPanel
+        currentStep={1}
+        totalSteps={3}
+        disabled
+        disabledReason="Resolve 2 conflicts to continue"
+        onContinue={vi.fn()}
+        onAbort={vi.fn()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Continue Rebase" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription("Resolve 2 conflicts to continue");
+  });
 });

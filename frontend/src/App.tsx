@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HelpCircle, Moon, Sun } from "lucide-react";
+import { Moon, Sparkles, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutHint } from "./components/ShortcutHint";
@@ -11,6 +11,9 @@ import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
+import { OperationStatusStrip } from "./components/OperationStatusStrip";
+import { ToastRegion } from "./components/primitives/ToastRegion";
+import { useToasts } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
@@ -107,6 +110,36 @@ function RepoWorkspace({
           ? "A rebase is in progress."
           : null;
 
+  // Positive feedback (AUD-2026-09-20-FB-003). The mutation runner swallows failures into
+  // `state.error`, so success is detected as "pending fell back to false with no error" after a
+  // labelled action; `announce` clears any stale error first so that check is unambiguous.
+  const toasts = useToasts();
+  const pendingLabel = useRef<string | null>(null);
+  const { pending: statePending, error: stateError } = appState.state;
+  const { push: pushToast } = toasts;
+  useEffect(() => {
+    if (statePending || pendingLabel.current === null) return;
+    const label = pendingLabel.current;
+    pendingLabel.current = null;
+    if (stateError === null) pushToast(label);
+  }, [statePending, stateError, pushToast]);
+  const { dismissError } = appState;
+  const announce = useCallback(
+    <A extends unknown[], R,>(label: string, action: (...args: A) => R) =>
+      (...args: A): R => {
+        dismissError();
+        pendingLabel.current = label;
+        return action(...args);
+      },
+    [dismissError],
+  );
+  const pullOutcome = appState.state.pullOutcome;
+  useEffect(() => {
+    if (pullOutcome === null) return;
+    if (pullOutcome.kind === "UpToDate") pushToast("Already up to date");
+    else if (pullOutcome.kind === "FastForwarded") pushToast(`Pulled ${pullOutcome.upstreamRef}`);
+  }, [pullOutcome, pushToast]);
+
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
   // rule that already disables every other mutating action while this is true.
@@ -121,8 +154,18 @@ function RepoWorkspace({
     // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
     // actually looking at.
     <div style={{ display: active ? "contents" : "none" }} data-active-repo={active ? "true" : "false"}>
+      <OperationStatusStrip
+        merging={appState.state.mergeMessage !== null}
+        rebaseProgress={appState.state.rebaseProgress}
+        conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
+        onAbortMerge={appState.abortMerge}
+        onAbortRebase={appState.abortRebase}
+      />
+      {active && <ToastRegion toasts={toasts.toasts} onDismiss={toasts.dismiss} />}
       {appState.state.error !== null && (
-        <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+        <div className={styles.errorLayer}>
+          <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+        </div>
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
@@ -173,9 +216,9 @@ function RepoWorkspace({
             <BranchTree
               branches={appState.state.branches}
               createBranchDraft={appState.state.createBranchDraft}
-              onSwitchBranch={appState.switchBranch}
+              onSwitchBranch={announce("Switched branch", appState.switchBranch)}
               onCreateBranch={appState.createBranch}
-              onDeleteBranch={appState.deleteBranch}
+              onDeleteBranch={announce("Deleted branch", appState.deleteBranch)}
               onRenameBranch={appState.renameBranch}
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
@@ -199,8 +242,8 @@ function RepoWorkspace({
               onSetUpstream={appState.setCurrentUpstream}
               onClearUpstream={appState.clearCurrentUpstream}
               onListRemoteBranches={appState.listRemoteBranches}
-              onFetchRemote={appState.fetchRemote}
-              onPushCurrentBranch={appState.pushCurrentBranch}
+              onFetchRemote={announce("Fetch complete", appState.fetchRemote)}
+              onPushCurrentBranch={announce("Push complete", appState.pushCurrentBranch)}
               onPull={appState.pullCurrentUpstream}
               pendingPull={appState.state.pendingPull}
               pullOutcome={appState.state.pullOutcome}
@@ -315,8 +358,8 @@ function RepoWorkspace({
                 onStageHunk={appState.stageHunk}
                 onUnstageHunk={appState.unstageHunk}
                 onDiscardHunk={appState.discardHunk}
-                onCommit={appState.commit}
-                onSaveStash={appState.saveStash}
+                onCommit={announce("Committed", appState.commit)}
+                onSaveStash={announce("Changes stashed", appState.saveStash)}
                 onSelectRow={appState.selectRow}
                 onResolveConflict={appState.resolveConflict}
                 onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
@@ -386,7 +429,7 @@ export default function App({
   // to open (bad path, a stale recent-repo entry, permissions). Nothing else catches that now
   // that `App` has no `useAppState` of its own, so a failed open would look like nothing
   // happened — the same trap the pre-tabs `App` carried a comment about.
-  const [openError, setOpenError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<{ message: string; path: string } | null>(null);
   const [transportError, setTransportError] = useState<string | null>(null);
   useEffect(
     () => subscribeTransportStatus((status) => setTransportError(status.message)),
@@ -396,11 +439,12 @@ export default function App({
   const openRepoTab = useCallback(
     // Both branches settle asynchronously on purpose: the E2E auto-open effect below calls this
     // directly, and a synchronous `setOpenError` in the body would be a setState-in-effect.
-    (path: string) =>
-      openRepo(path).then(
+    (path: string) => {
+      return openRepo(path).then(
         () => setOpenError(null),
-        (error: unknown) => setOpenError(String(error)),
-      ),
+        (error: unknown) => setOpenError({ message: String(error), path }),
+      );
+    },
     [openRepo],
   );
 
@@ -550,19 +594,35 @@ export default function App({
           type="button"
           className={styles.iconButton}
           aria-label="Release notes"
+          title="What’s new"
           onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
         >
-          <HelpCircle size={16} />
+          <Sparkles size={16} aria-hidden="true" />
         </button>
       </header>
       <LaneBraid />
       {openRepos.restoreError !== null && (
         <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
       )}
-      {transportError !== null && (
-        <InlineError message={transportError} onDismiss={() => setTransportError(null)} />
+      {(transportError !== null || openError !== null) && (
+        <div className={styles.errorLayer}>
+          {transportError !== null && (
+            <InlineError
+              message={transportError}
+              hint="Browsitory lost its connection to the backend. Restart the app if this keeps happening."
+              onDismiss={() => setTransportError(null)}
+            />
+          )}
+          {openError !== null && (
+            <InlineError
+              message={openError.message}
+              hint="Check that the folder exists and is a Git repository."
+              onRetry={() => void openRepoTab(openError.path)}
+              onDismiss={() => setOpenError(null)}
+            />
+          )}
+        </div>
       )}
-      {openError !== null && <InlineError message={openError} onDismiss={() => setOpenError(null)} />}
       {releaseNotesView !== null && (
         <ReleaseNotesModal entries={releaseNotesView.entries} onClose={closeReleaseNotes} />
       )}
