@@ -1,9 +1,36 @@
 .draftForm {
   display: flex;
-  flex-wrap: wrap;
-  align-items: end;
+  flex-direction: column;
   gap: var(--space-2);
   margin: var(--space-2) 0;
+  min-width: 0;
+}
+
+.draftBase,
+.draftProblem {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.draftProblem {
+  color: var(--color-danger-text);
+}
+
+.draftLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.draftCheckbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.draftActions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .tree {

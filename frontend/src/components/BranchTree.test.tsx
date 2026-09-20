@@ -1157,3 +1157,30 @@ describe("BranchTree — remote list states and upstream block", () => {
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
   });
 });
+
+describe("BranchTree — new branch form", () => {
+  it("shows the base branch for HEAD and a short id for a commit", () => {
+    const { unmount } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    expect(screen.getByText(/New branch from/)).toHaveTextContent("New branch from main");
+    unmount();
+    renderTree({ createBranchDraft: { startPoint: "abcdef1234567890abcdef1234567890abcdef12" } });
+    expect(screen.getByText(/New branch from/)).toHaveTextContent("New branch from abcdef1");
+  });
+
+  it("validates the name inline and blocks Create, tied to the field", () => {
+    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    const input = screen.getByRole("textbox", { name: "Branch name" });
+    fireEvent.change(input, { target: { value: "bad name" } });
+    expect(input).toHaveAccessibleDescription("Branch names can't contain spaces.");
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(props.onCreateBranch).not.toHaveBeenCalled();
+  });
+
+  it("checks out the new branch when the option is ticked", async () => {
+    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/x"));
+  });
+});
