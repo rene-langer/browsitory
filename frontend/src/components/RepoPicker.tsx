@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Panel } from "./primitives/Panel";
@@ -146,23 +147,20 @@ export function RepoPicker({
           </Panel>
         </div>
         {deleteConfirmation !== null && (
-          <dialog open aria-label={`Delete workspace ${deleteConfirmation.name}`}>
-            <p>
-              Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the saved
-              workspace is removed.
-            </p>
-            <button
-              type="button"
-              onClick={() =>
-                void onDeleteWorkspace(deleteConfirmation.id).then(() => setDeleteConfirmation(null))
-              }
-            >
-              Delete workspace
-            </button>
-            <button type="button" onClick={() => setDeleteConfirmation(null)}>
-              Cancel
-            </button>
-          </dialog>
+          <ConfirmDialog
+            ariaLabel={`Delete workspace ${deleteConfirmation.name}`}
+            message={
+              <p>
+                Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the
+                saved workspace is removed.
+              </p>
+            }
+            confirmLabel="Delete workspace"
+            onConfirm={() =>
+              void onDeleteWorkspace(deleteConfirmation.id).then(() => setDeleteConfirmation(null))
+            }
+            onCancel={() => setDeleteConfirmation(null)}
+          />
         )}
       </Panel>
     </div>

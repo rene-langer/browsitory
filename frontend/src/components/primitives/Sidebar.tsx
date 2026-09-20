@@ -21,6 +21,7 @@ export function Sidebar({ children, panelToggles }: { children: ReactNode; panel
           type="button"
           className={styles.toolbarButton}
           aria-label="Expand all sections"
+          title="Expand all sections"
           onClick={() => groupRef.current?.expandAll()}
         >
           <ChevronsUpDown size={14} aria-hidden="true" />
@@ -29,6 +30,7 @@ export function Sidebar({ children, panelToggles }: { children: ReactNode; panel
           type="button"
           className={styles.toolbarButton}
           aria-label="Collapse all sections"
+          title="Collapse all sections"
           onClick={() => groupRef.current?.collapseAll()}
         >
           <ChevronsDownUp size={14} aria-hidden="true" />
@@ -39,6 +41,7 @@ export function Sidebar({ children, panelToggles }: { children: ReactNode; panel
               type="button"
               className={styles.toolbarButton}
               aria-label="Sidebar section settings"
+              title="Sidebar section settings"
               aria-expanded={settingsOpen}
               onClick={() => setSettingsOpen((open) => !open)}
             >

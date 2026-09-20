@@ -101,11 +101,11 @@
   background: transparent;
 }
 
-/* Invisible 20x20 hit area around the 10px dot. */
+/* Invisible 24x24 (--size-target-min) hit area around the 10px dot. */
 .swatch::after {
   content: "";
   position: absolute;
-  inset: -5px;
+  inset: calc((var(--size-target-min) - 10px) / -2);
 }
 
 .swatch:focus-visible {

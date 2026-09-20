@@ -32,6 +32,9 @@
   --space-4: 16px;
   --space-5: 24px;
 
+  /* Minimum pointer target (WCAG 2.5.8) */
+  --size-target-min: 24px;
+
   /* Radius */
   --radius-sm: 4px;
   --radius-md: 8px;

@@ -76,7 +76,7 @@ function expandRemoteBranches(remoteName: string): void {
   if (remoteToggle.getAttribute("aria-expanded") === "false") {
     remoteToggle.click();
   }
-  remoteToggle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  remoteToggle.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
 }
 
 function goToSidebarSection(title: string): void {
@@ -95,7 +95,14 @@ function goToSidebarSection(title: string): void {
   if (button.getAttribute("aria-expanded") === "false") {
     button.click();
   }
-  button.closest("section")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  button.closest("section")?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
+}
+
+/** Smooth scrolling unless the user asked the OS for reduced motion. */
+function scrollBehavior(): ScrollBehavior {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 }
 
 export function buildCommands(

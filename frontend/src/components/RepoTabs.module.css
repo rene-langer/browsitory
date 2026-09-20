@@ -81,9 +81,14 @@
 /* Fixed footprint so a truncated label's ellipsis never jitters against the "x". */
 .closeButton {
   flex: 0 0 auto;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--size-target-min);
+  height: var(--size-target-min);
   padding: 0;
+}
+
+.addButton {
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
 }
 
 .closeButton:hover,
