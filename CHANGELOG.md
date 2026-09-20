@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Sidebar section header buttons (such as the Branches "+") no longer sit under the sidebar's
+  overlay scrollbar, which swallowed clicks on them once the sections overflowed; this also
+  fixes the remote e2e specs that go through that button.
 - Pulling a fast-forward no longer force-checks out over untracked or ignored files: the
   checkout is now safe and aborts untouched with a "would be overwritten" error, and the pull
   surfaces its dirty-worktree, no-upstream, detached-HEAD and checkout-conflict reasons instead
