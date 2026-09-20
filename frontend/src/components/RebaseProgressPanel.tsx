@@ -34,9 +34,9 @@ export function RebaseProgressPanel({
           disabled={disabled}
           aria-describedby={disabled && disabledReason !== undefined ? "rebase-continue-reason" : undefined}
         >
-          Continue Rebase
+          Continue rebase
         </button>
-        <button onClick={onAbort}>Abort Rebase</button>
+        <button onClick={onAbort}>Abort rebase</button>
       </Toolbar>
     </Panel>
   );

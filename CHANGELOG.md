@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### UX audit: feedback, states and content
+
+- A persistent status strip now shows while a merge or rebase is in progress (step, conflict
+  count, Abort), and Commit / Continue rebase show a visible reason when disabled.
+- Success toasts (polite live region) after commit, checkout, branch delete, stash, fetch, push
+  and pull. Error banners float instead of shifting the layout, and carry a hint and Retry.
+- New success, warning and info color tokens for light and dark themes.
+- The inline New branch form shows its base, validates the name inline, and can check the new
+  branch out. Pull request source/target branches default sensibly and suggest known branches.
+- The repository picker leads with folder names, explains workspaces, and hints at the command
+  palette. The palette hint is platform-aware and release notes use a "What's new" icon.
+- Sentence case for the picker and rebase buttons.
+
 ### Security
 
 - `resolve_conflict` now validates that the given path is an actual index conflict before

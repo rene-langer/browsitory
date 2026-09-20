@@ -320,6 +320,7 @@ function RepoWorkspace({
                 onForgetForgeToken={appState.forgetForgeToken}
                 onCreatePullRequest={appState.createPullRequest}
                 onOpenExternalUrl={appState.openExternalUrl}
+                branches={appState.state.branches}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />
