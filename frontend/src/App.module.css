@@ -2,6 +2,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   flex: 0 0 auto;
@@ -14,7 +15,17 @@
   flex: 0 0 auto;
 }
 
-.themeToggle {
+.headerSpacer {
+  flex: 1 1 auto;
+}
+
+.loading {
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+/* Shared by the theme toggle and the release-notes button. */
+.iconButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -28,6 +39,6 @@
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.themeToggle:hover {
+.iconButton:hover {
   background: var(--color-bg-subtle);
 }

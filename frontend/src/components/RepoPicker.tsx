@@ -83,84 +83,88 @@ export function RepoPicker({
   }
 
   return (
-    <Panel title="Open a repository">
-      <Toolbar>
-        <button onClick={handleOpenFolder}>Open Folder</button>
-        <button onClick={() => setCreatingWorkspace(true)}>Open Workspace Root</button>
-      </Toolbar>
-      {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
-      {recentRepos.length === 0 ? (
-        <p>No recent repositories</p>
-      ) : (
-        <ul className={styles.list}>
-          {recentRepos.map((path) => (
-            <ListRow key={path} onClick={() => onOpenRepo(path)}>
-              {path}
-            </ListRow>
-          ))}
-        </ul>
-      )}
-      <Panel title="Workspaces" headingLevel={3}>
-        {workspacesError !== null && (
-          <InlineError message={workspacesError} onDismiss={onDismissWorkspacesError} />
-        )}
-        {!workspacesLoading && workspaces.length === 0 ? (
-          <p>No saved workspaces</p>
+    <div className={styles.picker}>
+      <Panel title="Open a repository">
+        <Toolbar>
+          <button onClick={handleOpenFolder}>Open Folder</button>
+          <button onClick={() => setCreatingWorkspace(true)}>Open Workspace Root</button>
+        </Toolbar>
+        {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
+        {recentRepos.length === 0 ? (
+          <p className={styles.empty}>No recent repositories</p>
         ) : (
           <ul className={styles.list}>
-            {workspaces.map((workspace) => (
-              <ListRow key={workspace.id}>
-                <span title={workspace.rootPath}>{workspace.name}</span>
-                <Toolbar>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenWorkspace(workspace);
-                    }}
-                  >
-                    Open All
-                  </button>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setEditingWorkspace(workspace);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setDeleteConfirmation(workspace);
-                    }}
-                  >
-                    Delete {workspace.name}
-                  </button>
-                </Toolbar>
+            {recentRepos.map((path) => (
+              <ListRow key={path} className={styles.repoRow} onClick={() => onOpenRepo(path)}>
+                {path}
               </ListRow>
             ))}
           </ul>
         )}
+        <div className={styles.workspaces}>
+          <Panel title="Workspaces" headingLevel={3}>
+            {workspacesError !== null && (
+              <InlineError message={workspacesError} onDismiss={onDismissWorkspacesError} />
+            )}
+            {!workspacesLoading && workspaces.length === 0 ? (
+              <p className={styles.empty}>No saved workspaces</p>
+            ) : (
+              <ul className={styles.list}>
+                {workspaces.map((workspace) => (
+                  <ListRow key={workspace.id}>
+                    <span title={workspace.rootPath}>{workspace.name}</span>
+                    <Toolbar>
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenWorkspace(workspace);
+                        }}
+                      >
+                        Open All
+                      </button>
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingWorkspace(workspace);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleteConfirmation(workspace);
+                        }}
+                      >
+                        Delete {workspace.name}
+                      </button>
+                    </Toolbar>
+                  </ListRow>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
+        {deleteConfirmation !== null && (
+          <dialog open aria-label={`Delete workspace ${deleteConfirmation.name}`}>
+            <p>
+              Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the saved
+              workspace is removed.
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                void onDeleteWorkspace(deleteConfirmation.id).then(() => setDeleteConfirmation(null))
+              }
+            >
+              Delete workspace
+            </button>
+            <button type="button" onClick={() => setDeleteConfirmation(null)}>
+              Cancel
+            </button>
+          </dialog>
+        )}
       </Panel>
-      {deleteConfirmation !== null && (
-        <dialog open aria-label={`Delete workspace ${deleteConfirmation.name}`}>
-          <p>
-            Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the saved
-            workspace is removed.
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              void onDeleteWorkspace(deleteConfirmation.id).then(() => setDeleteConfirmation(null))
-            }
-          >
-            Delete workspace
-          </button>
-          <button type="button" onClick={() => setDeleteConfirmation(null)}>
-            Cancel
-          </button>
-        </dialog>
-      )}
-    </Panel>
+    </div>
   );
 }

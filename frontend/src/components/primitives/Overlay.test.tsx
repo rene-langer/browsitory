@@ -103,6 +103,34 @@ describe("Overlay", () => {
       }
     });
 
+    it("resets the dialog's scroll to the top after opening, so focus on a bottom control doesn't leave it scrolled", () => {
+      const proto = window.HTMLDialogElement.prototype;
+      const originalShowModal = proto.showModal;
+      const originalClose = proto.close;
+      // Real browsers scroll a freshly shown modal to whatever `showModal()` focuses (e.g. a
+      // Close button at the bottom of a long dialog); simulate that scroll side effect.
+      proto.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+        this.scrollTop = 482;
+      };
+      proto.close = function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      };
+      try {
+        render(
+          <Overlay>
+            <p>content</p>
+          </Overlay>,
+        );
+
+        expect((screen.getByRole("dialog") as HTMLDialogElement).scrollTop).toBe(0);
+      } finally {
+        cleanup();
+        proto.showModal = originalShowModal;
+        proto.close = originalClose;
+      }
+    });
+
     it("still calls onClose for a real user-driven close (Escape/backdrop/form submit)", () => {
       const restore = installDialogPolyfill();
       try {
