@@ -327,6 +327,28 @@ export function buildCommands(
   return commands;
 }
 
+// Heading order used when the palette shows its unfiltered, grouped view.
+export const COMMAND_GROUPS = ["Branches", "Remotes", "Stash", "Go to", "Repositories", "General"] as const;
+export type CommandGroup = (typeof COMMAND_GROUPS)[number];
+
+/** Derives a command's display group from its id; unknown ids fall into "General". */
+export function commandGroup(id: string): CommandGroup {
+  if (id.startsWith("switch-branch:")) return "Branches";
+  if (
+    id.startsWith("fetch-remote:") ||
+    id.startsWith("push-branch:") ||
+    id.startsWith("push-tags:") ||
+    id.startsWith("browse-remote-branches:") ||
+    id === "add-remote"
+  ) {
+    return "Remotes";
+  }
+  if (id === "save-stash" || id.startsWith("apply-stash:") || id.startsWith("drop-stash:")) return "Stash";
+  if (id.startsWith("go-to:")) return "Go to";
+  if (id.startsWith("switch-repo:")) return "Repositories";
+  return "General";
+}
+
 function scoreCommand(command: Command, query: string): number | null {
   const q = query.trim().toLowerCase();
   if (q === "") return 0;

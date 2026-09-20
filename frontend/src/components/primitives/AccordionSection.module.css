@@ -11,6 +11,26 @@
   min-height: 12rem;
 }
 
+.headerRow {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.headerRow .heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  /* Clear the sidebar's overlay scrollbar, whose hit area otherwise swallows clicks on the
+     rightmost ~20px of a header once the sections overflow. */
+  padding-right: var(--space-4);
+}
+
 /* The heading only carries the role; the button inside owns all the spacing. */
 .heading {
   margin: 0;

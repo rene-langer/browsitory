@@ -46,6 +46,16 @@ describe("parseChangelog", () => {
     expect(entries[1].sections).toEqual({ changed: ["Behavior change"] });
   });
 
+  it("joins indented continuation lines onto their bullet", () => {
+    const entries = parseChangelog(
+      "## [1.0.0] - 2026-01-01\n\n### Fixed\n- First line of a long note\n  continues here\n  and here.\n- Next bullet\n",
+    );
+    expect(entries[0].sections.fixed).toEqual([
+      "First line of a long note continues here and here.",
+      "Next bullet",
+    ]);
+  });
+
   it("returns an empty array for a changelog with only Unreleased", () => {
     const entries = parseChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n");
     expect(entries).toEqual([]);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -11,6 +11,7 @@ import { branchSwatchColor } from "../lib/laneColors";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { FormDialog } from "./primitives/FormDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -156,10 +157,8 @@ export function BranchTree({
   const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
   const [credentialUsername, setCredentialUsername] = useState("");
   const accessTokenRef = useRef<HTMLInputElement>(null);
-  const editDialogRef = useRef<HTMLDialogElement>(null);
-  const credentialDialogRef = useRef<HTMLDialogElement>(null);
-  const upstreamFormDialogRef = useRef<HTMLDialogElement>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
+  const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
   const [upstreamBranchField, setUpstreamBranchField] = useState("");
   const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
@@ -171,38 +170,6 @@ export function BranchTree({
   const [addError, setAddError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [remoteBranchesError, setRemoteBranchesError] = useState<string | null>(null);
-  const pullDialogRef = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = pullDialogRef.current;
-    if (pendingPull === null || dialog === null) return;
-    if (!dialog.open && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else if (!dialog.open) {
-      dialog.setAttribute("open", "");
-    }
-    dialog.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
-  }, [pendingPull]);
-
-  function openNativeDialog(ref: RefObject<HTMLDialogElement | null>): void {
-    const dialog = ref.current;
-    if (dialog === null || dialog.open) return;
-    if (typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else {
-      dialog.setAttribute("open", "");
-    }
-  }
-
-  useEffect(() => {
-    if (editingRemote !== null) openNativeDialog(editDialogRef);
-  }, [editingRemote]);
-  useEffect(() => {
-    if (credentialRemote !== null) openNativeDialog(credentialDialogRef);
-  }, [credentialRemote]);
-  useEffect(() => {
-    if (upstreamDialogOpen) openNativeDialog(upstreamFormDialogRef);
-  }, [upstreamDialogOpen]);
 
   function remoteFolderKey(remoteName: string): string {
     return `branchtree.remote.${remoteName}`;
@@ -254,7 +221,7 @@ export function BranchTree({
       return (
         <ListRow
           key={branch.name}
-          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
           onClick={isRenaming ? undefined : () => setSelectedRow(rowKey)}
           onDoubleClick={
             isRenaming
@@ -272,13 +239,13 @@ export function BranchTree({
                 }
           }
         >
-          <Toolbar>
+          <div className={styles.rowInner}>
             <button
               type="button"
               className={styles.swatch}
               aria-label={`Show ${branch.name} in graph`}
               aria-pressed={shownInGraph}
-              style={{ backgroundColor: branchSwatchColor(branch.name), opacity: shownInGraph ? 1 : 0.3 }}
+              style={{ "--swatch": branchSwatchColor(branch.name) } as CSSProperties}
               onClick={(event) => {
                 event.stopPropagation();
                 toggleGraphBranch(branch.name);
@@ -286,17 +253,43 @@ export function BranchTree({
             />
             {isRenaming ? (
               <input
+                autoFocus
+                aria-label={`Rename ${branch.name}`}
                 value={renameValue}
                 onChange={(event) => setRenameValue(event.target.value)}
+                onFocus={(event) => event.currentTarget.select()}
+                onBlur={() => {
+                  if (renameValue === branch.name) setRenaming(null);
+                }}
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
             ) : (
-              <span>
+              <span
+                className={branch.isCurrent ? `${styles.name} ${styles.currentName}` : styles.name}
+                title={branch.name}
+              >
+                {branch.isCurrent && (
+                  <span className={styles.currentMarker} role="img" aria-label="current branch" />
+                )}
                 {node.name}
                 {branch.isCurrent && " (current)"}
               </span>
             )}
-          </Toolbar>
+            {!isRenaming && (
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label={`Actions for ${branch.name}`}
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openRowMenu({ kind: "local-branch", name: branch.name, x: rect.left, y: rect.bottom });
+                }}
+              >
+                <MoreHorizontal size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </ListRow>
       );
     });
@@ -332,7 +325,7 @@ export function BranchTree({
       return (
         <ListRow
           key={branchName}
-          className={selectedRow === rowKey ? styles.selectedRow : undefined}
+          className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
           onClick={() => setSelectedRow(rowKey)}
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
@@ -342,8 +335,10 @@ export function BranchTree({
             openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
           }}
         >
-          <Toolbar>
-            <span>{node.name}</span>
+          <div className={styles.rowInner}>
+            <span className={styles.name} title={branchName}>
+              {node.name}
+            </span>
             {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
                 native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
                 name button has focus) — without this, a keyboard/screen-reader user has no
@@ -360,7 +355,7 @@ export function BranchTree({
             >
               <MoreHorizontal size={12} aria-hidden="true" />
             </button>
-          </Toolbar>
+          </div>
         </ListRow>
       );
     });
@@ -529,6 +524,9 @@ export function BranchTree({
       if (renameValue.trim() === "") return;
       onRenameBranch(oldName, renameValue);
       setRenaming(null);
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      setRenaming(null);
     }
   };
 
@@ -584,20 +582,31 @@ export function BranchTree({
   }
 
   return (
-    <AccordionSection title="Branches" storageKey="sidebar-branches" icon={GitBranch} count={branches.length} defaultOpen>
-      <Toolbar aria-label="Branches actions">
+    <AccordionSection
+      title="Branches"
+      storageKey="sidebar-branches"
+      icon={GitBranch}
+      count={branches.length}
+      defaultOpen
+      actions={
         <button
           type="button"
+          className={styles.iconButton}
           aria-label="Add"
-          onClick={(event) => openRowMenu({ kind: "add", x: event.clientX, y: event.clientY })}
+          aria-haspopup="menu"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            openRowMenu({ kind: "add", x: rect.left, y: rect.bottom });
+          }}
         >
           <Plus size={14} aria-hidden="true" />
         </button>
-      </Toolbar>
-
+      }
+    >
       {createBranchDraft !== null && (
         <div className={styles.draftForm}>
           <input
+            autoFocus
             value={newBranchName}
             onChange={(event) => {
               setNewBranchName(event.target.value);
@@ -606,6 +615,10 @@ export function BranchTree({
             placeholder="New branch name"
             onKeyDown={(event) => {
               if (event.key === "Enter") void submitCreate();
+              else if (event.key === "Escape") {
+                setCreateError(null);
+                onCloseCreateBranchDraft();
+              }
             }}
           />
           <button onClick={() => void submitCreate()} disabled={newBranchName.trim() === "" || isRebasing}>
@@ -627,6 +640,9 @@ export function BranchTree({
         <form
           className={styles.form}
           aria-label="Add remote"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onCloseAddRemoteDraft();
+          }}
           onSubmit={(event) => {
             event.preventDefault();
             void submitAddRemote();
@@ -635,6 +651,7 @@ export function BranchTree({
           <label className={styles.label}>
             Remote name
             <input
+              autoFocus
               placeholder="origin"
               value={newRemoteName}
               onChange={(event) => {
@@ -741,6 +758,10 @@ export function BranchTree({
             </button>
             {isRemoteOpen(remote.name) && (
               <ul className={styles.folderBody}>
+                {remoteBranches[remote.name] === undefined && remoteBranchesError === null && (
+                  <li className={styles.statusRow}>Loading…</li>
+                )}
+                {remoteBranches[remote.name]?.length === 0 && <li className={styles.statusRow}>No branches</li>}
                 {renderRemoteNodes(
                   remote.name,
                   buildBranchTree((remoteBranches[remote.name] ?? []).map((name) => ({ path: name, value: name }))),
@@ -857,14 +878,7 @@ export function BranchTree({
       )}
 
       {editingRemote !== null && (
-        <dialog
-          ref={editDialogRef}
-          aria-label={`Edit ${editingRemote.name}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setEditingRemote(null);
-          }}
-        >
+        <FormDialog ariaLabel={`Edit ${editingRemote.name}`} onCancel={() => setEditingRemote(null)}>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
@@ -915,18 +929,11 @@ export function BranchTree({
               Cancel
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
       {credentialRemote !== null && (
-        <dialog
-          ref={credentialDialogRef}
-          aria-label={`Credentials for ${credentialRemote}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setCredentialRemote(null);
-          }}
-        >
+        <FormDialog ariaLabel={`Credentials for ${credentialRemote}`} onCancel={() => setCredentialRemote(null)}>
           <form
             onSubmit={async (event) => {
               event.preventDefault();
@@ -985,36 +992,63 @@ export function BranchTree({
               Cancel credentials
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
-      <section>
-        <h3>Upstream</h3>
-        {upstream === null ? <p>No upstream for the current branch.</p> : <p>{upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.</p>}
-        <button
-          type="button"
-          disabled={operationDisabled || upstream === null || pendingPull !== null}
-          title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          onClick={() => void onPull()}
-        >
-          Pull
-        </button>
-        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
-        {upstream !== null && (
-          <button type="button" onClick={() => void onClearUpstream()}>
-            Clear upstream
-          </button>
+      <section className={styles.upstreamBlock}>
+        <h3 className={styles.upstreamHeading}>Upstream</h3>
+        {upstream === null ? (
+          <p className={styles.helperText}>No upstream for the current branch.</p>
+        ) : (
+          <p className={styles.helperText}>
+            {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
+          </p>
         )}
+        <Toolbar aria-label="Upstream actions">
+          <button
+            type="button"
+            disabled={operationDisabled || upstream === null || pendingPull !== null}
+            title={
+              operationDisabled
+                ? (operationDisabledReason ?? undefined)
+                : upstream === null
+                  ? "No upstream set for the current branch."
+                  : undefined
+            }
+            onClick={() => void onPull()}
+          >
+            Pull
+          </button>
+          {upstream !== null && (
+            <button type="button" onClick={() => setClearUpstreamConfirm(true)}>
+              Clear upstream
+            </button>
+          )}
+        </Toolbar>
+        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
       </section>
 
-      {upstreamDialogOpen && (
-        <dialog
-          ref={upstreamFormDialogRef}
-          aria-label={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
-          onCancel={(event) => {
-            event.preventDefault();
-            setUpstreamDialogOpen(false);
+      {clearUpstreamConfirm && upstream !== null && (
+        <ConfirmDialog
+          ariaLabel="Clear upstream confirmation"
+          message={
+            <p>
+              Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
+            </p>
+          }
+          confirmLabel="Clear upstream"
+          onConfirm={() => {
+            setClearUpstreamConfirm(false);
+            void onClearUpstream();
           }}
+          onCancel={() => setClearUpstreamConfirm(false)}
+        />
+      )}
+
+      {upstreamDialogOpen && (
+        <FormDialog
+          ariaLabel={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
+          onCancel={() => setUpstreamDialogOpen(false)}
         >
           <form
             onSubmit={async (event) => {
@@ -1064,18 +1098,11 @@ export function BranchTree({
               Cancel
             </button>
           </form>
-        </dialog>
+        </FormDialog>
       )}
 
       {pendingPull !== null && (
-        <dialog
-          ref={pullDialogRef}
-          aria-label="Pull has diverged"
-          onCancel={(event) => {
-            event.preventDefault();
-            onCancelPull();
-          }}
-        >
+        <FormDialog ariaLabel="Pull has diverged" onCancel={onCancelPull}>
           <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
           <button type="button" disabled={operationDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>
             Merge
@@ -1086,7 +1113,7 @@ export function BranchTree({
           <button type="button" data-autofocus onClick={onCancelPull}>
             Cancel
           </button>
-        </dialog>
+        </FormDialog>
       )}
     </AccordionSection>
   );

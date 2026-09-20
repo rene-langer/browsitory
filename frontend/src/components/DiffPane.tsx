@@ -549,29 +549,31 @@ function UncommittedDiffPane({
           </ul>
         </div>
       )}
-      {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
-          resolved/amended content lives in the working tree, so stashing it away and continuing
-          lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
-          `BranchSwitcher`'s ref-mutating actions. */}
-      <button onClick={onSaveStash} disabled={status.length === 0 || rebaseProgress !== null}>
-        Stash
-      </button>
-      {rebaseProgress !== null ? (
-        <RebaseProgressPanel
-          currentStep={rebaseProgress.currentStep}
-          totalSteps={rebaseProgress.totalSteps}
-          disabled={status.some((entry) => entry.kind === "Conflicted")}
-          onContinue={onRebaseContinue}
-          onAbort={onRebaseAbort}
-        />
-      ) : (
-        <CommitBox
-          onCommit={onCommit}
-          disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
-          onAbortMerge={onAbortMerge}
-          initialMessage={mergeMessage ?? undefined}
-        />
-      )}
+      <div className={styles.commitDock} role="group" aria-label="Commit actions">
+        {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
+            resolved/amended content lives in the working tree, so stashing it away and continuing
+            lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
+            `BranchSwitcher`'s ref-mutating actions. */}
+        <button onClick={onSaveStash} disabled={status.length === 0 || rebaseProgress !== null}>
+          Stash
+        </button>
+        {rebaseProgress !== null ? (
+          <RebaseProgressPanel
+            currentStep={rebaseProgress.currentStep}
+            totalSteps={rebaseProgress.totalSteps}
+            disabled={status.some((entry) => entry.kind === "Conflicted")}
+            onContinue={onRebaseContinue}
+            onAbort={onRebaseAbort}
+          />
+        ) : (
+          <CommitBox
+            onCommit={onCommit}
+            disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
+            onAbortMerge={onAbortMerge}
+            initialMessage={mergeMessage ?? undefined}
+          />
+        )}
+      </div>
     </div>
   );
 }

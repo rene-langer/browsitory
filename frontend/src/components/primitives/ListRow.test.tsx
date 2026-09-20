@@ -141,4 +141,21 @@ describe("ListRow", () => {
     // The row's own CSS-module class must still be present alongside the passed-in one.
     expect(row?.className.trim().length).toBeGreaterThan("commit-row".length);
   });
+
+  it("ignores Enter and Space bubbling from a nested control", () => {
+    const onClick = vi.fn();
+    const onDoubleClick = vi.fn();
+    render(
+      <ul>
+        <ListRow onClick={onClick} onDoubleClick={onDoubleClick}>
+          <button type="button">inner</button>
+        </ListRow>
+      </ul>,
+    );
+    const inner = screen.getByText("inner");
+    fireEvent.keyDown(inner, { key: "Enter" });
+    fireEvent.keyDown(inner, { key: " " });
+    expect(onDoubleClick).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });

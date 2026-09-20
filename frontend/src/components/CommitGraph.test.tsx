@@ -476,3 +476,98 @@ describe("CommitGraph", () => {
     expect(screen.getByText("Rebase onto here")).toBeDisabled();
   });
 });
+
+describe("CommitGraph — keyboard access", () => {
+  const chain: GraphCommit[] = [
+    { ...commits[0], id: "C", shortId: "C", summary: "C", parentIds: ["B"] },
+    { ...commits[0], id: "B", shortId: "B", summary: "B", parentIds: ["A"] },
+    { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: [] },
+  ];
+
+  function setup(selectedRow: "uncommitted" | { commitId: string }) {
+    const handlers = {
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+      onSquashCommits: vi.fn(),
+    };
+    const utils = render(
+      <CommitGraph status={status} commits={chain} selectedRow={selectedRow} pending={false} {...handlers} />,
+    );
+    return { ...utils, ...handlers, list: screen.getByRole("listbox") };
+  }
+
+  it("advertises its shortcuts", () => {
+    const { list } = setup("uncommitted");
+    expect(list.getAttribute("aria-keyshortcuts")).toContain("Enter");
+  });
+
+  it("Enter opens the context menu for the selected commit and Branch from here uses its id", () => {
+    const { list, onBranchFromCommit } = setup({ commitId: "B" });
+    fireEvent.keyDown(list, { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Branch from here" }));
+    expect(onBranchFromCommit).toHaveBeenCalledWith("B");
+  });
+
+  it("the Menu key and Shift+F10 open the same menu", () => {
+    const { list, unmount } = setup({ commitId: "B" });
+    fireEvent.keyDown(list, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "Rebase onto here" })).toBeInTheDocument();
+    unmount();
+    const second = setup({ commitId: "B" });
+    fireEvent.keyDown(second.list, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Rebase onto here" })).toBeInTheDocument();
+  });
+
+  it("Enter on the Uncommitted Changes row opens no menu", () => {
+    const { list } = setup("uncommitted");
+    fireEvent.keyDown(list, { key: "Enter" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Home and End jump to the first and last row", () => {
+    const { list, onSelectRow } = setup({ commitId: "B" });
+    fireEvent.keyDown(list, { key: "Home" });
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+    fireEvent.keyDown(list, { key: "End" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+  });
+
+  it("PageDown and PageUp move by a page, clamped to the ends", () => {
+    const { list, onSelectRow } = setup({ commitId: "B" });
+    fireEvent.keyDown(list, { key: "PageDown" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+    fireEvent.keyDown(list, { key: "PageUp" });
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+  });
+
+  it("Shift+ArrowDown extends a squash range that the menu then offers", () => {
+    const { rerender, list, onSelectRow, onSquashCommits, ...rest } = setup({ commitId: "C" });
+    fireEvent.click(screen.getByText(/^C /).closest("li")!);
+    fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
+    rerender(
+      <CommitGraph
+        status={status}
+        commits={chain}
+        selectedRow={{ commitId: "B" }}
+        pending={false}
+        onSelectRow={onSelectRow}
+        onBranchFromCommit={rest.onBranchFromCommit}
+        onRebaseFromCommit={rest.onRebaseFromCommit}
+        onSquashCommits={onSquashCommits}
+      />,
+    );
+    fireEvent.keyDown(list, { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits" }));
+    expect(onSquashCommits).toHaveBeenCalledWith("A", ["C"]);
+  });
+
+  it("keys pressed inside the open menu do not re-trigger list navigation", () => {
+    const { list, onSelectRow } = setup({ commitId: "B" });
+    fireEvent.keyDown(list, { key: "Enter" });
+    onSelectRow.mockClear();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Branch from here" }), { key: "ArrowDown" });
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+});

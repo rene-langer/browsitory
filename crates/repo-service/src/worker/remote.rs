@@ -273,7 +273,13 @@ pub(super) fn pull<S: CredentialStore>(
         .as_ref()
         .err()
         .map(|error| error.transfer_error_kind());
-    let _ = reply.send(result.map_err(|_| "pull failed".to_string()));
+    let _ = reply.send(result.map_err(|error| match error {
+        git_core::remote::RemoteError::DirtyWorktree
+        | git_core::remote::RemoteError::NoUpstream
+        | git_core::remote::RemoteError::CheckoutConflict
+        | git_core::remote::RemoteError::DetachedHead => error.to_string(),
+        _ => "pull failed".to_string(),
+    }));
     let _ = events.send(TransferEvent::Completed {
         operation_id,
         operation: TransferOperation::Pull,

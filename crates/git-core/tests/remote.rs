@@ -68,7 +68,11 @@ struct RemoteFixture {
 
 impl RemoteFixture {
     fn remote_commit(&self, message: &str) {
-        common::write_file(self.source_dir.path(), "remote.txt", message);
+        self.remote_commit_file("remote.txt", message);
+    }
+
+    fn remote_commit_file(&self, path: &str, message: &str) {
+        common::write_file(self.source_dir.path(), path, message);
         common::commit_all(&self.source, message);
 
         let branch = self.source.head().unwrap().shorthand().unwrap().to_string();
@@ -308,6 +312,25 @@ fn branch_push_rejects_non_fast_forward_updates() {
     assert_eq!(
         fixture.remote_tip(),
         fixture.source.head().unwrap().target().unwrap()
+    );
+}
+
+#[test]
+fn pull_aborts_untouched_when_an_ignored_file_blocks_the_checkout() {
+    let fixture = diverged_local_and_bare_remote();
+    std::fs::create_dir_all(fixture.local.path().join("info")).unwrap();
+    std::fs::write(fixture.local.path().join("info/exclude"), "blocker\n").unwrap();
+    fixture.write_local("blocker", "precious");
+    fixture.remote_commit_file("blocker/inner.txt", "remote change");
+    let head_before = fixture.local.head().unwrap().target().unwrap();
+
+    let result = pull_after_fetch(&fixture.local, "origin", "main");
+
+    assert!(matches!(result, Err(RemoteError::CheckoutConflict)));
+    assert_eq!(fixture.local.head().unwrap().target().unwrap(), head_before);
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("blocker")).unwrap(),
+        "precious"
     );
 }
 

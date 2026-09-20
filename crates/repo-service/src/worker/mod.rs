@@ -1629,6 +1629,39 @@ mod tests {
     }
 
     #[test]
+    fn pull_with_untracked_file_reports_dirty_worktree() {
+        let (local_dir, repo) = init_repo();
+        write_file(local_dir.path(), "README.md", "initial commit\n");
+        commit_all(&repo, "initial commit");
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        repo.remote("origin", local_dir.path().to_str().unwrap())
+            .unwrap();
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .unwrap();
+        drop(config);
+        drop(repo);
+        write_file(local_dir.path(), "untracked.txt", "x");
+
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, _event_rx) = mpsc::channel();
+
+        let error = worker
+            .handle()
+            .pull_current_upstream(event_tx)
+            .expect_err("pull should refuse a dirty worktree");
+
+        assert_eq!(error, "cannot pull with a dirty worktree");
+    }
+
+    #[test]
     fn apply_then_drop_stash_round_trips_through_the_worker() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "file.txt", "v1");

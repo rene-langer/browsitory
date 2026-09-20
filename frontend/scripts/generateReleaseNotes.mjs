@@ -37,6 +37,13 @@ export function parseChangelog(markdown) {
     const bulletMatch = line.match(/^-\s+(.+)/);
     if (bulletMatch !== null && current !== null && currentSectionKey !== null) {
       current.sections[currentSectionKey].push(bulletMatch[1].trim());
+      continue;
+    }
+    // A wrapped bullet: an indented line under a bullet continues it.
+    const continuation = line.match(/^\s+(\S.*)/);
+    if (continuation !== null && current !== null && currentSectionKey !== null) {
+      const bullets = current.sections[currentSectionKey];
+      if (bullets.length > 0) bullets[bullets.length - 1] += ` ${continuation[1].trim()}`;
     }
   }
   return entries;

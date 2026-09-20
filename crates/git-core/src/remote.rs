@@ -127,6 +127,8 @@ pub enum RemoteError {
     DirtyWorktree,
     #[error("cannot pull while HEAD is detached")]
     DetachedHead,
+    #[error("untracked or ignored files would be overwritten by the pull")]
+    CheckoutConflict,
     #[error("current branch has no upstream")]
     NoUpstream,
     #[error("push was rejected because it was not a fast-forward")]
@@ -348,8 +350,15 @@ pub fn pull_after_fetch(
 
     let local_ref = format!("refs/heads/{local_branch}");
     let mut checkout = CheckoutBuilder::new();
-    checkout.force();
-    repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))?;
+    checkout.safe();
+    repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
+        .map_err(|error| {
+            if error.code() == ErrorCode::Conflict {
+                RemoteError::CheckoutConflict
+            } else {
+                RemoteError::Git(error)
+            }
+        })?;
     repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
 
     Ok(PullOutcome::FastForwarded { upstream_ref })

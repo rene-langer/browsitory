@@ -11,6 +11,7 @@ export function AccordionSection({
   icon: Icon,
   count,
   headingLevel = 2,
+  actions,
   children,
 }: {
   title: string;
@@ -19,6 +20,8 @@ export function AccordionSection({
   icon?: LucideIcon;
   count?: number;
   headingLevel?: 2 | 3;
+  /** Controls shown at the right of the header row, beside (not inside) the toggle button. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(() => loadPersistedOpen(storageKey, defaultOpen));
@@ -51,34 +54,37 @@ export function AccordionSection({
           `AccordionGroup`. Open state itself is independent per section by design (not mutual
           exclusion) — each section persists its own open/closed state under its own
           `storageKey`, so opening one is not meant to close its siblings. */}
-      {createElement(
-        `h${headingLevel}`,
-        { className: styles.heading },
-        <button
-          ref={headerRef}
-          type="button"
-          className={styles.header}
-          aria-expanded={open}
-          aria-label={title}
-          tabIndex={headerTabIndex}
-          onFocus={() => group?.onHeaderFocus(headerRef)}
-          onKeyDown={(event) => group?.onHeaderKeyDown(event, headerRef)}
-          onClick={() => setOpenState(!open)}
-        >
-          <ChevronRight
-            size={14}
-            aria-hidden="true"
-            className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
-          />
-          {Icon !== undefined && <Icon size={14} aria-hidden="true" className={styles.icon} />}
-          <span className={styles.title}>{title}</span>
-          {count !== undefined && (
-            <span className={styles.count} aria-hidden="true">
-              {count}
-            </span>
-          )}
-        </button>,
-      )}
+      <div className={styles.headerRow}>
+        {createElement(
+          `h${headingLevel}`,
+          { className: styles.heading },
+          <button
+            ref={headerRef}
+            type="button"
+            className={styles.header}
+            aria-expanded={open}
+            aria-label={title}
+            tabIndex={headerTabIndex}
+            onFocus={() => group?.onHeaderFocus(headerRef)}
+            onKeyDown={(event) => group?.onHeaderKeyDown(event, headerRef)}
+            onClick={() => setOpenState(!open)}
+          >
+            <ChevronRight
+              size={14}
+              aria-hidden="true"
+              className={open ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+            />
+            {Icon !== undefined && <Icon size={14} aria-hidden="true" className={styles.icon} />}
+            <span className={styles.title}>{title}</span>
+            {count !== undefined && (
+              <span className={styles.count} aria-hidden="true">
+                {count}
+              </span>
+            )}
+          </button>,
+        )}
+        {actions !== undefined && <div className={styles.actions}>{actions}</div>}
+      </div>
       {open && <div className={styles.body}>{children}</div>}
     </section>
   );

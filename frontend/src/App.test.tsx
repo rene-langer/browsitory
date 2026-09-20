@@ -141,4 +141,11 @@ describe("App", () => {
 
     expect(await screen.findByText("sidecar stopped unexpectedly")).toBeInTheDocument();
   });
+
+  it("renders the header and a loading placeholder while the open repos restore", () => {
+    const client = fakeClient({ listOpenRepos: () => new Promise(() => {}) });
+    render(<App client={client} />);
+    expect(screen.getByRole("heading", { name: "Browsitory" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
 });

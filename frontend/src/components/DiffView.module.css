@@ -16,7 +16,9 @@
   font-size: var(--text-sm);
   line-height: var(--leading-dense);
   white-space: pre-wrap;
-  padding: 0 var(--space-2);
+  /* Hanging indent: wrapped continuation lines sit one column right of the +/- marker. */
+  padding: 0 var(--space-2) 0 calc(var(--space-2) + 1ch);
+  text-indent: -1ch;
 }
 
 .lineAdd {

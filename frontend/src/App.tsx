@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { HelpCircle, Moon, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutHint } from "./components/ShortcutHint";
 import { CommitGraph } from "./components/CommitGraph";
 import { DiffPane } from "./components/DiffPane";
 import { LaneBraid } from "./components/LaneBraid";
@@ -449,7 +450,7 @@ export default function App({
   const themeToggle = (
     <button
       type="button"
-      className={styles.themeToggle}
+      className={styles.iconButton}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       onClick={() => {
         const next = theme === "dark" ? "light" : "dark";
@@ -513,7 +514,18 @@ export default function App({
   }, [openRepos.loading, openRepos.openRepos]);
 
   if (openRepos.loading) {
-    return null;
+    return (
+      <main>
+        <header className={styles.headerRow}>
+          <h1>Browsitory</h1>
+          <div className={styles.headerSpacer} />
+          {themeToggle}
+        </header>
+        <p role="status" className={styles.loading}>
+          Loading…
+        </p>
+      </main>
+    );
   }
 
   return (
@@ -531,10 +543,12 @@ export default function App({
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
         />
+        {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
+        {openRepos.openRepos.length > 0 && <ShortcutHint />}
         {themeToggle}
         <button
           type="button"
-          className={styles.themeToggle}
+          className={styles.iconButton}
           aria-label="Release notes"
           onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
         >

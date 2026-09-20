@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { GitBranch } from "lucide-react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccordionSection } from "./AccordionSection";
 
 describe("AccordionSection", () => {
@@ -116,5 +116,30 @@ describe("AccordionSection", () => {
     fireEvent.click(button);
     // Same SVG node stays mounted (rotated via CSS class), not swapped for a different icon.
     expect(button.querySelector("svg")).toBe(chevron);
+  });
+
+  it("renders header actions beside the toggle without toggling the section", () => {
+    const onAction = vi.fn();
+    render(
+      <AccordionSection
+        title="Things"
+        storageKey="acc-actions"
+        defaultOpen
+        actions={
+          <button type="button" aria-label="Add thing" onClick={onAction}>
+            +
+          </button>
+        }
+      >
+        <p>body</p>
+      </AccordionSection>,
+    );
+    const heading = screen.getByRole("heading", { name: /Things/ });
+    const add = screen.getByRole("button", { name: "Add thing" });
+    expect(add.closest("section")?.firstElementChild).toContainElement(heading);
+    expect(add.closest("section")?.firstElementChild).toContainElement(add);
+    fireEvent.click(add);
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(screen.getByText("body")).toBeInTheDocument();
   });
 });

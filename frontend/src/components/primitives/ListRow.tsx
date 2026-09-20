@@ -69,6 +69,8 @@ export function ListRow({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
     if (onClick === undefined) return;
+    // Keys bubbling from nested controls (swatch toggle, "..." button) belong to those controls.
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       // Mirrors mouse behavior for a row with a distinct double-click "activate" action (e.g. a

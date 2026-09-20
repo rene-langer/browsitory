@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes, isSquashableRange } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
@@ -6,6 +6,8 @@ import { CommitLaneGraphic } from "./CommitLaneGraphic";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import styles from "./CommitGraph.module.css";
+
+const PAGE_SIZE = 10;
 
 function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
   if (a === "uncommitted" || b === "uncommitted") {
@@ -54,13 +56,64 @@ export function CommitGraph({
   ];
   const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
 
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Keep the keyboard-driven selection visible in a long history.
+  useEffect(() => {
+    const selected = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  const moveSelection = (nextIndex: number, extendRange: boolean) => {
+    const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
+    if (extendRange && next >= 1) {
+      // Row 0 is "Uncommitted Changes"; commit indexes are offset by one.
+      const anchor = squashAnchorIndex ?? (selectedIndex >= 1 ? selectedIndex - 1 : next - 1);
+      setSquashAnchorIndex(anchor);
+      setSquashRange({ start: Math.min(anchor, next - 1), end: Math.max(anchor, next - 1) });
+    } else {
+      setSquashAnchorIndex(next >= 1 ? next - 1 : null);
+      setSquashRange(null);
+    }
+    onSelectRow(rows[next]);
+  };
+
+  const openMenuForSelected = (list: HTMLUListElement) => {
+    if (selectedIndex < 1) return;
+    const row = list.querySelector<HTMLElement>('[aria-selected="true"]');
+    const rect = row?.getBoundingClientRect();
+    setContextMenu({
+      commitId: commits[selectedIndex - 1].id,
+      x: rect?.left ?? 0,
+      y: rect?.bottom ?? 0,
+    });
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    // Keys from the open context menu (or any nested control) are not list navigation.
+    if (event.target !== event.currentTarget) return;
+    const extend = event.shiftKey;
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
-      onSelectRow(rows[Math.min(selectedIndex + 1, rows.length - 1)]);
+      moveSelection(selectedIndex + 1, extend);
     } else if (event.key === "ArrowUp" || event.key === "k") {
       event.preventDefault();
-      onSelectRow(rows[Math.max(selectedIndex - 1, 0)]);
+      moveSelection(selectedIndex - 1, extend);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      moveSelection(0, false);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      moveSelection(rows.length - 1, false);
+    } else if (event.key === "PageDown") {
+      event.preventDefault();
+      moveSelection(selectedIndex + PAGE_SIZE, false);
+    } else if (event.key === "PageUp") {
+      event.preventDefault();
+      moveSelection(selectedIndex - PAGE_SIZE, false);
+    } else if (event.key === "Enter" || event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      openMenuForSelected(event.currentTarget);
     }
   };
 
@@ -107,8 +160,17 @@ export function CommitGraph({
     ) + 1;
 
   return (
-    <ul className={styles.list} onKeyDown={handleKeyDown} tabIndex={0} role="listbox" aria-label="Commit history">
+    <ul
+      ref={listRef}
+      className={styles.list}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="listbox"
+      aria-label="Commit history"
+      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10"
+    >
       <ListRow
+        className={styles.uncommittedRow}
         selected={selectedRow === "uncommitted"}
         onClick={() => {
           setSquashAnchorIndex(null);
@@ -149,7 +211,10 @@ export function CommitGraph({
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          onClose={() => setContextMenu(null)}
+          onClose={() => {
+            setContextMenu(null);
+            listRef.current?.focus();
+          }}
           items={
             squashMenuActive && activeSquashRange !== null
               ? [
