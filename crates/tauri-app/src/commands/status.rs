@@ -84,6 +84,15 @@ pub async fn get_commit_files(
 }
 
 #[tauri::command]
+pub async fn get_commit_message(
+    repo_path: String,
+    commit_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    worker_handle(&state, &repo_path)?.get_commit_message(commit_id)
+}
+
+#[tauri::command]
 pub async fn get_blame(
     repo_path: String,
     commit_id: String,

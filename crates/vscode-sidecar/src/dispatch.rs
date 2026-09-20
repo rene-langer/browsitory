@@ -78,6 +78,7 @@ pub fn dispatch(
         "get_graph_branch_selection" => get_graph_branch_selection(params),
         "set_graph_branch_selection" => set_graph_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
+        "get_commit_message" => get_commit_message(params, repos),
         "stage_file" => stage_file(params, repos),
         "unstage_file" => unstage_file(params, repos),
         "stage_hunk" => stage_hunk(params, repos),
@@ -533,6 +534,13 @@ fn get_commit_files(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(files).map_err(|error| error.to_string())
 }
 
+fn get_commit_message(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetCommitFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let message = worker_handle(repos, &params.repo_path)?.get_commit_message(params.commit_id)?;
+    serde_json::to_value(message).map_err(|error| error.to_string())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RepoFilePathParams {
@@ -977,6 +985,8 @@ struct UpstreamInfoDto {
     local_branch: String,
     remote_name: String,
     remote_branch: String,
+    ahead: Option<usize>,
+    behind: Option<usize>,
 }
 
 impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
@@ -985,6 +995,8 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             local_branch: upstream.local_branch,
             remote_name: upstream.remote_name,
             remote_branch: upstream.remote_branch,
+            ahead: upstream.ahead,
+            behind: upstream.behind,
         }
     }
 }
