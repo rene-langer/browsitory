@@ -114,6 +114,14 @@ function workspaceProps() {
 }
 
 describe("RepoPicker", () => {
+  it("leads each recent repo with its folder name and explains workspaces", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/home/me/code/widget"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    expect(await screen.findByText("widget")).toBeInTheDocument();
+    expect(screen.getByText("/home/me/code/widget")).toBeInTheDocument();
+    expect(screen.getByText(/A workspace is a saved group of repositories/)).toBeInTheDocument();
+  });
+
   it("renders each recent repo and opens it on click", async () => {
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a", "/repo/b"],
@@ -141,7 +149,7 @@ describe("RepoPicker", () => {
     expect(await screen.findByText("No recent repositories")).toBeInTheDocument();
   });
 
-  it("Open Folder button opens the picked path", async () => {
+  it("Open folder button opens the picked path", async () => {
     const client = fakeClient({
       listRecentRepos: async () => [],
       pickRepoFolder: async () => "/picked/repo",
@@ -150,14 +158,14 @@ describe("RepoPicker", () => {
 
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    fireEvent.click(screen.getByText("Open Folder"));
+    fireEvent.click(screen.getByText("Open folder"));
 
     await waitFor(() => {
       expect(onOpenRepo).toHaveBeenCalledWith("/picked/repo");
     });
   });
 
-  it("Open Folder button does nothing when the dialog is cancelled", async () => {
+  it("Open folder button does nothing when the dialog is cancelled", async () => {
     const client = fakeClient({
       listRecentRepos: async () => [],
       pickRepoFolder: async () => null,
@@ -166,7 +174,7 @@ describe("RepoPicker", () => {
 
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    fireEvent.click(screen.getByText("Open Folder"));
+    fireEvent.click(screen.getByText("Open folder"));
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -260,7 +268,7 @@ describe("RepoPicker workspaces", () => {
     await waitFor(() => expect(onDeleteWorkspace).toHaveBeenCalledWith("ws-1"));
   });
 
-  it("Open Workspace Root shows the WorkspaceEditor in create mode", () => {
+  it("Open workspace root shows the WorkspaceEditor in create mode", () => {
     render(
       <RepoPicker
         client={fakeClient({ listRecentRepos: async () => [] })}
@@ -276,7 +284,7 @@ describe("RepoPicker workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Open Workspace Root"));
+    fireEvent.click(screen.getByText("Open workspace root"));
 
     expect(screen.getByText("New Workspace")).toBeInTheDocument();
   });
@@ -304,7 +312,7 @@ describe("RepoPicker workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Open Workspace Root"));
+    fireEvent.click(screen.getByText("Open workspace root"));
     fireEvent.click(screen.getByText("Choose Root Folder"));
     await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
     fireEvent.click(screen.getByText("Save"));

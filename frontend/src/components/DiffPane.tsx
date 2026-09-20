@@ -1,3 +1,4 @@
+import { conflictReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -393,6 +394,7 @@ function UncommittedDiffPane({
   const stagedEntries = status.filter((entry) => entry.staged);
   const unstagedEntries = status.filter((entry) => !entry.staged);
   const stagedCount = stagedEntries.length;
+  const conflictCount = status.filter((entry) => entry.kind === "Conflicted").length;
   // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
   // "Changes" group — but staging a conflicted path is what *marks the conflict resolved*, with
   // whatever happens to be in the working tree. One "Stage all" click would silently resolve
@@ -568,14 +570,16 @@ function UncommittedDiffPane({
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
             totalSteps={rebaseProgress.totalSteps}
-            disabled={status.some((entry) => entry.kind === "Conflicted")}
+            disabled={conflictCount > 0}
+            disabledReason={conflictReason(conflictCount)}
             onContinue={onRebaseContinue}
             onAbort={onRebaseAbort}
           />
         ) : (
           <CommitBox
             onCommit={onCommit}
-            disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
+            disabled={stagedCount === 0 || conflictCount > 0}
+            disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
             onAbortMerge={onAbortMerge}
             initialMessage={mergeMessage ?? undefined}
           />

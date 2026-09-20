@@ -40,6 +40,13 @@ interface ForgeRepositorySectionProps {
   // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
   // disables (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  // Known local branches: offered as suggestions for the source/target fields and used to
+  // default them (current branch, and main/master).
+  branches: { name: string; isCurrent: boolean }[];
+}
+
+function defaultTargetBranch(branches: { name: string }[]): string {
+  return ["main", "master"].find((candidate) => branches.some((branch) => branch.name === candidate)) ?? "";
 }
 
 function ForgeRepositorySection({
@@ -52,6 +59,7 @@ function ForgeRepositorySection({
   onOpenExternalUrl,
   operationDisabled,
   operationDisabledReason,
+  branches,
 }: ForgeRepositorySectionProps) {
   const tokenRef = useRef<HTMLInputElement>(null);
   const [account, setAccount] = useState("");
@@ -59,8 +67,8 @@ function ForgeRepositorySection({
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [sourceBranch, setSourceBranch] = useState("");
-  const [targetBranch, setTargetBranch] = useState("");
+  const [sourceBranch, setSourceBranch] = useState(() => branches.find((branch) => branch.isCurrent)?.name ?? "");
+  const [targetBranch, setTargetBranch] = useState(() => defaultTargetBranch(branches));
   // Hides this section's rows immediately after its token is forgotten, even though
   // `state.pullRequests[repository.remoteName]` itself isn't cleared until the next list call —
   // showing rows fetched with a token the user just forgot would be misleading. Cleared again by
@@ -248,12 +256,25 @@ function ForgeRepositorySection({
         </label>
         <label className={styles.label}>
           Source branch
-          <input value={sourceBranch} onChange={(event) => setSourceBranch(event.target.value)} />
+          <input
+            list={`pr-branches-${repository.remoteName}`}
+            value={sourceBranch}
+            onChange={(event) => setSourceBranch(event.target.value)}
+          />
         </label>
         <label className={styles.label}>
           Target branch
-          <input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
+          <input
+            list={`pr-branches-${repository.remoteName}`}
+            value={targetBranch}
+            onChange={(event) => setTargetBranch(event.target.value)}
+          />
         </label>
+        <datalist id={`pr-branches-${repository.remoteName}`}>
+          {branches.map((branch) => (
+            <option key={branch.name} value={branch.name} />
+          ))}
+        </datalist>
         <Toolbar>
           <button
             type="submit"
@@ -278,6 +299,7 @@ export function PullRequestPanel({
   onOpenExternalUrl,
   operationDisabled,
   operationDisabledReason,
+  branches,
 }: {
   forgeRepositories: ForgeRepository[];
   pullRequests: Record<string, PullRequestList>;
@@ -294,6 +316,7 @@ export function PullRequestPanel({
   // Human-readable reason `operationDisabled` is true, forwarded to each `ForgeRepositorySection`
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  branches: { name: string; isCurrent: boolean }[];
 }) {
   if (forgeRepositories.length === 0) {
     return (
@@ -338,6 +361,7 @@ export function PullRequestPanel({
               onOpenExternalUrl={onOpenExternalUrl}
               operationDisabled={operationDisabled}
               operationDisabledReason={operationDisabledReason}
+              branches={branches}
             />
           ))}
         </div>

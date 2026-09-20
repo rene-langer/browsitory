@@ -8,6 +8,16 @@ import { Toolbar } from "./primitives/Toolbar";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import styles from "./RepoPicker.module.css";
 
+function isApplePlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /mac|iphone|ipad/i.test(`${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`);
+}
+
+function repoNameOf(path: string): string {
+  const parts = path.split(/[\\/]/).filter((part) => part !== "");
+  return parts[parts.length - 1] ?? path;
+}
+
 export function RepoPicker({
   client,
   onOpenRepo,
@@ -87,23 +97,32 @@ export function RepoPicker({
     <div className={styles.picker}>
       <Panel title="Open a repository">
         <Toolbar>
-          <button onClick={handleOpenFolder}>Open Folder</button>
-          <button onClick={() => setCreatingWorkspace(true)}>Open Workspace Root</button>
+          <button onClick={handleOpenFolder}>Open folder</button>
+          <button onClick={() => setCreatingWorkspace(true)}>Open workspace root</button>
         </Toolbar>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
+        <p className={styles.hint}>
+          Tip: press <kbd>{isApplePlatform() ? "⌘K" : "Ctrl+K"}</kbd> once a repository is open to search every command.
+        </p>
         {recentRepos.length === 0 ? (
-          <p className={styles.empty}>No recent repositories</p>
+          <>
+            <p className={styles.empty}>No recent repositories</p>
+            <p className={styles.hint}>Open a folder that contains a Git repository to get started.</p>
+          </>
         ) : (
           <ul className={styles.list}>
             {recentRepos.map((path) => (
               <ListRow key={path} className={styles.repoRow} onClick={() => onOpenRepo(path)}>
-                {path}
+                <span className={styles.repoName}>{repoNameOf(path)}</span>
+                <span className={styles.repoPath}>{path}</span>
               </ListRow>
             ))}
           </ul>
         )}
-        <div className={styles.workspaces}>
-          <Panel title="Workspaces" headingLevel={3}>
+        <section className={styles.workspaces} aria-label="Workspaces">
+          <h3 className={styles.workspacesTitle}>Workspaces</h3>
+          <p className={styles.hint}>A workspace is a saved group of repositories you can open together.</p>
+          <div>
             {workspacesError !== null && (
               <InlineError message={workspacesError} onDismiss={onDismissWorkspacesError} />
             )}
@@ -144,8 +163,8 @@ export function RepoPicker({
                 ))}
               </ul>
             )}
-          </Panel>
-        </div>
+          </div>
+        </section>
         {deleteConfirmation !== null && (
           <ConfirmDialog
             ariaLabel={`Delete workspace ${deleteConfirmation.name}`}
