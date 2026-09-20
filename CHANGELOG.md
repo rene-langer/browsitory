@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Pulling a fast-forward no longer force-checks out over untracked or ignored files: the
+  checkout is now safe and aborts untouched with a "would be overwritten" error, and the pull
+  surfaces its dirty-worktree, no-upstream, detached-HEAD and checkout-conflict reasons instead
+  of a generic "pull failed".
 - `current_upstream` no longer errors on a detached HEAD (the normal state during an in-progress
   rebase); it returns "no upstream" instead. Previously this rejected the frontend's whole
   per-mutation state refresh, leaving the UI stuck showing stale pre-rebase content after a
