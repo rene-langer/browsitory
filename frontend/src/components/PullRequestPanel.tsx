@@ -45,6 +45,10 @@ interface ForgeRepositorySectionProps {
   branches: { name: string; isCurrent: boolean }[];
 }
 
+// Rendered once outside the sections (see `PullRequestPanel`): WebKitWebDriver cannot compute the
+// text of an element that contains a `<datalist>`, which breaks the e2e `toHaveText` assertions.
+const BRANCH_SUGGESTIONS_ID = "pr-branch-suggestions";
+
 function defaultTargetBranch(branches: { name: string }[]): string {
   return ["main", "master"].find((candidate) => branches.some((branch) => branch.name === candidate)) ?? "";
 }
@@ -257,7 +261,7 @@ function ForgeRepositorySection({
         <label className={styles.label}>
           Source branch
           <input
-            list={`pr-branches-${repository.remoteName}`}
+            list={BRANCH_SUGGESTIONS_ID}
             value={sourceBranch}
             onChange={(event) => setSourceBranch(event.target.value)}
           />
@@ -265,16 +269,11 @@ function ForgeRepositorySection({
         <label className={styles.label}>
           Target branch
           <input
-            list={`pr-branches-${repository.remoteName}`}
+            list={BRANCH_SUGGESTIONS_ID}
             value={targetBranch}
             onChange={(event) => setTargetBranch(event.target.value)}
           />
         </label>
-        <datalist id={`pr-branches-${repository.remoteName}`}>
-          {branches.map((branch) => (
-            <option key={branch.name} value={branch.name} />
-          ))}
-        </datalist>
         <Toolbar>
           <button
             type="submit"
@@ -337,35 +336,42 @@ export function PullRequestPanel({
   // with its own provider/owner/remote, nested inside this section's AccordionSection body, in
   // its own AccordionGroup so its roving-tabindex nav stays scoped to just the repo cards.
   return (
-    <AccordionSection
-      title="Pull Requests"
-      storageKey="sidebar-pull-requests"
-      icon={GitPullRequest}
-      count={
-        forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
-          ? totalPullRequests
-          : undefined
-      }
-    >
-      <AccordionGroup>
-        <div className={styles.sections}>
-          {forgeRepositories.map((repository) => (
-            <ForgeRepositorySection
-              key={repository.remoteName}
-              repository={repository}
-              pullRequests={pullRequests[repository.remoteName]}
-              onListPullRequests={onListPullRequests}
-              onForgetForgeToken={onForgetForgeToken}
-              onSaveForgeToken={onSaveForgeToken}
-              onCreatePullRequest={onCreatePullRequest}
-              onOpenExternalUrl={onOpenExternalUrl}
-              operationDisabled={operationDisabled}
-              operationDisabledReason={operationDisabledReason}
-              branches={branches}
-            />
-          ))}
-        </div>
-      </AccordionGroup>
-    </AccordionSection>
+    <>
+      <AccordionSection
+        title="Pull Requests"
+        storageKey="sidebar-pull-requests"
+        icon={GitPullRequest}
+        count={
+          forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
+            ? totalPullRequests
+            : undefined
+        }
+      >
+        <AccordionGroup>
+          <div className={styles.sections}>
+            {forgeRepositories.map((repository) => (
+              <ForgeRepositorySection
+                key={repository.remoteName}
+                repository={repository}
+                pullRequests={pullRequests[repository.remoteName]}
+                onListPullRequests={onListPullRequests}
+                onForgetForgeToken={onForgetForgeToken}
+                onSaveForgeToken={onSaveForgeToken}
+                onCreatePullRequest={onCreatePullRequest}
+                onOpenExternalUrl={onOpenExternalUrl}
+                operationDisabled={operationDisabled}
+                operationDisabledReason={operationDisabledReason}
+                branches={branches}
+              />
+            ))}
+          </div>
+        </AccordionGroup>
+      </AccordionSection>
+      <datalist id={BRANCH_SUGGESTIONS_ID}>
+        {branches.map((branch) => (
+          <option key={branch.name} value={branch.name} />
+        ))}
+      </datalist>
+    </>
   );
 }
