@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./ConfirmDialog.module.css";
 
 /**
@@ -35,6 +36,7 @@ export function ConfirmDialog({
   confirmTitle?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  useRestoreFocus();
 
   useEffect(() => {
     const dialog = dialogRef.current;

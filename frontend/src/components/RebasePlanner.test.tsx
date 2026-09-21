@@ -71,6 +71,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingDiff: unused,
     getCommitDiff: unused,
     getCommitFiles: unused,
+    getCommitMessage: unused,
     stageFile: unused,
     unstageFile: unused,
     stageHunk: unused,

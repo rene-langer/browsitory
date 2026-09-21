@@ -163,3 +163,30 @@ fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
         .unwrap();
     assert_eq!(merge_commit.parent_ids.len(), 2);
 }
+
+#[test]
+fn commit_message_returns_the_full_message_including_the_body() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(
+        &repo,
+        "subject line\n\nbody paragraph one\n\nbody paragraph two\n",
+    );
+    let id = repo.head().unwrap().target().unwrap().to_string();
+
+    let message = git_core::graph::commit_message(&repo, &id).unwrap();
+
+    assert_eq!(
+        message,
+        "subject line\n\nbody paragraph one\n\nbody paragraph two\n"
+    );
+}
+
+#[test]
+fn commit_message_rejects_an_unknown_commit_id() {
+    let (_dir, repo) = init_repo();
+
+    let result = git_core::graph::commit_message(&repo, "0000000000000000000000000000000000000000");
+
+    assert!(result.is_err());
+}

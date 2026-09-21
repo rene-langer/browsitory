@@ -40,6 +40,17 @@ interface ForgeRepositorySectionProps {
   // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
   // disables (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  // Known local branches: offered as suggestions for the source/target fields and used to
+  // default them (current branch, and main/master).
+  branches: { name: string; isCurrent: boolean }[];
+}
+
+// Rendered once outside the sections (see `PullRequestPanel`): WebKitWebDriver cannot compute the
+// text of an element that contains a `<datalist>`, which breaks the e2e `toHaveText` assertions.
+const BRANCH_SUGGESTIONS_ID = "pr-branch-suggestions";
+
+function defaultTargetBranch(branches: { name: string }[]): string {
+  return ["main", "master"].find((candidate) => branches.some((branch) => branch.name === candidate)) ?? "";
 }
 
 function ForgeRepositorySection({
@@ -52,6 +63,7 @@ function ForgeRepositorySection({
   onOpenExternalUrl,
   operationDisabled,
   operationDisabledReason,
+  branches,
 }: ForgeRepositorySectionProps) {
   const tokenRef = useRef<HTMLInputElement>(null);
   const [account, setAccount] = useState("");
@@ -59,8 +71,8 @@ function ForgeRepositorySection({
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [sourceBranch, setSourceBranch] = useState("");
-  const [targetBranch, setTargetBranch] = useState("");
+  const [sourceBranch, setSourceBranch] = useState(() => branches.find((branch) => branch.isCurrent)?.name ?? "");
+  const [targetBranch, setTargetBranch] = useState(() => defaultTargetBranch(branches));
   // Hides this section's rows immediately after its token is forgotten, even though
   // `state.pullRequests[repository.remoteName]` itself isn't cleared until the next list call —
   // showing rows fetched with a token the user just forgot would be misleading. Cleared again by
@@ -248,11 +260,19 @@ function ForgeRepositorySection({
         </label>
         <label className={styles.label}>
           Source branch
-          <input value={sourceBranch} onChange={(event) => setSourceBranch(event.target.value)} />
+          <input
+            list={BRANCH_SUGGESTIONS_ID}
+            value={sourceBranch}
+            onChange={(event) => setSourceBranch(event.target.value)}
+          />
         </label>
         <label className={styles.label}>
           Target branch
-          <input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
+          <input
+            list={BRANCH_SUGGESTIONS_ID}
+            value={targetBranch}
+            onChange={(event) => setTargetBranch(event.target.value)}
+          />
         </label>
         <Toolbar>
           <button
@@ -278,6 +298,7 @@ export function PullRequestPanel({
   onOpenExternalUrl,
   operationDisabled,
   operationDisabledReason,
+  branches,
 }: {
   forgeRepositories: ForgeRepository[];
   pullRequests: Record<string, PullRequestList>;
@@ -294,6 +315,7 @@ export function PullRequestPanel({
   // Human-readable reason `operationDisabled` is true, forwarded to each `ForgeRepositorySection`
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  branches: { name: string; isCurrent: boolean }[];
 }) {
   if (forgeRepositories.length === 0) {
     return (
@@ -314,34 +336,42 @@ export function PullRequestPanel({
   // with its own provider/owner/remote, nested inside this section's AccordionSection body, in
   // its own AccordionGroup so its roving-tabindex nav stays scoped to just the repo cards.
   return (
-    <AccordionSection
-      title="Pull Requests"
-      storageKey="sidebar-pull-requests"
-      icon={GitPullRequest}
-      count={
-        forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
-          ? totalPullRequests
-          : undefined
-      }
-    >
-      <AccordionGroup>
-        <div className={styles.sections}>
-          {forgeRepositories.map((repository) => (
-            <ForgeRepositorySection
-              key={repository.remoteName}
-              repository={repository}
-              pullRequests={pullRequests[repository.remoteName]}
-              onListPullRequests={onListPullRequests}
-              onForgetForgeToken={onForgetForgeToken}
-              onSaveForgeToken={onSaveForgeToken}
-              onCreatePullRequest={onCreatePullRequest}
-              onOpenExternalUrl={onOpenExternalUrl}
-              operationDisabled={operationDisabled}
-              operationDisabledReason={operationDisabledReason}
-            />
-          ))}
-        </div>
-      </AccordionGroup>
-    </AccordionSection>
+    <>
+      <AccordionSection
+        title="Pull Requests"
+        storageKey="sidebar-pull-requests"
+        icon={GitPullRequest}
+        count={
+          forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
+            ? totalPullRequests
+            : undefined
+        }
+      >
+        <AccordionGroup>
+          <div className={styles.sections}>
+            {forgeRepositories.map((repository) => (
+              <ForgeRepositorySection
+                key={repository.remoteName}
+                repository={repository}
+                pullRequests={pullRequests[repository.remoteName]}
+                onListPullRequests={onListPullRequests}
+                onForgetForgeToken={onForgetForgeToken}
+                onSaveForgeToken={onSaveForgeToken}
+                onCreatePullRequest={onCreatePullRequest}
+                onOpenExternalUrl={onOpenExternalUrl}
+                operationDisabled={operationDisabled}
+                operationDisabledReason={operationDisabledReason}
+                branches={branches}
+              />
+            ))}
+          </div>
+        </AccordionGroup>
+      </AccordionSection>
+      <datalist id={BRANCH_SUGGESTIONS_ID}>
+        {branches.map((branch) => (
+          <option key={branch.name} value={branch.name} />
+        ))}
+      </datalist>
+    </>
   );
 }

@@ -32,7 +32,8 @@ import { useStashActions } from "./useStashActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
 
-const GRAPH_LIMIT = 300;
+// History is loaded a page at a time; `loadMoreHistory` grows the limit by one page.
+const GRAPH_PAGE_SIZE = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
 
@@ -41,6 +42,10 @@ export interface AppState {
   selectedRow: SelectedRow;
   status: StatusEntry[];
   commits: GraphCommit[];
+  // Limit the current `commits` were fetched with, and whether the graph filled it (so older
+  // history probably exists beyond what is shown).
+  graphLimit: number;
+  hasMoreHistory: boolean;
   // `null` means "no filter saved" — every local branch is walked (see `graph_log` in
   // `git-core`). Non-null is the persisted subset CommitGraph currently shows.
   graphBranchSelection: string[] | null;
@@ -170,6 +175,8 @@ export interface UseAppStateResult {
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
+  // Fetches the next page of history (grows the graph limit by one page and reloads).
+  loadMoreHistory(): Promise<void>;
   refresh(): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
   // global banner's dismiss control (issue #30/UX-002). See `App.tsx`'s `RepoWorkspace`.
@@ -182,6 +189,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     selectedRow: "uncommitted",
     status: [],
     commits: [],
+    graphLimit: GRAPH_PAGE_SIZE,
+    hasMoreHistory: false,
     graphBranchSelection: null,
     worktrees: [],
     submodules: [],
@@ -209,16 +218,18 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pending: false,
   });
 
+  const graphLimit = useRef(GRAPH_PAGE_SIZE);
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
       const graphBranchSelection = await client.getGraphBranchSelection(repoPath);
+      const limit = graphLimit.current;
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
         await Promise.all([
           client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, GRAPH_LIMIT, graphBranchSelection),
+          client.getCommitGraph(repoPath, limit, graphBranchSelection),
           client.listBranches(repoPath),
           client.listWorktrees(repoPath),
           client.listSubmodules(repoPath),
@@ -248,6 +259,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         ...prev,
         status,
         commits,
+        graphLimit: limit,
+        hasMoreHistory: commits.length >= limit,
         graphBranchSelection,
         branches,
         worktrees,
@@ -274,6 +287,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       setState((prev) => ({ ...prev, error: credentialFailureMessage(err) }));
     }
   }, [client, repoPath]);
+
+  const loadMoreHistory = useCallback(async () => {
+    graphLimit.current += GRAPH_PAGE_SIZE;
+    await refresh();
+  }, [refresh]);
 
   const {
     runMutation,
@@ -452,6 +470,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     createPullRequest,
     openExternalUrl,
     setGraphBranchSelection,
+    loadMoreHistory,
     refresh,
     dismissError,
   };

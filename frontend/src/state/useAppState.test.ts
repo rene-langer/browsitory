@@ -89,6 +89,7 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingDiff: async () => unimplemented(),
     getCommitDiff: async () => unimplemented(),
     getCommitFiles: async () => unimplemented(),
+    getCommitMessage: async () => unimplemented(),
     stageFile: async () => unimplemented(),
     unstageFile: async () => unimplemented(),
     stageHunk: async () => unimplemented(),
@@ -248,6 +249,47 @@ describe("useAppState", () => {
 
     expect(receivedSelection).toEqual(["main"]);
     expect(result.current.state.graphBranchSelection).toEqual(["main"]);
+  });
+
+  it("loadMoreHistory refetches the graph with a larger limit", async () => {
+    const limits: number[] = [];
+    const client = transferClient({
+      getCommitGraph: async (_repoPath, limit) => {
+        limits.push(limit);
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    await act(() => result.current.loadMoreHistory());
+
+    expect(limits).toEqual([300, 600]);
+    expect(result.current.state.graphLimit).toBe(600);
+  });
+
+  it("reports more history only when the graph filled its limit", async () => {
+    const commitFor = (n: number) => ({
+      id: `id${n}`,
+      shortId: `id${n}`,
+      summary: `c${n}`,
+      authorName: "a",
+      authorEmail: "a@b",
+      timestamp: n,
+      parentIds: [],
+      branchRefs: [],
+    });
+    const full = Array.from({ length: 300 }, (_, n) => commitFor(n));
+    const client = transferClient({ getCommitGraph: async (_repoPath, limit) => full.slice(0, limit) });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    expect(result.current.state.hasMoreHistory).toBe(true);
+
+    const short = transferClient({ getCommitGraph: async () => full.slice(0, 10) });
+    const { result: shortResult } = renderHook(() => useAppState(short, TEST_REPO_PATH));
+    await act(() => shortResult.current.refresh());
+    expect(shortResult.current.state.hasMoreHistory).toBe(false);
   });
 
   it("setGraphBranchSelection persists the selection and refreshes the graph with it", async () => {
@@ -976,6 +1018,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1036,6 +1079,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1096,6 +1140,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async (_repoPath: string, path: string) => {
         stageFileArg = path;
       },
@@ -1576,6 +1621,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async (_repoPath: string, path: string, oldStart: number, newStart: number) => {
@@ -1633,6 +1679,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1686,6 +1733,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1739,6 +1787,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1798,6 +1847,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -1853,6 +1903,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2027,6 +2078,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2081,6 +2133,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2134,6 +2187,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2185,6 +2239,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2239,6 +2294,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2298,6 +2354,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2355,6 +2412,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2409,6 +2467,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2508,6 +2567,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2562,6 +2622,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () => unimplemented(),
       unstageFile: async () => unimplemented(),
       stageHunk: async () => unimplemented(),
@@ -2615,6 +2676,7 @@ describe("useAppState", () => {
       getWorkingDiff: async () => unimplemented(),
       getCommitDiff: async () => unimplemented(),
       getCommitFiles: async () => unimplemented(),
+      getCommitMessage: async () => unimplemented(),
       stageFile: async () =>
         new Promise<void>((resolve) => {
           resolveStage = resolve;

@@ -792,3 +792,35 @@ fn explicit_removal_clears_every_upstream_for_only_the_selected_remote() {
         "backup-topic"
     );
 }
+
+#[test]
+fn current_upstream_reports_ahead_and_behind_counts_against_the_tracking_ref() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "1");
+    common::commit_all(&repo, "first");
+    let first = repo.head().unwrap().target().unwrap();
+    common::write_file(dir.path(), "a.txt", "2");
+    common::commit_all(&repo, "second");
+    let second = repo.head().unwrap().target().unwrap();
+    let head_ref = repo.head().unwrap().name().unwrap().to_string();
+
+    add_remote(&repo, "origin", "file:///tmp/origin.git", None).unwrap();
+    set_current_upstream(&repo, "origin", "main").unwrap();
+
+    // No tracking ref fetched yet: counts are unknown, not zero.
+    let upstream = current_upstream(&repo).unwrap().unwrap();
+    assert_eq!((upstream.ahead, upstream.behind), (None, None));
+
+    // Remote at `first`, local at `second`: one commit ahead.
+    repo.reference("refs/remotes/origin/main", first, true, "test")
+        .unwrap();
+    let upstream = current_upstream(&repo).unwrap().unwrap();
+    assert_eq!((upstream.ahead, upstream.behind), (Some(1), Some(0)));
+
+    // Remote at `second`, local rewound to `first`: one commit behind.
+    repo.reference("refs/remotes/origin/main", second, true, "test")
+        .unwrap();
+    repo.reference(&head_ref, first, true, "rewind").unwrap();
+    let upstream = current_upstream(&repo).unwrap().unwrap();
+    assert_eq!((upstream.ahead, upstream.behind), (Some(0), Some(1)));
+}

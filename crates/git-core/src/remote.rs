@@ -96,6 +96,36 @@ pub struct UpstreamInfo {
     pub local_branch: String,
     pub remote_name: String,
     pub remote_branch: String,
+    /// Commits on the local branch not on its remote-tracking ref. `None` when the tracking ref
+    /// does not exist locally (never fetched), so "unknown" is not shown as zero.
+    pub ahead: Option<usize>,
+    /// Commits on the remote-tracking ref not on the local branch; `None` as for `ahead`.
+    pub behind: Option<usize>,
+}
+
+/// Ahead/behind of `local_branch` against `refs/remotes/<remote>/<remote_branch>`, or
+/// `(None, None)` when either side cannot be resolved.
+fn ahead_behind(
+    repo: &Repository,
+    local_branch: &str,
+    remote_name: &str,
+    remote_branch: &str,
+) -> (Option<usize>, Option<usize>) {
+    let local = repo
+        .find_reference(&format!("refs/heads/{local_branch}"))
+        .ok()
+        .and_then(|r| r.target());
+    let remote = repo
+        .find_reference(&format!("refs/remotes/{remote_name}/{remote_branch}"))
+        .ok()
+        .and_then(|r| r.target());
+    match (local, remote) {
+        (Some(local), Some(remote)) => match repo.graph_ahead_behind(local, remote) {
+            Ok((ahead, behind)) => (Some(ahead), Some(behind)),
+            Err(_) => (None, None),
+        },
+        _ => (None, None),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,10 +527,13 @@ pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, Remot
         .unwrap_or(&merge_ref)
         .to_string();
 
+    let (ahead, behind) = ahead_behind(repo, &local_branch, &remote_name, &remote_branch);
     Ok(Some(UpstreamInfo {
         local_branch,
         remote_name,
         remote_branch,
+        ahead,
+        behind,
     }))
 }
 
@@ -564,13 +597,17 @@ pub fn remote_upstreams(
             Ok(_) | Err(git2::Error { .. }) => continue,
         }
         let merge_ref = config.get_string(&format!("branch.{local_branch}.merge"))?;
+        let remote_branch = merge_ref
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&merge_ref)
+            .to_string();
+        let (ahead, behind) = ahead_behind(repo, local_branch, remote_name, &remote_branch);
         upstreams.push(UpstreamInfo {
             local_branch: local_branch.to_string(),
             remote_name: remote_name.to_string(),
-            remote_branch: merge_ref
-                .strip_prefix("refs/heads/")
-                .unwrap_or(&merge_ref)
-                .to_string(),
+            remote_branch,
+            ahead,
+            behind,
         });
     }
     Ok(upstreams)

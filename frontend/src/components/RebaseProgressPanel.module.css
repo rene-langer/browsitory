@@ -1,0 +1,5 @@
+.reason {
+  margin: 0;
+  color: var(--color-warning-text);
+  font-size: var(--text-sm);
+}

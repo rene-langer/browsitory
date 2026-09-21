@@ -13,15 +13,29 @@ import styles from "./InlineError.module.css";
 export function InlineError({
   message,
   onDismiss,
+  onRetry,
+  hint,
   className,
 }: {
   message: string;
   onDismiss: () => void;
+  /** When given, renders a Retry button that re-runs the failed action. */
+  onRetry?: () => void;
+  /** Plain-language next step shown under the (often technical) message. */
+  hint?: string;
   className?: string;
 }) {
   return (
     <p role="alert" className={className === undefined ? styles.error : `${styles.error} ${className}`}>
-      <span className={styles.message}>{message}</span>
+      <span className={styles.message}>
+        {message}
+        {hint !== undefined && <span className={styles.hint}>{hint}</span>}
+      </span>
+      {onRetry !== undefined && (
+        <button type="button" className={styles.retry} onClick={onRetry}>
+          Retry
+        </button>
+      )}
       <button type="button" className={styles.dismiss} aria-label="Dismiss error" onClick={onDismiss}>
         <X size={12} aria-hidden="true" />
       </button>

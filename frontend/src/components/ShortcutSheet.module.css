@@ -1,0 +1,29 @@
+.sheet {
+  min-width: min(28rem, 80vw);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.sheet h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.list {
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  gap: var(--space-3);
+  padding: 2px 0;
+}
+
+.row dt {
+  flex: 0 0 12rem;
+}
+
+.row dd {
+  margin: 0;
+}

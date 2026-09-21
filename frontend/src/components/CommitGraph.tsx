@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes, isSquashableRange } from "../lib/commitGraphLayout";
 import type { SelectedRow } from "../state/useAppState";
-import { CommitLaneGraphic } from "./CommitLaneGraphic";
+import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
+import { formatShortDate } from "../lib/formatDate";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import styles from "./CommitGraph.module.css";
@@ -25,6 +26,8 @@ export function CommitGraph({
   onBranchFromCommit,
   onRebaseFromCommit,
   onSquashCommits,
+  hasMore = false,
+  onLoadMore,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -40,6 +43,9 @@ export function CommitGraph({
   // are the newer selected commits that fold into that oldest one, which survives as the group's
   // leader.
   onSquashCommits?: (ontoId: string, squashIds: string[]) => void;
+  // True when the loaded history filled its limit, so older commits probably exist.
+  hasMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -65,6 +71,8 @@ export function CommitGraph({
   }, [selectedIndex]);
 
   const moveSelection = (nextIndex: number, extendRange: boolean) => {
+    // Arrowing/paging past the last loaded row pulls in the next page instead of dead-ending.
+    if (nextIndex > rows.length - 1 && hasMore) onLoadMore?.();
     const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
     if (extendRange && next >= 1) {
       // Row 0 is "Uncommitted Changes"; commit indexes are offset by one.
@@ -160,6 +168,7 @@ export function CommitGraph({
     ) + 1;
 
   return (
+    <>
     <ul
       ref={listRef}
       className={styles.list}
@@ -178,7 +187,12 @@ export function CommitGraph({
           onSelectRow("uncommitted");
         }}
       >
-        Uncommitted Changes{status.length > 0 && ` (${status.length})`}
+        <div className={styles.graphCell}>
+          <WorkingTreeLaneGraphic lane={commitLayouts[0]?.lane ?? 0} totalLanes={laneCount} />
+        </div>
+        <span className={styles.commitSummary}>
+          Uncommitted Changes{status.length > 0 && ` (${status.length})`}
+        </span>
       </ListRow>
       {commits.map((commit, index) => (
         <ListRow
@@ -204,6 +218,16 @@ export function CommitGraph({
           ))}
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
+          </span>
+          <span className={styles.author} title={commit.authorEmail}>
+            {commit.authorName}
+          </span>
+          <span
+            className={styles.date}
+            data-testid="commit-date"
+            title={new Date(commit.timestamp * 1000).toLocaleString()}
+          >
+            {formatShortDate(commit.timestamp)}
           </span>
         </ListRow>
       ))}
@@ -244,5 +268,14 @@ export function CommitGraph({
         />
       )}
     </ul>
+    {hasMore && (
+      <div className={styles.loadMore}>
+        <span>Showing latest {commits.length} commits</span>
+        <button type="button" onClick={() => onLoadMore?.()}>
+          Load more
+        </button>
+      </div>
+    )}
+    </>
   );
 }

@@ -479,6 +479,13 @@ fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
     );
     assert_eq!(files["result"], serde_json::json!(["new.txt"]));
 
+    let message = sidecar.call(
+        6,
+        "get_commit_message",
+        serde_json::json!({"repoPath": repo_path, "commitId": commit_id}),
+    );
+    assert_eq!(message["result"], serde_json::json!("add new.txt"));
+
     let unstaged = sidecar.call(
         5,
         "unstage_file",

@@ -37,8 +37,8 @@ pub use remote::*;
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_hunk, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
-    get_graph_branch_selection, get_status, get_working_diff, set_graph_branch_selection,
-    stage_file, stage_hunk, unstage_file, unstage_hunk,
+    get_commit_message, get_graph_branch_selection, get_status, get_working_diff,
+    set_graph_branch_selection, stage_file, stage_hunk, unstage_file, unstage_hunk,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -340,6 +340,8 @@ pub struct UpstreamInfoDto {
     pub local_branch: String,
     pub remote_name: String,
     pub remote_branch: String,
+    pub ahead: Option<usize>,
+    pub behind: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -370,6 +372,8 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             local_branch: upstream.local_branch,
             remote_name: upstream.remote_name,
             remote_branch: upstream.remote_branch,
+            ahead: upstream.ahead,
+            behind: upstream.behind,
         }
     }
 }

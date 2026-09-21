@@ -7,6 +7,12 @@ describe("SplitView", () => {
     localStorage.clear();
   });
 
+  it("hides the left pane when forceCollapsed, keeping it mounted", () => {
+    render(<SplitView left={<div>left</div>} right={<div>right</div>} forceCollapsed />);
+    expect(screen.getByText("left").parentElement).toHaveAttribute("hidden");
+    expect(screen.getByText("right")).toBeInTheDocument();
+  });
+
   it("renders both panes", () => {
     render(<SplitView left={<div>left pane</div>} right={<div>right pane</div>} />);
     expect(screen.getByText("left pane")).toBeInTheDocument();

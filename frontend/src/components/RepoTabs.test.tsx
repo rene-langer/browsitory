@@ -42,6 +42,12 @@ describe("RepoTabs", () => {
     expect(onAddTab).toHaveBeenCalled();
   });
 
+  it("keeps the add button outside the scrolling tablist", () => {
+    render(<RepoTabs openRepos={repos} activePath="/repos/gadget" busyPaths={noneBusy} workspaceNames={{}} onSwitchTo={vi.fn()} onClose={vi.fn()} onCloseGroup={vi.fn()} onAddTab={vi.fn()} />);
+    const add = screen.getByRole("button", { name: "Open another repository" });
+    expect(screen.getByRole("tablist")).not.toContainElement(add);
+  });
+
   it("renders nothing when no repos are open", () => {
     const { container } = render(
       <RepoTabs openRepos={[]} activePath={null} busyPaths={noneBusy} workspaceNames={{}} onSwitchTo={vi.fn()} onClose={vi.fn()} onCloseGroup={vi.fn()} onAddTab={vi.fn()} />,

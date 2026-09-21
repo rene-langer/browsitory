@@ -295,6 +295,18 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(["a.txt"]);
   });
 
+  it("wires getCommitMessage", async () => {
+    const promise = vscodeRepoClient.getCommitMessage("/repo", "abc123");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_message",
+      params: { repoPath: "/repo", commitId: "abc123" },
+    });
+    respond(1, "subject\n\nbody\n");
+    await expect(promise).resolves.toBe("subject\n\nbody\n");
+  });
+
   it("wires stageFile and unstageFile", async () => {
     const stagePromise = vscodeRepoClient.stageFile("/repo", "a.txt");
     expect(postMessage).toHaveBeenCalledWith({

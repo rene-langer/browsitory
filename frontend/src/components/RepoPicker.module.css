@@ -19,8 +19,32 @@
 
 .repoRow {
   padding: var(--space-2) var(--space-3);
-  font-family: var(--font-mono);
   font-size: var(--text-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.repoName {
+  font-weight: 600;
+}
+
+.repoPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.workspacesTitle {
+  margin: 0;
+  font-size: var(--text-md);
 }
 
 .empty {
@@ -31,4 +55,6 @@
 
 .workspaces {
   margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
 }

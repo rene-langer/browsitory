@@ -58,11 +58,28 @@ describe("ContextMenu", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("closes on mouse leave, matching the menu it replaces in CommitGraph", () => {
+  it("stays open when the pointer leaves it (outside click and Escape close it)", () => {
     const onClose = vi.fn();
     render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
     fireEvent.mouseLeave(screen.getByRole("menu"));
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("clamps itself inside the viewport when opened near the bottom-right edge", () => {
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 160, height: 100, top: 0, left: 0, right: 160, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+    try {
+      render(
+        <ContextMenu x={window.innerWidth - 10} y={window.innerHeight - 10} onClose={() => {}} items={[{ label: "X", onSelect: () => {} }]} />,
+      );
+      expect(screen.getByRole("menu")).toHaveStyle({
+        left: `${window.innerWidth - 160 - 4}px`,
+        top: `${window.innerHeight - 100 - 4}px`,
+      });
+    } finally {
+      rectSpy.mockRestore();
+    }
   });
 
   // WAI-ARIA APG menu pattern — AUD-2026-09-05-FE-001.

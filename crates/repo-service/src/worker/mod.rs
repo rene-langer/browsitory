@@ -88,6 +88,10 @@ pub(crate) enum Command {
         commit_id: String,
         reply: Sender<Result<Vec<String>, String>>,
     },
+    GetCommitMessage {
+        commit_id: String,
+        reply: Sender<Result<String, String>>,
+    },
     GetBlame {
         commit_id: String,
         path: String,
@@ -461,6 +465,9 @@ impl Worker {
                     } => status::get_commit_diff(&repo, commit_id, path, reply),
                     Command::GetCommitFiles { commit_id, reply } => {
                         status::get_commit_files(&repo, commit_id, reply)
+                    }
+                    Command::GetCommitMessage { commit_id, reply } => {
+                        status::get_commit_message(&repo, commit_id, reply)
                     }
                     Command::GetBlame {
                         commit_id,
@@ -1410,6 +1417,8 @@ mod tests {
                 local_branch: repo.head().unwrap().shorthand().unwrap().into(),
                 remote_name: "origin".into(),
                 remote_branch: "main".into(),
+                ahead: None,
+                behind: None,
             })
         );
 

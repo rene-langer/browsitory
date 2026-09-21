@@ -24,6 +24,27 @@ describe("TransferPanel", () => {
     expect(screen.getByRole("region", { name: "Transfer progress" })).toBeInTheDocument();
   });
 
+  it.each([
+    [1536 * 1024, "1.5 MB received"],
+    [3 * 1024 * 1024 * 1024, "3.0 GB received"],
+  ])("formats %i bytes beyond KB", (receivedBytes, text) => {
+    render(
+      <TransferPanel
+        progress={{
+          operationId: "op-1",
+          operation: "Fetch",
+          phase: "Receiving",
+          errorKind: null,
+          current: 1,
+          total: 2,
+          receivedBytes,
+          message: null,
+        }}
+      />,
+    );
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+
   it("does not render a transfer message from the event payload", () => {
     render(
       <TransferPanel

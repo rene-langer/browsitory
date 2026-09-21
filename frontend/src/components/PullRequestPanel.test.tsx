@@ -43,6 +43,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
       operationDisabledReason={null}
+      branches={[]}
       {...overrides}
     />,
   );
@@ -419,5 +420,19 @@ describe("PullRequestPanel", () => {
     // ...while the Bitbucket card, untouched, stays open.
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
     expect(within(bitbucketSection).getByRole("button", { name: "List pull requests" })).toBeInTheDocument();
+  });
+
+  it("defaults source to the current branch, target to main, and suggests known branches", () => {
+    localStorage.clear();
+    const { container } = renderPanel({
+      branches: [
+        { name: "main", isCurrent: false },
+        { name: "feat/x", isCurrent: true },
+      ],
+    });
+    expect(screen.getByLabelText("Source branch")).toHaveValue("feat/x");
+    expect(screen.getByLabelText("Target branch")).toHaveValue("main");
+    const options = Array.from(container.querySelectorAll("datalist option")).map((o) => o.getAttribute("value"));
+    expect(options).toEqual(["main", "feat/x"]);
   });
 });

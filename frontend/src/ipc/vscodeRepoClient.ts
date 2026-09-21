@@ -210,6 +210,8 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     call<string[]>("get_commit_files", { repoPath, commitId }),
+  getCommitMessage: (repoPath: string, commitId: string) =>
+    call<string>("get_commit_message", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
   stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>

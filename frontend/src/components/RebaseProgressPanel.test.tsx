@@ -17,7 +17,7 @@ describe("RebaseProgressPanel", () => {
     expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
   });
 
-  it("Continue Rebase calls onContinue", () => {
+  it("Continue rebase calls onContinue", () => {
     const onContinue = vi.fn();
     render(
       <RebaseProgressPanel
@@ -29,12 +29,12 @@ describe("RebaseProgressPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Continue Rebase"));
+    fireEvent.click(screen.getByText("Continue rebase"));
 
     expect(onContinue).toHaveBeenCalled();
   });
 
-  it("Continue Rebase is disabled while a conflict is unresolved", () => {
+  it("Continue rebase is disabled while a conflict is unresolved", () => {
     render(
       <RebaseProgressPanel
         currentStep={1}
@@ -45,10 +45,10 @@ describe("RebaseProgressPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Continue Rebase").closest("button")).toBeDisabled();
+    expect(screen.getByText("Continue rebase").closest("button")).toBeDisabled();
   });
 
-  it("Abort Rebase calls onAbort", () => {
+  it("Abort rebase calls onAbort", () => {
     const onAbort = vi.fn();
     render(
       <RebaseProgressPanel
@@ -60,8 +60,24 @@ describe("RebaseProgressPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Abort Rebase"));
+    fireEvent.click(screen.getByText("Abort rebase"));
 
     expect(onAbort).toHaveBeenCalled();
+  });
+
+  it("shows why Continue is disabled and ties it to the button", () => {
+    render(
+      <RebaseProgressPanel
+        currentStep={1}
+        totalSteps={3}
+        disabled
+        disabledReason="Resolve 2 conflicts to continue"
+        onContinue={vi.fn()}
+        onAbort={vi.fn()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Continue rebase" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription("Resolve 2 conflicts to continue");
   });
 });
