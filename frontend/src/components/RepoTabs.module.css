@@ -1,12 +1,24 @@
-.tabs {
+.strip {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
   margin: 0 var(--space-4);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.addButton {
+  flex: 0 0 auto;
 }
 
 .tab {
@@ -81,9 +93,14 @@
 /* Fixed footprint so a truncated label's ellipsis never jitters against the "x". */
 .closeButton {
   flex: 0 0 auto;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--size-target-min);
+  height: var(--size-target-min);
   padding: 0;
+}
+
+.addButton {
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
 }
 
 .closeButton:hover,

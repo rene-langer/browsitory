@@ -571,3 +571,55 @@ describe("CommitGraph — keyboard access", () => {
     expect(onSelectRow).not.toHaveBeenCalled();
   });
 });
+
+describe("CommitGraph history metadata and pagination", () => {
+  const baseProps = {
+    status,
+    commits,
+    selectedRow: "uncommitted" as const,
+    pending: false,
+    onSelectRow: vi.fn(),
+    onBranchFromCommit: vi.fn(),
+    onRebaseFromCommit: vi.fn(),
+  };
+
+  it("shows each commit's author and date in the row", () => {
+    render(<CommitGraph {...baseProps} />);
+
+    expect(screen.getAllByText("Rene")).toHaveLength(2);
+    expect(screen.getAllByTestId("commit-date")).toHaveLength(2);
+  });
+
+  it("offers Load more when more history exists and calls onLoadMore", () => {
+    const onLoadMore = vi.fn();
+    render(<CommitGraph {...baseProps} hasMore onLoadMore={onLoadMore} />);
+
+    expect(screen.getByText(/Showing latest 2 commits/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer Load more when the whole history is loaded", () => {
+    render(<CommitGraph {...baseProps} hasMore={false} onLoadMore={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("loads more when keyboard navigation reaches the last row", () => {
+    const onLoadMore = vi.fn();
+    render(
+      <CommitGraph {...baseProps} selectedRow={{ commitId: "bbb222..." }} hasMore onLoadMore={onLoadMore} />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "ArrowDown" });
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws a hollow working-tree node in the lane column of the Uncommitted Changes row", () => {
+    render(<CommitGraph {...baseProps} />);
+
+    expect(screen.getByTestId("working-tree-node")).toBeInTheDocument();
+  });
+});

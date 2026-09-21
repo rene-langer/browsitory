@@ -19,6 +19,27 @@ function opacityFor(segmentId: number, hoveredSegmentId: number | null | undefin
   return hoveredSegmentId == null || segmentId === hoveredSegmentId ? 1 : 0.25;
 }
 
+/**
+ * Hollow node for the "Uncommitted Changes" row: occupies the same lane column width as the
+ * commit rows' graphic so the row's text lines up with commit summaries, and links down to the
+ * first commit (HEAD) in that commit's lane.
+ */
+export function WorkingTreeLaneGraphic({ lane, totalLanes }: { lane: number; totalLanes: number }) {
+  const x = laneCenterX(lane);
+  return (
+    <svg
+      data-testid="working-tree-node"
+      width={totalLanes * LANE_WIDTH}
+      height={ROW_HEIGHT}
+      aria-hidden="true"
+      style={{ display: "block" }}
+    >
+      <line x1={x} y1={ROW_HEIGHT / 2} x2={x} y2={ROW_HEIGHT} stroke={laneColor(lane)} strokeWidth={2} strokeDasharray="3 2" />
+      <circle cx={x} cy={ROW_HEIGHT / 2} r={4} fill="var(--color-bg)" stroke={laneColor(lane)} strokeWidth={2} />
+    </svg>
+  );
+}
+
 export function CommitLaneGraphic({
   layout,
   totalLanes,

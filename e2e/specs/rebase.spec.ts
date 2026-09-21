@@ -174,7 +174,7 @@ describe("Browsitory interactive rebase", () => {
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
-    const continueButton = await $("button=Continue Rebase");
+    const continueButton = await $("button=Continue rebase");
     await continueButton.waitForEnabled({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), continueButton);
 
@@ -246,7 +246,7 @@ describe("Browsitory interactive rebase", () => {
     const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
 
-    const abortButton = await $("button=Abort Rebase");
+    const abortButton = await $("button=Abort rebase");
     await abortButton.click();
 
     await browser.waitUntil(

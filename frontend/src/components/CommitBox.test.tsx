@@ -208,4 +208,9 @@ describe("CommitBox", () => {
 
     expect(onAbortMerge).toHaveBeenCalled();
   });
+
+  it("shows why Commit is disabled and ties it to the button", () => {
+    render(<CommitBox onCommit={vi.fn()} disabled disabledReason="Stage changes to commit" onAbortMerge={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Stage changes to commit");
+  });
 });

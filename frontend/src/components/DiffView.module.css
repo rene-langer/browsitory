@@ -1,3 +1,21 @@
+.placeholder {
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0;
+}
+
+.diff {
+  min-width: 0;
+}
+
+.diff:focus-visible {
+  outline: 2px solid var(--color-focus-ring, currentColor);
+  outline-offset: 1px;
+}
+
+.activeHunk .hunkHeader {
+  box-shadow: inset 2px 0 0 var(--color-accent, currentColor);
+}
+
 .hunkHeader {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -6,19 +24,62 @@
   padding: var(--space-1) var(--space-2);
   margin-top: var(--space-2);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
+}
+
+.hunkRange {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hunkHeader button {
+  white-space: nowrap;
+}
+
+.armedDiscard {
+  background: var(--color-danger, #c62828);
+  border-color: var(--color-danger, #c62828);
+  color: #fff;
+}
+
+.lines {
+  margin: 0;
+  overflow-x: auto;
 }
 
 .line {
+  display: flex;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: var(--leading-dense);
+  padding-right: var(--space-2);
+}
+
+.gutter {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  padding: 0 var(--space-1);
+  text-align: right;
+  color: var(--color-text-muted);
+  user-select: none;
+  opacity: 0.8;
+}
+
+.marker {
+  flex: 0 0 auto;
+  width: 2ch;
+  text-align: center;
+  user-select: none;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: pre-wrap;
-  /* Hanging indent: wrapped continuation lines sit one column right of the +/- marker. */
-  padding: 0 var(--space-2) 0 calc(var(--space-2) + 1ch);
-  text-indent: -1ch;
+  overflow-wrap: anywhere;
 }
 
 .lineAdd {

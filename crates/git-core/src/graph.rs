@@ -86,3 +86,9 @@ pub fn graph_log(
 
     Ok(commits)
 }
+
+/// Full raw message (subject plus body) of `commit_id`, for the commit header.
+pub fn commit_message(repo: &Repository, commit_id: &str) -> Result<String, GraphError> {
+    let commit = repo.find_commit(Oid::from_str(commit_id)?)?;
+    Ok(String::from_utf8_lossy(commit.message_bytes()).into_owned())
+}

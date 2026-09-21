@@ -76,7 +76,7 @@ function expandRemoteBranches(remoteName: string): void {
   if (remoteToggle.getAttribute("aria-expanded") === "false") {
     remoteToggle.click();
   }
-  remoteToggle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  remoteToggle.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
 }
 
 function goToSidebarSection(title: string): void {
@@ -95,7 +95,14 @@ function goToSidebarSection(title: string): void {
   if (button.getAttribute("aria-expanded") === "false") {
     button.click();
   }
-  button.closest("section")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  button.closest("section")?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
+}
+
+/** Smooth scrolling unless the user asked the OS for reduced motion. */
+function scrollBehavior(): ScrollBehavior {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "auto"
+    : "smooth";
 }
 
 export function buildCommands(
@@ -104,9 +111,19 @@ export function buildCommands(
   otherOpenRepos: OpenRepo[] = [],
   onSwitchRepoTab: (path: string) => void = () => {},
   panelVisibility: Record<SidebarPanelId, boolean> = defaultPanelVisibility(),
+  onShowShortcuts?: () => void,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
+
+  if (onShowShortcuts !== undefined) {
+    commands.push({
+      id: "show-shortcuts",
+      label: "Show keyboard shortcuts",
+      keywords: ["keyboard", "shortcuts", "help", "keys"],
+      run: onShowShortcuts,
+    });
+  }
 
   // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
   // sidebar mutation button behind. Mutating command families must be omitted

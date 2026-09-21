@@ -1,16 +1,18 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./CommitBox.module.css";
 
 export function CommitBox({
   onCommit,
   disabled,
+  disabledReason,
   onAbortMerge,
   initialMessage,
 }: {
   onCommit: (message: string) => void;
   disabled: boolean;
+  /** Visible explanation shown while `disabled` blocks Commit. */
+  disabledReason?: string;
   onAbortMerge: () => void;
   initialMessage?: string;
 }) {
@@ -58,7 +60,7 @@ export function CommitBox({
   };
 
   return (
-    <Panel>
+    <div>
       <textarea
         className={styles.textarea}
         value={message}
@@ -67,12 +69,21 @@ export function CommitBox({
         placeholder="Commit message"
         aria-label="Commit message"
       />
+      {disabled && disabledReason !== undefined && (
+        <p id="commit-disabled-reason" className={styles.reason}>
+          {disabledReason}
+        </p>
+      )}
       <Toolbar>
-        <button onClick={commitIfReady} disabled={disabled || message.trim() === ""}>
+        <button
+          onClick={commitIfReady}
+          disabled={disabled || message.trim() === ""}
+          aria-describedby={disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined}
+        >
           Commit
         </button>
         {initialMessage !== undefined && <button onClick={onAbortMerge}>Abort merge</button>}
       </Toolbar>
-    </Panel>
+    </div>
   );
 }

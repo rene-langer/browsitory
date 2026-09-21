@@ -1,3 +1,4 @@
+import { conflictReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -11,11 +12,12 @@ import {
   Plus,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
   FileConflictChoice,
+  GraphCommit,
   RepoClient,
   StatusEntry,
   StatusKind,
@@ -23,6 +25,7 @@ import type {
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox } from "./CommitBox";
+import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
@@ -105,7 +108,7 @@ function UncommittedFileSection({
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const isConflicted = entry.kind === "Conflicted";
@@ -117,7 +120,8 @@ function UncommittedFileSection({
   // `status` stays a dependency for the same reason the old single-pane version needed it: a new
   // `status` array (by reference) is the only signal that this file's own diff may be stale.
   useEffect(() => {
-    if (mode !== "diff" || isConflicted) return;
+    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
+    if (mode !== "diff" || isConflicted || collapsed) return;
     let ignore = false;
     client
       .getWorkingDiff(repoPath, entry.path, entry.staged)
@@ -135,7 +139,7 @@ function UncommittedFileSection({
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status, collapsed]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -267,10 +271,13 @@ export function DiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  commits,
 }: {
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
+  // Loaded history, used for the selected commit's header (author, date, parents).
+  commits?: GraphCommit[];
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
@@ -322,6 +329,7 @@ export function DiffPane({
       repoPath={repoPath}
       client={client}
       commitId={selectedRow.commitId}
+      commits={commits}
       onSelectRow={onSelectRow}
     />
   );
@@ -386,6 +394,7 @@ function UncommittedDiffPane({
   const stagedEntries = status.filter((entry) => entry.staged);
   const unstagedEntries = status.filter((entry) => !entry.staged);
   const stagedCount = stagedEntries.length;
+  const conflictCount = status.filter((entry) => entry.kind === "Conflicted").length;
   // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
   // "Changes" group — but staging a conflicted path is what *marks the conflict resolved*, with
   // whatever happens to be in the working tree. One "Stage all" click would silently resolve
@@ -561,14 +570,16 @@ function UncommittedDiffPane({
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
             totalSteps={rebaseProgress.totalSteps}
-            disabled={status.some((entry) => entry.kind === "Conflicted")}
+            disabled={conflictCount > 0}
+            disabledReason={conflictReason(conflictCount)}
             onContinue={onRebaseContinue}
             onAbort={onRebaseAbort}
           />
         ) : (
           <CommitBox
             onCommit={onCommit}
-            disabled={stagedCount === 0 || status.some((entry) => entry.kind === "Conflicted")}
+            disabled={stagedCount === 0 || conflictCount > 0}
+            disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
             onAbortMerge={onAbortMerge}
             initialMessage={mergeMessage ?? undefined}
           />
@@ -596,12 +607,12 @@ function CommitFileSection({
   onSelectRow: (row: SelectedRow) => void;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (mode !== "diff") return;
+    if (mode !== "diff" || collapsed) return;
     let ignore = false;
     client
       .getCommitDiff(repoPath, commitId, path)
@@ -619,7 +630,7 @@ function CommitFileSection({
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, commitId, path, mode]);
+  }, [repoPath, client, commitId, path, mode, collapsed]);
 
   useEffect(() => {
     if (mode !== "blame") return;
@@ -679,13 +690,16 @@ function CommitDiffPane({
   repoPath,
   client,
   commitId,
+  commits,
   onSelectRow,
 }: {
   repoPath: string;
   client: RepoClient;
   commitId: string;
+  commits?: GraphCommit[];
   onSelectRow: (row: SelectedRow) => void;
 }) {
+  const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const [files, setFiles] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
@@ -734,6 +748,14 @@ function CommitDiffPane({
 
   return (
     <div>
+      <CommitHeader
+        repoPath={repoPath}
+        client={client}
+        commitId={commitId}
+        commit={commits?.find((c) => c.id === commitId)}
+        knownCommitIds={knownCommitIds}
+        onSelectRow={onSelectRow}
+      />
       {files.length > 0 && (
         <div className={styles.groupHeading}>
           <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />

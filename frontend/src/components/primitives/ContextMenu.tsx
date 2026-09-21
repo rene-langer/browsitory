@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import styles from "./ContextMenu.module.css";
 
 export interface ContextMenuItem {
@@ -23,6 +23,20 @@ export function ContextMenu({
 }) {
   const menuRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Clamp to the viewport once the menu's real size is known, so a menu opened near the right or
+  // bottom edge is never partly off-screen. Outside click and Escape close it; leaving with the
+  // pointer does not.
+  const [position, setPosition] = useState({ x, y });
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (menu === null) return;
+    const rect = menu.getBoundingClientRect();
+    const margin = 4;
+    const nextX = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin));
+    const nextY = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin));
+    setPosition((current) => (current.x === nextX && current.y === nextY ? current : { x: nextX, y: nextY }));
+  }, [x, y, items.length]);
 
   // Indexes of every non-disabled item, in order — the only stops arrow-key navigation and
   // initial focus-on-open should land on (the WAI-ARIA APG menu pattern skips disabled items
@@ -111,8 +125,7 @@ export function ContextMenu({
       ref={menuRef}
       role="menu"
       className={styles.menu}
-      style={{ position: "fixed", top: y, left: x }}
-      onMouseLeave={onClose}
+      style={{ position: "fixed", top: position.y, left: position.x }}
       onKeyDown={handleMenuKeyDown}
     >
       {items.map((item, index) => (

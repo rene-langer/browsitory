@@ -1,0 +1,23 @@
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.required {
+  color: var(--color-danger-text);
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.error {
+  font-size: var(--text-xs);
+  color: var(--color-danger-text);
+}

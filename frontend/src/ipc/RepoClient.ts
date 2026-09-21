@@ -68,6 +68,9 @@ export interface UpstreamInfo {
   localBranch: string;
   remoteName: string;
   remoteBranch: string;
+  // Commits ahead of / behind the remote-tracking ref; null when that ref was never fetched.
+  ahead?: number | null;
+  behind?: number | null;
 }
 
 export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
@@ -236,6 +239,8 @@ export interface RepoClient {
   getWorkingDiff(repoPath: string, path: string, staged: boolean): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
+  // Full raw commit message (subject plus body).
+  getCommitMessage(repoPath: string, commitId: string): Promise<string>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
   stageHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;

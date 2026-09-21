@@ -90,6 +90,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingDiff: async () => [],
     getCommitDiff: async () => [],
     getCommitFiles: unused,
+    getCommitMessage: unused,
     stageFile: unused,
     unstageFile: unused,
     stageHunk: unused,
@@ -594,6 +595,29 @@ describe("DiffPane", () => {
 
       expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
       expect(screen.queryByPlaceholderText("Commit message")).not.toBeInTheDocument();
+    });
+
+    describe("diff loading", () => {
+      it("shows a loading placeholder, not 'No text differences', while the diff is pending", async () => {
+        const getWorkingDiff = vi.fn(() => new Promise<DiffHunk[]>(() => {}));
+        renderUncommitted(fakeClient({ getWorkingDiff }), status);
+
+        expect((await screen.findAllByText(/Loading diff/)).length).toBeGreaterThan(0);
+        expect(screen.queryByText(/No text differences/)).not.toBeInTheDocument();
+      });
+
+      it("does not fetch a collapsed section's diff until it is expanded", async () => {
+        const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+        renderUncommitted(fakeClient({ getWorkingDiff }), status);
+        await screen.findByRole("button", { name: "Collapse a.txt" });
+        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+        await waitFor(() => expect(screen.queryByText(/No text differences/)).not.toBeInTheDocument());
+        getWorkingDiff.mockClear();
+
+        fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
+
+        await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      });
     });
 
     describe("collapse", () => {

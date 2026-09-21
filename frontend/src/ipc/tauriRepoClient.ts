@@ -90,6 +90,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     loggedInvoke<string[]>("get_commit_files", { repoPath, commitId }),
+  getCommitMessage: (repoPath: string, commitId: string) =>
+    loggedInvoke<string>("get_commit_message", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => loggedInvoke("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => loggedInvoke("unstage_file", { repoPath, path }),
   stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>

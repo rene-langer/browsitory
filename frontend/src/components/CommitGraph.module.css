@@ -2,6 +2,7 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  container-type: inline-size;
 }
 
 .commitSummary {
@@ -40,4 +41,41 @@
 li.uncommittedRow {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+}
+
+.author,
+.date {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.author {
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Author and date columns give way to the summary when the history pane is narrow. */
+@container (max-width: 480px) {
+  .date {
+    display: none;
+  }
+}
+
+@container (max-width: 360px) {
+  .author {
+    display: none;
+  }
+}
+
+.loadMore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }

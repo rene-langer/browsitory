@@ -1,3 +1,4 @@
+import { branchNameProblem } from "../lib/refName";
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
@@ -129,6 +130,7 @@ export function BranchTree({
   onOpenAddRemoteDraft: () => void;
   onCloseAddRemoteDraft: () => void;
 }) {
+  const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
@@ -497,6 +499,12 @@ export function BranchTree({
     setRowMenu(menu);
   };
 
+  const newBranchProblem = branchNameProblem(newBranchName.trim());
+  const startPoint = createBranchDraft?.startPoint ?? "HEAD";
+  const currentBranchName = branches.find((branch) => branch.isCurrent)?.name;
+  const createBaseLabel =
+    startPoint === "HEAD" ? (currentBranchName ?? "HEAD") : /^[0-9a-f]{40}$/i.test(startPoint) ? startPoint.slice(0, 7) : startPoint;
+
   const submitCreate = async () => {
     if (newBranchName.trim() === "" || createBranchDraft === null) return;
     const failure = await onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
@@ -506,6 +514,7 @@ export function BranchTree({
     }
     setNewBranchName("");
     setCreateError(null);
+    if (checkoutAfterCreate) await onSwitchBranch(newBranchName.trim());
   };
 
   const handleDeleteClick = async (name: string) => {
@@ -532,6 +541,12 @@ export function BranchTree({
 
   function branchContextItems(branch: BranchInfo): ContextMenuItem[] {
     const items: ContextMenuItem[] = [
+      {
+        label: "Checkout",
+        title: branch.isCurrent ? "Already the current branch." : "Same as double-clicking the branch.",
+        disabled: isRebasing || branch.isCurrent,
+        onSelect: () => onSwitchBranch(branch.name),
+      },
       {
         label: "Rename",
         disabled: isRebasing,
@@ -604,36 +619,67 @@ export function BranchTree({
       }
     >
       {createBranchDraft !== null && (
-        <div className={styles.draftForm}>
+        <form
+          className={styles.draftForm}
+          aria-label="New branch"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (newBranchProblem === null) void submitCreate();
+          }}
+        >
+          <p className={styles.draftBase}>
+            New branch from <strong>{createBaseLabel}</strong>
+          </p>
+          <label htmlFor="new-branch-name" className={styles.draftLabel}>
+            Branch name
+          </label>
           <input
+            id="new-branch-name"
             autoFocus
             value={newBranchName}
+            aria-invalid={newBranchProblem !== null}
+            aria-describedby={newBranchProblem !== null ? "new-branch-name-problem" : undefined}
             onChange={(event) => {
               setNewBranchName(event.target.value);
               setCreateError(null);
             }}
             placeholder="New branch name"
             onKeyDown={(event) => {
-              if (event.key === "Enter") void submitCreate();
-              else if (event.key === "Escape") {
+              if (event.key === "Escape") {
                 setCreateError(null);
                 onCloseCreateBranchDraft();
               }
             }}
           />
-          <button onClick={() => void submitCreate()} disabled={newBranchName.trim() === "" || isRebasing}>
-            Create
-          </button>
-          <button
-            onClick={() => {
-              setCreateError(null);
-              onCloseCreateBranchDraft();
-            }}
-          >
-            Cancel
-          </button>
+          {newBranchProblem !== null && (
+            <p id="new-branch-name-problem" className={styles.draftProblem}>
+              {newBranchProblem}
+            </p>
+          )}
+          <label className={styles.draftCheckbox}>
+            <input
+              type="checkbox"
+              checked={checkoutAfterCreate}
+              onChange={(event) => setCheckoutAfterCreate(event.target.checked)}
+            />
+            Check out after creating
+          </label>
+          <div className={styles.draftActions}>
+            <button type="submit" disabled={newBranchName.trim() === "" || newBranchProblem !== null || isRebasing}>
+              Create
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCreateError(null);
+                onCloseCreateBranchDraft();
+              }}
+            >
+              Cancel
+            </button>
+          </div>
           {createError !== null && <InlineError message={createError} onDismiss={() => setCreateError(null)} />}
-        </div>
+        </form>
       )}
 
       {addRemoteDraftOpen && (
