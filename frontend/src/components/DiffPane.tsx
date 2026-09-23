@@ -25,7 +25,7 @@ import type {
 } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
-import { CommitBox } from "./CommitBox";
+import { CommitBox, type CommitDraft } from "./CommitBox";
 import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
@@ -331,6 +331,8 @@ export function DiffPane({
   onRebaseAbort,
   commits,
   refreshGeneration = 0,
+  initialCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -339,6 +341,9 @@ export function DiffPane({
   // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
   // only so tests that don't exercise refreshes needn't pass it.
   refreshGeneration?: number;
+  // Passed straight through to `CommitBox` — see its `initialDraft`/`onDraftChange`.
+  initialCommitDraft?: CommitDraft;
+  onCommitDraftChange?: (draft: CommitDraft) => void;
   // Loaded history, used for the selected commit's header (author, date, parents).
   commits?: GraphCommit[];
   status: StatusEntry[];
@@ -386,6 +391,8 @@ export function DiffPane({
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
         refreshGeneration={refreshGeneration}
+        initialCommitDraft={initialCommitDraft}
+        onCommitDraftChange={onCommitDraftChange}
       />
     );
   }
@@ -427,11 +434,15 @@ function UncommittedDiffPane({
   onRebaseContinue,
   onRebaseAbort,
   refreshGeneration,
+  initialCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
   refreshGeneration: number;
+  initialCommitDraft?: CommitDraft;
+  onCommitDraftChange?: (draft: CommitDraft) => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onStageAllFiles: (paths: string[]) => void;
@@ -689,6 +700,8 @@ function UncommittedDiffPane({
             disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
             onAbortMerge={onAbortMerge}
             initialMessage={mergeMessage ?? undefined}
+            initialDraft={initialCommitDraft}
+            onDraftChange={onCommitDraftChange}
           />
         )}
       </div>

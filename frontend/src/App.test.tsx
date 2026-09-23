@@ -233,6 +233,76 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
   });
 
+  it("keeps a half-typed commit message across switching tabs away and back", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
+      target: { value: "wip: half-typed" },
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    // b's workspace replaced a's (PERF-001 unmounts inactive tabs), with its own empty draft.
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("tab", { name: "a" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
+  });
+
+  it("re-enables a tab's close button once it is switched away from mid-operation", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      // Never settles: the stash stays in flight, so repo a stays busy for as long as its
+      // workspace is mounted.
+      saveStash: () => new Promise(() => {}),
+    });
+
+    render(<App client={client} />);
+    const tabA = await screen.findByRole("tab", { name: "a" });
+    // The per-tab close button is `aria-hidden` (mouse-only), so it's found by position: the
+    // tab's sibling inside its `role="presentation"` wrapper.
+    const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
+
+    const stash = await screen.findByRole("button", { name: "Stash" });
+    await waitFor(() => expect(stash).toBeEnabled());
+    fireEvent.click(stash);
+    await waitFor(() => expect(closeA()).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+
+    await waitFor(() => expect(closeA()).toBeEnabled());
+  });
+
   it("opens the shortcut sheet on ? outside of a text input", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({

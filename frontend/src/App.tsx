@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Moon, Sparkles, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
+import type { CommitDraft } from "./components/CommitBox";
 import { ShortcutHint } from "./components/ShortcutHint";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 
@@ -51,6 +52,8 @@ function RepoWorkspace({
   openRepos,
   onSwitchRepoTab,
   onCloseRepoTab,
+  getCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -63,8 +66,16 @@ function RepoWorkspace({
   openRepos: OpenRepo[];
   onSwitchRepoTab: (path: string) => void;
   onCloseRepoTab: (path: string) => void;
+  // `App`'s per-repo commit-message drafts (see `commitDrafts` there): this workspace unmounts
+  // whenever its tab isn't active, so `CommitBox`'s own state can't outlive a tab switch.
+  getCommitDraft: (repoPath: string) => CommitDraft | undefined;
+  onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
 }) {
   const appState = useAppState(client, repoPath);
+  const handleCommitDraftChange = useCallback(
+    (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
+    [onCommitDraftChange, repoPath],
+  );
   const panelVisibility = useSidebarPanelVisibility();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -179,6 +190,11 @@ function RepoWorkspace({
   useEffect(() => {
     onBusyChange(repoPath, repositoryOperationDisabled);
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
+  // Only the active tab's workspace is mounted (PERF-001), so switching away mid-operation
+  // unmounts this component before its "no longer busy" report can ever fire — which would leave
+  // the backgrounded tab's close button disabled for good. Clear it on the way out; remounting
+  // re-reports from fresh state (a merge/rebase still in progress is re-read by `refresh()`).
+  useEffect(() => () => onBusyChange(repoPath, false), [repoPath, onBusyChange]);
 
   return (
     // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
@@ -419,6 +435,8 @@ function RepoWorkspace({
                 commits={appState.state.commits}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}
+                initialCommitDraft={getCommitDraft(repoPath)}
+                onCommitDraftChange={handleCommitDraftChange}
                 onStageFile={appState.stageFile}
                 onUnstageFile={appState.unstageFile}
                 onStageAllFiles={appState.stageAllFiles}
@@ -489,6 +507,17 @@ export default function App({
     () => new Set(Object.entries(busyByPath).filter(([, busy]) => busy).map(([path]) => path)),
     [busyByPath],
   );
+
+  // Per-repo commit-message drafts, keyed by repo path. A ref rather than state: nothing renders
+  // from it — `CommitBox` reads its entry once on mount and writes through on every change — so
+  // keeping it out of state avoids re-rendering the whole app on each keystroke. Entries outlive
+  // their tab on purpose (reopening a repo in the same session restores its draft), and cost one
+  // short string per repo ever opened.
+  const commitDrafts = useRef<Record<string, CommitDraft>>({});
+  const getCommitDraft = useCallback((repoPath: string) => commitDrafts.current[repoPath], []);
+  const onCommitDraftChange = useCallback((repoPath: string, draft: CommitDraft) => {
+    commitDrafts.current[repoPath] = draft;
+  }, []);
 
   const [pickingRepo, setPickingRepo] = useState(false);
 
@@ -751,6 +780,8 @@ export default function App({
               openRepos={openRepos.openRepos}
               onSwitchRepoTab={openRepos.switchTo}
               onCloseRepoTab={openRepos.closeRepo}
+              getCommitDraft={getCommitDraft}
+              onCommitDraftChange={onCommitDraftChange}
             />
           ))
       )}
