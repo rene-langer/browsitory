@@ -190,9 +190,9 @@ describe("DiffPane", () => {
       const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
-      expect(await screen.findByText("Stage Hunk")).toBeInTheDocument();
-      expect(screen.queryByText("Unstage Hunk")).not.toBeInTheDocument();
-      expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+      expect(await screen.findByText("Stage hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Unstage hunk")).not.toBeInTheDocument();
+      expect(screen.getByText("Discard hunk")).toBeInTheDocument();
     });
 
     it("shows Unstage Hunk (not Stage Hunk) for a staged file's diff", async () => {
@@ -203,8 +203,8 @@ describe("DiffPane", () => {
       const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "b.txt" ? hunks : []));
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
-      expect(await screen.findByText("Unstage Hunk")).toBeInTheDocument();
-      expect(screen.queryByText("Stage Hunk")).not.toBeInTheDocument();
+      expect(await screen.findByText("Unstage hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Stage hunk")).not.toBeInTheDocument();
     });
 
     it("clicking Stage Hunk calls onStageHunk with that section's path and the hunk's start lines", async () => {
@@ -214,7 +214,7 @@ describe("DiffPane", () => {
       const onStageHunk = vi.fn();
       renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), status, { onStageHunk });
 
-      fireEvent.click(await screen.findByText("Stage Hunk"));
+      fireEvent.click(await screen.findByText("Stage hunk"));
 
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
     });

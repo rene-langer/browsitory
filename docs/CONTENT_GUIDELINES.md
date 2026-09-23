@@ -6,5 +6,3 @@
 - Errors name what failed and the next step; keep raw backend text as the message and add a plain-language `hint`.
 - Positive results go to the toast region (`useToasts`), not to layout-shifting banners.
 - Keyboard shortcuts render the platform modifier (⌘ on Apple, Ctrl elsewhere).
-
-Known leftovers (owned by other areas): Title Case labels in the hunk actions, branch context menu and commit graph.

@@ -129,12 +129,12 @@ export function DiffView({
                 <Toolbar>
                   {onStageHunk !== undefined && (
                     <button tabIndex={-1} onClick={() => onStageHunk(hunk.oldStart, hunk.newStart)}>
-                      Stage Hunk
+                      Stage hunk
                     </button>
                   )}
                   {onUnstageHunk !== undefined && (
                     <button tabIndex={-1} onClick={() => onUnstageHunk(hunk.oldStart, hunk.newStart)}>
-                      Unstage Hunk
+                      Unstage hunk
                     </button>
                   )}
                   {onDiscardHunk !== undefined && (
@@ -158,7 +158,7 @@ export function DiffView({
                         }
                       }}
                     >
-                      {armed ? "Confirm Discard" : "Discard Hunk"}
+                      {armed ? "Confirm discard" : "Discard hunk"}
                     </button>
                   )}
                 </Toolbar>

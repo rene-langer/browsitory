@@ -131,9 +131,9 @@ describe("DiffView", () => {
     const group = screen.getByRole("group", { name: "Diff hunks" });
 
     fireEvent.keyDown(group, { key: "d" });
-    expect(screen.getByText("Confirm Discard")).toBeInTheDocument();
+    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
     fireEvent.keyDown(group, { key: "Escape" });
-    expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
     expect(onDiscardHunk).not.toHaveBeenCalled();
 
     fireEvent.keyDown(group, { key: "d" });
@@ -145,10 +145,10 @@ describe("DiffView", () => {
     const hunks: DiffHunk[] = [{ oldStart: 5, oldLines: 1, newStart: 7, newLines: 1, lines: [] }];
     render(<DiffView hunks={hunks} onDiscardHunk={vi.fn()} />);
 
-    fireEvent.click(screen.getByText("Discard Hunk"));
-    fireEvent.blur(screen.getByText("Confirm Discard"));
+    fireEvent.click(screen.getByText("Discard hunk"));
+    fireEvent.blur(screen.getByText("Confirm discard"));
 
-    expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
   });
 
   it("renders no action buttons when no hunk callbacks are passed", () => {
@@ -158,9 +158,9 @@ describe("DiffView", () => {
 
     render(<DiffView hunks={hunks} />);
 
-    expect(screen.queryByText("Stage Hunk")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unstage Hunk")).not.toBeInTheDocument();
-    expect(screen.queryByText("Discard Hunk")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stage hunk")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unstage hunk")).not.toBeInTheDocument();
+    expect(screen.queryByText("Discard hunk")).not.toBeInTheDocument();
   });
 
   it("clicking Stage Hunk calls onStageHunk with that hunk's old/new start", () => {
@@ -170,7 +170,7 @@ describe("DiffView", () => {
     const onStageHunk = vi.fn();
 
     render(<DiffView hunks={hunks} onStageHunk={onStageHunk} />);
-    fireEvent.click(screen.getByText("Stage Hunk"));
+    fireEvent.click(screen.getByText("Stage hunk"));
 
     expect(onStageHunk).toHaveBeenCalledWith(5, 7);
   });
@@ -182,7 +182,7 @@ describe("DiffView", () => {
     const onUnstageHunk = vi.fn();
 
     render(<DiffView hunks={hunks} onUnstageHunk={onUnstageHunk} />);
-    fireEvent.click(screen.getByText("Unstage Hunk"));
+    fireEvent.click(screen.getByText("Unstage hunk"));
 
     expect(onUnstageHunk).toHaveBeenCalledWith(5, 7);
   });
@@ -194,12 +194,12 @@ describe("DiffView", () => {
     const onDiscardHunk = vi.fn();
 
     render(<DiffView hunks={hunks} onDiscardHunk={onDiscardHunk} />);
-    fireEvent.click(screen.getByText("Discard Hunk"));
+    fireEvent.click(screen.getByText("Discard hunk"));
 
     expect(onDiscardHunk).not.toHaveBeenCalled();
-    expect(screen.getByText("Confirm Discard")).toBeInTheDocument();
+    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Confirm Discard"));
+    fireEvent.click(screen.getByText("Confirm discard"));
 
     expect(onDiscardHunk).toHaveBeenCalledWith(5, 7);
   });
@@ -211,15 +211,15 @@ describe("DiffView", () => {
     const onDiscardHunk = vi.fn();
 
     const { rerender } = render(<DiffView hunks={hunks} onDiscardHunk={onDiscardHunk} />);
-    fireEvent.click(screen.getByText("Discard Hunk"));
-    expect(screen.getByText("Confirm Discard")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Discard hunk"));
+    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
 
     const otherHunks: DiffHunk[] = [
       { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [] },
     ];
     rerender(<DiffView hunks={otherHunks} onDiscardHunk={onDiscardHunk} />);
 
-    expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
-    expect(screen.queryByText("Confirm Discard")).not.toBeInTheDocument();
+    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
+    expect(screen.queryByText("Confirm discard")).not.toBeInTheDocument();
   });
 });

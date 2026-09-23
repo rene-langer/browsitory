@@ -835,7 +835,7 @@ export function BranchTree({
           message={
             <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
           }
-          confirmLabel="Force Delete"
+          confirmLabel="Force delete"
           confirmDisabled={isRebasing}
           onConfirm={() => {
             void onDeleteBranch(pendingForceFor, true);
@@ -867,7 +867,7 @@ export function BranchTree({
           y={rowMenu.y}
           onClose={() => setRowMenu(null)}
           items={[
-            { label: "New Branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
+            { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
             { label: "Add Remote…", onSelect: onOpenAddRemoteDraft },
             {
               label: "Show all branches",
