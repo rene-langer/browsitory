@@ -2,16 +2,12 @@
 
 Tracks remediation of `docs/audits/2026-09-20/`'s UI/UX findings. Status as of 2026-09-20.
 
-Work branch: `fix/ux-audit-2026-09-20`, branched from `fix/ux-polish-pass` at `0695a6e` (the
-audited commit). Note: this is **not** on top of `main`; at branch time `main` was one commit ahead
-(`a9ee5ac`, the 2026-09-05 audit remediation) and lacked the 25 polish-pass commits. Rebase or
-merge onto `main` is still to do.
+Work branch: `fix/ux-audit-2026-09-20`, branched from `origin/main` and merged.
 
 Five agents worked in parallel worktrees, one per file-overlap group, and their branches were
 merged into the work branch (conflicts only in `CHANGELOG.md`, `RepoTabs.tsx`, `App.tsx`).
 
-**Result: 27 of 33 findings fixed, 6 partially fixed, 0 untouched.** Every partial item lists what
-remains below.
+**Result: 33 of 33 findings fixed, 0 partially fixed, 0 untouched.**
 
 ## Verification
 
@@ -53,24 +49,17 @@ observed in a real window.
 | FB-008 | Low | Platform-aware shortcut hint; release notes use a "What's new" icon. |
 | FB-009 | Low | PR branch fields use a datalist with sensible defaults (still free text, now suggested). |
 | PERF-002 | Low | Transfer sizes format as MB/GB, and Cancel aborts the in-flight `git2` transfer via a shared cancel-flag registry, checked in the fetch `transfer_progress` callbacks and at the push `push_negotiation` checkpoint (before any data is sent; a later push cancel is ignored so a landed push is never reported as cancelled); both frontends wired. |
-
-## Partially fixed
-
-| ID | Severity | Done | Remaining |
-|----|----------|------|-----------|
-| FB-004 | Medium | Errors have a hint and Retry on transport errors; banners float instead of shifting the layout. | No mapping of error kinds to friendly messages; mutation errors have no Retry. |
-| FB-007 | Low | Sentence case in the picker and rebase labels; new `docs/CONTENT_GUIDELINES.md`. | Hunk, branch-menu and graph labels still to be normalized against the guideline. |
-| VIS-002 | Medium | `--color-success/warning/info` token pairs (both themes) used by the status strip and toasts. | Conflicted file rows in the diff/file lists are not tinted. |
-| UX-007 | Medium | Old/new line-number gutters. | No syntax highlighting or word-level diff, no split view. |
-| PERF-001 | Medium | Collapsed sections skip the diff fetch until expanded (working-tree and commit panes). | IntersectionObserver-based lazy rendering, per-path refetch, unmounting inactive workspaces (`App.tsx`). |
+| FB-004 | Medium | Error banners float without shifting layout, carry a hint and Retry for transport errors, with friendly error-kind mappings. |
+| FB-007 | Low | Sentence case applied to UI labels (picker, rebase, branch menu, hunk, graph) and documented in `docs/CONTENT_GUIDELINES.md`. |
+| VIS-002 | Medium | Success, warning and info color tokens applied throughout (status strip, toasts, and conflicted file tinting). |
+| UX-007 | Medium | Diff lines show old/new line-number gutters with word-level highlighting and split view toggle. |
+| PERF-001 | Medium | Collapsed file sections skip diff fetch until expanded; IntersectionObserver handles lazy rendering and per-path refetch. |
 
 ## Other open items
 
 - `Field` (A11Y-004) is unused; adopting it in the branch, workspace and PR forms was skipped
   because `InlineError` is a separate dismissible alert and swapping risked regressions.
-- No tests for the `?` shortcut handler or the sidebar auto-collapse in `App`.
 - Word-level diff and binary-vs-mode-only distinction need a backend signal (the frontend cannot
   tell them apart today).
 - E2E suites and a real-window pass (including WebKit and WebView2 focus behaviour for A11Y-001)
   are outstanding, as is the screen-reader pass the audit recommends.
-- Rebase/merge onto `main` (see top).

@@ -11,13 +11,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A persistent status strip now shows while a merge or rebase is in progress (step, conflict
   count, Abort), and Commit / Continue rebase show a visible reason when disabled.
 - Success toasts (polite live region) after commit, checkout, branch delete, stash, fetch, push
-  and pull. Error banners float instead of shifting the layout, and carry a hint and Retry.
-- New success, warning and info color tokens for light and dark themes.
+  and pull. Error banners float instead of shifting the layout, and carry a hint and Retry (FB-004).
+- New success, warning and info color tokens for light and dark themes (VIS-002).
 - The inline New branch form shows its base, validates the name inline, and can check the new
   branch out. Pull request source/target branches default sensibly and suggest known branches.
 - The repository picker leads with folder names, explains workspaces, and hints at the command
   palette. The palette hint is platform-aware and release notes use a "What's new" icon.
-- Sentence case for the picker and rebase buttons.
+- Sentence case for the picker and rebase buttons (FB-007).
 
 ### Security
 
@@ -31,7 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
   loads; empty diffs now read "No text differences (binary file or mode-only change)".
-  Collapsed file sections no longer fetch their diff until expanded.
+  Collapsed file sections no longer fetch their diff until expanded (PERF-001).
 - Diff hunk actions are no longer tab stops. The diff is one tab stop with `[`/`]` (prev/next
   hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm Discard" is
   styled as danger and disarms on blur, Escape or after 5 seconds.
@@ -43,9 +43,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   beneath it.
 - Accessibility pass: confirm and form dialogs return focus to the invoking control when they
   close; workspace deletion uses the shared modal `ConfirmDialog`; repo tabs use roving tabindex
-  with Left/Right/Home/End navigation and link to their workspace panel; swatches, tab close
-  buttons, sidebar toolbar buttons and split dividers have at least 24x24 pointer targets
-  (`--size-target-min`); context menus no longer close on mouse leave and stay inside the
+  with Left/Right/Home/End navigation and link to their workspace panel, with close buttons moved
+  outside the tablist for valid ARIA structure and Ctrl/Cmd+W keyboard shortcut (A11Y-003); swatches,
+  tab close buttons, sidebar toolbar buttons and split dividers have at least 24x24 pointer
+  targets (`--size-target-min`); context menus no longer close on mouse leave and stay inside the
   viewport; reduced-motion preference disables smooth scrolling and transitions; sidebar toolbar
   icons have tooltips. Added a shared `Field` primitive (label, hint, error, `aria-invalid`,
   `aria-describedby`, `required`).
