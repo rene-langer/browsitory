@@ -307,19 +307,12 @@ describe("App", () => {
     await screen.findByRole("tab", { name: "a" });
     await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
 
-    // Find the sidebar pane by looking for its first child containing the sidebar content
-    let sidebarPane: HTMLElement | null = null;
-    await waitFor(() => {
-      const branchesHeading = screen.getByText("Branches");
-      sidebarPane = branchesHeading.closest("[hidden]") || branchesHeading.closest("div");
-      // Walk up to find the actual sidebar pane (the one with width style)
-      while (sidebarPane && !sidebarPane.style.width) {
-        sidebarPane = sidebarPane.parentElement;
-      }
-    });
+    // The sidebar pane is the previous sibling of the divider (separator).
+    // It has hidden={shownWidth === 0} where shownWidth depends on forceCollapsed.
+    const divider = screen.getByRole("separator", { name: "Sidebar width" });
+    const sidebarPane = divider.previousElementSibling as HTMLElement;
 
-    // Sidebar pane should exist and not have the hidden attribute when above breakpoint
-    expect(sidebarPane).not.toBeNull();
+    // Sidebar should not be hidden when above breakpoint
     expect(sidebarPane).not.toHaveAttribute("hidden");
 
     // Narrow the window below NARROW_BREAKPOINT
