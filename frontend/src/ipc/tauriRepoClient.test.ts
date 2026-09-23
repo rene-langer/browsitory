@@ -211,6 +211,23 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
   });
 
+  it("invokes cancel_transfer without waiting for the transfer listeners", async () => {
+    // Unlike fetch/push/pull this starts no transfer, so it must not be gated on the listener
+    // handshake — a cancel that waited for listeners that never resolve could never be sent.
+    vi.mocked(listen).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(invoke).mockResolvedValue(null);
+
+    tauriRepoClient.subscribeTransferProgress(() => {});
+    await expect(
+      tauriRepoClient.cancelTransfer(TEST_REPO_PATH, "fetch-42"),
+    ).resolves.toBeNull();
+
+    expect(invoke).toHaveBeenCalledWith("cancel_transfer", {
+      repoPath: TEST_REPO_PATH,
+      operationId: "fetch-42",
+    });
+  });
+
   it("normalizes progress events and unregisters its listeners", async () => {
     const unlisten = vi.fn();
     let progressListener: ((event: { payload: unknown }) => void) | undefined;

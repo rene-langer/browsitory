@@ -1,8 +1,57 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { TransferPanel } from "./TransferPanel";
 
 describe("TransferPanel", () => {
+  it("calls onCancel with the in-flight operation id when Cancel is clicked", () => {
+    const onCancel = vi.fn();
+    render(
+      <TransferPanel
+        progress={{
+          operationId: "fetch-1",
+          operation: "Fetch",
+          phase: "Receiving",
+          errorKind: null,
+          current: 10,
+          total: 100,
+          receivedBytes: 2048,
+          message: null,
+        }}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancel).toHaveBeenCalledWith("fetch-1");
+  });
+
+  it("disables Cancel once it has been pressed, so a second click cannot re-fire", () => {
+    const onCancel = vi.fn();
+    render(
+      <TransferPanel
+        progress={{
+          operationId: "fetch-1",
+          operation: "Fetch",
+          phase: "Receiving",
+          errorKind: null,
+          current: 10,
+          total: 100,
+          receivedBytes: 2048,
+          message: null,
+        }}
+        onCancel={onCancel}
+      />,
+    );
+
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(cancel);
+    fireEvent.click(cancel);
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
+  });
+
   it("renders object and byte progress for an active transfer", () => {
     render(
       <TransferPanel
@@ -16,6 +65,7 @@ describe("TransferPanel", () => {
           receivedBytes: 1024,
           message: null,
         }}
+        onCancel={() => {}}
       />,
     );
 
@@ -40,6 +90,7 @@ describe("TransferPanel", () => {
           receivedBytes,
           message: null,
         }}
+        onCancel={() => {}}
       />,
     );
     expect(screen.getByText(text)).toBeInTheDocument();
@@ -58,6 +109,7 @@ describe("TransferPanel", () => {
           receivedBytes: 1024,
           message: "https://alice:secret@example.test/repo.git",
         }}
+        onCancel={() => {}}
       />,
     );
 

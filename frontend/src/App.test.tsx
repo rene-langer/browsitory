@@ -1,6 +1,7 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
+import styles from "./App.module.css";
 import type { RepoClient } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
@@ -73,6 +74,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     pullCurrentUpstream: async () => unused(),
+    cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
@@ -148,5 +150,322 @@ describe("App", () => {
     render(<App client={client} />);
     expect(screen.getByRole("heading", { name: "Browsitory" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
+
+  it("shows a failed open-repos restore in the reserved error slot instead of shifting the layout", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => {
+        throw new Error("config.toml is unreadable");
+      },
+    });
+
+    render(<App client={client} />);
+
+    const banner = await screen.findByText("Error: config.toml is unreadable");
+    // The reserved-space slot (`.errorLayer`, shared with the other App-level banners) floats
+    // the banner over the workspace instead of pushing it down (FB-004) — asserting the class
+    // instead of computed layout, since jsdom doesn't run layout.
+    expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
+  });
+
+  it("closes the active tab on Ctrl/Cmd+W", async () => {
+    const closeRepo = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      closeRepo,
+      persistOpenRepos: async () => {},
+      // RepoWorkspace's mount-time refresh() fans out to these; the fakeClient defaults for
+      // several of them are `unused` (throw), which is fine for tests that never mount a
+      // RepoWorkspace but this one does.
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+
+    await waitFor(
+      () => expect(screen.queryByRole("tab", { name: "a" })).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+  });
+
+  it("closes a focused, inactive tab on Delete without switching away from the active one", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      closeRepo: vi.fn().mockResolvedValue(undefined),
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    const tabB = await screen.findByRole("tab", { name: "b" });
+    tabB.focus();
+
+    fireEvent.keyDown(tabB, { key: "Delete" });
+
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "b" })).not.toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true");
+    expect(client.closeRepo).toHaveBeenCalledWith("/repos/b");
+  });
+
+  it("unmounts an inactive repo's workspace instead of hiding it with CSS (PERF-001)", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/b",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      // RepoWorkspace's mount-time refresh() fans out to these for whichever tab actually mounts.
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+
+    // Both tabs exist in the tab strip, but only the active repo's workspace (b) is mounted —
+    // the audit's own evidence for this finding was three open repos producing three copies of
+    // section headings like "Branches" in the DOM; the fix renders exactly one.
+    await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
+  });
+
+  it("keeps a half-typed commit message across switching tabs away and back", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
+      target: { value: "wip: half-typed" },
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    // b's workspace replaced a's (PERF-001 unmounts inactive tabs), with its own empty draft.
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("tab", { name: "a" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
+  });
+
+  it("re-enables a tab's close button once it is switched away from mid-operation", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      // Never settles: the stash stays in flight, so repo a stays busy for as long as its
+      // workspace is mounted.
+      saveStash: () => new Promise(() => {}),
+    });
+
+    render(<App client={client} />);
+    const tabA = await screen.findByRole("tab", { name: "a" });
+    // The per-tab close button is `aria-hidden` (mouse-only), so it's found by position: the
+    // tab's sibling inside its `role="presentation"` wrapper.
+    const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
+
+    const stash = await screen.findByRole("button", { name: "Stash" });
+    await waitFor(() => expect(stash).toBeEnabled());
+    fireEvent.click(stash);
+    await waitFor(() => expect(closeA()).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+
+    await waitFor(() => expect(closeA()).toBeEnabled());
+  });
+
+  it("keeps a tab's close button disabled after it's switched away from mid-rebase, unlike a plain pending/transfer busy state", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      // Rebase state lives only in the worker's in-memory `rebase_state` (nothing but
+      // `set_head_detached` is persisted), so unlike `pending`/`transfer` it must NOT be
+      // reported as clear just because this tab's workspace unmounted.
+      getRebaseProgress: async () => ({ currentStep: 1, totalSteps: 3 }),
+    });
+
+    render(<App client={client} />);
+    const tabA = await screen.findByRole("tab", { name: "a" });
+    const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
+
+    await waitFor(() => expect(closeA()).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+
+    // Unlike the plain pending/transfer case above, this stays disabled: `a`'s `RepoWorkspace`
+    // unmounted while `rebaseProgress !== null`, and dropping that worker mid-rebase would leave
+    // the repo with a detached HEAD and a conflicted index with no way to Continue or Abort.
+    expect(closeA()).toBeDisabled();
+  });
+
+  it("opens the shortcut sheet on ? outside of a text input", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    fireEvent.keyDown(window, { key: "?" });
+
+    expect(screen.getByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  });
+
+  it("does not open the shortcut sheet on ? while typing in a text field", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    // Create a temporary input and fire the event on it
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "?" });
+    document.body.removeChild(input);
+
+    expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("collapses the sidebar automatically below the narrow-window breakpoint", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    // Start with a wide window (above NARROW_BREAKPOINT of 900)
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: 1200,
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
+
+    // The sidebar pane is the previous sibling of the divider (separator).
+    // It has hidden={shownWidth === 0} where shownWidth depends on forceCollapsed.
+    const divider = screen.getByRole("separator", { name: "Sidebar width" });
+    const sidebarPane = divider.previousElementSibling as HTMLElement;
+
+    // Sidebar should not be hidden when above breakpoint
+    expect(sidebarPane).not.toHaveAttribute("hidden");
+
+    // Narrow the window below NARROW_BREAKPOINT
+    window.innerWidth = 800;
+    act(() => {
+      fireEvent(window, new Event("resize"));
+    });
+
+    // Sidebar should be hidden when below breakpoint
+    await waitFor(() => {
+      expect(sidebarPane).toHaveAttribute("hidden");
+    });
+
+    // Restore original width
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: originalInnerWidth,
+    });
   });
 });

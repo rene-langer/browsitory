@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Moon, Sparkles, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
+import type { CommitDraft } from "./components/CommitBox";
 import { ShortcutHint } from "./components/ShortcutHint";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 
@@ -50,6 +51,9 @@ function RepoWorkspace({
   onBusyChange,
   openRepos,
   onSwitchRepoTab,
+  onCloseRepoTab,
+  getCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -61,8 +65,17 @@ function RepoWorkspace({
   onBusyChange: (repoPath: string, busy: boolean) => void;
   openRepos: OpenRepo[];
   onSwitchRepoTab: (path: string) => void;
+  onCloseRepoTab: (path: string) => void;
+  // `App`'s per-repo commit-message drafts (see `commitDrafts` there): this workspace unmounts
+  // whenever its tab isn't active, so `CommitBox`'s own state can't outlive a tab switch.
+  getCommitDraft: (repoPath: string) => CommitDraft | undefined;
+  onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
 }) {
   const appState = useAppState(client, repoPath);
+  const handleCommitDraftChange = useCallback(
+    (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
+    [onCommitDraftChange, repoPath],
+  );
   const panelVisibility = useSidebarPanelVisibility();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -87,6 +100,12 @@ function RepoWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const repositoryOperationDisabled =
+    appState.state.pending ||
+    appState.state.transfer !== null ||
+    appState.state.mergeMessage !== null ||
+    appState.state.rebaseProgress !== null;
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!active) return;
@@ -101,17 +120,25 @@ function RepoWorkspace({
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
         event.preventDefault();
         setShortcutsOpen(true);
+        return;
+      }
+      // A11Y-003: keyboard equivalent for the per-tab close button, which is mouse-only
+      // (`aria-hidden`/`tabIndex={-1}` in `RepoTabs.tsx`) so it doesn't sit in the tablist's
+      // accessible children. This `RepoWorkspace` only ever handles its own tab's `repoPath`, and
+      // only while `active` (checked above), so "the active repo" is just this one.
+      // Best-effort only: Tauri's default macOS app menu binds Cmd+W to "Close Window" (the whole
+      // app) before the webview sees the key, and a VSCode webview may forward Ctrl+W to the
+      // workbench. The host-independent paths are Delete on a focused tab (`RepoTabs.tsx`) and
+      // the palette's "Close tab" command.
+      if (event.key.toLowerCase() === "w" && (event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (repositoryOperationDisabled) return;
+        event.preventDefault();
+        onCloseRepoTab(repoPath);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active]);
-
-  const repositoryOperationDisabled =
-    appState.state.pending ||
-    appState.state.transfer !== null ||
-    appState.state.mergeMessage !== null ||
-    appState.state.rebaseProgress !== null;
+  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath]);
 
   // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
   // — threaded into the sidebar mutation panels (`BranchTree`, `WorktreePanel`, `TagPanel`,
@@ -167,13 +194,34 @@ function RepoWorkspace({
   useEffect(() => {
     onBusyChange(repoPath, repositoryOperationDisabled);
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
+  // Mirrors `appState.state.rebaseProgress` into a ref so the unmount cleanup below can read its
+  // current value instead of a stale one closed over when that effect was first set up.
+  const rebaseProgressRef = useRef(appState.state.rebaseProgress);
+  useEffect(() => {
+    rebaseProgressRef.current = appState.state.rebaseProgress;
+  }, [appState.state.rebaseProgress]);
+  // Only the active tab's workspace is mounted (PERF-001), so switching away mid-operation
+  // unmounts this component before its "no longer busy" report can ever fire — which would leave
+  // the backgrounded tab's close button disabled for good. Clear it on the way out for
+  // `pending`/`transfer`/merge, which are all safe to lose track of: the worker finishes its
+  // current command and exits cleanly, and merge state (`MERGE_HEAD`) lives on disk so
+  // `refresh()` re-reads it correctly on remount. Rebase state is the exception — it lives only
+  // in the worker's in-memory `rebase_state`, nothing beyond `set_head_detached` is persisted —
+  // so unmounting mid-rebase must NOT clear busy, or closing this tab drops the worker (and its
+  // rebase state) while HEAD is still detached with a conflicted index and no way to Continue or
+  // Abort from the app.
+  useEffect(
+    () => () => onBusyChange(repoPath, rebaseProgressRef.current !== null),
+    [repoPath, onBusyChange],
+  );
 
   return (
-    // `data-active-repo` marks which workspace is the visible one. Every tab's `RepoWorkspace`
-    // stays mounted (only CSS-hidden when inactive), so a document-wide `querySelector` would
-    // always hit whichever tab is first in document order — `commands.ts`'s `goToSidebarSection`
-    // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
-    // actually looking at.
+    // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
+    // active tab's `RepoWorkspace` now (PERF-001), so in practice exactly one of these exists at
+    // a time — but the attribute (and the `active` prop it mirrors) stays: `commands.ts`'s
+    // `goToSidebarSection` still scopes its `document.querySelector` lookup to it, and this
+    // component's own internal gates (`active &&` below) still need a real boolean rather than an
+    // assumption that they're always mounted-implies-active.
     <div
       style={{ display: active ? "contents" : "none" }}
       data-active-repo={active ? "true" : "false"}
@@ -205,7 +253,12 @@ function RepoWorkspace({
           state this doesn't touch, so switching back re-shows the same overlay. */}
       {active && appState.state.transfer !== null && (
         <Overlay>
-          <TransferPanel progress={appState.state.transfer} />
+          <TransferPanel
+            progress={appState.state.transfer}
+            // Fire-and-forget: the backend records the cancel request and the transfer's own
+            // terminal progress event (errorKind "Cancelled") is what closes this panel.
+            onCancel={(operationId) => void client.cancelTransfer(repoPath, operationId)}
+          />
         </Overlay>
       )}
       {active && paletteOpen && (
@@ -218,6 +271,7 @@ function RepoWorkspace({
               onSwitchRepoTab,
               panelVisibility.visibility,
               () => setShortcutsOpen(true),
+              () => onCloseRepoTab(repoPath),
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -400,6 +454,9 @@ function RepoWorkspace({
                 selectedRow={appState.state.selectedRow}
                 commits={appState.state.commits}
                 status={appState.state.status}
+                refreshGeneration={appState.state.refreshGeneration}
+                initialCommitDraft={getCommitDraft(repoPath)}
+                onCommitDraftChange={handleCommitDraftChange}
                 onStageFile={appState.stageFile}
                 onUnstageFile={appState.unstageFile}
                 onStageAllFiles={appState.stageAllFiles}
@@ -470,6 +527,17 @@ export default function App({
     () => new Set(Object.entries(busyByPath).filter(([, busy]) => busy).map(([path]) => path)),
     [busyByPath],
   );
+
+  // Per-repo commit-message drafts, keyed by repo path. A ref rather than state: nothing renders
+  // from it — `CommitBox` reads its entry once on mount and writes through on every change — so
+  // keeping it out of state avoids re-rendering the whole app on each keystroke. Entries outlive
+  // their tab on purpose (reopening a repo in the same session restores its draft), and cost one
+  // short string per repo ever opened.
+  const commitDrafts = useRef<Record<string, CommitDraft>>({});
+  const getCommitDraft = useCallback((repoPath: string) => commitDrafts.current[repoPath], []);
+  const onCommitDraftChange = useCallback((repoPath: string, draft: CommitDraft) => {
+    commitDrafts.current[repoPath] = draft;
+  }, []);
 
   const [pickingRepo, setPickingRepo] = useState(false);
 
@@ -651,7 +719,9 @@ export default function App({
       </header>
       <LaneBraid />
       {openRepos.restoreError !== null && (
-        <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+        <div className={styles.errorLayer}>
+          <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+        </div>
       )}
       {(transportError !== null || openError !== null) && (
         <div className={styles.errorLayer}>
@@ -711,18 +781,29 @@ export default function App({
           onDeleteWorkspace={workspaces.deleteWorkspace}
         />
       ) : (
-        openRepos.openRepos.map((repo) => (
-          <RepoWorkspace
-            key={repo.path}
-            repoPath={repo.path}
-            active={repo.path === openRepos.activePath}
-            client={client}
-            onOpenRepoTab={openRepoTab}
-            onBusyChange={onBusyChange}
-            openRepos={openRepos.openRepos}
-            onSwitchRepoTab={openRepos.switchTo}
-          />
-        ))
+        // PERF-001: only the active tab's workspace is mounted — an inactive one renders nothing
+        // rather than staying mounted `display: none`. `RepoTabs` above still renders every open
+        // tab (so switching away and back is possible); this just avoids paying N tabs' worth of
+        // steady-state DOM/IPC cost while only one is ever visible. Switching back remounts a
+        // fresh `RepoWorkspace`, which re-fetches its own status/graph on mount — already the
+        // existing behavior for a newly-opened repo, so no new loading-state code is needed.
+        openRepos.openRepos
+          .filter((repo) => repo.path === openRepos.activePath)
+          .map((repo) => (
+            <RepoWorkspace
+              key={repo.path}
+              repoPath={repo.path}
+              active
+              client={client}
+              onOpenRepoTab={openRepoTab}
+              onBusyChange={onBusyChange}
+              openRepos={openRepos.openRepos}
+              onSwitchRepoTab={openRepos.switchTo}
+              onCloseRepoTab={openRepos.closeRepo}
+              getCommitDraft={getCommitDraft}
+              onCommitDraftChange={onCommitDraftChange}
+            />
+          ))
       )}
     </main>
   );

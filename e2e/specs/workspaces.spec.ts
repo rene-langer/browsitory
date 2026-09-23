@@ -36,7 +36,7 @@ describe("Browsitory multi-repo workspaces", function () {
   it("restores an open workspace group after restart, then closes the whole group at once", async () => {
     await openPickerOverlay();
 
-    const openAllButton = await $('button=Open All');
+    const openAllButton = await $('button=Open all');
     await openAllButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), openAllButton);
 
@@ -114,7 +114,7 @@ describe("Browsitory multi-repo workspaces", function () {
 
     // Saving waits for the config update and workspace refresh before returning to the picker.
     // Observe that return before reopening Edit so the second edit reads persisted membership.
-    const openAllAfterSave = await $('button=Open All');
+    const openAllAfterSave = await $('button=Open all');
     await openAllAfterSave.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Edit'));
     const repoCCheckboxAfterSave = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);

@@ -1,9 +1,10 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
 
-use super::{Command, TransferEvent, WorkerHandle};
+use super::{CancelRegistry, Command, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore, CredentialStoreError};
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -197,14 +198,53 @@ pub(super) fn clear_current_upstream(repo: &git2::Repository, reply: Sender<Resu
         .send(git_core::remote::clear_current_upstream(repo).map_err(|error| error.to_string()));
 }
 
+/// The per-operation state every remote transfer carries: the ID the UI tracks the operation
+/// by, and the shared registry a cancel request for that ID lands in.
+///
+/// They travel together because they are only meaningful together — the registry is keyed by
+/// exactly this ID — and keeping them as one parameter keeps the transfer entry points below at
+/// a readable arity.
+pub(super) struct TransferOp<'a> {
+    pub(super) id: String,
+    pub(super) cancelled: &'a CancelRegistry,
+}
+
+impl TransferOp<'_> {
+    /// Builds the closure `git-core` polls from inside its `git2` progress callbacks.
+    ///
+    /// Owns a clone of the shared registry and the operation's own ID, so the check stays valid
+    /// for the whole (blocking) transfer without borrowing anything from the command loop.
+    fn cancel_check(&self) -> impl Fn() -> bool {
+        let cancelled = Arc::clone(self.cancelled);
+        let operation_id = self.id.clone();
+        move || {
+            cancelled
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .contains(&operation_id)
+        }
+    }
+
+    /// Drops this operation from the shared registry. Called on every terminal path (success,
+    /// real failure and cancellation alike) so a long-lived worker's cancel set cannot grow
+    /// unbounded.
+    fn clear(&self) {
+        self.cancelled
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.id);
+    }
+}
+
 fn complete(
     events: &Sender<TransferEvent>,
-    operation_id: String,
+    op: TransferOp<'_>,
     operation: TransferOperation,
     result: Result<(), git_core::remote::RemoteError>,
 ) {
+    op.clear();
     let _ = events.send(TransferEvent::Completed {
-        operation_id,
+        operation_id: op.id,
         operation,
         error: result.err().map(|error| error.transfer_error_kind()),
     });
@@ -213,57 +253,61 @@ pub(super) fn fetch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
-    operation_id: String,
+    op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
     let _ = events.send(TransferEvent::Started {
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
         operation: TransferOperation::Fetch,
     });
-    let _ = reply.send(Ok(operation_id.clone()));
+    let _ = reply.send(Ok(op.id.clone()));
     let mut reporter = ChannelReporter {
         events: events.clone(),
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
     };
+    let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
         git_core::remote::fetch_remote(
             repo,
             &remote_name,
-            operation_id.clone(),
+            op.id.clone(),
             &mut provider,
             &mut reporter,
+            &cancel,
         )
     });
-    complete(&events, operation_id, TransferOperation::Fetch, result);
+    complete(&events, op, TransferOperation::Fetch, result);
 }
 pub(super) fn pull<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
-    operation_id: String,
+    op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<PullOutcome, String>>,
 ) {
     let _ = events.send(TransferEvent::Started {
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
         operation: TransferOperation::Pull,
     });
+    let cancel = op.cancel_check();
     let result = (|| -> Result<PullOutcome, git_core::remote::RemoteError> {
         let upstream = git_core::remote::current_upstream(repo)?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
         let mut reporter = ChannelReporter {
             events: events.clone(),
-            operation_id: operation_id.clone(),
+            operation_id: op.id.clone(),
         };
         let profile = git_core::remote::remote_auth_profile(repo, &upstream.remote_name)?;
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
         git_core::remote::fetch_remote(
             repo,
             &upstream.remote_name,
-            operation_id.clone(),
+            op.id.clone(),
             &mut provider,
             &mut reporter,
+            &cancel,
         )?;
         let upstream = git_core::remote::current_upstream(repo)?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
@@ -277,11 +321,14 @@ pub(super) fn pull<S: CredentialStore>(
         git_core::remote::RemoteError::DirtyWorktree
         | git_core::remote::RemoteError::NoUpstream
         | git_core::remote::RemoteError::CheckoutConflict
-        | git_core::remote::RemoteError::DetachedHead => error.to_string(),
+        | git_core::remote::RemoteError::DetachedHead
+        // Static, secret-free text: the user asked for this by pressing Cancel.
+        | git_core::remote::RemoteError::Cancelled => error.to_string(),
         _ => "pull failed".to_string(),
     }));
+    op.clear();
     let _ = events.send(TransferEvent::Completed {
-        operation_id,
+        operation_id: op.id,
         operation: TransferOperation::Pull,
         error,
     });
@@ -290,48 +337,63 @@ pub(super) fn push_branch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
-    operation_id: String,
+    op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
     let _ = events.send(TransferEvent::Started {
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
         operation: TransferOperation::PushBranch,
     });
-    let _ = reply.send(Ok(operation_id.clone()));
+    let _ = reply.send(Ok(op.id.clone()));
     let mut reporter = ChannelReporter {
         events: events.clone(),
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
     };
+    let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::push_current_branch(repo, &remote_name, &mut provider, &mut reporter)
+        git_core::remote::push_current_branch(
+            repo,
+            &remote_name,
+            &mut provider,
+            &mut reporter,
+            &cancel,
+        )
     });
-    complete(&events, operation_id, TransferOperation::PushBranch, result);
+    complete(&events, op, TransferOperation::PushBranch, result);
 }
 pub(super) fn push_tags<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
     names: Vec<String>,
-    operation_id: String,
+    op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
     let _ = events.send(TransferEvent::Started {
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
         operation: TransferOperation::PushTags,
     });
-    let _ = reply.send(Ok(operation_id.clone()));
+    let _ = reply.send(Ok(op.id.clone()));
     let mut reporter = ChannelReporter {
         events: events.clone(),
-        operation_id: operation_id.clone(),
+        operation_id: op.id.clone(),
     };
+    let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::push_tags(repo, &remote_name, &names, &mut provider, &mut reporter)
+        git_core::remote::push_tags(
+            repo,
+            &remote_name,
+            &names,
+            &mut provider,
+            &mut reporter,
+            &cancel,
+        )
     });
-    complete(&events, operation_id, TransferOperation::PushTags, result);
+    complete(&events, op, TransferOperation::PushTags, result);
 }
 
 impl WorkerHandle {

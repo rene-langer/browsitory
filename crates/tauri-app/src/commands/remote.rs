@@ -165,6 +165,22 @@ pub async fn fetch_remote(
     Ok(operation_id)
 }
 
+/// Asks the worker to abort the in-flight transfer `operation_id`.
+///
+/// Deliberately does no channel round trip: `WorkerHandle::cancel_transfer` writes into the
+/// worker's shared cancel registry, which is the only route that reaches a worker thread already
+/// blocked inside a `git2` transfer. Unknown or already-finished IDs are a no-op, so the UI can
+/// fire this without first checking whether the transfer is still running.
+#[tauri::command]
+pub async fn cancel_transfer(
+    repo_path: String,
+    operation_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.cancel_transfer(&operation_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn push_current_branch(
     repo_path: String,

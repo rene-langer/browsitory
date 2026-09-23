@@ -293,7 +293,10 @@ jobs:
         # GitHub-hosted ubuntu-latest runners are fresh VMs per job, so there's no leftover
         # process from a prior job to squat this run's port; this is a known limitation to keep
         # in mind if this job ever moves to a self-hosted or reused runner, not a live bug here.
-        run: xvfb-run --auto-servernum pnpm test
+        # --ignore-workspace: same reason as the install step above — extension/e2e isn't a
+        # workspace member, and pnpm 11 hard-errors ("packages field missing or empty") walking
+        # up to extension/pnpm-workspace.yaml otherwise, instead of just running the script.
+        run: xvfb-run --auto-servernum pnpm --ignore-workspace test
 
   e2e:
     runs-on: ubuntu-latest

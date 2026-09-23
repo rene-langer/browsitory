@@ -39,20 +39,19 @@ describe("Browsitory multi-repo tabs", () => {
       async () => (await firstTab.getAttribute("aria-selected")) === "true",
       { timeout: 10000, timeoutMsg: "expected switching back to focus the first tab" },
     );
-    // `isDisplayed()`, not `isExisting()`: `RepoWorkspace` keeps every open tab's DOM mounted at
-    // all times (toggling `display: none`/`display: contents` for snappy tab switching, see
-    // `App.tsx`), so the second repo's own (now-hidden) workspace still legitimately contains
-    // this `<li>` in the DOM even with correct per-tab isolation — `isExisting()` would find it
-    // regardless of whether the first tab's data ever leaked. `isDisplayed()` resolves through
-    // the `display: none` ancestor and would also correctly catch a real leak: if this commit
-    // ever rendered inside the *first* (active) tab's own workspace, that `<li>` comes first in
-    // document order (workspaces render in `openRepos.openRepos` order) and `$` would match it.
+    // `isExisting()`, the strict check: `App.tsx` mounts only the active tab's `RepoWorkspace`
+    // (inactive tabs are unmounted, not hidden with `display: none` — PERF-001), so once the
+    // first tab is active again the second repo's workspace is gone from the DOM entirely. Any
+    // match here can only mean the second repo's commit leaked into the first tab's workspace.
     const secondRepoCommitFromFirstTab = await $("li*=e2e: second repo base commit");
-    expect(await secondRepoCommitFromFirstTab.isDisplayed()).toBe(false);
+    expect(await secondRepoCommitFromFirstTab.isExisting()).toBe(false);
 
+    // The per-tab close button has no accessible name (it's `aria-hidden`/`tabIndex={-1}`,
+    // mouse-only — see `RepoTabs.tsx`), so it's found structurally: the `<button>` right after
+    // the second repo's `role="tab"` button, inside the same `role="presentation"` wrapper.
     await browser.execute(
       (el) => (el as HTMLElement).click(),
-      await $(`button[aria-label="Close ${path.basename(E2E_SECOND_REPO_PATH)}"]`),
+      await $(`//button[@role="tab" and @title="${E2E_SECOND_REPO_PATH}"]/following-sibling::button[1]`),
     );
     await browser.waitUntil(
       async () => (await $$('[role="tab"]')).length === 1,

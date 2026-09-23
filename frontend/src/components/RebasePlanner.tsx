@@ -265,7 +265,7 @@ export function RebasePlanner({
       </ul>
       <Toolbar>
         <button onClick={start} disabled={operationDisabled}>
-          Start Rebase
+          Start rebase
         </button>
         <button onClick={onCancel}>Cancel</button>
       </Toolbar>

@@ -39,12 +39,12 @@ describe("Browsitory hunk staging", () => {
     // `DiffPane.tsx`'s `FileListRow`), not in a `<button>`; the click bubbles to the `<li>`.
     await browser.execute((el) => (el as HTMLElement).click(), await $(`span=${HUNK_FIXTURE_FILE} (Modified)`));
 
-    const stageHunkButtons = await $$("button=Stage Hunk");
+    const stageHunkButtons = await $$("button=Stage hunk");
     await expect(stageHunkButtons).toBeElementsArrayOfSize(2);
     await browser.execute((el) => (el as HTMLElement).click(), stageHunkButtons[0]);
 
     await browser.waitUntil(
-      async () => (await $$("button=Stage Hunk")).length === 1,
+      async () => (await $$("button=Stage hunk")).length === 1,
       { timeout: 10000, timeoutMsg: "expected only one unstaged hunk to remain after staging the other" },
     );
 

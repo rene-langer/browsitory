@@ -117,6 +117,7 @@ pub fn dispatch(
         "create_tag" => create_tag(params, repos),
         "delete_tag" => delete_tag(params, repos),
         "fetch_remote" => fetch_remote(params, repos, stdout),
+        "cancel_transfer" => cancel_transfer(params, repos),
         "push_current_branch" => push_current_branch(params, repos, stdout),
         "push_tags" => push_tags(params, repos, stdout),
         "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
@@ -1351,6 +1352,26 @@ fn fetch_remote(
     let operation_id =
         worker_handle(repos, &params.repo_path)?.fetch_remote(params.remote_name, event_tx)?;
     Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CancelTransferParams {
+    repo_path: String,
+    operation_id: String,
+}
+
+/// Asks the worker to abort the in-flight transfer `operationId`.
+///
+/// Takes no `stdout`: it spawns no progress relay of its own, because the cancellation surfaces
+/// on the relay the original fetch/push/pull already started — as that operation's terminal
+/// `Completed` notification, carrying `errorKind: "Cancelled"`. Unknown or already-finished IDs
+/// are a no-op, so the extension can fire this without racing the transfer it is cancelling.
+fn cancel_transfer(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CancelTransferParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.cancel_transfer(&params.operation_id);
+    Ok(Value::Null)
 }
 
 fn push_current_branch(

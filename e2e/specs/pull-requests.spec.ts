@@ -55,14 +55,14 @@ const BITBUCKET_CREATE_FIXTURE = {
 
 async function addRemote(name: string, url: string) {
   // The Add-remote form is reached via `BranchTree`'s "Add" toolbar button (opens a context menu
-  // with "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle, and it stays open
+  // with "New branch…"/"Add remote…"), not a standalone "Add remote" toggle, and it stays open
   // after a successful add — so only open it when it isn't already showing (the first call in a
   // test, typically).
   if (!(await $("form[aria-label='Add remote']").isExisting())) {
     const addButton = await $('[aria-label="Add"]');
     await addButton.waitForExist({ timeout: 10000 });
     await addButton.click();
-    await (await $("button=Add Remote…")).click();
+    await (await $("button=Add remote…")).click();
   }
   const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
   await remoteNameInput.waitForExist({ timeout: 10000 });
@@ -153,7 +153,14 @@ describe("Browsitory pull requests", () => {
     const createdRow = await section.$("li*=Add feature");
     await createdRow.waitForExist({ timeout: 10000 });
     expect(await createdRow.getText()).toContain("#8");
-    expect(await (await createForm.$("aria/Title")).getValue()).toBe("");
+    // The row above renders as soon as `createPullRequest`'s own state update lands, but the form
+    // only clears once that call's wrapping `runMutationWithOutcome` also finishes its trailing
+    // `refresh()` (13 parallel RPCs) and resolves `succeeded` — so this must be polled, not
+    // asserted immediately, same as the token-clear wait above.
+    await browser.waitUntil(
+      async () => (await (await createForm.$("aria/Title")).getValue()) === "",
+      { timeout: 10000, timeoutMsg: "expected the Title field to clear after a successful create" },
+    );
 
     const createRequest = await server.lastRequestFor("github-create");
     expect(createRequest?.authorization).toBe("Bearer gh-test-token");

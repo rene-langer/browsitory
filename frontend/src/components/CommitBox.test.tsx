@@ -209,6 +209,46 @@ describe("CommitBox", () => {
     expect(onAbortMerge).toHaveBeenCalled();
   });
 
+  it("starts from initialDraft and reports every change through onDraftChange", () => {
+    const onDraftChange = vi.fn();
+    render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialDraft={{ message: "restored", lastSeeded: "" }}
+        onDraftChange={onDraftChange}
+      />,
+    );
+
+    const textarea = screen.getByRole("textbox", { name: "Commit message" });
+    expect(textarea).toHaveValue("restored");
+
+    fireEvent.change(textarea, { target: { value: "restored, then edited" } });
+    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "restored, then edited", lastSeeded: "" });
+
+    fireEvent.click(screen.getByText("Commit"));
+    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "", lastSeeded: "" });
+  });
+
+  it("still clears a restored merge pre-fill when the merge ends", () => {
+    const seeded = "Merge branch 'feature'";
+    const { rerender } = render(
+      <CommitBox
+        onCommit={vi.fn()}
+        disabled={false}
+        onAbortMerge={vi.fn()}
+        initialMessage={seeded}
+        initialDraft={{ message: seeded, lastSeeded: seeded }}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue(seeded);
+
+    rerender(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} initialDraft={{ message: seeded, lastSeeded: seeded }} />);
+
+    expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
+  });
+
   it("shows why Commit is disabled and ties it to the button", () => {
     render(<CommitBox onCommit={vi.fn()} disabled disabledReason="Stage changes to commit" onAbortMerge={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Stage changes to commit");
