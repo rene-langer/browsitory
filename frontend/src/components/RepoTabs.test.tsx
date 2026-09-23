@@ -1,6 +1,27 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RepoTabs } from "./RepoTabs";
+
+// The per-tab/group close buttons are `aria-hidden` (kept mouse-only; see the "keeps the per-tab
+// close button out of the tablist's accessible children" test below), so role queries need
+// `{ hidden: true }` to see them at all.
+function closeButtonFor(tabName: string) {
+  const tab = screen.getByRole("tab", { name: tabName });
+  const wrapper = tab.closest('[role="presentation"]');
+  if (wrapper === null) throw new Error(`no presentation wrapper found for tab "${tabName}"`);
+  return within(wrapper as HTMLElement).getByRole("button", { hidden: true });
+}
+
+// Same story for the group close-all button: `aria-hidden` makes its accessible name compute to
+// "" even with `{ hidden: true }` (that option only stops the element being excluded from query
+// candidates — it doesn't skip the accname algorithm's own hidden check), so name-based queries
+// never match it. Scope to the group header by its visible label text instead.
+function groupCloseButtonFor(groupLabel: string) {
+  const label = screen.getByText(groupLabel);
+  const header = label.closest('[role="presentation"]');
+  if (header === null) throw new Error(`no group header found for label "${groupLabel}"`);
+  return within(header as HTMLElement).getByRole("button", { hidden: true });
+}
 
 const repos = [
   { path: "/repos/widget", displayName: "widget", workspaceId: null },
@@ -30,9 +51,41 @@ describe("RepoTabs", () => {
     const onClose = vi.fn();
     const onSwitchTo = vi.fn();
     render(<RepoTabs openRepos={repos} activePath="/repos/gadget" busyPaths={noneBusy} workspaceNames={{}} onSwitchTo={onSwitchTo} onClose={onClose} onCloseGroup={vi.fn()} onAddTab={vi.fn()} />);
-    screen.getByRole("button", { name: /close widget/i }).click();
+    closeButtonFor("widget").click();
     expect(onClose).toHaveBeenCalledWith("/repos/widget");
     expect(onSwitchTo).not.toHaveBeenCalled();
+  });
+
+  it("keeps the per-tab close button out of the tablist's accessible children", () => {
+    render(
+      <RepoTabs
+        openRepos={[
+          { path: "/a", displayName: "a", workspaceId: null },
+          { path: "/b", displayName: "b", workspaceId: null },
+        ]}
+        activePath="/a"
+        busyPaths={new Set()}
+        workspaceNames={{}}
+        onSwitchTo={() => {}}
+        onClose={() => {}}
+        onCloseGroup={() => {}}
+        onAddTab={() => {}}
+      />,
+    );
+
+    const tablist = screen.getByRole("tablist");
+    const closeButtons = within(tablist).queryAllByRole("button", { name: /^Close/ });
+    expect(closeButtons).toHaveLength(0);
+  });
+
+  it("gives the per-tab close button a title that documents the Delete shortcut, and keeps it out of the tab order", () => {
+    render(
+      <RepoTabs openRepos={repos} activePath="/repos/gadget" busyPaths={noneBusy} workspaceNames={{}} onSwitchTo={vi.fn()} onClose={vi.fn()} onCloseGroup={vi.fn()} onAddTab={vi.fn()} />,
+    );
+    const closeButton = closeButtonFor("widget");
+    expect(closeButton).toHaveAttribute("title", "Close (Delete)");
+    expect(closeButton).toHaveAttribute("tabindex", "-1");
+    expect(closeButton).toHaveAttribute("aria-hidden", "true");
   });
 
   it("the trailing add button calls onAddTab", () => {
@@ -69,7 +122,7 @@ describe("RepoTabs", () => {
         onAddTab={vi.fn()}
       />,
     );
-    const closeButton = screen.getByRole("button", { name: /close widget/i });
+    const closeButton = closeButtonFor("widget");
     expect(closeButton).toBeDisabled();
     closeButton.click();
     expect(onClose).not.toHaveBeenCalled();
@@ -117,7 +170,7 @@ describe("RepoTabs grouping", () => {
     );
 
     expect(screen.getByRole("tab", { name: /solo/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /close services/i })).toBeInTheDocument();
+    expect(groupCloseButtonFor("Services")).toBeInTheDocument();
   });
 
   it("clicking the chip's close-all control calls onCloseGroup with every path in that run", () => {
@@ -135,7 +188,7 @@ describe("RepoTabs grouping", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /close services/i }));
+    fireEvent.click(groupCloseButtonFor("Services"));
 
     expect(onCloseGroup).toHaveBeenCalledWith(["/repos/widget", "/repos/gadget"]);
   });
@@ -155,7 +208,7 @@ describe("RepoTabs grouping", () => {
       />,
     );
 
-    const closeGroupButton = screen.getByRole("button", { name: /close services/i });
+    const closeGroupButton = groupCloseButtonFor("Services");
     expect(closeGroupButton).toBeDisabled();
     fireEvent.click(closeGroupButton);
     expect(onCloseGroup).not.toHaveBeenCalled();

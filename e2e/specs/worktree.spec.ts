@@ -13,16 +13,14 @@ const WORKTREE_BRANCH_LEAF = WORKTREE_BRANCH.split("/").pop();
 const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 
 // Opening a worktree opens it as its own tab (`WorktreePanel`'s `onOpenWorktree` routes through
-// `App.tsx`'s tab-opening path) rather than switching the current workspace's branch in place —
-// and every open tab's `RepoWorkspace` stays mounted (toggling `display: none`/`display:
-// contents` for snappy switching, never unmounting), so once a second tab is open, BOTH tabs'
-// current-branch rows in their respective `BranchTree`s exist simultaneously, and both tabs'
-// `WorktreePanel`s render identical "Open <path>"/"Remove <path>" buttons for the *same*
-// underlying worktree list (it's shared by the underlying repository, not scoped per tab — see
-// `WorktreePanel.tsx`, which never excludes the tab's own current worktree). A plain
-// `$(selector)` — or a reference captured before the second tab existed — resolves to whichever
-// match is first in the DOM, which can be the wrong (hidden, non-interactable) tab's copy. This
-// polls for, and returns, the one match that's actually displayed.
+// `App.tsx`'s tab-opening path) rather than switching the current workspace's branch in place.
+// `App.tsx` mounts only the active tab's `RepoWorkspace` (inactive tabs are unmounted — PERF-001),
+// so every tab switch tears down one workspace's DOM and mounts a fresh one that renders its
+// `BranchTree`/`WorktreePanel` only after its own refresh lands. Both tabs' `WorktreePanel`s list
+// identical "Open <path>"/"Remove <path>" buttons (the worktree list belongs to the underlying
+// repository, not the tab — see `WorktreePanel.tsx`), so the text alone can't tell the old
+// workspace's (about-to-unmount) copy from the new one's, and a reference captured before the
+// switch goes stale. This polls until a displayed match exists after the switch, and returns it.
 async function activeElement(selector: string, timeout = 10000) {
   await browser.waitUntil(
     async () => {
@@ -94,10 +92,10 @@ describe("Browsitory worktrees", () => {
     await (await removalDialog.$("button=Remove worktree")).click();
     // Not a whole-DOM `aria/${WORKTREE_PATH}` absence check: the linked worktree's own tab
     // (opened earlier, never closed by this test — removing a worktree doesn't close a tab that
-    // was pointed at it, a separate gap worth a product-level look) stays open, and its `title`
-    // attribute and its own now-stale `WorktreePanel` listing both still reference the removed
-    // path — so that check would never pass. What actually matters here is that the *active*
-    // tab's own (live, refreshed) worktree list no longer lists it.
+    // was pointed at it, a separate gap worth a product-level look) stays open, and its tab's
+    // `title` attribute still references the removed path — so that check would never pass.
+    // What actually matters here is that the *active* tab's own (live, refreshed) worktree list
+    // no longer lists it.
     await browser.waitUntil(
       async () => {
         const candidates = await $$(`button=Open ${WORKTREE_PATH}`);

@@ -36,6 +36,7 @@ const BASE_STATE: AppState = {
   error: null,
   pending: false,
   addRemoteDraftOpen: false,
+  refreshGeneration: 0,
 };
 
 function setupRunner() {

@@ -71,7 +71,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await conflictedRow.waitForExist({ timeout: 10000 });
     await conflictedRow.scrollIntoView({ block: "center" });
 
-    const acceptTheirs = await $("button=Accept Theirs");
+    const acceptTheirs = await $("button=Accept theirs");
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
     await acceptTheirs.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
@@ -162,7 +162,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
 
-    const keepTheirs = await $("button=Keep Their Version");
+    const keepTheirs = await $("button=Keep their version");
     await keepTheirs.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), keepTheirs);
 

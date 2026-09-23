@@ -681,6 +681,18 @@ describe("vscodeRepoClient", () => {
     await expect(tagsPromise).resolves.toBe("push-2");
   });
 
+  it("wires cancelTransfer", async () => {
+    const promise = vscodeRepoClient.cancelTransfer("/repo", "fetch-1");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "cancel_transfer",
+      params: { repoPath: "/repo", operationId: "fetch-1" },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
   it("wires pullCurrentUpstream", async () => {
     const promise = vscodeRepoClient.pullCurrentUpstream("/repo");
     expect(postMessage).toHaveBeenCalledWith({

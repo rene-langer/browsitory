@@ -1,3 +1,4 @@
+import { describeError, type DescribedError } from "../lib/errorMessages";
 import { conflictReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
@@ -24,7 +25,7 @@ import type {
 } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
-import { CommitBox } from "./CommitBox";
+import { CommitBox, type CommitDraft } from "./CommitBox";
 import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
@@ -77,6 +78,7 @@ function UncommittedFileSection({
   status,
   isCurrent,
   collapsed,
+  diffVersion,
   onToggleCollapse,
   onSelect,
   onStageFile,
@@ -95,6 +97,11 @@ function UncommittedFileSection({
   status: StatusEntry[];
   isCurrent: boolean;
   collapsed: boolean;
+  // This section's staleness signal: its own per-path version plus the pane-wide refresh
+  // generation, combined by the parent (`UncommittedDiffPane`) into one monotonically increasing
+  // number — see `staleness` there for how each part is bumped. Any change means "this diff may
+  // be stale, refetch it".
+  diffVersion: number;
   onToggleCollapse: () => void;
   onSelect: () => void;
   onStageFile: (path: string) => void;
@@ -110,18 +117,36 @@ function UncommittedFileSection({
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
-
-  // Every file's diff is fetched eagerly (all sections render expanded by default), keyed on the
-  // file's own identity rather than a shared "selected" pointer. Whole-file staging/unstaging
-  // moves this file to a differently-keyed section and remounts it fresh, but *partial* (hunk)
-  // staging leaves it at the same path/staged key while only its hunk count changes underneath —
-  // `status` stays a dependency for the same reason the old single-pane version needed it: a new
-  // `status` array (by reference) is the only signal that this file's own diff may be stale.
+  // Tracks proximity to the viewport so a long file list doesn't eagerly fetch every section's
+  // diff at once (PERF-001) — only sections within `rootMargin` of the viewport ever load.
+  const sectionElRef = useRef<HTMLDivElement | null>(null);
+  const [nearViewport, setNearViewport] = useState(false);
   useEffect(() => {
-    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
-    if (mode !== "diff" || isConflicted || collapsed) return;
+    const el = sectionElRef.current;
+    if (el === null) return;
+    const observer = new IntersectionObserver(([observerEntry]) => setNearViewport(observerEntry.isIntersecting), {
+      rootMargin: "200px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Every file's diff is fetched keyed on the file's own identity rather than a shared
+  // "selected" pointer. Whole-file staging/unstaging moves this file to a differently-keyed
+  // section and remounts it fresh, but *partial* (hunk) staging leaves it at the same
+  // path/staged key while only its hunk content changes underneath — and so does anything else
+  // that changes the working tree or index without moving the file between groups (a stash
+  // apply, a pull, the palette's Refresh after an external edit). `diffVersion` is the signal for
+  // all of those: the parent bumps it for both sides of a hunk-mutated path once the mutation has
+  // settled, and folds in a refresh generation that advances on every `appState.refresh()`. It
+  // replaced a direct `status` dependency only so that a status array that is new by reference
+  // but not the product of a refresh (a re-render, an optimistic update) doesn't refetch anything.
+  //
+  // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
+  // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
+  const loadDiff = () => {
     let ignore = false;
     client
       .getWorkingDiff(repoPath, entry.path, entry.staged)
@@ -133,19 +158,27 @@ function UncommittedFileSection({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status, collapsed]);
+  };
+
+  useEffect(() => {
+    // Lazy: a collapsed section fetches nothing until it is expanded, and a section far from the
+    // viewport fetches nothing until it is scrolled near (both PERF-001). `diffVersion` (not
+    // `status`) is the staleness signal — see the comment on `loadDiff` above.
+    if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
+    return loadDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
   // on screen.
-  useEffect(() => {
-    if (mode !== "blame") return;
+  const loadBlame = () => {
     let ignore = false;
     client
       .getBlame(repoPath, "HEAD", entry.path)
@@ -157,19 +190,34 @@ function UncommittedFileSection({
       })
       .catch(() => {
         if (!ignore) {
-          setError("No blame available for this file at this revision.");
+          setError({ message: "No blame available for this file at this revision." });
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    if (mode !== "blame") return;
+    return loadBlame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, entry.path, mode, status]);
 
   const Icon = STATUS_ICONS[entry.kind];
 
   return (
-    <ListRow selected={isCurrent} onClick={onSelect} className={styles.fileSection}>
-      <div className={styles.fileSectionHeader}>
+    <ListRow
+      selected={isCurrent}
+      onClick={onSelect}
+      className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
+    >
+      <div
+        className={styles.fileSectionHeader}
+        ref={(el) => {
+          sectionElRef.current = el;
+        }}
+      >
         <CollapseToggle collapsed={collapsed} path={entry.path} onToggle={onToggleCollapse} />
         <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
         <span className={styles.path}>
@@ -217,12 +265,17 @@ function UncommittedFileSection({
           {mode === "blame" ? (
             <>
               {error !== null ? (
-                <InlineError message={error} onDismiss={() => setError(null)} />
+                <InlineError
+                  message={error.message}
+                  hint={error.hint}
+                  onDismiss={() => setError(null)}
+                  onRetry={loadBlame}
+                />
               ) : (
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
               <button type="button" onClick={() => setMode("diff")}>
-                Back to Diff
+                Back to diff
               </button>
             </>
           ) : isConflicted ? (
@@ -234,7 +287,12 @@ function UncommittedFileSection({
               onResolveAddDelete={onResolveAddDeleteConflict}
             />
           ) : error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
+            <InlineError
+              message={error.message}
+              hint={error.hint}
+              onDismiss={() => setError(null)}
+              onRetry={loadDiff}
+            />
           ) : (
             <DiffView
               hunks={hunks}
@@ -272,10 +330,20 @@ export function DiffPane({
   onRebaseContinue,
   onRebaseAbort,
   commits,
+  refreshGeneration = 0,
+  initialCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
+  // `useAppState`'s `state.refreshGeneration`: advances on every `refresh()`, so any refresh
+  // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
+  // only so tests that don't exercise refreshes needn't pass it.
+  refreshGeneration?: number;
+  // Passed straight through to `CommitBox` — see its `initialDraft`/`onDraftChange`.
+  initialCommitDraft?: CommitDraft;
+  onCommitDraftChange?: (draft: CommitDraft) => void;
   // Loaded history, used for the selected commit's header (author, date, parents).
   commits?: GraphCommit[];
   status: StatusEntry[];
@@ -283,9 +351,11 @@ export function DiffPane({
   onUnstageFile: (path: string) => void;
   onStageAllFiles: (paths: string[]) => void;
   onUnstageAllFiles: (paths: string[]) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
+  // before marking that path's diff stale, so the refetch can't race the mutation itself.
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -320,6 +390,9 @@ export function DiffPane({
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
+        refreshGeneration={refreshGeneration}
+        initialCommitDraft={initialCommitDraft}
+        onCommitDraftChange={onCommitDraftChange}
       />
     );
   }
@@ -360,17 +433,25 @@ function UncommittedDiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  refreshGeneration,
+  initialCommitDraft,
+  onCommitDraftChange,
 }: {
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
+  refreshGeneration: number;
+  initialCommitDraft?: CommitDraft;
+  onCommitDraftChange?: (draft: CommitDraft) => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onStageAllFiles: (paths: string[]) => void;
   onUnstageAllFiles: (paths: string[]) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
+  // before marking that path's diff stale, so the refetch can't race the mutation itself.
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -385,6 +466,37 @@ function UncommittedDiffPane({
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Per-`entryKey` version counters: the per-path half of each section's staleness signal (the
+  // other half is `refreshGeneration`, see `staleness` below). A hunk stage/unstage/discard bumps
+  // *both* sides of the affected path — staging a hunk of a partially-staged file changes its
+  // staged diff as much as its unstaged one, and either section may be open — and only once the
+  // mutation's promise has settled, so the refetch can't observe the index before the backend
+  // has applied the change.
+  const [diffVersion, setDiffVersion] = useState<Record<string, number>>({});
+  const bumpPathVersions = (path: string) => {
+    const keys = [entryKey({ path, staged: false }), entryKey({ path, staged: true })];
+    setDiffVersion((prev) => {
+      const next = { ...prev };
+      for (const key of keys) next[key] = (prev[key] ?? 0) + 1;
+      return next;
+    });
+  };
+  const wrapHunkAction =
+    (action: (path: string, oldStart: number, newStart: number) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number) => {
+      // `useAppState`'s hunk actions never reject (`runMutation` records failures in
+      // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
+      // failed mutation may still have partially applied.
+      void Promise.resolve(action(path, oldStart, newStart)).finally(() => bumpPathVersions(path));
+    };
+  // One number per section: the path's own version plus the pane-wide refresh generation. Both
+  // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
+  // both (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when
+  // React batches the two updates into one render. Every open section refetches on any refresh:
+  // that is deliberate, it's the only signal an external edit, stash apply or pull leaves behind
+  // (there's no file watcher). PERF-001's savings come from lazy loading instead — collapsed and
+  // off-screen sections never fetch at all.
+  const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
 
   useEffect(() => {
     if (current === null) return;
@@ -492,13 +604,14 @@ function UncommittedDiffPane({
         status={status}
         isCurrent={isEntrySelected(entry)}
         collapsed={collapsedKeys.has(key)}
+        diffVersion={staleness(key)}
         onToggleCollapse={() => toggleCollapse(key)}
         onSelect={() => selectEntry(entry)}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
-        onStageHunk={onStageHunk}
-        onUnstageHunk={onUnstageHunk}
-        onDiscardHunk={onDiscardHunk}
+        onStageHunk={wrapHunkAction(onStageHunk)}
+        onUnstageHunk={wrapHunkAction(onUnstageHunk)}
+        onDiscardHunk={wrapHunkAction(onDiscardHunk)}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
@@ -520,6 +633,11 @@ function UncommittedDiffPane({
         <div>
           <div className={styles.groupHeading}>
             <span>Changes ({unstagedEntries.length})</span>
+            {conflictCount > 0 && (
+              <span className={styles.conflictBadge}>
+                {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+              </span>
+            )}
             {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
                 that still costs a full refresh. */}
             <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
@@ -582,6 +700,8 @@ function UncommittedDiffPane({
             disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
             onAbortMerge={onAbortMerge}
             initialMessage={mergeMessage ?? undefined}
+            initialDraft={initialCommitDraft}
+            onDraftChange={onCommitDraftChange}
           />
         )}
       </div>
@@ -609,10 +729,9 @@ function CommitFileSection({
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
 
-  useEffect(() => {
-    if (mode !== "diff" || collapsed) return;
+  const loadDiff = () => {
     let ignore = false;
     client
       .getCommitDiff(repoPath, commitId, path)
@@ -624,16 +743,21 @@ function CommitFileSection({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, commitId, path, mode, collapsed]);
+  };
 
   useEffect(() => {
-    if (mode !== "blame") return;
+    if (mode !== "diff" || collapsed) return;
+    return loadDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoPath, client, commitId, path, mode, collapsed]);
+
+  const loadBlame = () => {
     let ignore = false;
     client
       .getBlame(repoPath, commitId, path)
@@ -645,12 +769,18 @@ function CommitFileSection({
       })
       .catch(() => {
         if (!ignore) {
-          setError("No blame available for this file at this revision.");
+          setError({ message: "No blame available for this file at this revision." });
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    if (mode !== "blame") return;
+    return loadBlame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, commitId, path, mode]);
 
   return (
@@ -669,14 +799,24 @@ function CommitFileSection({
           {mode === "blame" ? (
             <>
               {error !== null ? (
-                <InlineError message={error} onDismiss={() => setError(null)} />
+                <InlineError
+                  message={error.message}
+                  hint={error.hint}
+                  onDismiss={() => setError(null)}
+                  onRetry={loadBlame}
+                />
               ) : (
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
-              <button onClick={() => setMode("diff")}>Back to Diff</button>
+              <button onClick={() => setMode("diff")}>Back to diff</button>
             </>
           ) : error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
+            <InlineError
+              message={error.message}
+              hint={error.hint}
+              onDismiss={() => setError(null)}
+              onRetry={loadDiff}
+            />
           ) : (
             <DiffView hunks={hunks} />
           )}
@@ -701,10 +841,10 @@ function CommitDiffPane({
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const [files, setFiles] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
+  const loadFiles = () => {
     let ignore = false;
     client
       .getCommitFiles(repoPath, commitId)
@@ -716,12 +856,17 @@ function CommitDiffPane({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    return loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, commitId]);
 
   const allCollapsed = files.length > 0 && files.every((path) => collapsedPaths.has(path));
@@ -743,7 +888,14 @@ function CommitDiffPane({
   };
 
   if (error !== null) {
-    return <InlineError message={error} onDismiss={() => setError(null)} />;
+    return (
+      <InlineError
+        message={error.message}
+        hint={error.hint}
+        onDismiss={() => setError(null)}
+        onRetry={loadFiles}
+      />
+    );
   }
 
   return (

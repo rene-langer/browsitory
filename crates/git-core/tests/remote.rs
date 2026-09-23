@@ -200,13 +200,21 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
     create_tag(&fixture.local, "not-selected", None).unwrap();
     let mut reporter = VecReporter::default();
 
-    push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter).unwrap();
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
     push_tags(
         &fixture.local,
         "origin",
         &["v1.0.0".to_string()],
         &mut NoCredentials,
         &mut reporter,
+        &|| false,
     )
     .unwrap();
 
@@ -255,6 +263,7 @@ fn pushes_all_local_tags_without_using_the_configured_push_refspec() {
         &[],
         &mut NoCredentials,
         &mut reporter,
+        &|| false,
     )
     .unwrap();
 
@@ -287,6 +296,7 @@ fn pushing_all_tags_is_a_no_op_when_there_are_no_local_tags() {
         &[],
         &mut NoCredentials,
         &mut reporter,
+        &|| false,
     )
     .unwrap();
 
@@ -306,7 +316,13 @@ fn branch_push_rejects_non_fast_forward_updates() {
     let mut reporter = VecReporter::default();
 
     assert!(matches!(
-        push_current_branch(&fixture.local, "origin", &mut NoCredentials, &mut reporter),
+        push_current_branch(
+            &fixture.local,
+            "origin",
+            &mut NoCredentials,
+            &mut reporter,
+            &|| false
+        ),
         Err(RemoteError::NonFastForward)
     ));
     assert_eq!(
@@ -444,6 +460,7 @@ fn fetch_updates_tracking_ref_and_reports_owned_progress() {
         "fetch-42".to_string(),
         &mut NoCredentials,
         &mut events,
+        &|| false,
     )
     .unwrap();
 
@@ -457,6 +474,155 @@ fn fetch_updates_tracking_ref_and_reports_owned_progress() {
     assert!(events.events.iter().all(|event| {
         event.operation_id == "fetch-42" && event.operation == TransferOperation::Fetch
     }));
+}
+
+#[test]
+fn a_fetch_aborts_when_the_cancel_flag_is_set_before_the_first_progress_tick() {
+    // The cancel flag is the side channel a cancel request writes to while the transfer is
+    // already blocked inside git2's network I/O: the transfer-progress callback polls it on
+    // every tick and returns `false`, which aborts the transfer from inside libgit2.
+    let (source_dir, source) = common::init_repo();
+    common::write_file(source_dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&source, "initial commit");
+    let remote_dir = tempfile::TempDir::new().unwrap();
+    let remote_repo = git2::Repository::init_bare(remote_dir.path()).unwrap();
+    let branch_name = source.head().unwrap().shorthand().unwrap().to_string();
+    let branch_ref = format!("refs/heads/{branch_name}");
+    source
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    source
+        .find_remote("origin")
+        .unwrap()
+        .push(&[format!("{branch_ref}:{branch_ref}")], None)
+        .unwrap();
+    let (_local_dir, local) = common::init_repo();
+    local
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    drop(remote_repo);
+
+    let cancelled = std::sync::atomic::AtomicBool::new(true);
+    let mut reporter = VecReporter::default();
+
+    let result = fetch_remote(
+        &local,
+        "origin",
+        "fetch-cancelled".to_string(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| cancelled.load(std::sync::atomic::Ordering::SeqCst),
+    );
+
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::Cancelled
+    );
+    assert!(local
+        .find_reference(&format!("refs/remotes/origin/{branch_name}"))
+        .is_err());
+}
+
+#[test]
+fn a_push_cancelled_before_negotiation_is_reported_cancelled_and_leaves_the_remote_untouched() {
+    // `push_negotiation` fires before any pack data is sent; returning an error there is
+    // libgit2's documented way to cancel a push without the remote applying anything.
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    let remote_tip_before = fixture.remote_tip();
+    let mut reporter = VecReporter::default();
+
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| true,
+    );
+
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::Cancelled
+    );
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert_eq!(
+        remote_repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        remote_tip_before
+    );
+}
+
+#[test]
+fn a_push_cancelled_after_negotiation_completes_and_reports_its_real_outcome() {
+    // Once negotiation has passed, the pack goes out and the remote applies the update before
+    // any later callback runs. Aborting there would report "cancelled" for a push that actually
+    // landed (and skip the local tracking-ref update), so a late cancel must be ignored.
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let polls = std::sync::atomic::AtomicUsize::new(0);
+    let mut reporter = VecReporter::default();
+
+    // Not cancelled on the first poll (negotiation), cancelled on every poll after it.
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1,
+    );
+
+    assert!(result.is_ok(), "late cancel must not fail a landed push");
+    assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert_eq!(
+        remote_repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        local_tip
+    );
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        local_tip
+    );
+}
+
+#[test]
+fn a_cancelled_fetch_is_not_reported_as_a_generic_transfer_failure() {
+    // Guards the classification: an uncancelled failure against the same fixture must still be
+    // `TransferFailed`, so `Cancelled` can't be produced by simply mapping every fetch error.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let missing_dir = tempfile::TempDir::new().unwrap();
+    let missing_path = missing_dir.path().join("does-not-exist");
+    repo.remote("origin", missing_path.to_str().unwrap())
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    let result = fetch_remote(
+        &repo,
+        "origin",
+        "fetch-failed".to_string(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::TransferFailed
+    );
 }
 
 #[test]
@@ -477,6 +643,7 @@ fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
         "fetch-unreachable".to_string(),
         &mut NoCredentials,
         &mut reporter,
+        &|| false,
     );
 
     assert!(matches!(result, Err(RemoteError::Git(_))));
@@ -495,7 +662,9 @@ fn push_to_an_unreachable_remote_fails_without_moving_local_head() {
     let local_head = repo.head().unwrap().target();
     let mut reporter = VecReporter::default();
 
-    let result = push_current_branch(&repo, "origin", &mut NoCredentials, &mut reporter);
+    let result = push_current_branch(&repo, "origin", &mut NoCredentials, &mut reporter, &|| {
+        false
+    });
 
     assert!(matches!(result, Err(RemoteError::Git(_))));
     assert_eq!(repo.head().unwrap().target(), local_head);

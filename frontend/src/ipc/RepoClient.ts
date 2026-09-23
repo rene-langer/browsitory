@@ -74,7 +74,8 @@ export interface UpstreamInfo {
 }
 
 export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed";
+/** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled";
 
 export interface TransferProgress {
   operationId: string;
@@ -282,6 +283,13 @@ export interface RepoClient {
   pushCurrentBranch(repoPath: string, remoteName: string): Promise<string>;
   pushTags(repoPath: string, remoteName: string, names: string[]): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
+  /**
+   * Asks the backend to abort the in-flight transfer `operationId`. Resolves as soon as the
+   * request is recorded, not when the transfer stops: the cancellation itself arrives as that
+   * operation's terminal `subscribeTransferProgress` event with `errorKind: "Cancelled"`.
+   * Unknown or already-finished ids are a no-op.
+   */
+  cancelTransfer(repoPath: string, operationId: string): Promise<void>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(repoPath: string): Promise<StashEntry[]>;
   saveStash(repoPath: string): Promise<void>;

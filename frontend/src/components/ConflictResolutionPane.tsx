@@ -64,13 +64,13 @@ export function ConflictResolutionPane({
           <p>{error}</p>
           <Toolbar>
             <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Ours")}>
-              Keep Our Version
+              Keep our version
             </button>
             <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Theirs")}>
-              Keep Their Version
+              Keep their version
             </button>
             <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Delete")}>
-              Delete File
+              Delete file
             </button>
           </Toolbar>
         </Panel>
@@ -118,9 +118,9 @@ export function ConflictResolutionPane({
               Theirs: {segment.theirs}
             </pre>
             <Toolbar>
-              <button onClick={() => setResolutionAt(index, "ours")}>Accept Ours</button>
-              <button onClick={() => setResolutionAt(index, "theirs")}>Accept Theirs</button>
-              <button onClick={() => setResolutionAt(index, "both")}>Accept Both</button>
+              <button onClick={() => setResolutionAt(index, "ours")}>Accept ours</button>
+              <button onClick={() => setResolutionAt(index, "theirs")}>Accept theirs</button>
+              <button onClick={() => setResolutionAt(index, "both")}>Accept both</button>
             </Toolbar>
           </div>
         ),

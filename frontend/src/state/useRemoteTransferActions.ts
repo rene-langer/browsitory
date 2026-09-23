@@ -12,6 +12,16 @@ import type {
 import type { AppState } from "./useAppState";
 
 function transferFailureMessage(progress: TransferProgress): string {
+  // A cancellation reaches the UI as a `Failed` terminal event — the transfer really did stop
+  // short — but the user pressed Cancel themselves, so it must not read as "Fetch failed".
+  // Reporting it here (rather than treating it as a completion) also keeps `state.error`
+  // non-null, which is what stops `App`'s success toast from announcing "Fetch complete" for a
+  // transfer that never completed.
+  if (progress.errorKind === "Cancelled") {
+    if (progress.operation === "Pull") return "Pull cancelled.";
+    if (progress.operation === "Fetch") return "Fetch cancelled.";
+    return "Push cancelled.";
+  }
   if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
   if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
   if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");

@@ -291,6 +291,8 @@ export const vscodeRepoClient: RepoClient = {
     call<string>("push_tags", { repoPath, remoteName, names }),
   pullCurrentUpstream: (repoPath: string) =>
     call<PullOutcome>("pull_current_upstream", { repoPath }),
+  cancelTransfer: (repoPath: string, operationId: string) =>
+    call<void>("cancel_transfer", { repoPath, operationId }),
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     // Initialize eagerly: a caller may subscribe before it ever issues a request, and the
     // `message` listener registered here is what delivers notifications.

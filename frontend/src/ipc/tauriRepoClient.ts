@@ -170,6 +170,11 @@ export const tauriRepoClient: RepoClient = {
     await transferListenersReady;
     return loggedInvoke<PullOutcome>("pull_current_upstream", { repoPath });
   },
+  // No `transferListenersReady` await, unlike the calls above: this one starts no transfer and
+  // so emits no events of its own — the cancellation shows up on the listeners the cancelled
+  // operation already set up.
+  cancelTransfer: (repoPath: string, operationId: string) =>
+    loggedInvoke("cancel_transfer", { repoPath, operationId }),
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     let disposed = false;
     const unlisten: Array<() => void> = [];

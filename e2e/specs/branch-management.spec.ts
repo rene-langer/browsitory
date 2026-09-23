@@ -38,7 +38,7 @@ describe("Browsitory branch management", () => {
     await addButton.waitForExist({ timeout: 10000 });
     await addButton.click();
 
-    const newBranchButton = await $("button=New Branch…");
+    const newBranchButton = await $("button=New branch…");
     await newBranchButton.click();
 
     const nameInput = await $("input[placeholder='New branch name']");

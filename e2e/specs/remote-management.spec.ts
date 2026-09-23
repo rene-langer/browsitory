@@ -29,11 +29,11 @@ describe("Browsitory remote management", () => {
     await expandSidebarSection("Branches");
 
     // Adding a remote is reached via the tree's "Add" toolbar button (opens a context menu with
-    // "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle.
+    // "New branch…"/"Add remote…"), not a standalone "Add remote" toggle.
     const addButton = await $('[aria-label="Add"]');
     await addButton.waitForExist({ timeout: 10000 });
     await addButton.click();
-    await (await $("button=Add Remote…")).click();
+    await (await $("button=Add remote…")).click();
 
     const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
     await remoteNameInput.waitForExist({ timeout: 10000 });

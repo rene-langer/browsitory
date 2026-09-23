@@ -109,7 +109,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
-    fireEvent.click(await screen.findByRole("button", { name: "Force Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Force delete" }));
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
 
@@ -131,7 +131,7 @@ describe("BranchTree — local branches", () => {
     rerender(<BranchTree {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
 
     expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Force Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Force delete" })).not.toBeInTheDocument();
   });
 
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {
@@ -174,7 +174,7 @@ describe("BranchTree — local branches", () => {
   it("the header '+' menu's New Branch opens the create-branch draft with startPoint HEAD", () => {
     const { props } = renderTree();
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "New Branch…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New branch…" }));
     expect(props.onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
@@ -621,7 +621,7 @@ describe("BranchTree — remotes", () => {
     const onOpenAddRemoteDraft = vi.fn();
     renderTree({ onOpenAddRemoteDraft });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add Remote…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add remote…" }));
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 

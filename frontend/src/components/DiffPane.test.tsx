@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
+import styles from "./DiffPane.module.css";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -62,6 +63,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     pullCurrentUpstream: async () => unused(),
+    cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
@@ -189,9 +191,9 @@ describe("DiffPane", () => {
       const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
-      expect(await screen.findByText("Stage Hunk")).toBeInTheDocument();
-      expect(screen.queryByText("Unstage Hunk")).not.toBeInTheDocument();
-      expect(screen.getByText("Discard Hunk")).toBeInTheDocument();
+      expect(await screen.findByText("Stage hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Unstage hunk")).not.toBeInTheDocument();
+      expect(screen.getByText("Discard hunk")).toBeInTheDocument();
     });
 
     it("shows Unstage Hunk (not Stage Hunk) for a staged file's diff", async () => {
@@ -202,8 +204,8 @@ describe("DiffPane", () => {
       const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "b.txt" ? hunks : []));
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
-      expect(await screen.findByText("Unstage Hunk")).toBeInTheDocument();
-      expect(screen.queryByText("Stage Hunk")).not.toBeInTheDocument();
+      expect(await screen.findByText("Unstage hunk")).toBeInTheDocument();
+      expect(screen.queryByText("Stage hunk")).not.toBeInTheDocument();
     });
 
     it("clicking Stage Hunk calls onStageHunk with that section's path and the hunk's start lines", async () => {
@@ -213,9 +215,107 @@ describe("DiffPane", () => {
       const onStageHunk = vi.fn();
       renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), status, { onStageHunk });
 
-      fireEvent.click(await screen.findByText("Stage Hunk"));
+      fireEvent.click(await screen.findByText("Stage hunk"));
 
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+    });
+
+    it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+      ];
+      // Only a.txt (unstaged) gets a hunk — b.txt stays empty, so there's exactly one "Stage
+      // hunk" button to click.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
+      const client = fakeClient({ getWorkingDiff });
+      const { rerender } = renderUncommitted(client, status);
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      fireEvent.click(await screen.findByText("Stage hunk"));
+
+      // A status array that is new by reference but didn't come from a refresh (same content,
+      // different identity, and no `refreshGeneration` change) must not refetch every open
+      // section on its own — only the path the hunk action touched is invalidated. (A real
+      // refresh *does* invalidate every open section; see the `refreshGeneration` test below.)
+      rerender(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={[...status]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />,
+      );
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+    });
+
+    it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
+      const partial: StatusEntry[] = [
+        { path: "a.txt", staged: false, kind: "Modified" },
+        { path: "a.txt", staged: true, kind: "Modified" },
+      ];
+      const hunk: DiffHunk = { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] };
+      // Only the unstaged side has a hunk to stage, so there's exactly one "Stage hunk" button.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, _path: string, staged: boolean) => (staged ? [] : [hunk]));
+      let settle: () => void = () => {};
+      const onStageHunk = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settle = resolve;
+          }),
+      );
+      renderUncommitted(fakeClient({ getWorkingDiff }), partial, { onStageHunk });
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      fireEvent.click(await screen.findByText("Stage hunk"));
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      // Nothing refetches while the mutation is still in flight — a refetch now could read the
+      // index before the backend applied the change, with nothing to correct it afterward.
+      await act(async () => {});
+      expect(getWorkingDiff).not.toHaveBeenCalled();
+
+      await act(async () => settle());
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true);
+    });
+
+    it("refetches every open diff when refreshGeneration advances, with no hunk action involved", async () => {
+      const getWorkingDiff = vi.fn(async () => []);
+      const client = fakeClient({ getWorkingDiff });
+      const { rerender } = renderUncommitted(client, status, { refreshGeneration: 0 });
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      // What a palette Refresh, stash apply or pull looks like from here: `useAppState.refresh()`
+      // advances `refreshGeneration`, while `status` may well be content-identical.
+      rerender(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          refreshGeneration={1}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />,
+      );
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
@@ -409,7 +509,46 @@ describe("DiffPane", () => {
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
     });
 
-    it("Back to Diff switches that section back to the diff view", async () => {
+    it("shows the raw error and a plain-language hint, plus a Retry that re-fetches, when the working diff fails", async () => {
+      const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+      const getWorkingDiff = vi.fn<RepoClient["getWorkingDiff"]>().mockResolvedValue([]);
+      getWorkingDiff.mockRejectedValueOnce(new Error("Transport failed: sidecar exited unexpectedly (code 1)"));
+      renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
+
+      expect(
+        await screen.findByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The connection to the backend was lost. Retry, or reopen the repository."),
+      ).toBeInTheDocument();
+      expect(getWorkingDiff).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows a Retry that re-fetches blame when the blame fetch fails", async () => {
+      const getBlame = vi
+        .fn<RepoClient["getBlame"]>()
+        .mockRejectedValueOnce(new Error("git operation failed: no such revision"))
+        .mockResolvedValueOnce([]);
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      await screen.findByText("No blame available for this file at this revision.");
+      expect(getBlame).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getBlame).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText("No blame available for this file at this revision.")).not.toBeInTheDocument();
+    });
+
+    it("Back to diff switches that section back to the diff view", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -419,9 +558,9 @@ describe("DiffPane", () => {
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
       await screen.findByText("hello");
-      fireEvent.click(screen.getByText("Back to Diff"));
+      fireEvent.click(screen.getByText("Back to diff"));
 
-      expect(screen.queryByText("Back to Diff")).not.toBeInTheDocument();
+      expect(screen.queryByText("Back to diff")).not.toBeInTheDocument();
       expect(screen.queryByText("hello")).not.toBeInTheDocument();
     });
 
@@ -475,12 +614,12 @@ describe("DiffPane", () => {
       });
       renderUncommitted(fakeClient({ getConflictHunks }), twoConflicts);
 
-      await waitFor(() => screen.getByText("Keep Our Version"));
+      await waitFor(() => screen.getByText("Keep our version"));
       await waitFor(() => screen.getByText("Save resolution"));
 
       // Both sections are mounted simultaneously now — one file's add/delete fallback state
       // must not appear on the other's section.
-      expect(screen.getAllByText("Keep Our Version")).toHaveLength(1);
+      expect(screen.getAllByText("Keep our version")).toHaveLength(1);
       expect(screen.getAllByText("Save resolution")).toHaveLength(1);
     });
 
@@ -500,6 +639,19 @@ describe("DiffPane", () => {
 
       expect(screen.getByText("Changes (1)")).toBeInTheDocument();
       expect(screen.getByText("Staged (1)")).toBeInTheDocument();
+    });
+
+    it("tints a conflicted file row and shows a conflict count badge", () => {
+      const statusWithConflict: StatusEntry[] = [
+        { path: "crates/git-core/src/merge.rs", staged: false, kind: "Conflicted" },
+        { path: "README.md", staged: false, kind: "Modified" },
+      ];
+      renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), statusWithConflict);
+
+      const conflictedRow = screen.getByText("crates/git-core/src/merge.rs (Conflicted)").closest("li");
+      expect(conflictedRow).toHaveClass(styles.conflicted);
+      expect(screen.getByText("Changes (2)")).toBeInTheDocument();
+      expect(screen.getByText("1 conflict")).toBeInTheDocument();
     });
 
     it("marks the current file's row as aria-selected on click, without hiding any other section", async () => {
@@ -617,6 +769,40 @@ describe("DiffPane", () => {
         fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
 
         await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      });
+
+      it("does not fetch an expanded file's diff until it is near the viewport (PERF-001)", () => {
+        const observedCallbacks: IntersectionObserverCallback[] = [];
+        const observe = vi.fn();
+        const disconnect = vi.fn();
+        // A plain `function`, not an arrow function: `new IntersectionObserver(...)` in the
+        // component requires the mock to be constructible, which an arrow-function
+        // implementation (no `[[Construct]]`) is not.
+        const IntersectionObserverMock = vi.fn().mockImplementation(function (
+          callback: IntersectionObserverCallback,
+        ) {
+          observedCallbacks.push(callback);
+          return { observe, unobserve: vi.fn(), disconnect };
+        });
+        vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
+
+        const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+        const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+        renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
+
+        expect(observe).toHaveBeenCalledTimes(1);
+        expect(getWorkingDiff).not.toHaveBeenCalled();
+
+        act(() => {
+          observedCallbacks[0](
+            [{ isIntersecting: true } as IntersectionObserverEntry],
+            {} as IntersectionObserver,
+          );
+        });
+
+        expect(getWorkingDiff).toHaveBeenCalled();
+
+        vi.unstubAllGlobals();
       });
     });
 
@@ -756,6 +942,41 @@ describe("DiffPane", () => {
 
       expect(await screen.findByText("No blame available for this file at this revision.")).toBeInTheDocument();
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
+    });
+
+    it("shows the raw error and a Retry that re-fetches when a commit file's diff fails", async () => {
+      const getCommitDiffOnce = vi.fn<RepoClient["getCommitDiff"]>().mockResolvedValue([]);
+      getCommitDiffOnce.mockRejectedValueOnce(new Error("failed to read working diff: permission denied"));
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff: getCommitDiffOnce }), "abc123");
+
+      expect(
+        await screen.findByText("failed to read working diff: permission denied"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Could not read this file's changes. Retry, or check the file still exists."),
+      ).toBeInTheDocument();
+      expect(getCommitDiffOnce).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getCommitDiffOnce).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByText("failed to read working diff: permission denied"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows a Retry that re-fetches when a commit's file list fails to load", async () => {
+      const getCommitFilesOnce = vi.fn<RepoClient["getCommitFiles"]>().mockResolvedValue(["src/main.rs"]);
+      getCommitFilesOnce.mockRejectedValueOnce(new Error("something unusual"));
+      renderCommit(fakeClient({ getCommitFiles: getCommitFilesOnce, getCommitDiff }), "abc123");
+
+      expect(await screen.findByText("something unusual")).toBeInTheDocument();
+      expect(getCommitFilesOnce).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getCommitFilesOnce).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
     });
 
     it("Collapse all / Expand all toggles every file's section", async () => {

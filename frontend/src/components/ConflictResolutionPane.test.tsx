@@ -62,6 +62,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     pullCurrentUpstream: async () => unused(),
+    cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
@@ -135,27 +136,27 @@ describe("ConflictResolutionPane", () => {
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nmain two\nline three\n");
   });
 
-  it("Accept Theirs changes that conflict's contribution to the saved text", async () => {
+  it("Accept theirs changes that conflict's contribution to the saved text", async () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("Accept Theirs"));
-    fireEvent.click(screen.getByText("Accept Theirs"));
+    await waitFor(() => screen.getByText("Accept theirs"));
+    fireEvent.click(screen.getByText("Accept theirs"));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nfeature two\nline three\n");
   });
 
-  it("Accept Both concatenates ours then theirs", async () => {
+  it("Accept both concatenates ours then theirs", async () => {
     const onResolve = vi.fn();
     const client = fakeClient({ getConflictHunks: async () => segments });
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("Accept Both"));
-    fireEvent.click(screen.getByText("Accept Both"));
+    await waitFor(() => screen.getByText("Accept both"));
+    fireEvent.click(screen.getByText("Accept both"));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith(
@@ -182,7 +183,7 @@ describe("ConflictResolutionPane", () => {
     await waitFor(() => expect(saveButton).not.toBeDisabled());
   });
 
-  it("Accept Both does not insert a spurious blank line when one side of a conflict is empty", async () => {
+  it("Accept both does not insert a spurious blank line when one side of a conflict is empty", async () => {
     const onResolve = vi.fn();
     const oneEmptySide: ConflictSegment[] = [
       { kind: "Clean", content: "line one\n" },
@@ -193,14 +194,14 @@ describe("ConflictResolutionPane", () => {
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("Accept Both"));
-    fireEvent.click(screen.getByText("Accept Both"));
+    await waitFor(() => screen.getByText("Accept both"));
+    fireEvent.click(screen.getByText("Accept both"));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
   });
 
-  it("Accept Ours does not insert a spurious blank line when theirs is empty", async () => {
+  it("Accept ours does not insert a spurious blank line when theirs is empty", async () => {
     const onResolve = vi.fn();
     const theirsEmpty: ConflictSegment[] = [
       { kind: "Clean", content: "line one\n" },
@@ -211,14 +212,14 @@ describe("ConflictResolutionPane", () => {
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("Accept Ours"));
-    fireEvent.click(screen.getByText("Accept Ours"));
+    await waitFor(() => screen.getByText("Accept ours"));
+    fireEvent.click(screen.getByText("Accept ours"));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
   });
 
-  it("Accept Theirs does not insert a spurious blank line when ours is empty", async () => {
+  it("Accept theirs does not insert a spurious blank line when ours is empty", async () => {
     const onResolve = vi.fn();
     const oursEmpty: ConflictSegment[] = [
       { kind: "Clean", content: "line one\n" },
@@ -229,8 +230,8 @@ describe("ConflictResolutionPane", () => {
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText("Accept Theirs"));
-    fireEvent.click(screen.getByText("Accept Theirs"));
+    await waitFor(() => screen.getByText("Accept theirs"));
+    fireEvent.click(screen.getByText("Accept theirs"));
     fireEvent.click(screen.getByText("Save resolution"));
 
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nline two\nline three\n");
@@ -253,12 +254,12 @@ describe("ConflictResolutionPane", () => {
       />,
     );
 
-    await waitFor(() => screen.getByText("Keep Our Version"));
-    expect(screen.getByText("Keep Their Version")).toBeInTheDocument();
-    expect(screen.getByText("Delete File")).toBeInTheDocument();
+    await waitFor(() => screen.getByText("Keep our version"));
+    expect(screen.getByText("Keep their version")).toBeInTheDocument();
+    expect(screen.getByText("Delete file")).toBeInTheDocument();
   });
 
-  it("clicking Keep Their Version calls onResolveAddDelete with Theirs", async () => {
+  it("clicking Keep their version calls onResolveAddDelete with Theirs", async () => {
     const onResolveAddDelete = vi.fn();
     const client = fakeClient({
       getConflictHunks: async () => {
@@ -276,8 +277,8 @@ describe("ConflictResolutionPane", () => {
       />,
     );
 
-    await waitFor(() => screen.getByText("Keep Their Version"));
-    fireEvent.click(screen.getByText("Keep Their Version"));
+    await waitFor(() => screen.getByText("Keep their version"));
+    fireEvent.click(screen.getByText("Keep their version"));
 
     expect(onResolveAddDelete).toHaveBeenCalledWith("binary.dat", "Theirs");
   });
@@ -301,6 +302,6 @@ describe("ConflictResolutionPane", () => {
 
     await waitFor(() => screen.getByRole("alert"));
     expect(screen.getByRole("alert")).toHaveTextContent("network error");
-    expect(screen.queryByText("Keep Our Version")).not.toBeInTheDocument();
+    expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
   });
 });

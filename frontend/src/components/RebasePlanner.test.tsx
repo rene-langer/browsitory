@@ -62,6 +62,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     pullCurrentUpstream: async () => unused(),
+    cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
@@ -121,7 +122,7 @@ const fourCommits: RebasePlanCommit[] = [
 ];
 
 describe("RebasePlanner", () => {
-  it("disables Start Rebase while another repository operation is active", async () => {
+  it("disables Start rebase while another repository operation is active", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
@@ -136,7 +137,7 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    expect(screen.getByText("Start Rebase")).toBeDisabled();
+    expect(screen.getByText("Start rebase")).toBeDisabled();
   });
 
   it("lists commits oldest-first with a default Pick action each", async () => {
@@ -166,7 +167,7 @@ describe("RebasePlanner", () => {
     await screen.findByText(/add a/);
 
     fireEvent.click(screen.getAllByText("Move down")[0]);
-    fireEvent.click(screen.getByText("Start Rebase"));
+    fireEvent.click(screen.getByText("Start rebase"));
 
     expect(onStartRebase).toHaveBeenCalledWith(
       "base",
@@ -199,7 +200,7 @@ describe("RebasePlanner", () => {
     fireEvent.change(screen.getByPlaceholderText("New commit message"), {
       target: { value: "reworded" },
     });
-    fireEvent.click(screen.getByText("Start Rebase"));
+    fireEvent.click(screen.getByText("Start rebase"));
 
     const [, plan] = onStartRebase.mock.calls[0];
     expect(plan[0].action).toEqual({ kind: "Reword", message: "reworded" });
@@ -251,7 +252,7 @@ describe("RebasePlanner", () => {
     expect(combinedFields[0]).toHaveValue("add a\n\nadd c");
 
     fireEvent.change(combinedFields[0], { target: { value: "e2e: combined rebase commit" } });
-    fireEvent.click(screen.getByText("Start Rebase"));
+    fireEvent.click(screen.getByText("Start rebase"));
 
     const [, plan] = onStartRebase.mock.calls[0];
     expect(plan[0].commitId).toBe("aaa");
@@ -298,7 +299,7 @@ describe("RebasePlanner", () => {
     // message text).
     expect(combinedFields[1]).toHaveValue("add c");
 
-    fireEvent.click(screen.getByText("Start Rebase"));
+    fireEvent.click(screen.getByText("Start rebase"));
     const [, plan] = onStartRebase.mock.calls[0];
     expect(plan[0].combinedMessage).toBe("hand-written message for A");
   });

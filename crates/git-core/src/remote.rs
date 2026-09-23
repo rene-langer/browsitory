@@ -42,6 +42,9 @@ pub enum TransferErrorKind {
     CredentialStoreFailure,
     SshAgentFailure,
     TransferFailed,
+    /// The caller asked for the in-flight transfer to stop — see the `cancel` parameter on
+    /// `fetch_remote`/`push_current_branch`/`push_tags`.
+    Cancelled,
 }
 
 /// Stable callback marker used internally to classify a missing keychain token without sending
@@ -165,11 +168,14 @@ pub enum RemoteError {
     NonFastForward,
     #[error("the remote rejected a pushed reference")]
     RejectedRemoteRef,
+    #[error("the transfer was cancelled")]
+    Cancelled,
 }
 
 impl RemoteError {
     pub fn transfer_error_kind(&self) -> TransferErrorKind {
         match self {
+            Self::Cancelled => TransferErrorKind::Cancelled,
             Self::NonFastForward => TransferErrorKind::NonFastForward,
             Self::RejectedRemoteRef => TransferErrorKind::RejectedRemoteRef,
             Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
@@ -189,12 +195,20 @@ impl RemoteError {
     }
 }
 
+/// Fetches `remote_name`, reporting progress through `reporter`.
+///
+/// `cancel` is polled from inside libgit2's own progress callbacks — the only place a caller can
+/// interrupt a transfer that is already blocked in network I/O. Returning `false` from
+/// `transfer_progress`/`sideband_progress` makes libgit2 abort the transfer, which surfaces here
+/// as a generic `git2::Error` (libgit2 does not give the abort its own error code), so `cancel`
+/// is polled once more after the failure to tell a cancellation from a real transport failure.
 pub fn fetch_remote(
     repo: &Repository,
     remote_name: &str,
     operation_id: String,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
@@ -205,6 +219,9 @@ pub fn fetch_remote(
         credentials.borrow_mut().credential(url, username, allowed)
     });
     callbacks.transfer_progress(|progress| {
+        if cancel() {
+            return false;
+        }
         reporter.borrow_mut().report(TransferProgress {
             operation_id: operation_id.clone(),
             operation: TransferOperation::Fetch,
@@ -217,6 +234,9 @@ pub fn fetch_remote(
         true
     });
     callbacks.sideband_progress(|message| {
+        if cancel() {
+            return false;
+        }
         reporter.borrow_mut().report(TransferProgress {
             operation_id: operation_id.clone(),
             operation: TransferOperation::Fetch,
@@ -229,6 +249,9 @@ pub fn fetch_remote(
         true
     });
     callbacks.update_tips(|_reference, _old, _new| {
+        if cancel() {
+            return false;
+        }
         reporter.borrow_mut().report(TransferProgress {
             operation_id: operation_id.clone(),
             operation: TransferOperation::Fetch,
@@ -243,8 +266,21 @@ pub fn fetch_remote(
 
     let mut options = FetchOptions::new();
     options.remote_callbacks(callbacks);
-    remote.fetch(&[] as &[&str], Some(&mut options), None)?;
-    Ok(())
+    match remote.fetch(&[] as &[&str], Some(&mut options), None) {
+        Ok(()) => Ok(()),
+        Err(error) => Err(cancellation_or(cancel, error)),
+    }
+}
+
+/// Classifies a failed transfer: libgit2 reports a callback-initiated abort as an ordinary
+/// error, so the only way to tell "the user cancelled" from "the transport broke" is to ask the
+/// cancel signal again now that the call has returned.
+fn cancellation_or(cancel: &dyn Fn() -> bool, error: git2::Error) -> RemoteError {
+    if cancel() {
+        RemoteError::Cancelled
+    } else {
+        RemoteError::Git(error)
+    }
 }
 
 pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>, RemoteError> {
@@ -302,11 +338,15 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
+/// Pushes the current branch. `cancel` is checked once, at `push_negotiation` (before any data
+/// is sent); a cancel requested after that is ignored so a push that lands is never reported as
+/// cancelled — see `push_refs`.
 pub fn push_current_branch(
     repo: &Repository,
     remote_name: &str,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
     let branch = current_local_branch_name(repo)?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
@@ -317,15 +357,19 @@ pub fn push_current_branch(
         TransferOperation::PushBranch,
         credentials,
         reporter,
+        cancel,
     )
 }
 
+/// Pushes `names` (or every local tag when empty). `cancel` behaves as for
+/// `push_current_branch`.
 pub fn push_tags(
     repo: &Repository,
     remote_name: &str,
     names: &[String],
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
     let tag_names = if names.is_empty() {
         repo.tag_names(None)?
@@ -353,6 +397,7 @@ pub fn push_tags(
         TransferOperation::PushTags,
         credentials,
         reporter,
+        cancel,
     )
 }
 
@@ -638,6 +683,7 @@ fn push_refs(
     operation: TransferOperation,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
@@ -647,6 +693,24 @@ fn push_refs(
 
     callbacks.credentials(|url, username, allowed| {
         credentials.borrow_mut().credential(url, username, allowed)
+    });
+    // `push_negotiation` fires once between ref negotiation and the pack upload; returning an
+    // error there is libgit2's documented way to cancel a push, and it is the **only** point a
+    // push is cancelled. Nothing has been sent yet, so the remote is guaranteed untouched.
+    //
+    // After it, the push is committed: git2 0.21's `push_transfer_progress` returns `()` and
+    // cannot abort, and `push_update_reference`/`sideband_progress` run from the server's
+    // report-status — i.e. *after* the remote already applied the update. Aborting there would
+    // report "cancelled" for a push that actually landed (and skip the local tracking-ref
+    // update), so a cancel pressed after negotiation is deliberately ignored and the push
+    // reports its real outcome.
+    let cancelled_at_negotiation = Cell::new(false);
+    callbacks.push_negotiation(|_updates| {
+        if cancel() {
+            cancelled_at_negotiation.set(true);
+            return Err(git2::Error::from_str("transfer cancelled"));
+        }
+        Ok(())
     });
     callbacks.push_transfer_progress(|current, total, transferred_bytes| {
         reporter.borrow_mut().report(TransferProgress {
@@ -686,8 +750,13 @@ fn push_refs(
 
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
-    if let Err(error) = remote.push(refspecs, Some(&mut options)) {
-        return if error.code() == ErrorCode::NotFastForward {
+    let pushed = remote.push(refspecs, Some(&mut options));
+    // Only a negotiation-time abort is a cancellation; a genuine failure that happens while
+    // Cancel is pressed keeps its real classification.
+    if let Err(error) = pushed {
+        return if cancelled_at_negotiation.get() {
+            Err(RemoteError::Cancelled)
+        } else if error.code() == ErrorCode::NotFastForward {
             Err(RemoteError::NonFastForward)
         } else {
             Err(error.into())
@@ -700,6 +769,9 @@ fn push_refs(
         Some(TransferErrorKind::CredentialStoreFailure) => unreachable!(),
         Some(TransferErrorKind::SshAgentFailure) => unreachable!(),
         Some(TransferErrorKind::TransferFailed) => unreachable!(),
+        // Cancellation aborts the `push` call itself (above); it is never recorded as a
+        // per-reference rejection.
+        Some(TransferErrorKind::Cancelled) => unreachable!(),
         None => Ok(()),
     }
 }
