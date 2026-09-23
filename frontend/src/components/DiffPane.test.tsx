@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
@@ -217,6 +217,43 @@ describe("DiffPane", () => {
       fireEvent.click(await screen.findByText("Stage hunk"));
 
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+    });
+
+    it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
+      const hunks: DiffHunk[] = [
+        { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+      ];
+      // Only a.txt (unstaged) gets a hunk — b.txt stays empty, so there's exactly one "Stage
+      // hunk" button to click.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
+      const client = fakeClient({ getWorkingDiff });
+      const { rerender } = renderUncommitted(client, status);
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      fireEvent.click(await screen.findByText("Stage hunk"));
+
+      // A real stage-hunk flow is followed by a status refresh from the backend, which hands
+      // `DiffPane` a new `status` array by reference (same content, different identity) — before
+      // the fix, that reference change alone was enough to refetch *every* open section's diff,
+      // not just a.txt's. Rerendering with a fresh-but-equal array (same `client` reference, so
+      // that isn't what's under test here) reproduces that without the fix reacting.
+      rerender(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={[...status]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />,
+      );
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
@@ -670,6 +707,40 @@ describe("DiffPane", () => {
         fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
 
         await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      });
+
+      it("does not fetch an expanded file's diff until it is near the viewport (PERF-001)", () => {
+        const observedCallbacks: IntersectionObserverCallback[] = [];
+        const observe = vi.fn();
+        const disconnect = vi.fn();
+        // A plain `function`, not an arrow function: `new IntersectionObserver(...)` in the
+        // component requires the mock to be constructible, which an arrow-function
+        // implementation (no `[[Construct]]`) is not.
+        const IntersectionObserverMock = vi.fn().mockImplementation(function (
+          callback: IntersectionObserverCallback,
+        ) {
+          observedCallbacks.push(callback);
+          return { observe, unobserve: vi.fn(), disconnect };
+        });
+        vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
+
+        const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+        const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+        renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
+
+        expect(observe).toHaveBeenCalledTimes(1);
+        expect(getWorkingDiff).not.toHaveBeenCalled();
+
+        act(() => {
+          observedCallbacks[0](
+            [{ isIntersecting: true } as IntersectionObserverEntry],
+            {} as IntersectionObserver,
+          );
+        });
+
+        expect(getWorkingDiff).toHaveBeenCalled();
+
+        vi.unstubAllGlobals();
       });
     });
 

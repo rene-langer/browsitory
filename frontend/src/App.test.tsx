@@ -202,4 +202,33 @@ describe("App", () => {
     );
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
+
+  it("unmounts an inactive repo's workspace instead of hiding it with CSS (PERF-001)", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/b",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      // RepoWorkspace's mount-time refresh() fans out to these for whichever tab actually mounts.
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+
+    // Both tabs exist in the tab strip, but only the active repo's workspace (b) is mounted —
+    // the audit's own evidence for this finding was three open repos producing three copies of
+    // section headings like "Branches" in the DOM; the fix renders exactly one.
+    await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
+  });
 });

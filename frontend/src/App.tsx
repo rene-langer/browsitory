@@ -181,11 +181,12 @@ function RepoWorkspace({
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
 
   return (
-    // `data-active-repo` marks which workspace is the visible one. Every tab's `RepoWorkspace`
-    // stays mounted (only CSS-hidden when inactive), so a document-wide `querySelector` would
-    // always hit whichever tab is first in document order — `commands.ts`'s `goToSidebarSection`
-    // scopes its lookup to this attribute so "Go to <section>" targets the tab the user is
-    // actually looking at.
+    // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
+    // active tab's `RepoWorkspace` now (PERF-001), so in practice exactly one of these exists at
+    // a time — but the attribute (and the `active` prop it mirrors) stays: `commands.ts`'s
+    // `goToSidebarSection` still scopes its `document.querySelector` lookup to it, and this
+    // component's own internal gates (`active &&` below) still need a real boolean rather than an
+    // assumption that they're always mounted-implies-active.
     <div
       style={{ display: active ? "contents" : "none" }}
       data-active-repo={active ? "true" : "false"}
@@ -725,19 +726,27 @@ export default function App({
           onDeleteWorkspace={workspaces.deleteWorkspace}
         />
       ) : (
-        openRepos.openRepos.map((repo) => (
-          <RepoWorkspace
-            key={repo.path}
-            repoPath={repo.path}
-            active={repo.path === openRepos.activePath}
-            client={client}
-            onOpenRepoTab={openRepoTab}
-            onBusyChange={onBusyChange}
-            openRepos={openRepos.openRepos}
-            onSwitchRepoTab={openRepos.switchTo}
-            onCloseRepoTab={openRepos.closeRepo}
-          />
-        ))
+        // PERF-001: only the active tab's workspace is mounted — an inactive one renders nothing
+        // rather than staying mounted `display: none`. `RepoTabs` above still renders every open
+        // tab (so switching away and back is possible); this just avoids paying N tabs' worth of
+        // steady-state DOM/IPC cost while only one is ever visible. Switching back remounts a
+        // fresh `RepoWorkspace`, which re-fetches its own status/graph on mount — already the
+        // existing behavior for a newly-opened repo, so no new loading-state code is needed.
+        openRepos.openRepos
+          .filter((repo) => repo.path === openRepos.activePath)
+          .map((repo) => (
+            <RepoWorkspace
+              key={repo.path}
+              repoPath={repo.path}
+              active
+              client={client}
+              onOpenRepoTab={openRepoTab}
+              onBusyChange={onBusyChange}
+              openRepos={openRepos.openRepos}
+              onSwitchRepoTab={openRepos.switchTo}
+              onCloseRepoTab={openRepos.closeRepo}
+            />
+          ))
       )}
     </main>
   );

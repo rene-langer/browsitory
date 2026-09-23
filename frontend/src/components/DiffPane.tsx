@@ -78,6 +78,7 @@ function UncommittedFileSection({
   status,
   isCurrent,
   collapsed,
+  diffVersion,
   onToggleCollapse,
   onSelect,
   onStageFile,
@@ -96,6 +97,11 @@ function UncommittedFileSection({
   status: StatusEntry[];
   isCurrent: boolean;
   collapsed: boolean;
+  // Bumped by the parent (`UncommittedDiffPane`) only for this file's own path/staged key, on
+  // that file's own hunk stage/unstage/discard — see `wrappedStageHunk` and friends below. Used
+  // (instead of `status`) as the diff-fetch effect's staleness signal so hunk-mutating one file
+  // doesn't refetch every other open section's diff too (PERF-001).
+  diffVersion: number;
   onToggleCollapse: () => void;
   onSelect: () => void;
   onStageFile: (path: string) => void;
@@ -113,6 +119,19 @@ function UncommittedFileSection({
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
+  // Tracks proximity to the viewport so a long file list doesn't eagerly fetch every section's
+  // diff at once (PERF-001) — only sections within `rootMargin` of the viewport ever load.
+  const sectionElRef = useRef<HTMLDivElement | null>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  useEffect(() => {
+    const el = sectionElRef.current;
+    if (el === null) return;
+    const observer = new IntersectionObserver(([observerEntry]) => setNearViewport(observerEntry.isIntersecting), {
+      rootMargin: "200px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Every file's diff is fetched eagerly (all sections render expanded by default), keyed on the
   // file's own identity rather than a shared "selected" pointer. Whole-file staging/unstaging
@@ -144,11 +163,13 @@ function UncommittedFileSection({
   };
 
   useEffect(() => {
-    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
-    if (mode !== "diff" || isConflicted || collapsed) return;
+    // Lazy: a collapsed section fetches nothing until it is expanded, and a section far from the
+    // viewport fetches nothing until it is scrolled near (both PERF-001). `diffVersion` (not
+    // `status`) is the staleness signal — see its doc comment above.
+    if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status, collapsed]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -187,7 +208,12 @@ function UncommittedFileSection({
       onClick={onSelect}
       className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
     >
-      <div className={styles.fileSectionHeader}>
+      <div
+        className={styles.fileSectionHeader}
+        ref={(el) => {
+          sectionElRef.current = el;
+        }}
+      >
         <CollapseToggle collapsed={collapsed} path={entry.path} onToggle={onToggleCollapse} />
         <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
         <span className={styles.path}>
@@ -413,6 +439,25 @@ function UncommittedDiffPane({
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Per-`entryKey` version counters, bumped only for the file whose hunk was just staged/
+  // unstaged/discarded (PERF-001) — the diff-fetch effect in `UncommittedFileSection` keys off
+  // this instead of the whole `status` array, so mutating one file's hunks doesn't refetch every
+  // other open section's diff.
+  const [diffVersion, setDiffVersion] = useState<Record<string, number>>({});
+  const bumpDiffVersion = (key: string) => {
+    setDiffVersion((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+  };
+  // Bump by the *rendering* entry's own key, not a hardcoded staged guess: `onStageHunk` and
+  // `onUnstageHunk` are each wired to only one side (unstaged/staged respectively) by
+  // `UncommittedFileSection`, but `onDiscardHunk` is wired unconditionally for both — a staged
+  // file's section can discard a hunk too, and that must bump *its own* (staged) key, not the
+  // unstaged one for the same path.
+  const wrapHunkAction =
+    (key: string, action: (path: string, oldStart: number, newStart: number) => void) =>
+    (path: string, oldStart: number, newStart: number) => {
+      bumpDiffVersion(key);
+      action(path, oldStart, newStart);
+    };
 
   useEffect(() => {
     if (current === null) return;
@@ -520,13 +565,14 @@ function UncommittedDiffPane({
         status={status}
         isCurrent={isEntrySelected(entry)}
         collapsed={collapsedKeys.has(key)}
+        diffVersion={diffVersion[key] ?? 0}
         onToggleCollapse={() => toggleCollapse(key)}
         onSelect={() => selectEntry(entry)}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
-        onStageHunk={onStageHunk}
-        onUnstageHunk={onUnstageHunk}
-        onDiscardHunk={onDiscardHunk}
+        onStageHunk={wrapHunkAction(key, onStageHunk)}
+        onUnstageHunk={wrapHunkAction(key, onUnstageHunk)}
+        onDiscardHunk={wrapHunkAction(key, onDiscardHunk)}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
