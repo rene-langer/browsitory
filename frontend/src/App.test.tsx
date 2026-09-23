@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
+import styles from "./App.module.css";
 import type { RepoClient } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
@@ -148,6 +149,22 @@ describe("App", () => {
     render(<App client={client} />);
     expect(screen.getByRole("heading", { name: "Browsitory" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
+
+  it("shows a failed open-repos restore in the reserved error slot instead of shifting the layout", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => {
+        throw new Error("config.toml is unreadable");
+      },
+    });
+
+    render(<App client={client} />);
+
+    const banner = await screen.findByText("Error: config.toml is unreadable");
+    // The reserved-space slot (`.errorLayer`, shared with the other App-level banners) floats
+    // the banner over the workspace instead of pushing it down (FB-004) — asserting the class
+    // instead of computed layout, since jsdom doesn't run layout.
+    expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
   });
 
   it("closes the active tab on Ctrl/Cmd+W", async () => {

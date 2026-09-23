@@ -663,7 +663,9 @@ export default function App({
       </header>
       <LaneBraid />
       {openRepos.restoreError !== null && (
-        <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+        <div className={styles.errorLayer}>
+          <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+        </div>
       )}
       {(transportError !== null || openError !== null) && (
         <div className={styles.errorLayer}>

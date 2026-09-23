@@ -1,3 +1,4 @@
+import { describeError, type DescribedError } from "../lib/errorMessages";
 import { conflictReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
@@ -110,7 +111,7 @@ function UncommittedFileSection({
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
 
   // Every file's diff is fetched eagerly (all sections render expanded by default), keyed on the
@@ -119,9 +120,10 @@ function UncommittedFileSection({
   // staging leaves it at the same path/staged key while only its hunk count changes underneath —
   // `status` stays a dependency for the same reason the old single-pane version needed it: a new
   // `status` array (by reference) is the only signal that this file's own diff may be stale.
-  useEffect(() => {
-    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
-    if (mode !== "diff" || isConflicted || collapsed) return;
+  //
+  // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
+  // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
+  const loadDiff = () => {
     let ignore = false;
     client
       .getWorkingDiff(repoPath, entry.path, entry.staged)
@@ -133,19 +135,25 @@ function UncommittedFileSection({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    // Lazy: a collapsed section fetches nothing until it is expanded (PERF-001).
+    if (mode !== "diff" || isConflicted || collapsed) return;
+    return loadDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, status, collapsed]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
   // on screen.
-  useEffect(() => {
-    if (mode !== "blame") return;
+  const loadBlame = () => {
     let ignore = false;
     client
       .getBlame(repoPath, "HEAD", entry.path)
@@ -157,12 +165,18 @@ function UncommittedFileSection({
       })
       .catch(() => {
         if (!ignore) {
-          setError("No blame available for this file at this revision.");
+          setError({ message: "No blame available for this file at this revision." });
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    if (mode !== "blame") return;
+    return loadBlame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, entry.path, mode, status]);
 
   const Icon = STATUS_ICONS[entry.kind];
@@ -221,7 +235,12 @@ function UncommittedFileSection({
           {mode === "blame" ? (
             <>
               {error !== null ? (
-                <InlineError message={error} onDismiss={() => setError(null)} />
+                <InlineError
+                  message={error.message}
+                  hint={error.hint}
+                  onDismiss={() => setError(null)}
+                  onRetry={loadBlame}
+                />
               ) : (
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
@@ -238,7 +257,12 @@ function UncommittedFileSection({
               onResolveAddDelete={onResolveAddDeleteConflict}
             />
           ) : error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
+            <InlineError
+              message={error.message}
+              hint={error.hint}
+              onDismiss={() => setError(null)}
+              onRetry={loadDiff}
+            />
           ) : (
             <DiffView
               hunks={hunks}
@@ -618,10 +642,9 @@ function CommitFileSection({
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
 
-  useEffect(() => {
-    if (mode !== "diff" || collapsed) return;
+  const loadDiff = () => {
     let ignore = false;
     client
       .getCommitDiff(repoPath, commitId, path)
@@ -633,16 +656,21 @@ function CommitFileSection({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, commitId, path, mode, collapsed]);
+  };
 
   useEffect(() => {
-    if (mode !== "blame") return;
+    if (mode !== "diff" || collapsed) return;
+    return loadDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoPath, client, commitId, path, mode, collapsed]);
+
+  const loadBlame = () => {
     let ignore = false;
     client
       .getBlame(repoPath, commitId, path)
@@ -654,12 +682,18 @@ function CommitFileSection({
       })
       .catch(() => {
         if (!ignore) {
-          setError("No blame available for this file at this revision.");
+          setError({ message: "No blame available for this file at this revision." });
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    if (mode !== "blame") return;
+    return loadBlame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, commitId, path, mode]);
 
   return (
@@ -678,14 +712,24 @@ function CommitFileSection({
           {mode === "blame" ? (
             <>
               {error !== null ? (
-                <InlineError message={error} onDismiss={() => setError(null)} />
+                <InlineError
+                  message={error.message}
+                  hint={error.hint}
+                  onDismiss={() => setError(null)}
+                  onRetry={loadBlame}
+                />
               ) : (
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
               <button onClick={() => setMode("diff")}>Back to Diff</button>
             </>
           ) : error !== null ? (
-            <InlineError message={error} onDismiss={() => setError(null)} />
+            <InlineError
+              message={error.message}
+              hint={error.hint}
+              onDismiss={() => setError(null)}
+              onRetry={loadDiff}
+            />
           ) : (
             <DiffView hunks={hunks} />
           )}
@@ -710,10 +754,10 @@ function CommitDiffPane({
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const [files, setFiles] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
+  const loadFiles = () => {
     let ignore = false;
     client
       .getCommitFiles(repoPath, commitId)
@@ -725,12 +769,17 @@ function CommitDiffPane({
       })
       .catch((err: unknown) => {
         if (!ignore) {
-          setError(String(err));
+          setError(describeError(err));
         }
       });
     return () => {
       ignore = true;
     };
+  };
+
+  useEffect(() => {
+    return loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, commitId]);
 
   const allCollapsed = files.length > 0 && files.every((path) => collapsedPaths.has(path));
@@ -752,7 +801,14 @@ function CommitDiffPane({
   };
 
   if (error !== null) {
-    return <InlineError message={error} onDismiss={() => setError(null)} />;
+    return (
+      <InlineError
+        message={error.message}
+        hint={error.hint}
+        onDismiss={() => setError(null)}
+        onRetry={loadFiles}
+      />
+    );
   }
 
   return (

@@ -410,6 +410,45 @@ describe("DiffPane", () => {
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
     });
 
+    it("shows the raw error and a plain-language hint, plus a Retry that re-fetches, when the working diff fails", async () => {
+      const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+      const getWorkingDiff = vi.fn<RepoClient["getWorkingDiff"]>().mockResolvedValue([]);
+      getWorkingDiff.mockRejectedValueOnce(new Error("Transport failed: sidecar exited unexpectedly (code 1)"));
+      renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
+
+      expect(
+        await screen.findByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The connection to the backend was lost. Retry, or reopen the repository."),
+      ).toBeInTheDocument();
+      expect(getWorkingDiff).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows a Retry that re-fetches blame when the blame fetch fails", async () => {
+      const getBlame = vi
+        .fn<RepoClient["getBlame"]>()
+        .mockRejectedValueOnce(new Error("git operation failed: no such revision"))
+        .mockResolvedValueOnce([]);
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      await screen.findByText("No blame available for this file at this revision.");
+      expect(getBlame).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getBlame).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText("No blame available for this file at this revision.")).not.toBeInTheDocument();
+    });
+
     it("Back to Diff switches that section back to the diff view", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
@@ -770,6 +809,41 @@ describe("DiffPane", () => {
 
       expect(await screen.findByText("No blame available for this file at this revision.")).toBeInTheDocument();
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
+    });
+
+    it("shows the raw error and a Retry that re-fetches when a commit file's diff fails", async () => {
+      const getCommitDiffOnce = vi.fn<RepoClient["getCommitDiff"]>().mockResolvedValue([]);
+      getCommitDiffOnce.mockRejectedValueOnce(new Error("failed to read working diff: permission denied"));
+      renderCommit(fakeClient({ getCommitFiles, getCommitDiff: getCommitDiffOnce }), "abc123");
+
+      expect(
+        await screen.findByText("failed to read working diff: permission denied"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Could not read this file's changes. Retry, or check the file still exists."),
+      ).toBeInTheDocument();
+      expect(getCommitDiffOnce).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getCommitDiffOnce).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByText("failed to read working diff: permission denied"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows a Retry that re-fetches when a commit's file list fails to load", async () => {
+      const getCommitFilesOnce = vi.fn<RepoClient["getCommitFiles"]>().mockResolvedValue(["src/main.rs"]);
+      getCommitFilesOnce.mockRejectedValueOnce(new Error("something unusual"));
+      renderCommit(fakeClient({ getCommitFiles: getCommitFilesOnce, getCommitDiff }), "abc123");
+
+      expect(await screen.findByText("something unusual")).toBeInTheDocument();
+      expect(getCommitFilesOnce).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      await waitFor(() => expect(getCommitFilesOnce).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
     });
 
     it("Collapse all / Expand all toggles every file's section", async () => {
