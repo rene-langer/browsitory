@@ -96,7 +96,7 @@
   color: var(--color-diff-context-text);
 }
 
-mark {
+.content mark {
   background: var(--color-warning-bg);
   color: inherit;
 }
