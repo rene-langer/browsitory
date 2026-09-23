@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
+import styles from "./DiffPane.module.css";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -500,6 +501,19 @@ describe("DiffPane", () => {
 
       expect(screen.getByText("Changes (1)")).toBeInTheDocument();
       expect(screen.getByText("Staged (1)")).toBeInTheDocument();
+    });
+
+    it("tints a conflicted file row and shows a conflict count badge", () => {
+      const statusWithConflict: StatusEntry[] = [
+        { path: "crates/git-core/src/merge.rs", staged: false, kind: "Conflicted" },
+        { path: "README.md", staged: false, kind: "Modified" },
+      ];
+      renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), statusWithConflict);
+
+      const conflictedRow = screen.getByText("crates/git-core/src/merge.rs (Conflicted)").closest("li");
+      expect(conflictedRow).toHaveClass(styles.conflicted);
+      expect(screen.getByText("Changes (2)")).toBeInTheDocument();
+      expect(screen.getByText("1 conflict")).toBeInTheDocument();
     });
 
     it("marks the current file's row as aria-selected on click, without hiding any other section", async () => {

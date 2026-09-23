@@ -168,7 +168,11 @@ function UncommittedFileSection({
   const Icon = STATUS_ICONS[entry.kind];
 
   return (
-    <ListRow selected={isCurrent} onClick={onSelect} className={styles.fileSection}>
+    <ListRow
+      selected={isCurrent}
+      onClick={onSelect}
+      className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
+    >
       <div className={styles.fileSectionHeader}>
         <CollapseToggle collapsed={collapsed} path={entry.path} onToggle={onToggleCollapse} />
         <Icon size={14} className={styles.statusIcon} aria-hidden="true" />
@@ -520,6 +524,11 @@ function UncommittedDiffPane({
         <div>
           <div className={styles.groupHeading}>
             <span>Changes ({unstagedEntries.length})</span>
+            {conflictCount > 0 && (
+              <span className={styles.conflictBadge}>
+                {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+              </span>
+            )}
             {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
                 that still costs a full refresh. */}
             <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>

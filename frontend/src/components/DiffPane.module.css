@@ -24,6 +24,14 @@
   cursor: default;
 }
 
+.conflicted {
+  background: var(--color-warning-bg);
+}
+
+.conflicted .path {
+  color: var(--color-warning-text);
+}
+
 .fileSectionHeader {
   display: flex;
   align-items: center;
@@ -75,6 +83,14 @@
 .fileRow:focus-within .stageToggle,
 .stageToggle:focus-visible {
   opacity: 1;
+}
+
+.conflictBadge {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 12px;
 }
 
 /* Pinned to the bottom of the scrolling pane so Commit / Continue rebase / Abort stay reachable
