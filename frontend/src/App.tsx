@@ -218,7 +218,12 @@ function RepoWorkspace({
           state this doesn't touch, so switching back re-shows the same overlay. */}
       {active && appState.state.transfer !== null && (
         <Overlay>
-          <TransferPanel progress={appState.state.transfer} />
+          <TransferPanel
+            progress={appState.state.transfer}
+            // Fire-and-forget: the backend records the cancel request and the transfer's own
+            // terminal progress event (errorKind "Cancelled") is what closes this panel.
+            onCancel={(operationId) => void client.cancelTransfer(repoPath, operationId)}
+          />
         </Overlay>
       )}
       {active && paletteOpen && (

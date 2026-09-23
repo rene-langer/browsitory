@@ -48,6 +48,7 @@ const remoteManagementClient = {
   clearCurrentUpstream: async () => unimplemented(),
     fetchRemote: async () => unimplemented(),
     pullCurrentUpstream: async () => unimplemented(),
+    cancelTransfer: async () => unimplemented(),
     listTags: async () => [],
     createTag: async () => unimplemented(),
     deleteTag: async () => unimplemented(),
@@ -856,6 +857,33 @@ describe("useAppState", () => {
     expect(result.current.state.transfer?.operationId).toBe("fetch-2");
     expect(result.current.state.pending).toBe(true);
     expect(result.current.state.error).toBeNull();
+  });
+
+  it("reports a cancelled transfer as cancelled, not as a failure (PERF-002)", async () => {
+    // A cancellation arrives on the wire as a `Failed` terminal event, but the user pressed
+    // Cancel themselves: "Fetch failed" would be wrong. Reporting it (rather than treating it
+    // as a completion) is also what keeps `App`'s success toast from announcing "Fetch
+    // complete" for a transfer that never completed.
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchRemote: async () => {
+        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Failed", errorKind: "Cancelled", current: 0, total: 0, receivedBytes: 0, message: null });
+        return "cancelled-fetch";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.fetchRemote("origin"));
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.error).toBe("Fetch cancelled.");
+    expect(result.current.state.pending).toBe(false);
   });
 
   it("guides a fetch missing an HTTPS credential toward saving a token", async () => {

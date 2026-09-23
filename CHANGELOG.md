@@ -52,8 +52,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Narrow windows: the Tauri window has a minimum size (800x500), the diff pane keeps a minimum
   width instead of collapsing to zero, and the sidebar auto-collapses below 900px (RESP-001).
 - The header "+" (open repository) button is pinned outside the scrolling tab strip (RESP-002).
-- Transfer progress shows MB/GB instead of ever-larger KB values (PERF-002). Transfer cancel is
-  not added: the backend has no cancellation support yet.
+- Transfer progress shows MB/GB instead of ever-larger KB values, and the transfer panel now has
+  a working Cancel button (PERF-002). Cancelling aborts the in-flight `git2` transfer itself: a
+  shared registry of cancelled operation IDs is polled from inside the fetch/push progress
+  callbacks, so a cancel lands even while the worker thread is blocked in network I/O. Surfaces
+  as a new `TransferErrorKind::Cancelled`, a `cancel_transfer` command on both the Tauri and
+  VSCode transports, and a "Fetch/Pull/Push cancelled." notice rather than a failure message.
 
 - Keyboard shortcut sheet, opened with `?` or the "Show keyboard shortcuts" palette command
   (UX-006).

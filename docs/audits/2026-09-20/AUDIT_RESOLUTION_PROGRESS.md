@@ -52,6 +52,7 @@ observed in a real window.
 | RESP-002 | Low | "+" button moved outside the scrolling tablist (`.strip` wrapper in `RepoTabs`). |
 | FB-008 | Low | Platform-aware shortcut hint; release notes use a "What's new" icon. |
 | FB-009 | Low | PR branch fields use a datalist with sensible defaults (still free text, now suggested). |
+| PERF-002 | Low | Transfer sizes format as MB/GB, and Cancel aborts the in-flight `git2` transfer via a shared cancel-flag registry, checked in the `transfer_progress`/`push_transfer_progress` callbacks; both frontends wired. |
 
 ## Partially fixed
 
@@ -62,7 +63,6 @@ observed in a real window.
 | VIS-002 | Medium | `--color-success/warning/info` token pairs (both themes) used by the status strip and toasts. | Conflicted file rows in the diff/file lists are not tinted. |
 | UX-007 | Medium | Old/new line-number gutters. | No syntax highlighting or word-level diff, no split view. |
 | PERF-001 | Medium | Collapsed sections skip the diff fetch until expanded (working-tree and commit panes). | IntersectionObserver-based lazy rendering, per-path refetch, unmounting inactive workspaces (`App.tsx`). |
-| PERF-002 | Low | Transfer sizes format as MB/GB. | Cancel for the transfer modal: no cancellation exists in `crates/`, so it needs backend work first. |
 
 ## Other open items
 

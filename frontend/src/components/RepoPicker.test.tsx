@@ -60,6 +60,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     pushCurrentBranch: async () => unimplemented(),
     pushTags: async () => unimplemented(),
     pullCurrentUpstream: async () => unimplemented(),
+    cancelTransfer: async () => unimplemented(),
     subscribeTransferProgress: () => () => {},
     listStashes: async () => unimplemented(),
     saveStash: async () => unimplemented(),
