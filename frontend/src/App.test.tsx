@@ -332,6 +332,42 @@ describe("App", () => {
     await waitFor(() => expect(closeA()).toBeEnabled());
   });
 
+  it("keeps a tab's close button disabled after it's switched away from mid-rebase, unlike a plain pending/transfer busy state", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      // Rebase state lives only in the worker's in-memory `rebase_state` (nothing but
+      // `set_head_detached` is persisted), so unlike `pending`/`transfer` it must NOT be
+      // reported as clear just because this tab's workspace unmounted.
+      getRebaseProgress: async () => ({ currentStep: 1, totalSteps: 3 }),
+    });
+
+    render(<App client={client} />);
+    const tabA = await screen.findByRole("tab", { name: "a" });
+    const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
+
+    await waitFor(() => expect(closeA()).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+
+    // Unlike the plain pending/transfer case above, this stays disabled: `a`'s `RepoWorkspace`
+    // unmounted while `rebaseProgress !== null`, and dropping that worker mid-rebase would leave
+    // the repo with a detached HEAD and a conflicted index with no way to Continue or Abort.
+    expect(closeA()).toBeDisabled();
+  });
+
   it("opens the shortcut sheet on ? outside of a text input", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({

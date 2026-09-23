@@ -194,11 +194,26 @@ function RepoWorkspace({
   useEffect(() => {
     onBusyChange(repoPath, repositoryOperationDisabled);
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
+  // Mirrors `appState.state.rebaseProgress` into a ref so the unmount cleanup below can read its
+  // current value instead of a stale one closed over when that effect was first set up.
+  const rebaseProgressRef = useRef(appState.state.rebaseProgress);
+  useEffect(() => {
+    rebaseProgressRef.current = appState.state.rebaseProgress;
+  }, [appState.state.rebaseProgress]);
   // Only the active tab's workspace is mounted (PERF-001), so switching away mid-operation
   // unmounts this component before its "no longer busy" report can ever fire — which would leave
-  // the backgrounded tab's close button disabled for good. Clear it on the way out; remounting
-  // re-reports from fresh state (a merge/rebase still in progress is re-read by `refresh()`).
-  useEffect(() => () => onBusyChange(repoPath, false), [repoPath, onBusyChange]);
+  // the backgrounded tab's close button disabled for good. Clear it on the way out for
+  // `pending`/`transfer`/merge, which are all safe to lose track of: the worker finishes its
+  // current command and exits cleanly, and merge state (`MERGE_HEAD`) lives on disk so
+  // `refresh()` re-reads it correctly on remount. Rebase state is the exception — it lives only
+  // in the worker's in-memory `rebase_state`, nothing beyond `set_head_detached` is persisted —
+  // so unmounting mid-rebase must NOT clear busy, or closing this tab drops the worker (and its
+  // rebase state) while HEAD is still detached with a conflicted index and no way to Continue or
+  // Abort from the app.
+  useEffect(
+    () => () => onBusyChange(repoPath, rebaseProgressRef.current !== null),
+    [repoPath, onBusyChange],
+  );
 
   return (
     // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
