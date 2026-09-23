@@ -418,6 +418,7 @@ function RepoWorkspace({
                 selectedRow={appState.state.selectedRow}
                 commits={appState.state.commits}
                 status={appState.state.status}
+                refreshGeneration={appState.state.refreshGeneration}
                 onStageFile={appState.stageFile}
                 onUnstageFile={appState.unstageFile}
                 onStageAllFiles={appState.stageAllFiles}

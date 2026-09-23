@@ -191,6 +191,25 @@ describe("useAppState", () => {
     );
   });
 
+  it("advances refreshGeneration on every refresh, successful or not", async () => {
+    let fail = false;
+    const client = transferClient({
+      getStatus: async () => {
+        if (fail) throw new Error("boom");
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    expect(result.current.state.refreshGeneration).toBe(0);
+
+    await act(() => result.current.refresh());
+    expect(result.current.state.refreshGeneration).toBe(1);
+
+    fail = true;
+    await act(() => result.current.refresh());
+    expect(result.current.state.refreshGeneration).toBe(2);
+  });
+
   it("forwards a credential token directly to the client without placing it in state", async () => {
     let saved: [string, string, string] | null = null;
     const client = transferClient({

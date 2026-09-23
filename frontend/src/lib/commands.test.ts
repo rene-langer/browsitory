@@ -62,6 +62,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       error: null,
       pending: false,
       addRemoteDraftOpen: false,
+      refreshGeneration: 0,
       ...overrides,
     },
     selectRow: vi.fn(),

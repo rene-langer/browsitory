@@ -86,6 +86,11 @@ export interface AppState {
   // disable themselves so a rapid double-click can't fire the same index-based mutation twice
   // before the first one's refresh lands — see the stash Drop race this was added for.
   pending: boolean;
+  // Advances once per `refresh()` call, whether it succeeded or not. `DiffPane` folds it into
+  // every open working-tree diff's staleness signal, so anything that refreshes — a mutation's
+  // trailing refresh, the palette's Refresh, a stash apply, a pull — refetches the diffs on
+  // screen, even when the new `status` looks identical (hunk-level edits don't change it).
+  refreshGeneration: number;
 }
 
 export interface UseAppStateResult {
@@ -216,6 +221,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     transfer: null,
     error: null,
     pending: false,
+    refreshGeneration: 0,
   });
 
   const graphLimit = useRef(GRAPH_PAGE_SIZE);
@@ -277,6 +283,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         rebaseProgress,
         forgeRepositories,
         error: null,
+        refreshGeneration: prev.refreshGeneration + 1,
       }));
     } catch (err) {
       // Runs the same worker-death/credential classification as every mutation's catch block
@@ -284,7 +291,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // successful mutation can hit a worker that died in between just as easily as the mutation
       // itself, and it shouldn't fall back to a raw, unclassified message just because it's this
       // call site instead of one of `runMutation`'s. See AUD-2026-09-05-CONC-002.
-      setState((prev) => ({ ...prev, error: credentialFailureMessage(err) }));
+      // Still advances `refreshGeneration`: a mutation that landed before this refresh failed has
+      // changed the working tree all the same, so open diffs shouldn't keep trusting what they
+      // last fetched.
+      setState((prev) => ({
+        ...prev,
+        error: credentialFailureMessage(err),
+        refreshGeneration: prev.refreshGeneration + 1,
+      }));
     }
   }, [client, repoPath]);
 

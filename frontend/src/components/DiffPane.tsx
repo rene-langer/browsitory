@@ -97,10 +97,10 @@ function UncommittedFileSection({
   status: StatusEntry[];
   isCurrent: boolean;
   collapsed: boolean;
-  // Bumped by the parent (`UncommittedDiffPane`) only for this file's own path/staged key, on
-  // that file's own hunk stage/unstage/discard — see `wrappedStageHunk` and friends below. Used
-  // (instead of `status`) as the diff-fetch effect's staleness signal so hunk-mutating one file
-  // doesn't refetch every other open section's diff too (PERF-001).
+  // This section's staleness signal: its own per-path version plus the pane-wide refresh
+  // generation, combined by the parent (`UncommittedDiffPane`) into one monotonically increasing
+  // number — see `staleness` there for how each part is bumped. Any change means "this diff may
+  // be stale, refetch it".
   diffVersion: number;
   onToggleCollapse: () => void;
   onSelect: () => void;
@@ -133,12 +133,16 @@ function UncommittedFileSection({
     return () => observer.disconnect();
   }, []);
 
-  // Every file's diff is fetched eagerly (all sections render expanded by default), keyed on the
-  // file's own identity rather than a shared "selected" pointer. Whole-file staging/unstaging
-  // moves this file to a differently-keyed section and remounts it fresh, but *partial* (hunk)
-  // staging leaves it at the same path/staged key while only its hunk count changes underneath —
-  // `status` stays a dependency for the same reason the old single-pane version needed it: a new
-  // `status` array (by reference) is the only signal that this file's own diff may be stale.
+  // Every file's diff is fetched keyed on the file's own identity rather than a shared
+  // "selected" pointer. Whole-file staging/unstaging moves this file to a differently-keyed
+  // section and remounts it fresh, but *partial* (hunk) staging leaves it at the same
+  // path/staged key while only its hunk content changes underneath — and so does anything else
+  // that changes the working tree or index without moving the file between groups (a stash
+  // apply, a pull, the palette's Refresh after an external edit). `diffVersion` is the signal for
+  // all of those: the parent bumps it for both sides of a hunk-mutated path once the mutation has
+  // settled, and folds in a refresh generation that advances on every `appState.refresh()`. It
+  // replaced a direct `status` dependency only so that a status array that is new by reference
+  // but not the product of a refresh (a re-render, an optimistic update) doesn't refetch anything.
   //
   // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
   // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
@@ -165,7 +169,7 @@ function UncommittedFileSection({
   useEffect(() => {
     // Lazy: a collapsed section fetches nothing until it is expanded, and a section far from the
     // viewport fetches nothing until it is scrolled near (both PERF-001). `diffVersion` (not
-    // `status`) is the staleness signal — see its doc comment above.
+    // `status`) is the staleness signal — see the comment on `loadDiff` above.
     if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -326,10 +330,15 @@ export function DiffPane({
   onRebaseContinue,
   onRebaseAbort,
   commits,
+  refreshGeneration = 0,
 }: {
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
+  // `useAppState`'s `state.refreshGeneration`: advances on every `refresh()`, so any refresh
+  // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
+  // only so tests that don't exercise refreshes needn't pass it.
+  refreshGeneration?: number;
   // Loaded history, used for the selected commit's header (author, date, parents).
   commits?: GraphCommit[];
   status: StatusEntry[];
@@ -337,9 +346,11 @@ export function DiffPane({
   onUnstageFile: (path: string) => void;
   onStageAllFiles: (paths: string[]) => void;
   onUnstageAllFiles: (paths: string[]) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
+  // before marking that path's diff stale, so the refetch can't race the mutation itself.
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -374,6 +385,7 @@ export function DiffPane({
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
+        refreshGeneration={refreshGeneration}
       />
     );
   }
@@ -414,17 +426,21 @@ function UncommittedDiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  refreshGeneration,
 }: {
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
+  refreshGeneration: number;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onStageAllFiles: (paths: string[]) => void;
   onUnstageAllFiles: (paths: string[]) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
+  // before marking that path's diff stale, so the refetch can't race the mutation itself.
+  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -439,25 +455,37 @@ function UncommittedDiffPane({
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  // Per-`entryKey` version counters, bumped only for the file whose hunk was just staged/
-  // unstaged/discarded (PERF-001) — the diff-fetch effect in `UncommittedFileSection` keys off
-  // this instead of the whole `status` array, so mutating one file's hunks doesn't refetch every
-  // other open section's diff.
+  // Per-`entryKey` version counters: the per-path half of each section's staleness signal (the
+  // other half is `refreshGeneration`, see `staleness` below). A hunk stage/unstage/discard bumps
+  // *both* sides of the affected path — staging a hunk of a partially-staged file changes its
+  // staged diff as much as its unstaged one, and either section may be open — and only once the
+  // mutation's promise has settled, so the refetch can't observe the index before the backend
+  // has applied the change.
   const [diffVersion, setDiffVersion] = useState<Record<string, number>>({});
-  const bumpDiffVersion = (key: string) => {
-    setDiffVersion((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+  const bumpPathVersions = (path: string) => {
+    const keys = [entryKey({ path, staged: false }), entryKey({ path, staged: true })];
+    setDiffVersion((prev) => {
+      const next = { ...prev };
+      for (const key of keys) next[key] = (prev[key] ?? 0) + 1;
+      return next;
+    });
   };
-  // Bump by the *rendering* entry's own key, not a hardcoded staged guess: `onStageHunk` and
-  // `onUnstageHunk` are each wired to only one side (unstaged/staged respectively) by
-  // `UncommittedFileSection`, but `onDiscardHunk` is wired unconditionally for both — a staged
-  // file's section can discard a hunk too, and that must bump *its own* (staged) key, not the
-  // unstaged one for the same path.
   const wrapHunkAction =
-    (key: string, action: (path: string, oldStart: number, newStart: number) => void) =>
+    (action: (path: string, oldStart: number, newStart: number) => void | Promise<void>) =>
     (path: string, oldStart: number, newStart: number) => {
-      bumpDiffVersion(key);
-      action(path, oldStart, newStart);
+      // `useAppState`'s hunk actions never reject (`runMutation` records failures in
+      // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
+      // failed mutation may still have partially applied.
+      void Promise.resolve(action(path, oldStart, newStart)).finally(() => bumpPathVersions(path));
     };
+  // One number per section: the path's own version plus the pane-wide refresh generation. Both
+  // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
+  // both (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when
+  // React batches the two updates into one render. Every open section refetches on any refresh:
+  // that is deliberate, it's the only signal an external edit, stash apply or pull leaves behind
+  // (there's no file watcher). PERF-001's savings come from lazy loading instead — collapsed and
+  // off-screen sections never fetch at all.
+  const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
 
   useEffect(() => {
     if (current === null) return;
@@ -565,14 +593,14 @@ function UncommittedDiffPane({
         status={status}
         isCurrent={isEntrySelected(entry)}
         collapsed={collapsedKeys.has(key)}
-        diffVersion={diffVersion[key] ?? 0}
+        diffVersion={staleness(key)}
         onToggleCollapse={() => toggleCollapse(key)}
         onSelect={() => selectEntry(entry)}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
-        onStageHunk={wrapHunkAction(key, onStageHunk)}
-        onUnstageHunk={wrapHunkAction(key, onUnstageHunk)}
-        onDiscardHunk={wrapHunkAction(key, onDiscardHunk)}
+        onStageHunk={wrapHunkAction(onStageHunk)}
+        onUnstageHunk={wrapHunkAction(onUnstageHunk)}
+        onDiscardHunk={wrapHunkAction(onDiscardHunk)}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}

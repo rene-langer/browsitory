@@ -235,11 +235,10 @@ describe("DiffPane", () => {
 
       fireEvent.click(await screen.findByText("Stage hunk"));
 
-      // A real stage-hunk flow is followed by a status refresh from the backend, which hands
-      // `DiffPane` a new `status` array by reference (same content, different identity) — before
-      // the fix, that reference change alone was enough to refetch *every* open section's diff,
-      // not just a.txt's. Rerendering with a fresh-but-equal array (same `client` reference, so
-      // that isn't what's under test here) reproduces that without the fix reacting.
+      // A status array that is new by reference but didn't come from a refresh (same content,
+      // different identity, and no `refreshGeneration` change) must not refetch every open
+      // section on its own — only the path the hunk action touched is invalidated. (A real
+      // refresh *does* invalidate every open section; see the `refreshGeneration` test below.)
       rerender(
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -255,6 +254,68 @@ describe("DiffPane", () => {
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
       expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
       expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+    });
+
+    it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
+      const partial: StatusEntry[] = [
+        { path: "a.txt", staged: false, kind: "Modified" },
+        { path: "a.txt", staged: true, kind: "Modified" },
+      ];
+      const hunk: DiffHunk = { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] };
+      // Only the unstaged side has a hunk to stage, so there's exactly one "Stage hunk" button.
+      const getWorkingDiff = vi.fn(async (_repoPath: string, _path: string, staged: boolean) => (staged ? [] : [hunk]));
+      let settle: () => void = () => {};
+      const onStageHunk = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settle = resolve;
+          }),
+      );
+      renderUncommitted(fakeClient({ getWorkingDiff }), partial, { onStageHunk });
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      fireEvent.click(await screen.findByText("Stage hunk"));
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      // Nothing refetches while the mutation is still in flight — a refetch now could read the
+      // index before the backend applied the change, with nothing to correct it afterward.
+      await act(async () => {});
+      expect(getWorkingDiff).not.toHaveBeenCalled();
+
+      await act(async () => settle());
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true);
+    });
+
+    it("refetches every open diff when refreshGeneration advances, with no hunk action involved", async () => {
+      const getWorkingDiff = vi.fn(async () => []);
+      const client = fakeClient({ getWorkingDiff });
+      const { rerender } = renderUncommitted(client, status, { refreshGeneration: 0 });
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      getWorkingDiff.mockClear();
+
+      // What a palette Refresh, stash apply or pull looks like from here: `useAppState.refresh()`
+      // advances `refreshGeneration`, while `status` may well be content-identical.
+      rerender(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          refreshGeneration={1}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />,
+      );
+
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
