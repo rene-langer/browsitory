@@ -524,6 +524,80 @@ fn a_fetch_aborts_when_the_cancel_flag_is_set_before_the_first_progress_tick() {
 }
 
 #[test]
+fn a_push_cancelled_before_negotiation_is_reported_cancelled_and_leaves_the_remote_untouched() {
+    // `push_negotiation` fires before any pack data is sent; returning an error there is
+    // libgit2's documented way to cancel a push without the remote applying anything.
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    let remote_tip_before = fixture.remote_tip();
+    let mut reporter = VecReporter::default();
+
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| true,
+    );
+
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::Cancelled
+    );
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert_eq!(
+        remote_repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        remote_tip_before
+    );
+}
+
+#[test]
+fn a_push_cancelled_after_negotiation_completes_and_reports_its_real_outcome() {
+    // Once negotiation has passed, the pack goes out and the remote applies the update before
+    // any later callback runs. Aborting there would report "cancelled" for a push that actually
+    // landed (and skip the local tracking-ref update), so a late cancel must be ignored.
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local change");
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let polls = std::sync::atomic::AtomicUsize::new(0);
+    let mut reporter = VecReporter::default();
+
+    // Not cancelled on the first poll (negotiation), cancelled on every poll after it.
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1,
+    );
+
+    assert!(result.is_ok(), "late cancel must not fail a landed push");
+    assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert_eq!(
+        remote_repo
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        local_tip
+    );
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target()
+            .unwrap(),
+        local_tip
+    );
+}
+
+#[test]
 fn a_cancelled_fetch_is_not_reported_as_a_generic_transfer_failure() {
     // Guards the classification: an uncancelled failure against the same fixture must still be
     // `TransferFailed`, so `Cancelled` can't be produced by simply mapping every fetch error.

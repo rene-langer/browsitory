@@ -54,8 +54,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The header "+" (open repository) button is pinned outside the scrolling tab strip (RESP-002).
 - Transfer progress shows MB/GB instead of ever-larger KB values, and the transfer panel now has
   a working Cancel button (PERF-002). Cancelling aborts the in-flight `git2` transfer itself: a
-  shared registry of cancelled operation IDs is polled from inside the fetch/push progress
-  callbacks, so a cancel lands even while the worker thread is blocked in network I/O. Surfaces
+  shared registry of cancelled operation IDs is polled from inside the fetch progress callbacks,
+  so a cancel lands even while the worker thread is blocked in network I/O. A push can only be
+  cancelled before its data is sent (at `push_negotiation`); a cancel pressed later lets the push
+  finish and report its real outcome, since the remote may already have applied it. Surfaces
   as a new `TransferErrorKind::Cancelled`, a `cancel_transfer` command on both the Tauri and
   VSCode transports, and a "Fetch/Pull/Push cancelled." notice rather than a failure message.
 

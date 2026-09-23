@@ -338,7 +338,9 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// Pushes the current branch. See `fetch_remote` for what `cancel` is polled from.
+/// Pushes the current branch. `cancel` is checked once, at `push_negotiation` (before any data
+/// is sent); a cancel requested after that is ignored so a push that lands is never reported as
+/// cancelled — see `push_refs`.
 pub fn push_current_branch(
     repo: &Repository,
     remote_name: &str,
@@ -359,7 +361,8 @@ pub fn push_current_branch(
     )
 }
 
-/// Pushes `names` (or every local tag when empty). See `fetch_remote` for `cancel`.
+/// Pushes `names` (or every local tag when empty). `cancel` behaves as for
+/// `push_current_branch`.
 pub fn push_tags(
     repo: &Repository,
     remote_name: &str,
@@ -692,17 +695,23 @@ fn push_refs(
         credentials.borrow_mut().credential(url, username, allowed)
     });
     // `push_negotiation` fires once between ref negotiation and the pack upload; returning an
-    // error there is libgit2's documented way to cancel a push, and it is the earliest point a
-    // cancel request can take effect. (git2 0.21's `push_transfer_progress` callback returns
-    // `()`, so unlike the fetch path it cannot abort mid-upload — `push_update_reference`,
-    // below, is the next checkpoint after the pack has gone out.)
+    // error there is libgit2's documented way to cancel a push, and it is the **only** point a
+    // push is cancelled. Nothing has been sent yet, so the remote is guaranteed untouched.
+    //
+    // After it, the push is committed: git2 0.21's `push_transfer_progress` returns `()` and
+    // cannot abort, and `push_update_reference`/`sideband_progress` run from the server's
+    // report-status — i.e. *after* the remote already applied the update. Aborting there would
+    // report "cancelled" for a push that actually landed (and skip the local tracking-ref
+    // update), so a cancel pressed after negotiation is deliberately ignored and the push
+    // reports its real outcome.
+    let cancelled_at_negotiation = Cell::new(false);
     callbacks.push_negotiation(|_updates| {
         if cancel() {
+            cancelled_at_negotiation.set(true);
             return Err(git2::Error::from_str("transfer cancelled"));
         }
         Ok(())
     });
-    callbacks.sideband_progress(|_message| !cancel());
     callbacks.push_transfer_progress(|current, total, transferred_bytes| {
         reporter.borrow_mut().report(TransferProgress {
             operation_id: String::new(),
@@ -715,9 +724,6 @@ fn push_refs(
         });
     });
     callbacks.push_update_reference(|_reference, status| {
-        if cancel() {
-            return Err(git2::Error::from_str("transfer cancelled"));
-        }
         if let Some(status) = status {
             let status = status.to_ascii_lowercase();
             let kind = if status.contains("non-fast-forward") || status.contains("nonfastforward") {
@@ -744,8 +750,11 @@ fn push_refs(
 
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
-    if let Err(error) = remote.push(refspecs, Some(&mut options)) {
-        return if cancel() {
+    let pushed = remote.push(refspecs, Some(&mut options));
+    // Only a negotiation-time abort is a cancellation; a genuine failure that happens while
+    // Cancel is pressed keeps its real classification.
+    if let Err(error) = pushed {
+        return if cancelled_at_negotiation.get() {
             Err(RemoteError::Cancelled)
         } else if error.code() == ErrorCode::NotFastForward {
             Err(RemoteError::NonFastForward)

@@ -52,7 +52,7 @@ observed in a real window.
 | RESP-002 | Low | "+" button moved outside the scrolling tablist (`.strip` wrapper in `RepoTabs`). |
 | FB-008 | Low | Platform-aware shortcut hint; release notes use a "What's new" icon. |
 | FB-009 | Low | PR branch fields use a datalist with sensible defaults (still free text, now suggested). |
-| PERF-002 | Low | Transfer sizes format as MB/GB, and Cancel aborts the in-flight `git2` transfer via a shared cancel-flag registry, checked in the `transfer_progress`/`push_transfer_progress` callbacks; both frontends wired. |
+| PERF-002 | Low | Transfer sizes format as MB/GB, and Cancel aborts the in-flight `git2` transfer via a shared cancel-flag registry, checked in the fetch `transfer_progress` callbacks and at the push `push_negotiation` checkpoint (before any data is sent; a later push cancel is ignored so a landed push is never reported as cancelled); both frontends wired. |
 
 ## Partially fixed
 
