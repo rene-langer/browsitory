@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   buildCommands,
+  commandGroup,
   filterAndSortCommands,
   loadRecentCommandIds,
   recordCommandUsed,
@@ -141,6 +142,23 @@ describe("buildCommands", () => {
     expect(cmd?.label).toBe("Show keyboard shortcuts");
     cmd?.run();
     expect(onShow).toHaveBeenCalled();
+  });
+
+  it("includes a Close tab command, grouped under Repositories, only when a close handler is supplied", () => {
+    const onClose = vi.fn();
+    expect(buildCommands(makeAppState()).some((c) => c.id === "close-tab")).toBe(false);
+    const cmd = buildCommands(makeAppState(), undefined, undefined, undefined, undefined, undefined, onClose).find(
+      (c) => c.id === "close-tab",
+    );
+    expect(cmd?.label).toBe("Close tab");
+    expect(commandGroup("close-tab")).toBe("Repositories");
+    cmd?.run();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("omits Close tab while a repository operation is in progress", () => {
+    const commands = buildCommands(makeAppState({ pending: true }), undefined, undefined, undefined, undefined, undefined, vi.fn());
+    expect(commands.some((c) => c.id === "close-tab")).toBe(false);
   });
 
   it("includes one switch-branch command per non-current branch", () => {

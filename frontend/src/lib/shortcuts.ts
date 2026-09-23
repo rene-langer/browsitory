@@ -9,8 +9,16 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: "Global",
     shortcuts: [
       { keys: "Ctrl/Cmd+K", description: "Open the command palette" },
-      { keys: "Ctrl/Cmd+W", description: "Close the active tab" },
+      { keys: "Ctrl/Cmd+W", description: "Close the active tab (where the host doesn't claim it)" },
       { keys: "?", description: "Show keyboard shortcuts" },
+    ],
+  },
+  {
+    title: "Repository tabs",
+    shortcuts: [
+      { keys: "Left / Right", description: "Switch to the previous / next tab" },
+      { keys: "Home / End", description: "Switch to the first / last tab" },
+      { keys: "Delete", description: "Close the focused tab (Fn+Delete on a Mac laptop)" },
     ],
   },
   {

@@ -112,6 +112,10 @@ export function buildCommands(
   onSwitchRepoTab: (path: string) => void = () => {},
   panelVisibility: Record<SidebarPanelId, boolean> = defaultPanelVisibility(),
   onShowShortcuts?: () => void,
+  // Closes the palette's own (active) repo tab. The palette is a keyboard path that no host can
+  // intercept — unlike Ctrl/Cmd+W, which Tauri's default macOS menu binds to "Close Window" and a
+  // VSCode webview may hand to the workbench before the page ever sees it.
+  onCloseActiveRepoTab?: () => void,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -332,6 +336,17 @@ export function buildCommands(
     });
   }
 
+  // Omitted (not disabled) while an operation is in flight, the same rule the tab's own close
+  // button and Ctrl/Cmd+W follow — closing would orphan the operation mid-way.
+  if (onCloseActiveRepoTab !== undefined && !repositoryOperationDisabled) {
+    commands.push({
+      id: "close-tab",
+      label: "Close tab",
+      keywords: ["close", "tab", "repo", "repository"],
+      run: onCloseActiveRepoTab,
+    });
+  }
+
   for (const repo of otherOpenRepos) {
     commands.push({
       id: `switch-repo:${repo.path}`,
@@ -362,7 +377,7 @@ export function commandGroup(id: string): CommandGroup {
   }
   if (id === "save-stash" || id.startsWith("apply-stash:") || id.startsWith("drop-stash:")) return "Stash";
   if (id.startsWith("go-to:")) return "Go to";
-  if (id.startsWith("switch-repo:")) return "Repositories";
+  if (id.startsWith("switch-repo:") || id === "close-tab") return "Repositories";
   return "General";
 }
 

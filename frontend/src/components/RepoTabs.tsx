@@ -50,12 +50,24 @@ export function RepoTabs({
   // move between tabs and activate them (automatic activation, WAI-ARIA APG tabs pattern).
   const tabStopPath = openRepos.some((repo) => repo.path === activePath) ? activePath : openRepos[0].path;
 
-  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-    if (!keys.includes(event.key)) return;
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, path: string, busy: boolean) => {
     const tabs = Array.from(tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     const current = tabs.indexOf(event.currentTarget);
     if (current === -1) return;
+    // WAI-ARIA APG tabs pattern: Delete closes the focused tab — any tab, not just the active one.
+    // This is the host-independent keyboard path for the mouse-only close button below; Ctrl/Cmd+W
+    // (App.tsx) can be swallowed by the Tauri/VSCode host first. Focus moves to the tab that takes
+    // this one's place (the next, else the previous) — the same neighbour `useOpenRepos.closeRepo`
+    // activates when the closed tab was the active one — so it isn't dropped to <body>.
+    if (event.key === "Delete") {
+      event.preventDefault();
+      if (busy) return;
+      (tabs[current + 1] ?? tabs[current - 1])?.focus();
+      onClose(path);
+      return;
+    }
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(event.key)) return;
     event.preventDefault();
     const next =
       event.key === "Home"
@@ -79,7 +91,8 @@ export function RepoTabs({
           aria-selected={selected}
           aria-controls={repoPanelId(repo.path)}
           tabIndex={repo.path === tabStopPath ? 0 : -1}
-          onKeyDown={handleTabKeyDown}
+          aria-keyshortcuts="Delete"
+          onKeyDown={(event) => handleTabKeyDown(event, repo.path, busy)}
           title={repo.path}
           className={styles.tabLabel}
           onClick={() => onSwitchTo(repo.path)}
@@ -89,13 +102,14 @@ export function RepoTabs({
         {/* `aria-hidden`/`tabIndex={-1}` pull this out of the tablist's accessible children (a
             tablist may only own `role="tab"` elements per WAI-ARIA — axe's `aria-required-children`
             flags a focusable close button here) and out of the Tab order; it stays clickable by
-            mouse, and Ctrl/Cmd+W (App.tsx) is the keyboard equivalent for the active tab. */}
+            mouse. Its keyboard equivalents are Delete on the focused tab (above), the palette's
+            "Close tab", and Ctrl/Cmd+W (App.tsx) where the host doesn't claim that key first. */}
         <button
           type="button"
           className={styles.closeButton}
           aria-hidden="true"
           tabIndex={-1}
-          title={busy ? "This repo has an operation in progress" : "Close (Ctrl/Cmd+W)"}
+          title={busy ? "This repo has an operation in progress" : "Close (Delete)"}
           disabled={busy}
           onClick={() => onClose(repo.path)}
         >

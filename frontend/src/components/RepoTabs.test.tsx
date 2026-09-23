@@ -78,12 +78,12 @@ describe("RepoTabs", () => {
     expect(closeButtons).toHaveLength(0);
   });
 
-  it("gives the per-tab close button a title that documents the Ctrl/Cmd+W shortcut, and keeps it out of the tab order", () => {
+  it("gives the per-tab close button a title that documents the Delete shortcut, and keeps it out of the tab order", () => {
     render(
       <RepoTabs openRepos={repos} activePath="/repos/gadget" busyPaths={noneBusy} workspaceNames={{}} onSwitchTo={vi.fn()} onClose={vi.fn()} onCloseGroup={vi.fn()} onAddTab={vi.fn()} />,
     );
     const closeButton = closeButtonFor("widget");
-    expect(closeButton).toHaveAttribute("title", "Close (Ctrl/Cmd+W)");
+    expect(closeButton).toHaveAttribute("title", "Close (Delete)");
     expect(closeButton).toHaveAttribute("tabindex", "-1");
     expect(closeButton).toHaveAttribute("aria-hidden", "true");
   });

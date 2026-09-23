@@ -204,6 +204,35 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 
+  it("closes a focused, inactive tab on Delete without switching away from the active one", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      closeRepo: vi.fn().mockResolvedValue(undefined),
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    const tabB = await screen.findByRole("tab", { name: "b" });
+    tabB.focus();
+
+    fireEvent.keyDown(tabB, { key: "Delete" });
+
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "b" })).not.toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true");
+    expect(client.closeRepo).toHaveBeenCalledWith("/repos/b");
+  });
+
   it("unmounts an inactive repo's workspace instead of hiding it with CSS (PERF-001)", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({

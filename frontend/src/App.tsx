@@ -126,6 +126,10 @@ function RepoWorkspace({
       // (`aria-hidden`/`tabIndex={-1}` in `RepoTabs.tsx`) so it doesn't sit in the tablist's
       // accessible children. This `RepoWorkspace` only ever handles its own tab's `repoPath`, and
       // only while `active` (checked above), so "the active repo" is just this one.
+      // Best-effort only: Tauri's default macOS app menu binds Cmd+W to "Close Window" (the whole
+      // app) before the webview sees the key, and a VSCode webview may forward Ctrl+W to the
+      // workbench. The host-independent paths are Delete on a focused tab (`RepoTabs.tsx`) and
+      // the palette's "Close tab" command.
       if (event.key.toLowerCase() === "w" && (event.metaKey || event.ctrlKey) && !event.altKey) {
         if (repositoryOperationDisabled) return;
         event.preventDefault();
@@ -252,6 +256,7 @@ function RepoWorkspace({
               onSwitchRepoTab,
               panelVisibility.visibility,
               () => setShortcutsOpen(true),
+              () => onCloseRepoTab(repoPath),
             )}
             onRun={() => setPaletteOpen(false)}
           />
