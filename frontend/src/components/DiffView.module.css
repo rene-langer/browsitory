@@ -95,3 +95,22 @@
 .lineContext {
   color: var(--color-diff-context-text);
 }
+
+mark {
+  background: var(--color-warning-bg);
+  color: inherit;
+}
+
+.splitRow {
+  display: flex;
+  align-items: stretch;
+}
+
+.splitColumn {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.splitColumn:first-child {
+  border-right: 1px solid var(--color-border);
+}

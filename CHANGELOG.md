@@ -36,7 +36,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm Discard" is
   styled as danger and disarms on blur, Escape or after 5 seconds.
 - Diff lines show old/new line-number gutters; long tokens wrap and hunk headers wrap cleanly
-  at narrow widths.
+  at narrow widths. Paired Remove/Add lines now highlight only the changed words, and a
+  Split view / Unified view toggle switches the diff between the single-column and a
+  side-by-side layout (UX-007).
 - Commit dock is lighter (single border, no nested panel) and no longer lets diff content show
   beneath it.
 - Accessibility pass: confirm and form dialogs return focus to the invoking control when they
