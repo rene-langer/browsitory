@@ -11,16 +11,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A persistent status strip now shows while a merge or rebase is in progress (step, conflict
   count, Abort), and Commit / Continue rebase show a visible reason when disabled.
 - Success toasts (polite live region) after commit, checkout, branch delete, stash, fetch, push
-  and pull. Error banners float instead of shifting the layout, carry a hint and Retry (FB-004), with
-  friendly error-kind mappings for transport errors and Retry support for mutation errors.
+  and pull. Error banners float instead of shifting the layout (FB-004). A failed diff, blame or
+  commit-file fetch in the diff pane keeps the raw error text, adds a plain-language hint for known
+  error kinds and offers Retry; a failed repository open also offers Retry, and a lost backend
+  connection shows a fixed hint. Errors from actions (the top-level banner for a failed commit,
+  checkout, push and so on) still show the message only, with no hint and no Retry.
 - New success, warning and info color tokens for light and dark themes (VIS-002), applied to status
   strip, toasts, and conflicted file tinting.
 - The inline New branch form shows its base, validates the name inline, and can check the new
   branch out. Pull request source/target branches default sensibly and suggest known branches.
 - The repository picker leads with folder names, explains workspaces, and hints at the command
   palette. The palette hint is platform-aware and release notes use a "What's new" icon.
-- Sentence case for UI labels (FB-007): picker and rebase buttons, branch menu and hunk actions,
-  documented in `docs/CONTENT_GUIDELINES.md`.
+- Sentence case for UI labels (FB-007): picker, workspace and rebase buttons, the branch "+" menu
+  ("New branch…", "Add remote…"), hunk actions, conflict resolution ("Accept ours", "Keep their
+  version", …) and "Back to diff", documented in `docs/CONTENT_GUIDELINES.md` together with the
+  Title Case labels that remain.
 - Added test coverage for the `?` keyboard shortcut guard and sidebar auto-collapse behavior in `App`.
 
 ### Security
@@ -35,22 +40,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
   loads; empty diffs now read "No text differences (binary file or mode-only change)".
-  Collapsed file sections no longer fetch their diff until expanded (PERF-001): IntersectionObserver-based
-  lazy rendering gates all diff fetches, per-path refetch allows refetching individual files, and inactive
-  workspaces are unmounted to prevent background operations.
+  Collapsed file sections no longer fetch their diff until expanded, and sections far from the
+  viewport not until scrolled near (PERF-001, IntersectionObserver). Open diffs refetch on every
+  refresh (an action, the palette's Refresh, a stash apply or pull), and a hunk stage/unstage/
+  discard refetches both the staged and unstaged diff of that file once the action has finished.
+  Only the active repository tab's workspace is mounted, to avoid paying every open tab's DOM and
+  IPC cost; a half-typed commit message is kept per repository across tab switches, and a tab
+  switched away from mid-action no longer stays unclosable.
 - Diff hunk actions are no longer tab stops. The diff is one tab stop with `[`/`]` (prev/next
-  hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm Discard" is
+  hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm discard" is
   styled as danger and disarms on blur, Escape or after 5 seconds.
 - Diff lines show old/new line-number gutters; long tokens wrap and hunk headers wrap cleanly
-  at narrow widths. Paired Remove/Add lines now highlight only the changed words, and a
-  Split view / Unified view toggle switches the diff between the single-column and a
-  side-by-side layout (UX-007).
+  at narrow widths. Paired Remove/Add lines now highlight only the changed words (computed once
+  per loaded diff; line pairs too long to compare cheaply, such as minified code, are marked
+  wholly changed instead), and a Split view / Unified view toggle switches the diff between the
+  single-column and a side-by-side layout (UX-007).
 - Commit dock is lighter (single border, no nested panel) and no longer lets diff content show
   beneath it.
 - Accessibility pass: confirm and form dialogs return focus to the invoking control when they
   close; workspace deletion uses the shared modal `ConfirmDialog`; repo tabs use roving tabindex
-  with Left/Right/Home/End navigation and link to their workspace panel, with close buttons moved
-  outside the tablist for valid ARIA structure and Ctrl/Cmd+W keyboard shortcut (A11Y-003); swatches,
+  with Left/Right/Home/End navigation and link to their workspace panel. Each tab's close button
+  is still inside the tablist but is now `aria-hidden` and out of the Tab order (mouse-only), so
+  the tablist exposes only tabs; from the keyboard, Delete closes the focused tab, the palette
+  has a "Close tab" command, and Ctrl/Cmd+W closes the active tab where the host doesn't take
+  the key first (Tauri's default macOS menu binds Cmd+W to Close Window) (A11Y-003); swatches,
   tab close buttons, sidebar toolbar buttons and split dividers have at least 24x24 pointer
   targets (`--size-target-min`); context menus no longer close on mouse leave and stay inside the
   viewport; reduced-motion preference disables smooth scrolling and transitions; sidebar toolbar

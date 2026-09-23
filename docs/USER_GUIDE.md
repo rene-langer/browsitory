@@ -9,11 +9,14 @@ recently used repositories.
 
 ## Multiple repositories
 
-Every repo you open lands in its own tab at the top of the window, and each
-tab keeps its own selection, panel state, and in-flight operations
-independent of the others — switch freely without losing your place. Open
-another via **+** at the end of the tab bar. A tab with an operation still
-running (a push, fetch, or similar) can't be closed until it finishes.
+Every repo you open lands in its own tab at the top of the window, independent
+of the others. Only the active tab's view is kept loaded: switching back to a
+tab reloads its history and changes, and a half-typed commit message is kept,
+but the selected row and expanded diff sections start fresh. Open another via
+**+** at the end of the tab bar. Close a tab with its **×** button, **Delete**
+on the focused tab, or **Close tab** in the command palette. While a push,
+fetch, or similar operation is running in the active tab, that tab can't be
+closed until it finishes.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 
@@ -23,7 +26,7 @@ A **workspace** is a saved group of repositories under a common root
 folder — the multi-repo case most git GUIs don't have an answer for: a
 project split across several repos that you always want open together.
 From the repo picker, **Open Workspace Root** scans a folder for git repos
-and lets you name and save the group; **Open All** reopens every member as
+and lets you name and save the group; **Open all** reopens every member as
 tabs at once, visually grouped in the tab bar under the workspace's name
 with a single button to close the whole group together. **Edit** re-scans
 the root — so a repo added to the folder later shows up, unchecked, ready
@@ -81,8 +84,8 @@ lazily the first time you expand it). Double-click a local branch, or choose
 right-click a branch, a remote folder, or a remote branch to bring up its
 actions — checkout, rename, delete, or merge a local branch; checkout or set a remote
 branch as upstream; fetch, push, edit, manage credentials for, or remove a
-remote. The **+** button in the section header opens **New Branch…** or
-**Add Remote…**. Creating a branch from a specific commit, or starting a
+remote. The **+** button in the section header opens **New branch…** or
+**Add remote…**. Creating a branch from a specific commit, or starting a
 rebase onto one, is available from that commit's row in the graph. The
 current branch's upstream status, a **Pull** button, and **Set upstream…**
 live at the bottom of the section.
