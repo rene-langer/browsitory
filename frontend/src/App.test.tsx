@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { RepoClient } from "./ipc/RepoClient";
@@ -148,5 +148,41 @@ describe("App", () => {
     render(<App client={client} />);
     expect(screen.getByRole("heading", { name: "Browsitory" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  });
+
+  it("closes the active tab on Ctrl/Cmd+W", async () => {
+    const closeRepo = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      closeRepo,
+      persistOpenRepos: async () => {},
+      // RepoWorkspace's mount-time refresh() fans out to these; the fakeClient defaults for
+      // several of them are `unused` (throw), which is fine for tests that never mount a
+      // RepoWorkspace but this one does.
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+
+    await waitFor(
+      () => expect(screen.queryByRole("tab", { name: "a" })).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 });

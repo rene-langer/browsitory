@@ -86,11 +86,16 @@ export function RepoTabs({
         >
           {repo.displayName}
         </button>
+        {/* `aria-hidden`/`tabIndex={-1}` pull this out of the tablist's accessible children (a
+            tablist may only own `role="tab"` elements per WAI-ARIA — axe's `aria-required-children`
+            flags a focusable close button here) and out of the Tab order; it stays clickable by
+            mouse, and Ctrl/Cmd+W (App.tsx) is the keyboard equivalent for the active tab. */}
         <button
           type="button"
           className={styles.closeButton}
-          aria-label={`Close ${repo.displayName}`}
-          title={busy ? "This repo has an operation in progress" : undefined}
+          aria-hidden="true"
+          tabIndex={-1}
+          title={busy ? "This repo has an operation in progress" : "Close (Ctrl/Cmd+W)"}
           disabled={busy}
           onClick={() => onClose(repo.path)}
         >
@@ -111,6 +116,8 @@ export function RepoTabs({
               <button
                 type="button"
                 className={styles.closeButton}
+                aria-hidden="true"
+                tabIndex={-1}
                 aria-label={`Close ${group.workspaceName}`}
                 title={group.repos.some((repo) => busyPaths.has(repo.path)) ? "A repo in this workspace has an operation in progress" : undefined}
                 disabled={group.repos.some((repo) => busyPaths.has(repo.path))}

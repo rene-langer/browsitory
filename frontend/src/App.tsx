@@ -50,6 +50,7 @@ function RepoWorkspace({
   onBusyChange,
   openRepos,
   onSwitchRepoTab,
+  onCloseRepoTab,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -61,6 +62,7 @@ function RepoWorkspace({
   onBusyChange: (repoPath: string, busy: boolean) => void;
   openRepos: OpenRepo[];
   onSwitchRepoTab: (path: string) => void;
+  onCloseRepoTab: (path: string) => void;
 }) {
   const appState = useAppState(client, repoPath);
   const panelVisibility = useSidebarPanelVisibility();
@@ -87,6 +89,12 @@ function RepoWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const repositoryOperationDisabled =
+    appState.state.pending ||
+    appState.state.transfer !== null ||
+    appState.state.mergeMessage !== null ||
+    appState.state.rebaseProgress !== null;
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!active) return;
@@ -101,17 +109,21 @@ function RepoWorkspace({
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
         event.preventDefault();
         setShortcutsOpen(true);
+        return;
+      }
+      // A11Y-003: keyboard equivalent for the per-tab close button, which is mouse-only
+      // (`aria-hidden`/`tabIndex={-1}` in `RepoTabs.tsx`) so it doesn't sit in the tablist's
+      // accessible children. This `RepoWorkspace` only ever handles its own tab's `repoPath`, and
+      // only while `active` (checked above), so "the active repo" is just this one.
+      if (event.key.toLowerCase() === "w" && (event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (repositoryOperationDisabled) return;
+        event.preventDefault();
+        onCloseRepoTab(repoPath);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active]);
-
-  const repositoryOperationDisabled =
-    appState.state.pending ||
-    appState.state.transfer !== null ||
-    appState.state.mergeMessage !== null ||
-    appState.state.rebaseProgress !== null;
+  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath]);
 
   // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
   // — threaded into the sidebar mutation panels (`BranchTree`, `WorktreePanel`, `TagPanel`,
@@ -721,6 +733,7 @@ export default function App({
             onBusyChange={onBusyChange}
             openRepos={openRepos.openRepos}
             onSwitchRepoTab={openRepos.switchTo}
+            onCloseRepoTab={openRepos.closeRepo}
           />
         ))
       )}

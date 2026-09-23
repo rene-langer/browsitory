@@ -10,7 +10,7 @@ merge onto `main` is still to do.
 Five agents worked in parallel worktrees, one per file-overlap group, and their branches were
 merged into the work branch (conflicts only in `CHANGELOG.md`, `RepoTabs.tsx`, `App.tsx`).
 
-**Result: 26 of 33 findings fixed, 7 partially fixed, 0 untouched.** Every partial item lists what
+**Result: 27 of 33 findings fixed, 6 partially fixed, 0 untouched.** Every partial item lists what
 remains below.
 
 ## Verification
@@ -36,6 +36,7 @@ observed in a real window.
 | UX-005 | Medium | Armed discard has danger styling and disarms on blur, Escape or after 5s. No undo. |
 | VIS-001 | Medium | Single border, nested `Panel` removed from `CommitBox`, dock no longer lets diff show beneath it. |
 | A11Y-002 | Medium | `--size-target-min` (24px) applied to swatch hit area, tab close buttons, "+", sidebar toolbar, dividers. The branch-row "…" button was not found and not changed. |
+| A11Y-003 | Medium | Per-tab close is `aria-hidden`/mouse-only; Ctrl/Cmd+W closes the active tab. |
 | A11Y-004 | Medium | New `Field` primitive (label, hint, error, `aria-invalid`, `aria-describedby`, `required`) with tests. **Not adopted in any form yet** (see Remaining). |
 | A11Y-005 | Medium | Workspace deletion uses `ConfirmDialog` instead of a raw `<dialog open>`. |
 | RESP-003 | Medium | `overflow-wrap` on long tokens; hunk headers wrap cleanly. |
@@ -56,7 +57,6 @@ observed in a real window.
 
 | ID | Severity | Done | Remaining |
 |----|----------|------|-----------|
-| A11Y-003 | Medium | Roving tabindex, Left/Right/Home/End, `aria-controls`, `tabpanel` on the workspace wrapper; "+" is now outside the tablist. | Per-tab close buttons are still inside the `tablist`, so its structure is not fully valid ARIA. Needs a design decision (move close out of the tab, or make it a non-focusable affordance with a keyboard command). |
 | FB-004 | Medium | Errors have a hint and Retry on transport errors; banners float instead of shifting the layout. | No mapping of error kinds to friendly messages; mutation errors have no Retry. |
 | FB-007 | Low | Sentence case in the picker and rebase labels; new `docs/CONTENT_GUIDELINES.md`. | Hunk, branch-menu and graph labels still to be normalized against the guideline. |
 | VIS-002 | Medium | `--color-success/warning/info` token pairs (both themes) used by the status strip and toasts. | Conflicted file rows in the diff/file lists are not tinted. |
