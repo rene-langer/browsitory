@@ -232,4 +232,112 @@ describe("App", () => {
     // section headings like "Branches" in the DOM; the fix renders exactly one.
     await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
   });
+
+  it("opens the shortcut sheet on ? outside of a text input", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    fireEvent.keyDown(window, { key: "?" });
+
+    expect(screen.getByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  });
+
+  it("does not open the shortcut sheet on ? while typing in a text field", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    // Create a temporary input and fire the event on it
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "?" });
+    document.body.removeChild(input);
+
+    expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("collapses the sidebar automatically below the narrow-window breakpoint", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [{ path: "/repos/a", workspaceId: null }],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    // Start with a wide window (above NARROW_BREAKPOINT of 900)
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: 1200,
+    });
+
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
+
+    // Find the sidebar pane by looking for its first child containing the sidebar content
+    let sidebarPane: HTMLElement | null = null;
+    await waitFor(() => {
+      const branchesHeading = screen.getByText("Branches");
+      sidebarPane = branchesHeading.closest("[hidden]") || branchesHeading.closest("div");
+      // Walk up to find the actual sidebar pane (the one with width style)
+      while (sidebarPane && !sidebarPane.style.width) {
+        sidebarPane = sidebarPane.parentElement;
+      }
+    });
+
+    // Sidebar pane should exist and not have the hidden attribute when above breakpoint
+    expect(sidebarPane).not.toBeNull();
+    expect(sidebarPane).not.toHaveAttribute("hidden");
+
+    // Narrow the window below NARROW_BREAKPOINT
+    window.innerWidth = 800;
+    act(() => {
+      fireEvent(window, new Event("resize"));
+    });
+
+    // Sidebar should be hidden when below breakpoint
+    await waitFor(() => {
+      expect(sidebarPane).toHaveAttribute("hidden");
+    });
+
+    // Restore original width
+    Object.defineProperty(window, "innerWidth", {
+      writable: true,
+      configurable: true,
+      value: originalInnerWidth,
+    });
+  });
 });
