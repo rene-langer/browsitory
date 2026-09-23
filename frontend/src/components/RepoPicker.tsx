@@ -140,7 +140,7 @@ export function RepoPicker({
                           onOpenWorkspace(workspace);
                         }}
                       >
-                        Open All
+                        Open all
                       </button>
                       <button
                         onClick={(event) => {

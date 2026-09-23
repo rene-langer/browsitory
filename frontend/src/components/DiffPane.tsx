@@ -275,7 +275,7 @@ function UncommittedFileSection({
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
               <button type="button" onClick={() => setMode("diff")}>
-                Back to Diff
+                Back to diff
               </button>
             </>
           ) : isConflicted ? (
@@ -808,7 +808,7 @@ function CommitFileSection({
               ) : (
                 <BlameView lines={blameLines} onSelectRow={onSelectRow} />
               )}
-              <button onClick={() => setMode("diff")}>Back to Diff</button>
+              <button onClick={() => setMode("diff")}>Back to diff</button>
             </>
           ) : error !== null ? (
             <InlineError

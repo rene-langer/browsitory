@@ -621,7 +621,7 @@ describe("BranchTree — remotes", () => {
     const onOpenAddRemoteDraft = vi.fn();
     renderTree({ onOpenAddRemoteDraft });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add Remote…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add remote…" }));
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 

@@ -55,14 +55,14 @@ const BITBUCKET_CREATE_FIXTURE = {
 
 async function addRemote(name: string, url: string) {
   // The Add-remote form is reached via `BranchTree`'s "Add" toolbar button (opens a context menu
-  // with "New Branch…"/"Add Remote…"), not a standalone "Add remote" toggle, and it stays open
+  // with "New branch…"/"Add remote…"), not a standalone "Add remote" toggle, and it stays open
   // after a successful add — so only open it when it isn't already showing (the first call in a
   // test, typically).
   if (!(await $("form[aria-label='Add remote']").isExisting())) {
     const addButton = await $('[aria-label="Add"]');
     await addButton.waitForExist({ timeout: 10000 });
     await addButton.click();
-    await (await $("button=Add Remote…")).click();
+    await (await $("button=Add remote…")).click();
   }
   const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
   await remoteNameInput.waitForExist({ timeout: 10000 });

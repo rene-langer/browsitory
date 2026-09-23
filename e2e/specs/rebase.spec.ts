@@ -97,7 +97,7 @@ describe("Browsitory interactive rebase", () => {
     await combinedMessageField.waitForExist({ timeout: 10000 });
     await combinedMessageField.setValue("e2e: combined rebase commit");
 
-    const startButton = await $("button=Start Rebase");
+    const startButton = await $("button=Start rebase");
     await startButton.click();
 
     await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting(), { timeout: 10000 });
@@ -157,7 +157,7 @@ describe("Browsitory interactive rebase", () => {
     await dropRowSelect.waitForExist({ timeout: 10000 });
     await dropRowSelect.selectByVisibleText("Drop");
 
-    const startButton = await $("button=Start Rebase");
+    const startButton = await $("button=Start rebase");
     await startButton.click();
 
     const rebasePanel = await $("h2*=Rebase in progress");
@@ -168,7 +168,7 @@ describe("Browsitory interactive rebase", () => {
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
 
-    const acceptTheirs = await $("button=Accept Theirs");
+    const acceptTheirs = await $("button=Accept theirs");
     await acceptTheirs.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
     const saveResolution = await $("button=Save resolution");
@@ -238,7 +238,7 @@ describe("Browsitory interactive rebase", () => {
     await dropRowSelect.waitForExist({ timeout: 10000 });
     await dropRowSelect.selectByVisibleText("Drop");
 
-    const startButton = await $("button=Start Rebase");
+    const startButton = await $("button=Start rebase");
     await startButton.click();
 
     const rebasePanel = await $("h2*=Rebase in progress");

@@ -223,7 +223,7 @@ describe("RepoPicker workspaces", () => {
     expect(screen.getByTitle("/projects")).toBeInTheDocument();
   });
 
-  it("Open All calls onOpenWorkspace with the workspace", () => {
+  it("Open all calls onOpenWorkspace with the workspace", () => {
     const onOpenWorkspace = vi.fn();
     render(
       <RepoPicker
@@ -240,7 +240,7 @@ describe("RepoPicker workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Open All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open all" }));
 
     expect(onOpenWorkspace).toHaveBeenCalledWith(workspace);
   });

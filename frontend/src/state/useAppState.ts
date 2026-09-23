@@ -112,7 +112,7 @@ export interface UseAppStateResult {
   commit(message: string): Promise<void>;
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
   // below. Naming a new branch is the one create-form action here with an obvious single trigger
-  // point (the "New Branch…" draft form), so its failure surfaces next to that form instead of
+  // point (the "New branch…" draft form), so its failure surfaces next to that form instead of
   // the shared banner (issue #30/UX-002).
   createBranch(name: string, startPoint: string): Promise<string | null>;
   switchBranch(name: string): Promise<void>;

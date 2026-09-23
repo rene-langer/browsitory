@@ -868,7 +868,7 @@ export function BranchTree({
           onClose={() => setRowMenu(null)}
           items={[
             { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
-            { label: "Add Remote…", onSelect: onOpenAddRemoteDraft },
+            { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
             {
               label: "Show all branches",
               disabled: graphBranchSelection === null,

@@ -548,7 +548,7 @@ describe("DiffPane", () => {
       expect(screen.queryByText("No blame available for this file at this revision.")).not.toBeInTheDocument();
     });
 
-    it("Back to Diff switches that section back to the diff view", async () => {
+    it("Back to diff switches that section back to the diff view", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -558,9 +558,9 @@ describe("DiffPane", () => {
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
       await screen.findByText("hello");
-      fireEvent.click(screen.getByText("Back to Diff"));
+      fireEvent.click(screen.getByText("Back to diff"));
 
-      expect(screen.queryByText("Back to Diff")).not.toBeInTheDocument();
+      expect(screen.queryByText("Back to diff")).not.toBeInTheDocument();
       expect(screen.queryByText("hello")).not.toBeInTheDocument();
     });
 
@@ -614,12 +614,12 @@ describe("DiffPane", () => {
       });
       renderUncommitted(fakeClient({ getConflictHunks }), twoConflicts);
 
-      await waitFor(() => screen.getByText("Keep Our Version"));
+      await waitFor(() => screen.getByText("Keep our version"));
       await waitFor(() => screen.getByText("Save resolution"));
 
       // Both sections are mounted simultaneously now — one file's add/delete fallback state
       // must not appear on the other's section.
-      expect(screen.getAllByText("Keep Our Version")).toHaveLength(1);
+      expect(screen.getAllByText("Keep our version")).toHaveLength(1);
       expect(screen.getAllByText("Save resolution")).toHaveLength(1);
     });
 
