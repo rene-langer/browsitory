@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DiffHunk, DiffLine, DiffLineOrigin } from "../ipc/RepoClient";
 import { Toolbar } from "./primitives/Toolbar";
-import { wordDiff } from "../lib/wordDiff";
+import { wordDiff, type Segment } from "../lib/wordDiff";
 import styles from "./DiffView.module.css";
 
 const DISCARD_DISARM_MS = 5000;
@@ -40,13 +40,29 @@ function pairReplaceBlocks(lines: DiffLine[]): Array<{ line: DiffLine; pairedWit
   return result;
 }
 
+/**
+ * Word-level segments for every paired Remove/Add line in `hunks`, keyed by the `DiffLine` object
+ * itself. Computed once per pair (the old code ran `wordDiff` twice per pair, once from each side)
+ * and memoized on the `hunks` array by `DiffView`, so re-renders that don't refetch — toggling
+ * split view, moving the active hunk, arming a discard — never redo the LCS work.
+ */
+function computeWordSegments(hunks: DiffHunk[] | null): Map<DiffLine, Segment[]> {
+  const segments = new Map<DiffLine, Segment[]>();
+  for (const hunk of hunks ?? []) {
+    for (const { line, pairedWith } of pairReplaceBlocks(hunk.lines)) {
+      if (pairedWith === null || line.origin !== "Remove") continue;
+      const { oldSegments, newSegments } = wordDiff(line.content, pairedWith.content);
+      segments.set(line, oldSegments);
+      segments.set(pairedWith, newSegments);
+    }
+  }
+  return segments;
+}
+
 /** Renders a line's content as plain text, or word-level highlighted segments when paired. */
-function renderContent(line: DiffLine, pairedWith: DiffLine | null): ReactNode {
-  if (pairedWith === null) return line.content;
-  const segments =
-    line.origin === "Remove"
-      ? wordDiff(line.content, pairedWith.content).oldSegments
-      : wordDiff(pairedWith.content, line.content).newSegments;
+function renderContent(line: DiffLine, wordSegments: Map<DiffLine, Segment[]>): ReactNode {
+  const segments = wordSegments.get(line);
+  if (segments === undefined) return line.content;
   return segments.map((segment, segmentIndex) =>
     segment.changed ? <mark key={segmentIndex}>{segment.text}</mark> : <span key={segmentIndex}>{segment.text}</span>,
   );
@@ -117,6 +133,7 @@ export function DiffView({
   const [activeIndex, setActiveIndex] = useState(0);
   const [split, setSplit] = useState(false);
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
 
   // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
   // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
@@ -208,7 +225,6 @@ export function DiffView({
           let oldLine = hunk.oldStart;
           let newLine = hunk.newStart;
           const armed = confirmingDiscardIndex === hunkIndex;
-          const pairedLines = pairReplaceBlocks(hunk.lines);
           const splitRows = split ? buildSplitRows(hunk.lines) : null;
           return (
             <div
@@ -300,7 +316,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.oldLine, row.newLine)}</span>
+                            <span className={styles.content}>{renderContent(row.oldLine, wordSegments)}</span>
                           </div>
                           <div
                             data-diff-column="new"
@@ -312,7 +328,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Add")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.newLine, row.oldLine)}</span>
+                            <span className={styles.content}>{renderContent(row.newLine, wordSegments)}</span>
                           </div>
                         </div>
                       );
@@ -359,7 +375,7 @@ export function DiffView({
                 </div>
               ) : (
                 <pre className={styles.lines}>
-                  {pairedLines.map(({ line, pairedWith }, lineIndex) => {
+                  {hunk.lines.map((line, lineIndex) => {
                     const oldNo = line.origin !== "Add" ? oldLine++ : null;
                     const newNo = line.origin !== "Remove" ? newLine++ : null;
                     return (
@@ -376,7 +392,7 @@ export function DiffView({
                         <span className={styles.marker} aria-hidden="true">
                           {originPrefix(line.origin)}
                         </span>
-                        <span className={styles.content}>{renderContent(line, pairedWith)}</span>
+                        <span className={styles.content}>{renderContent(line, wordSegments)}</span>
                       </div>
                     );
                   })}

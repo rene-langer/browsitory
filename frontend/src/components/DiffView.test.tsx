@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
+import { wordDiff } from "../lib/wordDiff";
 import { DiffView } from "./DiffView";
+
+// Pass-through spy on the real `wordDiff`, so tests can count how often DiffView recomputes it.
+vi.mock("../lib/wordDiff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/wordDiff")>();
+  return { ...actual, wordDiff: vi.fn(actual.wordDiff) };
+});
 
 describe("DiffView", () => {
   it("renders each line's content", () => {
@@ -228,6 +235,31 @@ describe("DiffView", () => {
     expect(marks).toHaveLength(2);
     expect(marks[0]).toHaveTextContent("1");
     expect(marks[1]).toHaveTextContent("2");
+  });
+
+  it("computes each pair's word diff once, not again on re-renders that keep the same hunks", () => {
+    const hunks: DiffHunk[] = [
+      {
+        oldStart: 1,
+        oldLines: 1,
+        newStart: 1,
+        newLines: 1,
+        lines: [
+          { origin: "Remove", content: "const foo = 1;" },
+          { origin: "Add", content: "const foo = 2;" },
+        ],
+      },
+    ];
+    vi.mocked(wordDiff).mockClear();
+    const { rerender } = render(<DiffView hunks={hunks} />);
+    // One call for the pair — not one per side.
+    expect(wordDiff).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    rerender(<DiffView hunks={hunks} />);
+
+    expect(wordDiff).toHaveBeenCalledOnce();
+    expect(document.querySelectorAll("mark")).toHaveLength(2);
   });
 
   it("does not word-diff unpaired Remove/Add lines", () => {
