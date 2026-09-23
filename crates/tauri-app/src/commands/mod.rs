@@ -1215,6 +1215,21 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_transfer_is_emitted_with_its_own_terminal_error_kind() {
+        // The frontend distinguishes "you cancelled this" from a real transport failure purely
+        // by this wire value, so it must not collapse into `TransferFailed`.
+        let (event_name, cancelled) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-42".into(),
+            operation: TransferOperation::Fetch,
+            error: Some(TransferErrorKind::Cancelled),
+        });
+
+        assert_eq!(event_name, "transfer-complete");
+        assert_eq!(cancelled.error_kind.as_deref(), Some("Cancelled"));
+        assert_eq!(cancelled.message, None);
+    }
+
+    #[test]
     fn missing_credential_failure_is_emitted_as_a_safe_terminal_kind() {
         let (_, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),

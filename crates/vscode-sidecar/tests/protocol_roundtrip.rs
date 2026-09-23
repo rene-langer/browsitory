@@ -1219,6 +1219,48 @@ fn transfer_progress_notifications_carry_no_id_and_are_rejected_as_requests() {
 }
 
 #[test]
+fn cancel_transfer_round_trips_through_the_sidecar_without_its_own_notifications() {
+    // `cancel_transfer` writes into the worker's shared cancel registry and returns immediately;
+    // the cancellation itself surfaces on the relay the cancelled operation already owns, so
+    // this call must answer with a plain `null` result and emit nothing of its own. An unknown
+    // operation id is a deliberate no-op so the extension can fire this without first racing the
+    // transfer to check whether it is still running.
+    let fixture = local_and_bare_remote();
+    let repo_path = fixture.local_path();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let response = sidecar.call(
+        2,
+        "cancel_transfer",
+        serde_json::json!({"repoPath": repo_path, "operationId": "fetch-1"}),
+    );
+
+    assert_eq!(response["id"], 2);
+    assert!(response["result"].is_null());
+    assert!(response.get("error").is_none());
+    // The very next response is the next line on the wire — no notification wedged in front.
+    let status = sidecar.call(3, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(status["id"], 3);
+}
+
+#[test]
+fn cancel_transfer_on_an_unopened_repo_returns_an_error() {
+    let mut sidecar = Sidecar::spawn();
+
+    let response = sidecar.call(
+        1,
+        "cancel_transfer",
+        serde_json::json!({"repoPath": "/no/such/repo", "operationId": "fetch-1"}),
+    );
+
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("repo not open"));
+}
+
+#[test]
 fn fetch_remote_on_an_unopened_repo_returns_an_error_without_emitting_notifications() {
     let mut sidecar = Sidecar::spawn();
 

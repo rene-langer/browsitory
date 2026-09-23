@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use git_core::blame::BlameLine;
@@ -382,8 +382,19 @@ pub(crate) enum Command {
     },
 }
 
+/// Operation IDs whose transfer the user asked to stop.
+///
+/// This is deliberately a *side channel* rather than another `Command`: the worker thread
+/// processes one command at a time, and while a fetch/pull/push is blocked inside `git2`'s
+/// network I/O it is not reading `rx` at all — a cancel sent through the command channel would
+/// queue behind the very transfer it is meant to interrupt. `WorkerHandle::cancel_transfer`
+/// therefore writes straight into this set, and `git-core`'s progress callbacks poll it on every
+/// tick from inside the blocked call (see `worker/remote.rs`'s `cancel_check`).
+pub type CancelRegistry = Arc<Mutex<HashSet<String>>>;
+
 pub struct Worker {
     tx: Sender<Command>,
+    cancelled: CancelRegistry,
 }
 
 /// Cheap, cloneable handle to a `Worker`'s command channel.
@@ -393,6 +404,8 @@ pub struct Worker {
 #[derive(Clone)]
 pub struct WorkerHandle {
     tx: Sender<Command>,
+    /// Shared with the worker thread — see `CancelRegistry`.
+    cancelled: CancelRegistry,
 }
 
 /// Finds the `ForgeRepository` for a named remote. Returns a secret-free, static error (never
@@ -432,8 +445,11 @@ impl Worker {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
         let (tx, rx) = mpsc::channel::<Command>();
+        let cancelled: CancelRegistry = Arc::new(Mutex::new(HashSet::new()));
+        let worker_cancelled = Arc::clone(&cancelled);
 
         thread::spawn(move || {
+            let cancelled = worker_cancelled;
             let mut repo = repo;
             let mut rebase_state: Option<RebaseState> = None;
             let credential_service = CredentialService::new(credential_store);
@@ -661,7 +677,10 @@ impl Worker {
                         &repo,
                         &credential_service,
                         remote_name,
-                        operation_id,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
                         events,
                         reply,
                     ),
@@ -669,7 +688,16 @@ impl Worker {
                         operation_id,
                         events,
                         reply,
-                    } => remote::pull(&repo, &credential_service, operation_id, events, reply),
+                    } => remote::pull(
+                        &repo,
+                        &credential_service,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::PushCurrentBranch {
                         remote_name,
                         operation_id,
@@ -679,7 +707,10 @@ impl Worker {
                         &repo,
                         &credential_service,
                         remote_name,
-                        operation_id,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
                         events,
                         reply,
                     ),
@@ -694,7 +725,10 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         names,
-                        operation_id,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
                         events,
                         reply,
                     ),
@@ -740,13 +774,14 @@ impl Worker {
             }
         });
 
-        Ok(Worker { tx })
+        Ok(Worker { tx, cancelled })
     }
 
     /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.
     pub fn handle(&self) -> WorkerHandle {
         WorkerHandle {
             tx: self.tx.clone(),
+            cancelled: Arc::clone(&self.cancelled),
         }
     }
 }
@@ -763,6 +798,23 @@ impl WorkerHandle {
     pub fn is_alive(&self) -> bool {
         let (reply, _reply_rx) = mpsc::channel();
         self.tx.send(Command::Ping { reply }).is_ok()
+    }
+
+    /// Asks the in-flight transfer identified by `operation_id` to stop.
+    ///
+    /// Writes straight into the shared `CancelRegistry` — **never** through `self.tx`. A
+    /// `Command` would be queued behind the blocking transfer itself and only be read once that
+    /// transfer had already finished, which is exactly what this must not do. The `git2`
+    /// progress callbacks poll this set from inside the blocked call and abort the transfer.
+    ///
+    /// Marking an operation that is not (or no longer) running is harmless: the entry is
+    /// removed when a transfer with that ID completes, and an ID that never runs only occupies
+    /// one string until the worker is dropped.
+    pub fn cancel_transfer(&self, operation_id: &str) {
+        self.cancelled
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(operation_id.to_string());
     }
 
     /// Test-only: crashes the worker thread from inside its dispatch loop, the same failure mode
@@ -838,7 +890,7 @@ mod tests {
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
-    use super::{ensure_worker, TransferEvent, Worker};
+    use super::{ensure_worker, Command, TransferEvent, Worker};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
@@ -1498,6 +1550,74 @@ mod tests {
                 error: Some(TransferErrorKind::TransferFailed),
             }) if id == &operation_id
         ));
+    }
+
+    #[test]
+    fn cancelling_a_transfer_by_operation_id_surfaces_a_cancelled_completion_event() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+        let (event_tx, event_rx) = mpsc::channel();
+        let (reply_tx, reply_rx) = mpsc::channel();
+
+        // The operation is marked cancelled *before* the worker dequeues it. A fetch from a
+        // local bare remote finishes in microseconds, so cancelling after `fetch_remote` returned
+        // would race the transfer and make this test flaky; pre-marking is well-defined precisely
+        // because `cancel_transfer` writes to the shared registry rather than sending a command,
+        // and the registry is what the `git2` progress callbacks poll.
+        handle.cancel_transfer("fetch-cancel-test");
+        handle
+            .tx
+            .send(Command::FetchRemote {
+                remote_name: "origin".into(),
+                operation_id: "fetch-cancel-test".into(),
+                events: event_tx,
+                reply: reply_tx,
+            })
+            .expect("queue fetch");
+        let _ = reply_rx.recv();
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(matches!(
+            events.last(),
+            Some(TransferEvent::Completed {
+                operation_id: id,
+                operation: TransferOperation::Fetch,
+                error: Some(TransferErrorKind::Cancelled),
+            }) if id == "fetch-cancel-test"
+        ));
+        // The cancelled transfer never created the tracking ref it would have on success.
+        assert!(Repository::open(local_dir.path())
+            .expect("open local repo")
+            .find_reference("refs/remotes/origin/main")
+            .is_err());
+        // Completion clears the registry entry, so a long-lived worker's cancel set cannot grow
+        // without bound.
+        assert!(!handle
+            .cancelled
+            .lock()
+            .unwrap()
+            .contains("fetch-cancel-test"));
+    }
+
+    #[test]
+    fn cancel_transfer_reaches_a_worker_that_is_not_reading_its_command_channel() {
+        // The whole point of the cancel registry: while a transfer is blocked inside `git2`'s
+        // network I/O the worker thread is not reading `rx`, so a `Command`-based cancel would
+        // queue behind the very operation it is meant to interrupt. A dead worker is the
+        // strongest form of "not reading commands" a test can create — every `tx.send` fails,
+        // yet the cancel must still land.
+        let (dir, _repo) = init_repo();
+        let worker = Worker::spawn(dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+        handle.crash_for_test();
+        while handle.is_alive() {
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        handle.cancel_transfer("fetch-7");
+
+        assert!(handle.cancelled.lock().unwrap().contains("fetch-7"));
     }
 
     #[test]
