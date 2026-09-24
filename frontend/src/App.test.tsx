@@ -29,6 +29,8 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     getCommitGraph: unused,
     getGraphBranchSelection: async () => null,
     setGraphBranchSelection: unused,
+    getGraphRemoteBranchSelection: async () => null,
+    setGraphRemoteBranchSelection: unused,
     getWorkingDiff: async () => [],
     getCommitDiff: async () => [],
     getCommitFiles: unused,

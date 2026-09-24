@@ -73,6 +73,8 @@ const remoteManagementClient = {
   openExternalUrl: async () => unimplemented(),
   getGraphBranchSelection: async () => null,
   setGraphBranchSelection: async () => {},
+  getGraphRemoteBranchSelection: async () => null,
+  setGraphRemoteBranchSelection: async () => {},
   logFrontendError: async () => {},
 };
 
