@@ -955,6 +955,7 @@ mod tests {
     use std::path::PathBuf;
 
     use config::{OpenRepoEntry, Workspace};
+    use git_core::graph::GraphCommit;
     use git_core::reflog::ReflogEntry;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::submodule::SubmoduleInfo;
@@ -963,9 +964,9 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, ForgeProviderDto, OpenRepoEntryDto, OpenRepoEntryInput,
-        PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto, WorkspaceDto,
-        WorktreeInfoDto,
+        transfer_event_payload, ForgeProviderDto, GraphCommitDto, OpenRepoEntryDto,
+        OpenRepoEntryInput, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto,
+        WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1017,6 +1018,36 @@ mod tests {
 
         assert_eq!(input.path, "/repos/suite/api");
         assert_eq!(input.workspace_id, Some("workspace-1".into()));
+    }
+
+    #[test]
+    fn graph_commit_dto_serializes_camel_case_fields() {
+        let dto = GraphCommitDto::from(GraphCommit {
+            id: "abc123".into(),
+            short_id: "abc123".into(),
+            summary: "Add remote branch badges".into(),
+            author_name: "Rene".into(),
+            author_email: "rene@example.com".into(),
+            timestamp: 1_700_000_000,
+            parent_ids: vec!["def456".into()],
+            branch_refs: vec!["main".into()],
+            remote_branch_refs: vec!["origin/main".into()],
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "id": "abc123",
+                "shortId": "abc123",
+                "summary": "Add remote branch badges",
+                "authorName": "Rene",
+                "authorEmail": "rene@example.com",
+                "timestamp": 1_700_000_000i64,
+                "parentIds": ["def456"],
+                "branchRefs": ["main"],
+                "remoteBranchRefs": ["origin/main"],
+            })
+        );
     }
 
     #[test]
