@@ -216,8 +216,13 @@ fn graph_log_excludes_a_remote_symbolic_head_ref() {
     let oid = repo.head().unwrap().target().unwrap();
     repo.reference("refs/remotes/origin/main", oid, true, "test")
         .unwrap();
-    repo.reference_symbolic("refs/remotes/origin/HEAD", "refs/remotes/origin/main", true, "test")
-        .unwrap();
+    repo.reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        true,
+        "test",
+    )
+    .unwrap();
 
     let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
 

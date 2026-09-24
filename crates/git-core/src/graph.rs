@@ -51,7 +51,10 @@ pub fn graph_log(
             continue;
         };
         if let Some(oid) = branch.get().target() {
-            remote_tips_by_oid.entry(oid).or_default().push(name.to_string());
+            remote_tips_by_oid
+                .entry(oid)
+                .or_default()
+                .push(name.to_string());
         }
     }
 
