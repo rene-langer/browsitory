@@ -206,6 +206,7 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
     // `#[serde(rename_all = "camelCase")]` on `GraphCommitDto` would actually fail a test.
     assert!(commits[0]["shortId"].is_string());
     assert!(commits[0]["parentIds"].is_array());
+    assert!(commits[0]["remoteBranchRefs"].is_array());
 }
 
 #[test]
@@ -447,6 +448,35 @@ fn graph_branch_selection_round_trips() {
         serde_json::json!({"repoPath": repo_path}),
     );
     assert_eq!(after["result"], serde_json::json!(["main", "feature"]));
+}
+
+#[test]
+fn graph_remote_branch_selection_round_trips() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let before = sidecar.call(
+        1,
+        "get_graph_remote_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(before["result"], serde_json::Value::Null);
+
+    let set = sidecar.call(
+        2,
+        "set_graph_remote_branch_selection",
+        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["origin/main"]}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null);
+
+    let after = sidecar.call(
+        3,
+        "get_graph_remote_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after["result"], serde_json::json!(["origin/main"]));
 }
 
 #[test]

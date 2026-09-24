@@ -190,3 +190,67 @@ fn commit_message_rejects_an_unknown_commit_id() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn graph_log_reports_remote_branch_refs_for_a_tip_commit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", oid, true, "test")
+        .unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+
+    assert_eq!(
+        commits[0].remote_branch_refs,
+        vec!["origin/main".to_string()]
+    );
+}
+
+#[test]
+fn graph_log_excludes_a_remote_symbolic_head_ref() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", oid, true, "test")
+        .unwrap();
+    repo.reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        true,
+        "test",
+    )
+    .unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+
+    // Only the direct ref should show up — the symbolic HEAD alias must not produce a
+    // duplicate or an "origin/HEAD" badge.
+    assert_eq!(
+        commits[0].remote_branch_refs,
+        vec!["origin/main".to_string()]
+    );
+}
+
+#[test]
+fn graph_log_keeps_local_and_remote_branch_refs_independent() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", oid, true, "test")
+        .unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+
+    assert_eq!(commits[0].branch_refs, vec![main_branch]);
+    assert_eq!(
+        commits[0].remote_branch_refs,
+        vec!["origin/main".to_string()]
+    );
+}

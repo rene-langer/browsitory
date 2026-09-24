@@ -37,8 +37,9 @@ pub use remote::*;
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_hunk, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
-    get_commit_message, get_graph_branch_selection, get_status, get_working_diff,
-    set_graph_branch_selection, stage_file, stage_hunk, unstage_file, unstage_hunk,
+    get_commit_message, get_graph_branch_selection, get_graph_remote_branch_selection, get_status,
+    get_working_diff, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
+    stage_hunk, unstage_file, unstage_hunk,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -440,6 +441,7 @@ pub struct GraphCommitDto {
     pub timestamp: i64,
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -453,6 +455,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             timestamp: c.timestamp,
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
+            remote_branch_refs: c.remote_branch_refs,
         }
     }
 }
@@ -952,6 +955,7 @@ mod tests {
     use std::path::PathBuf;
 
     use config::{OpenRepoEntry, Workspace};
+    use git_core::graph::GraphCommit;
     use git_core::reflog::ReflogEntry;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use git_core::submodule::SubmoduleInfo;
@@ -960,9 +964,9 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, ForgeProviderDto, OpenRepoEntryDto, OpenRepoEntryInput,
-        PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto, WorkspaceDto,
-        WorktreeInfoDto,
+        transfer_event_payload, ForgeProviderDto, GraphCommitDto, OpenRepoEntryDto,
+        OpenRepoEntryInput, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto,
+        WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1014,6 +1018,36 @@ mod tests {
 
         assert_eq!(input.path, "/repos/suite/api");
         assert_eq!(input.workspace_id, Some("workspace-1".into()));
+    }
+
+    #[test]
+    fn graph_commit_dto_serializes_camel_case_fields() {
+        let dto = GraphCommitDto::from(GraphCommit {
+            id: "abc123".into(),
+            short_id: "abc123".into(),
+            summary: "Add remote branch badges".into(),
+            author_name: "Rene".into(),
+            author_email: "rene@example.com".into(),
+            timestamp: 1_700_000_000,
+            parent_ids: vec!["def456".into()],
+            branch_refs: vec!["main".into()],
+            remote_branch_refs: vec!["origin/main".into()],
+        });
+
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "id": "abc123",
+                "shortId": "abc123",
+                "summary": "Add remote branch badges",
+                "authorName": "Rene",
+                "authorEmail": "rene@example.com",
+                "timestamp": 1_700_000_000i64,
+                "parentIds": ["def456"],
+                "branchRefs": ["main"],
+                "remoteBranchRefs": ["origin/main"],
+            })
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use git2::{BranchType, Oid, Repository, Sort};
+use git2::{BranchType, Oid, ReferenceType, Repository, Sort};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -19,6 +19,7 @@ pub struct GraphCommit {
     pub timestamp: i64,
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
 }
 
 pub fn graph_log(
@@ -34,6 +35,26 @@ pub fn graph_log(
         };
         if let Some(oid) = branch.get().target() {
             tips_by_oid.entry(oid).or_default().push(name.to_string());
+        }
+    }
+
+    let mut remote_tips_by_oid: HashMap<Oid, Vec<String>> = HashMap::new();
+    for entry in repo.branches(Some(BranchType::Remote))? {
+        let (branch, _) = entry?;
+        // Symbolic refs like `origin/HEAD` point at another ref rather than a commit
+        // directly and would otherwise duplicate whatever branch they alias — skip them so
+        // they don't produce a fake "origin/HEAD" badge on every default-branch commit.
+        if branch.get().kind() != Some(ReferenceType::Direct) {
+            continue;
+        }
+        let Ok(Some(name)) = branch.name() else {
+            continue;
+        };
+        if let Some(oid) = branch.get().target() {
+            remote_tips_by_oid
+                .entry(oid)
+                .or_default()
+                .push(name.to_string());
         }
     }
 
@@ -71,6 +92,7 @@ pub fn graph_log(
         let timestamp = commit.time().seconds();
         let parent_ids = commit.parent_ids().map(|p| p.to_string()).collect();
         let branch_refs = tips_by_oid.get(&oid).cloned().unwrap_or_default();
+        let remote_branch_refs = remote_tips_by_oid.get(&oid).cloned().unwrap_or_default();
 
         commits.push(GraphCommit {
             id,
@@ -81,6 +103,7 @@ pub fn graph_log(
             timestamp,
             parent_ids,
             branch_refs,
+            remote_branch_refs,
         });
     }
 

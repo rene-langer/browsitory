@@ -174,6 +174,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   their name, matching a filesystem-style tree view. Checkout is now double-click instead of
   single-click (single click just selects/highlights a row); the graph-visibility control is now
   a per-branch colored swatch button instead of a checkbox.
+- Remote-tracking branch tips now show inline in the commit graph as a dashed-border badge next to
+  the existing solid local-branch badge, with their own per-remote-branch graph-visibility toggle
+  in the branch tree.
 
 ### Changed
 

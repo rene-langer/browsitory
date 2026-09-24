@@ -15,6 +15,7 @@ const commit: GraphCommit = {
   timestamp: 1_700_000_000,
   parentIds: [PARENT_ID],
   branchRefs: [],
+  remoteBranchRefs: [],
 };
 
 function clientWithMessage(message: string): RepoClient {
