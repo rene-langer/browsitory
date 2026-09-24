@@ -77,6 +77,8 @@ pub fn dispatch(
         "delete_workspace" => delete_workspace(params),
         "get_graph_branch_selection" => get_graph_branch_selection(params),
         "set_graph_branch_selection" => set_graph_branch_selection(params),
+        "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(params),
+        "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
         "get_commit_message" => get_commit_message(params, repos),
         "stage_file" => stage_file(params, repos),
@@ -243,6 +245,7 @@ struct GraphCommitDto {
     timestamp: i64,
     parent_ids: Vec<String>,
     branch_refs: Vec<String>,
+    remote_branch_refs: Vec<String>,
 }
 
 impl From<GraphCommit> for GraphCommitDto {
@@ -256,6 +259,7 @@ impl From<GraphCommit> for GraphCommitDto {
             timestamp: c.timestamp,
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
+            remote_branch_refs: c.remote_branch_refs,
         }
     }
 }
@@ -518,6 +522,32 @@ fn set_graph_branch_selection(params: Value) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     config::set_graph_branch_selection(Path::new(&params.repo_path), &params.selected_branches)
         .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+fn get_graph_remote_branch_selection(params: Value) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let selection = config::get_graph_remote_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(selection).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetGraphRemoteBranchSelectionParams {
+    repo_path: String,
+    selected_branches: Vec<String>,
+}
+
+fn set_graph_remote_branch_selection(params: Value) -> Result<Value, String> {
+    let params: SetGraphRemoteBranchSelectionParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::set_graph_remote_branch_selection(
+        Path::new(&params.repo_path),
+        &params.selected_branches,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 
