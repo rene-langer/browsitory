@@ -29,6 +29,8 @@ function renderTree(overrides: Partial<BranchTreeProps> = {}) {
     operationDisabledReason: null,
     graphBranchSelection: null,
     onSetGraphBranchSelection: vi.fn(),
+    graphRemoteBranchSelection: null,
+    onSetGraphRemoteBranchSelection: vi.fn(),
     remotes: [],
     upstream: null,
     remoteUpstreams: {},
@@ -397,6 +399,33 @@ describe("BranchTree — remotes", () => {
     // Scoped to the remote's own <li>, not `screen`: `baseBranches` (the default local branches)
     // already has a "feat/foo" branch, so an unscoped query would ambiguously match either row.
     expect(await within(remoteFolder).findByText("foo")).toBeInTheDocument();
+  });
+
+  // With no saved remote selection, every known remote branch's swatch is pressed (shown) by
+  // default — mirroring the local-branch swatch's default (see "with no saved graph selection,
+  // every branch's graph swatch is pressed (shown) by default" above). So toggling off
+  // origin/main here removes it from the known set rather than adding it; origin/develop stays,
+  // which also proves the qualified `${remoteName}/${branchName}` naming is computed correctly.
+  it("toggles a remote branch's graph visibility via its swatch button", async () => {
+    const onSetGraphRemoteBranchSelection = vi.fn();
+    renderTree({
+      remotes: oneRemote,
+      graphRemoteBranchSelection: null,
+      onSetGraphRemoteBranchSelection,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["main", "develop"]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    await screen.findByText("main");
+
+    expect(screen.getByRole("button", { name: "Show origin/main in graph" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show origin/main in graph" }));
+
+    expect(onSetGraphRemoteBranchSelection).toHaveBeenCalledWith(["origin/develop"]);
   });
 
   it("does not re-fetch remote branches on a second expand", async () => {

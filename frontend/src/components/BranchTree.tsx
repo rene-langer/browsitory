@@ -51,6 +51,8 @@ export function BranchTree({
   operationDisabledReason,
   graphBranchSelection,
   onSetGraphBranchSelection,
+  graphRemoteBranchSelection,
+  onSetGraphRemoteBranchSelection,
   remotes,
   upstream,
   remoteUpstreams,
@@ -103,6 +105,11 @@ export function BranchTree({
   // `git-core` and `useAppState`'s `AppState.graphBranchSelection`).
   graphBranchSelection: string[] | null;
   onSetGraphBranchSelection: (selectedBranches: string[]) => void;
+  // Same shape as `graphBranchSelection`/`onSetGraphBranchSelection` above, but scoped to
+  // remote-tracking branches, keyed by their qualified `<remoteName>/<branchName>` name (see
+  // `useAppState`'s `AppState.graphRemoteBranchSelection`).
+  graphRemoteBranchSelection: string[] | null;
+  onSetGraphRemoteBranchSelection: (selectedBranches: string[]) => void;
   // Remote props: accepted from Task 7 onward for the type to match App.tsx's eventual single
   // call site, rendered starting in Task 8.
   remotes: RemoteInfo[];
@@ -338,6 +345,19 @@ export function BranchTree({
           }}
         >
           <div className={styles.rowInner}>
+            <button
+              type="button"
+              className={styles.swatch}
+              aria-label={`Show ${remoteName}/${branchName} in graph`}
+              aria-pressed={(graphRemoteBranchSelection ?? allKnownRemoteBranches).includes(
+                `${remoteName}/${branchName}`,
+              )}
+              style={{ "--swatch": branchSwatchColor(`${remoteName}/${branchName}`) } as CSSProperties}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleGraphRemoteBranch(`${remoteName}/${branchName}`);
+              }}
+            />
             <span className={styles.name} title={branchName}>
               {node.name}
             </span>
@@ -526,6 +546,17 @@ export function BranchTree({
     const shown = graphBranchSelection ?? branches.map((b) => b.name);
     const next = shown.includes(name) ? shown.filter((n) => n !== name) : [...shown, name];
     onSetGraphBranchSelection(next);
+  };
+
+  const allKnownRemoteBranches = Object.entries(remoteBranches).flatMap(([remoteName, names]) =>
+    (names ?? []).map((name) => `${remoteName}/${name}`),
+  );
+  const toggleGraphRemoteBranch = (qualifiedName: string) => {
+    const shown = graphRemoteBranchSelection ?? allKnownRemoteBranches;
+    const next = shown.includes(qualifiedName)
+      ? shown.filter((n) => n !== qualifiedName)
+      : [...shown, qualifiedName];
+    onSetGraphRemoteBranchSelection(next);
   };
 
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>, oldName: string) => {
