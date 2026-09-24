@@ -241,6 +241,47 @@ describe("CommitGraph", () => {
     expect(screen.getByText("main")).toBeInTheDocument();
   });
 
+  it("renders a remote branch badge for a commit that is a remote-tracking tip", () => {
+    const commitsWithRemoteBranch: GraphCommit[] = [
+      { ...commits[0], remoteBranchRefs: ["origin/main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithRemoteBranch}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("origin/main")).toBeInTheDocument();
+  });
+
+  it("hides a remote branch badge not in graphRemoteBranchSelection", () => {
+    const commitsWithRemoteBranch: GraphCommit[] = [
+      { ...commits[0], remoteBranchRefs: ["origin/main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithRemoteBranch}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        graphRemoteBranchSelection={["origin/other"]}
+      />,
+    );
+
+    expect(screen.queryByText("origin/main")).not.toBeInTheDocument();
+  });
+
   it("renders a lane graphic for every commit row", () => {
     const { container } = render(
       <CommitGraph

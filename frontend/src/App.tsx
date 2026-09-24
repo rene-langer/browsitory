@@ -446,6 +446,7 @@ function RepoWorkspace({
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onSquashCommits={appState.openSquashPlanner}
+                graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               />
               </>
             }
