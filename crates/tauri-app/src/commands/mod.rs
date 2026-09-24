@@ -37,8 +37,9 @@ pub use remote::*;
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_hunk, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
-    get_commit_message, get_graph_branch_selection, get_status, get_working_diff,
-    set_graph_branch_selection, stage_file, stage_hunk, unstage_file, unstage_hunk,
+    get_commit_message, get_graph_branch_selection, get_graph_remote_branch_selection, get_status,
+    get_working_diff, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
+    stage_hunk, unstage_file, unstage_hunk,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -440,6 +441,7 @@ pub struct GraphCommitDto {
     pub timestamp: i64,
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -453,6 +455,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             timestamp: c.timestamp,
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
+            remote_branch_refs: c.remote_branch_refs,
         }
     }
 }
