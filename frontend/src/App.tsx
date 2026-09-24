@@ -319,6 +319,7 @@ function RepoWorkspace({
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
               graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
+              remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
               remotes={appState.state.remotes}
               upstream={appState.state.upstream}
               remoteUpstreams={appState.state.remoteUpstreams}

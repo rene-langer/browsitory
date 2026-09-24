@@ -53,6 +53,7 @@ export function BranchTree({
   onSetGraphBranchSelection,
   graphRemoteBranchSelection,
   onSetGraphRemoteBranchSelection,
+  remoteBranchesInGraph,
   remotes,
   upstream,
   remoteUpstreams,
@@ -110,6 +111,14 @@ export function BranchTree({
   // `useAppState`'s `AppState.graphRemoteBranchSelection`).
   graphRemoteBranchSelection: string[] | null;
   onSetGraphRemoteBranchSelection: (selectedBranches: string[]) => void;
+  // Every remote-tracking ref actually present in the currently-loaded commit graph (same source
+  // CommitGraph.tsx's own null-selection fallback uses: `commits.flatMap((c) => c.remoteBranchRefs)`,
+  // deduped). Used ONLY as the null-selection fallback below (the remote swatch's `aria-pressed`
+  // and `toggleGraphRemoteBranch`'s `shown` computation) — deliberately NOT `remoteBranches`
+  // (this component's lazy per-remote-folder fetch cache, which only has entries for remotes
+  // whose folder has been expanded and would silently drop never-expanded remotes' badges on
+  // the first toggle).
+  remoteBranchesInGraph: string[];
   // Remote props: accepted from Task 7 onward for the type to match App.tsx's eventual single
   // call site, rendered starting in Task 8.
   remotes: RemoteInfo[];
@@ -259,6 +268,7 @@ export function BranchTree({
                 event.stopPropagation();
                 toggleGraphBranch(branch.name);
               }}
+              onDoubleClick={(event) => event.stopPropagation()}
             />
             {isRenaming ? (
               <input
@@ -349,7 +359,7 @@ export function BranchTree({
               type="button"
               className={styles.swatch}
               aria-label={`Show ${remoteName}/${branchName} in graph`}
-              aria-pressed={(graphRemoteBranchSelection ?? allKnownRemoteBranches).includes(
+              aria-pressed={(graphRemoteBranchSelection ?? remoteBranchesInGraph).includes(
                 `${remoteName}/${branchName}`,
               )}
               style={{ "--swatch": branchSwatchColor(`${remoteName}/${branchName}`) } as CSSProperties}
@@ -357,6 +367,7 @@ export function BranchTree({
                 event.stopPropagation();
                 toggleGraphRemoteBranch(`${remoteName}/${branchName}`);
               }}
+              onDoubleClick={(event) => event.stopPropagation()}
             />
             <span className={styles.name} title={branchName}>
               {node.name}
@@ -548,11 +559,8 @@ export function BranchTree({
     onSetGraphBranchSelection(next);
   };
 
-  const allKnownRemoteBranches = Object.entries(remoteBranches).flatMap(([remoteName, names]) =>
-    (names ?? []).map((name) => `${remoteName}/${name}`),
-  );
   const toggleGraphRemoteBranch = (qualifiedName: string) => {
-    const shown = graphRemoteBranchSelection ?? allKnownRemoteBranches;
+    const shown = graphRemoteBranchSelection ?? remoteBranchesInGraph;
     const next = shown.includes(qualifiedName)
       ? shown.filter((n) => n !== qualifiedName)
       : [...shown, qualifiedName];
