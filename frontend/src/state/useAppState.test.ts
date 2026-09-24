@@ -337,6 +337,22 @@ describe("useAppState", () => {
     expect(result.current.state.graphBranchSelection).toEqual(["feature"]);
   });
 
+  it("setGraphRemoteBranchSelection persists the selection and reloads it on refresh", async () => {
+    let saved: string[] | undefined;
+    const client = transferClient({
+      setGraphRemoteBranchSelection: async (_repoPath, branches) => {
+        saved = branches;
+      },
+      getGraphRemoteBranchSelection: async () => saved ?? null,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
+
+    expect(saved).toEqual(["origin/feature"]);
+    expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
+  });
+
   it.each(["create", "remove", "prune"] as const)(
     "refreshes status, graph, branches, and worktrees after the %s worktree operation",
     async (operation) => {
