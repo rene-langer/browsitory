@@ -49,6 +49,9 @@ export interface AppState {
   // `null` means "no filter saved" — every local branch is walked (see `graph_log` in
   // `git-core`). Non-null is the persisted subset CommitGraph currently shows.
   graphBranchSelection: string[] | null;
+  // Independent of graphBranchSelection: this one never affects which commits `graph_log`
+  // walks, only which remote-branch badges CommitGraph renders. `null` means "show all".
+  graphRemoteBranchSelection: string[] | null;
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
   submodules: SubmoduleInfo[];
@@ -180,6 +183,7 @@ export interface UseAppStateResult {
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
+  setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
   // Fetches the next page of history (grows the graph limit by one page and reloads).
   loadMoreHistory(): Promise<void>;
   refresh(): Promise<void>;
@@ -197,6 +201,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     graphLimit: GRAPH_PAGE_SIZE,
     hasMoreHistory: false,
     graphBranchSelection: null,
+    graphRemoteBranchSelection: null,
     worktrees: [],
     submodules: [],
     reflogRefs: [],
@@ -230,7 +235,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const refresh = useCallback(async () => {
     try {
-      const graphBranchSelection = await client.getGraphBranchSelection(repoPath);
+      const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
+        client.getGraphBranchSelection(repoPath),
+        client.getGraphRemoteBranchSelection(repoPath),
+      ]);
       const limit = graphLimit.current;
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
         await Promise.all([
@@ -268,6 +276,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         graphLimit: limit,
         hasMoreHistory: commits.length >= limit,
         graphBranchSelection,
+        graphRemoteBranchSelection,
         branches,
         worktrees,
         submodules,
@@ -336,6 +345,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openCreateBranchDraft,
     closeCreateBranchDraft,
     setGraphBranchSelection,
+    setGraphRemoteBranchSelection,
   } = useBranchActions(
     client,
     repoPath,
@@ -484,6 +494,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     createPullRequest,
     openExternalUrl,
     setGraphBranchSelection,
+    setGraphRemoteBranchSelection,
     loadMoreHistory,
     refresh,
     dismissError,

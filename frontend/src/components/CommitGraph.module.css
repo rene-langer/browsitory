@@ -37,6 +37,16 @@
   flex-shrink: 0;
 }
 
+.remoteBranchBadge {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  flex-shrink: 0;
+}
+
 /* Match the commit rows' size and face; the selected tint comes from ListRow's shared token. */
 li.uncommittedRow {
   font-family: var(--font-mono);

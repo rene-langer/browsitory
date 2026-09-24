@@ -12,6 +12,7 @@ const BASE_STATE: AppState = {
   graphLimit: 300,
   hasMoreHistory: false,
   graphBranchSelection: null,
+  graphRemoteBranchSelection: null,
   branches: [],
   worktrees: [],
   submodules: [],

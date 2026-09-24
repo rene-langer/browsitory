@@ -19,6 +19,7 @@ export interface BranchActions {
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
+  setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
 }
 
 export function useBranchActions(
@@ -84,6 +85,12 @@ export function useBranchActions(
     [client, runMutation, repoPath],
   );
 
+  const setGraphRemoteBranchSelection = useCallback(
+    (selectedBranches: string[]) =>
+      runMutation(() => client.setGraphRemoteBranchSelection(repoPath, selectedBranches)),
+    [client, runMutation, repoPath],
+  );
+
   return {
     createBranch,
     switchBranch,
@@ -92,5 +99,6 @@ export function useBranchActions(
     openCreateBranchDraft,
     closeCreateBranchDraft,
     setGraphBranchSelection,
+    setGraphRemoteBranchSelection,
   };
 }

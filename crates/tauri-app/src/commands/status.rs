@@ -47,6 +47,21 @@ pub fn set_graph_branch_selection(
 }
 
 #[tauri::command]
+pub fn get_graph_remote_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
+    config::get_graph_remote_branch_selection(Path::new(&repo_path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_graph_remote_branch_selection(
+    repo_path: String,
+    selected_branches: Vec<String>,
+) -> Result<(), String> {
+    config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn get_working_diff(
     repo_path: String,
     path: String,

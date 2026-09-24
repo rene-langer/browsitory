@@ -28,6 +28,7 @@ export function CommitGraph({
   onSquashCommits,
   hasMore = false,
   onLoadMore,
+  graphRemoteBranchSelection = null,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -46,6 +47,10 @@ export function CommitGraph({
   // True when the loaded history filled its limit, so older commits probably exist.
   hasMore?: boolean;
   onLoadMore?: () => void;
+  // `null`/omitted means "show every remote badge present" — mirrors BranchTree's local
+  // `graphBranchSelection ?? branches.map(...)` fallback, but computed here from the commits
+  // actually on screen since remote selection never narrows which commits are fetched.
+  graphRemoteBranchSelection?: string[] | null;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -159,6 +164,9 @@ export function CommitGraph({
     contextMenuIndex <= activeSquashRange.end;
 
   const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
+  // `null` means "show every remote badge" — skip building the membership set entirely in that
+  // case rather than deriving one from `commits` just to have every `.includes()` check pass.
+  const shownRemoteBranches = graphRemoteBranchSelection === null ? null : new Set(graphRemoteBranchSelection);
   const laneCount =
     Math.max(
       0,
@@ -213,6 +221,14 @@ export function CommitGraph({
           </div>
           {commit.branchRefs.map((ref) => (
             <span key={ref} className={styles.branchBadge}>
+              {ref}
+            </span>
+          ))}
+          {(shownRemoteBranches === null
+            ? commit.remoteBranchRefs
+            : commit.remoteBranchRefs.filter((ref) => shownRemoteBranches.has(ref))
+          ).map((ref) => (
+            <span key={ref} className={styles.remoteBranchBadge}>
               {ref}
             </span>
           ))}

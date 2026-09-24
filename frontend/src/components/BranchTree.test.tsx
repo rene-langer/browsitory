@@ -29,6 +29,9 @@ function renderTree(overrides: Partial<BranchTreeProps> = {}) {
     operationDisabledReason: null,
     graphBranchSelection: null,
     onSetGraphBranchSelection: vi.fn(),
+    graphRemoteBranchSelection: null,
+    onSetGraphRemoteBranchSelection: vi.fn(),
+    remoteBranchesInGraph: [],
     remotes: [],
     upstream: null,
     remoteUpstreams: {},
@@ -397,6 +400,71 @@ describe("BranchTree — remotes", () => {
     // Scoped to the remote's own <li>, not `screen`: `baseBranches` (the default local branches)
     // already has a "feat/foo" branch, so an unscoped query would ambiguously match either row.
     expect(await within(remoteFolder).findByText("foo")).toBeInTheDocument();
+  });
+
+  // With no saved remote selection, every remote branch present in the commit graph
+  // (`remoteBranchesInGraph`, NOT the lazy per-remote-folder fetch cache) has its swatch pressed
+  // (shown) by default — mirroring the local-branch swatch's default (see "with no saved graph
+  // selection, every branch's graph swatch is pressed (shown) by default" above). So toggling off
+  // origin/main here removes it from that set rather than adding it; origin/develop stays, which
+  // also proves the qualified `${remoteName}/${branchName}` naming is computed correctly.
+  it("toggles a remote branch's graph visibility via its swatch button", async () => {
+    const onSetGraphRemoteBranchSelection = vi.fn();
+    renderTree({
+      remotes: oneRemote,
+      graphRemoteBranchSelection: null,
+      onSetGraphRemoteBranchSelection,
+      remoteBranchesInGraph: ["origin/main", "origin/develop"],
+      onListRemoteBranches: vi.fn().mockResolvedValue(["main", "develop"]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    await screen.findByText("main");
+
+    expect(screen.getByRole("button", { name: "Show origin/main in graph" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show origin/main in graph" }));
+
+    expect(onSetGraphRemoteBranchSelection).toHaveBeenCalledWith(["origin/develop"]);
+  });
+
+  // AUD-2026-09-24: the null-selection fallback used to derive from `remoteBranches` — this
+  // component's own lazy per-remote-folder fetch cache, only populated for remotes whose folder
+  // has been expanded — instead of `remoteBranchesInGraph`. With two remotes and only one's
+  // folder ever expanded, the first toggle used to silently drop the never-expanded remote's
+  // branches from the saved selection (they were never in the "known" set to begin with).
+  it("does not drop badges for a remote whose folder was never expanded (null-selection fallback)", async () => {
+    const onSetGraphRemoteBranchSelection = vi.fn();
+    const remotes = [
+      { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null },
+      { name: "upstream", fetchUrl: "git@github.com:user/upstream.git", pushUrl: null, authMode: null, authUsername: null },
+    ];
+    renderTree({
+      remotes,
+      graphRemoteBranchSelection: null,
+      onSetGraphRemoteBranchSelection,
+      remoteBranchesInGraph: ["origin/main", "upstream/feature"],
+      onListRemoteBranches: vi.fn().mockResolvedValue(["main"]),
+    });
+
+    // Expand only "origin" — "upstream"'s folder is never touched, so `remoteBranches` (the lazy
+    // fetch cache) never gets an entry for it.
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    await screen.findByText("main");
+
+    expect(screen.getByRole("button", { name: "Show origin/main in graph" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // Toggling off origin/main must save a selection that still includes upstream/feature: if the
+    // fallback wrongly derived from the lazy fetch cache instead of `remoteBranchesInGraph`,
+    // upstream/feature would silently vanish here even though its folder was never expanded.
+    fireEvent.click(screen.getByRole("button", { name: "Show origin/main in graph" }));
+    expect(onSetGraphRemoteBranchSelection).toHaveBeenCalledWith(["upstream/feature"]);
   });
 
   it("does not re-fetch remote branches on a second expand", async () => {

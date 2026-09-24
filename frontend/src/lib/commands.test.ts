@@ -19,6 +19,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       graphLimit: 300,
       hasMoreHistory: false,
       graphBranchSelection: null,
+      graphRemoteBranchSelection: null,
       branches: [
         { name: "main", isCurrent: true },
         { name: "feature", isCurrent: false },
@@ -126,6 +127,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     createPullRequest: vi.fn(),
     openExternalUrl: vi.fn(),
     setGraphBranchSelection: vi.fn(),
+    setGraphRemoteBranchSelection: vi.fn(),
     loadMoreHistory: vi.fn(),
     refresh: vi.fn(),
     dismissError: vi.fn(),

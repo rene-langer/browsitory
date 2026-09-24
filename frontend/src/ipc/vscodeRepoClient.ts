@@ -208,6 +208,10 @@ export const vscodeRepoClient: RepoClient = {
     call<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
+  getGraphRemoteBranchSelection: (repoPath: string) =>
+    call<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
+  setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
+    call<void>("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     call<string[]>("get_commit_files", { repoPath, commitId }),
   getCommitMessage: (repoPath: string, commitId: string) =>

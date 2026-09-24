@@ -73,6 +73,8 @@ const remoteManagementClient = {
   openExternalUrl: async () => unimplemented(),
   getGraphBranchSelection: async () => null,
   setGraphBranchSelection: async () => {},
+  getGraphRemoteBranchSelection: async () => null,
+  setGraphRemoteBranchSelection: async () => {},
   logFrontendError: async () => {},
 };
 
@@ -298,6 +300,7 @@ describe("useAppState", () => {
       timestamp: n,
       parentIds: [],
       branchRefs: [],
+      remoteBranchRefs: [],
     });
     const full = Array.from({ length: 300 }, (_, n) => commitFor(n));
     const client = transferClient({ getCommitGraph: async (_repoPath, limit) => full.slice(0, limit) });
@@ -332,6 +335,43 @@ describe("useAppState", () => {
     expect(saved).toEqual(["feature"]);
     expect(selectionForGraph).toEqual(["feature"]);
     expect(result.current.state.graphBranchSelection).toEqual(["feature"]);
+  });
+
+  it("setGraphRemoteBranchSelection persists the selection and reloads it on refresh", async () => {
+    let saved: string[] | undefined;
+    const client = transferClient({
+      setGraphRemoteBranchSelection: async (_repoPath, branches) => {
+        saved = branches;
+      },
+      getGraphRemoteBranchSelection: async () => saved ?? null,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
+
+    expect(saved).toEqual(["origin/feature"]);
+    expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
+  });
+
+  it("setGraphRemoteBranchSelection leaves getCommitGraph's local-selection arg untouched", async () => {
+    const selectedBranchesSeen: (string[] | null | undefined)[] = [];
+    const client = transferClient({
+      getGraphBranchSelection: async () => ["main"],
+      setGraphRemoteBranchSelection: async () => {},
+      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
+        selectedBranchesSeen.push(selectedBranches);
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
+
+    // The remote-branch selection is a separate axis from the local `selectedBranches` arg
+    // `getCommitGraph` is called with — the two refreshes above must pass the identical local
+    // selection regardless of the remote-selection mutation in between.
+    expect(selectedBranchesSeen).toEqual([["main"], ["main"]]);
   });
 
   it.each(["create", "remove", "prune"] as const)(
@@ -1030,6 +1070,7 @@ describe("useAppState", () => {
       timestamp: 0,
       parentIds: [],
       branchRefs: [],
+      remoteBranchRefs: [],
     };
     const client: RepoClient = {
       ...remoteManagementClient,
