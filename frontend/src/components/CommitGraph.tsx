@@ -164,8 +164,9 @@ export function CommitGraph({
     contextMenuIndex <= activeSquashRange.end;
 
   const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
-  const shownRemoteBranches =
-    graphRemoteBranchSelection ?? Array.from(new Set(commits.flatMap((c) => c.remoteBranchRefs)));
+  // `null` means "show every remote badge" — skip building the membership set entirely in that
+  // case rather than deriving one from `commits` just to have every `.includes()` check pass.
+  const shownRemoteBranches = graphRemoteBranchSelection === null ? null : new Set(graphRemoteBranchSelection);
   const laneCount =
     Math.max(
       0,
@@ -223,13 +224,14 @@ export function CommitGraph({
               {ref}
             </span>
           ))}
-          {commit.remoteBranchRefs
-            .filter((ref) => shownRemoteBranches.includes(ref))
-            .map((ref) => (
-              <span key={ref} className={styles.remoteBranchBadge}>
-                {ref}
-              </span>
-            ))}
+          {(shownRemoteBranches === null
+            ? commit.remoteBranchRefs
+            : commit.remoteBranchRefs.filter((ref) => shownRemoteBranches.has(ref))
+          ).map((ref) => (
+            <span key={ref} className={styles.remoteBranchBadge}>
+              {ref}
+            </span>
+          ))}
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>

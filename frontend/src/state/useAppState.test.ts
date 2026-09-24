@@ -353,6 +353,27 @@ describe("useAppState", () => {
     expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
   });
 
+  it("setGraphRemoteBranchSelection leaves getCommitGraph's local-selection arg untouched", async () => {
+    const selectedBranchesSeen: (string[] | null | undefined)[] = [];
+    const client = transferClient({
+      getGraphBranchSelection: async () => ["main"],
+      setGraphRemoteBranchSelection: async () => {},
+      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
+        selectedBranchesSeen.push(selectedBranches);
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
+
+    // The remote-branch selection is a separate axis from the local `selectedBranches` arg
+    // `getCommitGraph` is called with — the two refreshes above must pass the identical local
+    // selection regardless of the remote-selection mutation in between.
+    expect(selectedBranchesSeen).toEqual([["main"], ["main"]]);
+  });
+
   it.each(["create", "remove", "prune"] as const)(
     "refreshes status, graph, branches, and worktrees after the %s worktree operation",
     async (operation) => {

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import { CommitGraph } from "./CommitGraph";
+import styles from "./CommitGraph.module.css";
 
 const status: StatusEntry[] = [
   { path: "src/main.rs", staged: false, kind: "Modified" },
@@ -280,6 +281,71 @@ describe("CommitGraph", () => {
     );
 
     expect(screen.queryByText("origin/main")).not.toBeInTheDocument();
+  });
+
+  it("hides every remote branch badge when graphRemoteBranchSelection is an explicit empty array", () => {
+    const commitsWithRemoteBranch: GraphCommit[] = [
+      { ...commits[0], remoteBranchRefs: ["origin/main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithRemoteBranch}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        graphRemoteBranchSelection={[]}
+      />,
+    );
+
+    expect(screen.queryByText("origin/main")).not.toBeInTheDocument();
+  });
+
+  it("still shows a remote branch badge whose ref is included in graphRemoteBranchSelection", () => {
+    const commitsWithRemoteBranch: GraphCommit[] = [
+      { ...commits[0], remoteBranchRefs: ["origin/main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithRemoteBranch}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        graphRemoteBranchSelection={["origin/main"]}
+      />,
+    );
+
+    expect(screen.getByText("origin/main")).toBeInTheDocument();
+  });
+
+  it("renders both a local and a remote badge for a commit that is both tips, each with its own CSS class", () => {
+    const commitsWithBothBadges: GraphCommit[] = [
+      { ...commits[0], branchRefs: ["main"], remoteBranchRefs: ["origin/main"] },
+      commits[1],
+    ];
+    render(
+      <CommitGraph
+        status={status}
+        commits={commitsWithBothBadges}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    const localBadge = screen.getByText("main");
+    const remoteBadge = screen.getByText("origin/main");
+    expect(localBadge).toHaveClass(styles.branchBadge);
+    expect(remoteBadge).toHaveClass(styles.remoteBranchBadge);
   });
 
   it("renders a lane graphic for every commit row", () => {
