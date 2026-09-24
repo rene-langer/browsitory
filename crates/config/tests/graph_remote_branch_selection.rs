@@ -43,7 +43,10 @@ fn set_graph_remote_branch_selection_at_overwrites_a_previous_selection_for_the_
     let result = get_graph_remote_branch_selection_at(&config_file, &repo_path).unwrap();
     assert_eq!(
         result,
-        Some(vec!["origin/main".to_string(), "origin/feature".to_string()])
+        Some(vec![
+            "origin/main".to_string(),
+            "origin/feature".to_string()
+        ])
     );
 }
 
@@ -52,10 +55,18 @@ fn set_graph_remote_branch_selection_at_keeps_selections_for_other_repos_separat
     let dir = tempfile::TempDir::new().unwrap();
     let config_file = dir.path().join("config.toml");
 
-    set_graph_remote_branch_selection_at(&config_file, Path::new("/repo/a"), &["origin/main".to_string()])
-        .unwrap();
-    set_graph_remote_branch_selection_at(&config_file, Path::new("/repo/b"), &["origin/dev".to_string()])
-        .unwrap();
+    set_graph_remote_branch_selection_at(
+        &config_file,
+        Path::new("/repo/a"),
+        &["origin/main".to_string()],
+    )
+    .unwrap();
+    set_graph_remote_branch_selection_at(
+        &config_file,
+        Path::new("/repo/b"),
+        &["origin/dev".to_string()],
+    )
+    .unwrap();
 
     assert_eq!(
         get_graph_remote_branch_selection_at(&config_file, Path::new("/repo/a")).unwrap(),

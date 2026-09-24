@@ -329,7 +329,9 @@ pub fn set_graph_branch_selection_at(
     write_config(config_file, &config)
 }
 
-pub fn get_graph_remote_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>>, ConfigError> {
+pub fn get_graph_remote_branch_selection(
+    repo_path: &Path,
+) -> Result<Option<Vec<String>>, ConfigError> {
     get_graph_remote_branch_selection_at(&config_file_path()?, repo_path)
 }
 
@@ -361,10 +363,12 @@ pub fn set_graph_remote_branch_selection_at(
     config
         .graph_remote_branch_selections
         .retain(|s| s.repo_path != repo_path);
-    config.graph_remote_branch_selections.push(GraphRemoteBranchSelection {
-        repo_path: repo_path.to_path_buf(),
-        selected_branches: selected_branches.to_vec(),
-    });
+    config
+        .graph_remote_branch_selections
+        .push(GraphRemoteBranchSelection {
+            repo_path: repo_path.to_path_buf(),
+            selected_branches: selected_branches.to_vec(),
+        });
     write_config(config_file, &config)
 }
 
