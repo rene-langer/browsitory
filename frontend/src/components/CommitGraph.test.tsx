@@ -18,6 +18,7 @@ const commits: GraphCommit[] = [
     timestamp: 2,
     parentIds: [],
     branchRefs: [],
+    remoteBranchRefs: [],
   },
   {
     id: "bbb222...",
@@ -28,6 +29,7 @@ const commits: GraphCommit[] = [
     timestamp: 1,
     parentIds: [],
     branchRefs: [],
+    remoteBranchRefs: [],
   },
 ];
 
@@ -221,7 +223,7 @@ describe("CommitGraph", () => {
 
   it("renders a branch badge for a commit that is a branch tip", () => {
     const commitsWithBranch: GraphCommit[] = [
-      { ...commits[0], branchRefs: ["main"] },
+      { ...commits[0], branchRefs: ["main"], remoteBranchRefs: [] },
       commits[1],
     ];
     render(
@@ -325,6 +327,7 @@ describe("CommitGraph", () => {
         timestamp: 3,
         parentIds: ["M1"],
         branchRefs: [],
+        remoteBranchRefs: [],
       },
       {
         id: "M2",
@@ -335,6 +338,7 @@ describe("CommitGraph", () => {
         timestamp: 2,
         parentIds: ["M1"],
         branchRefs: [],
+        remoteBranchRefs: [],
       },
       {
         id: "M1",
@@ -345,6 +349,7 @@ describe("CommitGraph", () => {
         timestamp: 1,
         parentIds: [],
         branchRefs: [],
+        remoteBranchRefs: [],
       },
     ];
 

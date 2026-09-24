@@ -112,6 +112,7 @@ export interface GraphCommit {
   timestamp: number;
   parentIds: string[];
   branchRefs: string[];
+  remoteBranchRefs: string[];
 }
 
 export interface BlameLine {
@@ -237,6 +238,8 @@ export interface RepoClient {
   getCommitGraph(repoPath: string, limit: number, selectedBranches: string[] | null): Promise<GraphCommit[]>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
+  setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   getWorkingDiff(repoPath: string, path: string, staged: boolean): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;

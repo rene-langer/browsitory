@@ -12,6 +12,7 @@ function commit(id: string, parentIds: string[]): GraphCommit {
     timestamp: 0,
     parentIds,
     branchRefs: [],
+    remoteBranchRefs: [],
   };
 }
 

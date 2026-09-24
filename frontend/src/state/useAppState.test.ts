@@ -298,6 +298,7 @@ describe("useAppState", () => {
       timestamp: n,
       parentIds: [],
       branchRefs: [],
+      remoteBranchRefs: [],
     });
     const full = Array.from({ length: 300 }, (_, n) => commitFor(n));
     const client = transferClient({ getCommitGraph: async (_repoPath, limit) => full.slice(0, limit) });
@@ -1030,6 +1031,7 @@ describe("useAppState", () => {
       timestamp: 0,
       parentIds: [],
       branchRefs: [],
+      remoteBranchRefs: [],
     };
     const client: RepoClient = {
       ...remoteManagementClient,
