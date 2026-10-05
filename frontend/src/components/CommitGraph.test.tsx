@@ -1,6 +1,8 @@
+import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
+import type { SelectedRow } from "../state/useAppState";
 import { CommitGraph } from "./CommitGraph";
 import styles from "./CommitGraph.module.css";
 
@@ -485,16 +487,33 @@ describe("CommitGraph", () => {
     expect(f1Circle.getAttribute("opacity")).toBe("1");
   });
 
-  it("shift-clicking a second commit and right-clicking within the range shows a Squash entry", () => {
-    // A straight three-commit chain: C -> B -> A, oldest last (array order matches CommitGraph's
-    // newest-first display order).
-    const chainCommits: GraphCommit[] = [
-      { ...commits[0], id: "C", shortId: "C", summary: "C", parentIds: ["B"] },
-      { ...commits[0], id: "B", shortId: "B", summary: "B", parentIds: ["A"] },
-      { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: [] },
-    ];
-    render(
+  const chainCommits: GraphCommit[] = [
+    { ...commits[0], id: "D", shortId: "D", summary: "D", parentIds: ["C"] },
+    { ...commits[0], id: "C", shortId: "C", summary: "C", parentIds: ["B"] },
+    { ...commits[0], id: "B", shortId: "B", summary: "B", parentIds: ["A"] },
+    { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: ["R"] },
+  ];
+
+  // `selectedRow` is controlled by the app, and the graph only honors a multi-selection while the
+  // focused commit belongs to it, so these tests need a stateful host rather than a static prop.
+  function Host(props: ComponentProps<typeof CommitGraph>) {
+    const [selectedRow, setSelectedRow] = useState<SelectedRow>(props.selectedRow);
+    return (
       <CommitGraph
+        {...props}
+        selectedRow={selectedRow}
+        onSelectRow={(next) => {
+          setSelectedRow(next);
+          props.onSelectRow(next);
+        }}
+      />
+    );
+  }
+
+  function renderChain(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    const onRebaseSelection = vi.fn();
+    render(
+      <Host
         status={status}
         commits={chainCommits}
         selectedRow="uncommitted"
@@ -502,72 +521,147 @@ describe("CommitGraph", () => {
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
-        onSquashCommits={vi.fn()}
+        onRebaseSelection={onRebaseSelection}
+        {...overrides}
       />,
     );
+    return { onRebaseSelection };
+  }
 
-    fireEvent.click(screen.getByText(/^C /).closest("li")!);
-    fireEvent.click(screen.getByText(/^B /).closest("li")!, { shiftKey: true });
-    fireEvent.contextMenu(screen.getByText(/^B /).closest("li")!);
+  const row = (name: string) => screen.getByText(new RegExp(`^${name} `)).closest("li")!;
 
-    expect(screen.getByText("Squash 2 commits")).toBeInTheDocument();
+  it("shift-clicking a second commit and right-clicking within the range shows the multi-select menu", () => {
+    renderChain();
+
+    fireEvent.click(row("C"));
+    fireEvent.click(row("B"), { shiftKey: true });
+    fireEvent.contextMenu(row("B"));
+
+    expect(screen.getByRole("menuitem", { name: "Squash 2 commits" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Interactive rebase…" })).toBeEnabled();
     expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
   });
 
-  it("clicking Squash N commits calls onSquashCommits with the base commit and the newer ids to fold in", () => {
-    const chainCommits: GraphCommit[] = [
-      { ...commits[0], id: "C", shortId: "C", summary: "C", parentIds: ["B"] },
+  it("Squash N commits opens the planner on the oldest selected commit's parent with the newer ones preset", () => {
+    const { onRebaseSelection } = renderChain();
+
+    fireEvent.click(row("C"));
+    fireEvent.click(row("B"), { shiftKey: true });
+    fireEvent.contextMenu(row("B"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits" }));
+
+    // C and B fold together onto B's parent A; B (oldest) stays the surviving Pick.
+    expect(onRebaseSelection).toHaveBeenCalledWith("A", new Map([["C", "Squash"]]));
+  });
+
+  it("Ctrl+click toggles a non-adjacent commit into the selection", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+
+    expect(row("D")).toHaveAttribute("aria-selected", "true");
+    expect(row("C")).toHaveAttribute("aria-selected", "false");
+    expect(row("B")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("toolbar", { name: "Selected commits" })).toHaveTextContent(
+      "2 commits selected",
+    );
+  });
+
+  it("Cmd+click toggles too, and toggling a selected commit off removes it", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { metaKey: true });
+    fireEvent.click(row("B"), { metaKey: true });
+
+    expect(row("B")).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+  });
+
+  it("a non-adjacent selection offers Drop and Interactive rebase but disables Squash and Fixup", () => {
+    const { onRebaseSelection } = renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+
+    expect(screen.getByRole("button", { name: "Squash 2 commits" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fixup 2 commits" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Drop 2 commits" }));
+    expect(onRebaseSelection).toHaveBeenLastCalledWith(
+      "A",
+      new Map([
+        ["B", "Drop"],
+        ["D", "Drop"],
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Interactive rebase…" }));
+    expect(onRebaseSelection).toHaveBeenLastCalledWith("A", new Map());
+  });
+
+  it("disables every multi-select action while a repository operation is pending", () => {
+    renderChain({ pending: true });
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+
+    for (const name of ["Interactive rebase…", "Drop 2 commits"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+  });
+
+  it("explains why actions are disabled when the selection holds a root commit", () => {
+    const rootChain: GraphCommit[] = [
       { ...commits[0], id: "B", shortId: "B", summary: "B", parentIds: ["A"] },
       { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: [] },
     ];
-    const onSquashCommits = vi.fn();
-    render(
-      <CommitGraph
-        status={status}
-        commits={chainCommits}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={vi.fn()}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onSquashCommits={onSquashCommits}
-      />,
-    );
+    renderChain({ commits: rootChain });
 
-    fireEvent.click(screen.getByText(/^C /).closest("li")!);
-    fireEvent.click(screen.getByText(/^B /).closest("li")!, { shiftKey: true });
-    fireEvent.contextMenu(screen.getByText(/^B /).closest("li")!);
-    fireEvent.click(screen.getByText("Squash 2 commits"));
+    fireEvent.click(row("B"));
+    fireEvent.click(row("A"), { shiftKey: true });
 
-    // C and B fold into B's parent A (the oldest selected commit stays as the surviving Pick).
-    expect(onSquashCommits).toHaveBeenCalledWith("A", ["C"]);
+    const drop = screen.getByRole("button", { name: "Drop 2 commits" });
+    expect(drop).toBeDisabled();
+    expect(drop).toHaveAttribute("title", "Merge and root commits can't be rebased.");
   });
 
-  it("does not offer Squash across a fork point (non-linear range)", () => {
+  it("Escape collapses a multi-selection back to the focused commit", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+  });
+
+  it("right-clicking a commit outside the selection opens the normal single-commit menu", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.contextMenu(row("C"));
+
+    expect(screen.getByRole("menuitem", { name: "Branch from here" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Drop 2 commits" })).not.toBeInTheDocument();
+  });
+
+  it("disables Squash across a fork point but still offers Interactive rebase", () => {
     const forkCommits: GraphCommit[] = [
       { ...commits[0], id: "F1", shortId: "F1", summary: "F1", parentIds: ["M1"] },
       { ...commits[0], id: "M2", shortId: "M2", summary: "M2", parentIds: ["M1"] },
-      { ...commits[0], id: "M1", shortId: "M1", summary: "M1", parentIds: [] },
+      { ...commits[0], id: "M1", shortId: "M1", summary: "M1", parentIds: ["R"] },
     ];
-    render(
-      <CommitGraph
-        status={status}
-        commits={forkCommits}
-        selectedRow="uncommitted"
-        pending={false}
-        onSelectRow={vi.fn()}
-        onBranchFromCommit={vi.fn()}
-        onRebaseFromCommit={vi.fn()}
-        onSquashCommits={vi.fn()}
-      />,
-    );
+    renderChain({ commits: forkCommits });
 
-    fireEvent.click(screen.getByText(/^F1 /).closest("li")!);
-    fireEvent.click(screen.getByText(/^M2 /).closest("li")!, { shiftKey: true });
-    fireEvent.contextMenu(screen.getByText(/^M2 /).closest("li")!);
+    fireEvent.click(row("F1"));
+    fireEvent.click(row("M2"), { shiftKey: true });
+    fireEvent.contextMenu(row("M2"));
 
-    expect(screen.queryByText(/Squash \d+ commits/)).not.toBeInTheDocument();
-    expect(screen.getByText("Branch from here")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Squash 2 commits" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Interactive rebase…" })).toBeEnabled();
   });
 
   it("disables Rebase onto here while a repository operation is pending", () => {
@@ -601,7 +695,7 @@ describe("CommitGraph — keyboard access", () => {
       onSelectRow: vi.fn(),
       onBranchFromCommit: vi.fn(),
       onRebaseFromCommit: vi.fn(),
-      onSquashCommits: vi.fn(),
+      onRebaseSelection: vi.fn(),
     };
     const utils = render(
       <CommitGraph status={status} commits={chain} selectedRow={selectedRow} pending={false} {...handlers} />,
@@ -653,8 +747,8 @@ describe("CommitGraph — keyboard access", () => {
     expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
   });
 
-  it("Shift+ArrowDown extends a squash range that the menu then offers", () => {
-    const { rerender, list, onSelectRow, onSquashCommits, ...rest } = setup({ commitId: "C" });
+  it("Shift+ArrowDown extends the selection and the menu then offers Squash", () => {
+    const { rerender, list, onSelectRow, onRebaseSelection, ...rest } = setup({ commitId: "C" });
     fireEvent.click(screen.getByText(/^C /).closest("li")!);
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
     expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
@@ -667,12 +761,12 @@ describe("CommitGraph — keyboard access", () => {
         onSelectRow={onSelectRow}
         onBranchFromCommit={rest.onBranchFromCommit}
         onRebaseFromCommit={rest.onRebaseFromCommit}
-        onSquashCommits={onSquashCommits}
+        onRebaseSelection={onRebaseSelection}
       />,
     );
     fireEvent.keyDown(list, { key: "Enter" });
     fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits" }));
-    expect(onSquashCommits).toHaveBeenCalledWith("A", ["C"]);
+    expect(onRebaseSelection).toHaveBeenCalledWith("A", new Map([["C", "Squash"]]));
   });
 
   it("keys pressed inside the open menu do not re-trigger list navigation", () => {
