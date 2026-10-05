@@ -2,8 +2,9 @@ import type { GraphCommit } from "../ipc/RepoClient";
 import { isSquashableRange } from "./commitGraphLayout";
 
 // Actions a graph multi-select can preset in the rebase planner. "Pick" is the planner's own
-// default, so it is never preset.
-export type PresetAction = "Squash" | "Fixup" | "Drop";
+// default, so it changes no row; it is preset for a plain Interactive rebase… only so the
+// planner's "not on the current branch" guard still covers every selected commit.
+export type PresetAction = "Pick" | "Squash" | "Fixup" | "Drop";
 
 export interface RebaseSelection {
   // Parent of the oldest selected commit: the base the planner rebases onto.
@@ -48,11 +49,15 @@ export function planRebaseSelection(
 
 export function presetForAction(
   selection: RebaseSelection,
-  action: PresetAction,
+  action: Exclude<PresetAction, "Pick">,
 ): Map<string, PresetAction> {
   // The oldest selected commit is the first entry of the plan; Squash/Fixup there have no
   // predecessor to fold into (the planner disables them on row 0), so it stays a Pick and the
   // rest fold into it.
   const ids = action === "Drop" ? selection.idsOldestFirst : selection.idsOldestFirst.slice(1);
   return new Map(ids.map((id) => [id, action]));
+}
+
+export function presetPickAll(selection: RebaseSelection): Map<string, PresetAction> {
+  return new Map(selection.idsOldestFirst.map((id) => [id, "Pick"]));
 }

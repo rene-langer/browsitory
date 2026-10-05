@@ -441,4 +441,24 @@ describe("RebasePlanner", () => {
     );
     expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
   });
+
+  it("also blocks Start when an all-Pick preset names a commit outside the planned history", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={client}
+        onto="base"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+        presetActions={new Map([["aaa", "Pick"], ["not-on-this-branch", "Pick"]])}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Some selected commits are not on the current branch",
+    );
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+  });
 });

@@ -598,16 +598,27 @@ describe("CommitGraph", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Interactive rebase…" }));
-    expect(onRebaseSelection).toHaveBeenLastCalledWith("A", new Map());
+    expect(onRebaseSelection).toHaveBeenLastCalledWith(
+      "A",
+      new Map([
+        ["B", "Pick"],
+        ["D", "Pick"],
+      ]),
+    );
   });
 
   it("disables every multi-select action while a repository operation is pending", () => {
     renderChain({ pending: true });
 
-    fireEvent.click(row("D"));
-    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.click(row("C"));
+    fireEvent.click(row("B"), { shiftKey: true });
 
-    for (const name of ["Interactive rebase…", "Drop 2 commits"]) {
+    for (const name of [
+      "Interactive rebase…",
+      "Squash 2 commits",
+      "Fixup 2 commits",
+      "Drop 2 commits",
+    ]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
   });
@@ -635,6 +646,110 @@ describe("CommitGraph", () => {
     fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
 
     expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+  });
+
+  it("Escape keeps the focused commit selected", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+
+    expect(row("B")).toHaveAttribute("aria-selected", "true");
+    expect(row("D")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("Ctrl-toggling off the focused commit moves focus to a remaining selected commit", () => {
+    const onSelectRow = vi.fn();
+    renderChain({ onSelectRow });
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("C"), { ctrlKey: true });
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.click(row("B"), { ctrlKey: true });
+
+    expect(row("B")).toHaveAttribute("aria-selected", "false");
+    expect(row("D")).toHaveAttribute("aria-selected", "true");
+    expect(row("C")).toHaveAttribute("aria-selected", "true");
+    const focused = onSelectRow.mock.lastCall![0] as { commitId: string };
+    expect(["D", "C"]).toContain(focused.commitId);
+    expect(screen.getByRole("toolbar", { name: "Selected commits" })).toHaveTextContent(
+      "2 commits selected",
+    );
+  });
+
+  it("Ctrl-toggling off a non-focused commit keeps focus where it is", () => {
+    const onSelectRow = vi.fn();
+    renderChain({ onSelectRow });
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("C"), { ctrlKey: true });
+    fireEvent.click(row("B"), { ctrlKey: true });
+    // Focus is on B; toggle off C.
+    fireEvent.click(row("C"), { ctrlKey: true });
+
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
+    expect(row("C")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("clicking the Uncommitted row collapses a multi-selection", () => {
+    renderChain();
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.click(screen.getByText(/Uncommitted Changes/).closest("li")!);
+
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+    expect(row("D")).toHaveAttribute("aria-selected", "false");
+    expect(row("B")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("an external focus change collapses the selection, and it does not resurface later", () => {
+    const props = {
+      status,
+      commits: chainCommits,
+      pending: false,
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+    };
+    const view = render(<CommitGraph {...props} selectedRow={{ commitId: "D" }} />);
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    // The graph reported B as focus; the static prop is the host's reaction.
+    view.rerender(<CommitGraph {...props} selectedRow={{ commitId: "B" }} />);
+    expect(screen.getByRole("toolbar", { name: "Selected commits" })).toBeInTheDocument();
+
+    // Search/sidebar jumps focus to C, then back to former member D.
+    view.rerender(<CommitGraph {...props} selectedRow={{ commitId: "C" }} />);
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+    view.rerender(<CommitGraph {...props} selectedRow={{ commitId: "D" }} />);
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+    expect(row("B")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("prunes selected ids that are no longer in the loaded commits", () => {
+    const props = {
+      status,
+      pending: false,
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+    };
+    const view = render(
+      <CommitGraph {...props} commits={chainCommits} selectedRow={{ commitId: "D" }} />,
+    );
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    view.rerender(<CommitGraph {...props} commits={chainCommits} selectedRow={{ commitId: "B" }} />);
+    expect(screen.getByRole("toolbar", { name: "Selected commits" })).toBeInTheDocument();
+
+    // D disappears (e.g. after a rebase/refresh): only B remains, so no multi-select toolbar.
+    view.rerender(
+      <CommitGraph {...props} commits={chainCommits.filter((c) => c.id !== "D")} selectedRow={{ commitId: "B" }} />,
+    );
+    expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
+    expect(row("B")).toHaveAttribute("aria-selected", "true");
   });
 
   it("right-clicking a commit outside the selection opens the normal single-commit menu", () => {

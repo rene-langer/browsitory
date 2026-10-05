@@ -8,7 +8,12 @@ import {
   toggleCommit,
   type CommitSelection,
 } from "../lib/commitSelection";
-import { planRebaseSelection, presetForAction, type PresetAction } from "../lib/rebaseSelection";
+import {
+  planRebaseSelection,
+  presetForAction,
+  presetPickAll,
+  type PresetAction,
+} from "../lib/rebaseSelection";
 import type { SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
@@ -49,8 +54,8 @@ export function CommitGraph({
   onRebaseFromCommit: (commitId: string) => void;
   // Called when the user acts on a multi-commit selection (Interactive rebase…, Squash, Fixup,
   // Drop). `onto` is the oldest selected commit's own parent — the base the planner rebases onto;
-  // `preset` maps commit ids to the action to pre-mark in the planner (empty for a plain
-  // Interactive rebase…).
+  // `preset` maps commit ids to the action to pre-mark in the planner (every selected
+  // id as "Pick" for a plain Interactive rebase…, so the planner still checks they are on the branch).
   onRebaseSelection?: (onto: string, preset: ReadonlyMap<string, PresetAction>) => void;
   // True when the loaded history filled its limit, so older commits probably exist.
   hasMore?: boolean;
@@ -66,7 +71,12 @@ export function CommitGraph({
     y: number;
   } | null>(null);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
-  const [selection, setSelection] = useState<CommitSelection>(EMPTY_SELECTION);
+  // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
+  // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
+  const [{ selection, focusId }, setGraphSelection] = useState<{
+    selection: CommitSelection;
+    focusId: string | null;
+  }>({ selection: EMPTY_SELECTION, focusId: null });
 
   const rows: SelectedRow[] = [
     "uncommitted",
@@ -74,16 +84,26 @@ export function CommitGraph({
   ];
   const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
 
-  // The multi-selection only counts while the focused commit belongs to it. Anything that moves
-  // the focus elsewhere (a click outside the graph, search, the Uncommitted row) therefore
-  // collapses it without an effect to keep two sources of truth in sync.
+  // The multi-selection only counts while the focused commit is the one the graph last set and
+  // belongs to it, and only for commits still loaded. Anything else (a click outside the graph,
+  // search, the Uncommitted row, a refresh) collapses or prunes it without an effect keeping two
+  // sources of truth in sync.
   const primaryId = typeof selectedRow === "object" ? selectedRow.commitId : null;
-  const effectiveSelection: CommitSelection =
-    primaryId === null
-      ? EMPTY_SELECTION
-      : selection.ids.has(primaryId)
-        ? selection
-        : selectOnly(primaryId);
+  const effectiveSelection: CommitSelection = (() => {
+    if (primaryId === null) return EMPTY_SELECTION;
+    if (primaryId !== focusId) return selectOnly(primaryId);
+    const loaded = new Set(commits.map((commit) => commit.id));
+    const ids = new Set([...selection.ids].filter((id) => loaded.has(id)));
+    if (!ids.has(primaryId)) return selectOnly(primaryId);
+    if (ids.size === selection.ids.size) return selection;
+    const anchorId = selection.anchorId !== null && ids.has(selection.anchorId) ? selection.anchorId : primaryId;
+    return { ids, anchorId };
+  })();
+
+  const setSelection = (next: CommitSelection, row: SelectedRow) => {
+    setGraphSelection({ selection: next, focusId: typeof row === "object" ? row.commitId : null });
+    onSelectRow(row);
+  };
 
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -98,14 +118,13 @@ export function CommitGraph({
     if (nextIndex > rows.length - 1 && hasMore) onLoadMore?.();
     const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
     if (next < 1) {
-      setSelection(EMPTY_SELECTION);
+      setSelection(EMPTY_SELECTION, rows[next]);
     } else if (extendRange) {
       // Row 0 is "Uncommitted Changes"; commit rows are offset by one.
-      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id));
+      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next]);
     } else {
-      setSelection(selectOnly(commits[next - 1].id));
+      setSelection(selectOnly(commits[next - 1].id), rows[next]);
     }
-    onSelectRow(rows[next]);
   };
 
   const openMenuForSelected = (list: HTMLUListElement) => {
@@ -144,7 +163,7 @@ export function CommitGraph({
     } else if (event.key === "Escape") {
       if (effectiveSelection.ids.size > 1 && primaryId !== null) {
         event.preventDefault();
-        setSelection(selectOnly(primaryId));
+        setSelection(selectOnly(primaryId), { commitId: primaryId });
       }
     } else if (event.key === "Enter" || event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
       event.preventDefault();
@@ -161,14 +180,19 @@ export function CommitGraph({
     if (event?.ctrlKey || event?.metaKey) {
       const next = toggleCommit(effectiveSelection, commitId);
       if (next.ids.size === 0) return; // the only selected commit can't be toggled off
-      setSelection(next);
-      onSelectRow({ commitId: next.ids.has(commitId) ? commitId : (next.anchorId ?? commitId) });
+      // Keep focus where it is unless the focused commit itself was toggled off.
+      const focus = next.ids.has(commitId)
+        ? commitId
+        : primaryId !== null && next.ids.has(primaryId)
+          ? primaryId
+          : (next.anchorId ?? commitId);
+      setSelection(next, { commitId: focus });
       return;
     }
     setSelection(
       event?.shiftKey ? extendSelection(effectiveSelection, commits, commitId) : selectOnly(commitId),
+      { commitId },
     );
-    onSelectRow({ commitId });
   };
 
   const multiSelected = effectiveSelection.ids.size >= 2;
@@ -196,12 +220,12 @@ export function CommitGraph({
     }
     const { selection: plan } = rebasePlan;
     const needsRun = "Squash and Fixup need commits that are next to each other.";
-    const act = (action: PresetAction) => () =>
+    const act = (action: Exclude<PresetAction, "Pick">) => () =>
       onRebaseSelection?.(plan.onto, presetForAction(plan, action));
     return [
       {
         label: "Interactive rebase…",
-        onSelect: () => onRebaseSelection?.(plan.onto, new Map()),
+        onSelect: () => onRebaseSelection?.(plan.onto, presetPickAll(plan)),
         disabled: pending,
       },
       {
@@ -253,8 +277,7 @@ export function CommitGraph({
         className={styles.uncommittedRow}
         selected={selectedRow === "uncommitted"}
         onClick={() => {
-          setSelection(EMPTY_SELECTION);
-          onSelectRow("uncommitted");
+          setSelection(EMPTY_SELECTION, "uncommitted");
         }}
       >
         <div className={styles.graphCell}>

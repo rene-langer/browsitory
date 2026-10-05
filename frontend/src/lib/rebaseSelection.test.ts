@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphCommit } from "../ipc/RepoClient";
-import { planRebaseSelection, presetForAction } from "./rebaseSelection";
+import { planRebaseSelection, presetForAction, presetPickAll } from "./rebaseSelection";
 
 function commit(id: string, parentIds: string[]): GraphCommit {
   return {
@@ -97,6 +97,18 @@ describe("presetForAction", () => {
         ["B", "Drop"],
         ["C", "Drop"],
         ["D", "Drop"],
+      ]),
+    );
+  });
+});
+
+describe("presetPickAll", () => {
+  it("marks every selected commit as Pick so the planner can verify they are all on the branch", () => {
+    const selection = { onto: "A", contiguous: false, idsOldestFirst: ["B", "D"] };
+    expect(presetPickAll(selection)).toEqual(
+      new Map([
+        ["B", "Pick"],
+        ["D", "Pick"],
       ]),
     );
   });
