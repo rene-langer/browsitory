@@ -39,9 +39,12 @@ interactive rebase planner on it. Gap vs Sublime Merge.
 
 - With 2+ commits selected, context menu and a small action bar show: Interactive rebase…, Squash,
   Fixup, Drop.
-- Base must be a linear first-parent chain from HEAD to the oldest selected commit. If the span
-  includes a merge commit or a selected commit is not reachable from HEAD, actions are disabled with
-  an explanatory tooltip. Replaces the `isSquashableRange` check.
+- The frontend disables the actions (with an explanatory tooltip) only when a *selected* commit is a
+  merge or root commit. A merge elsewhere in the span, and selected commits that are not in HEAD's
+  first-parent history, are caught by the planner's missing-preset alert (a preset id absent from
+  `commitsSince(onto)` blocks Start) and by the backend `validate_plan` at Start, which fails before
+  HEAD detaches. Interactive rebase… presets every selected id as Pick (the planner default, so rows
+  are unchanged) precisely so that the same guard covers it.
 - Squash and Fixup fold into the plan entry *before* them, so they are enabled only when the
   selection is one unbroken first-parent run; otherwise disabled with a tooltip. Drop and
   Interactive rebase… accept any selection.
@@ -65,5 +68,5 @@ interactive rebase planner on it. Gap vs Sublime Merge.
 - Vitest: selection reducer and base helper unit tests; `CommitGraph` tests for Ctrl-click toggle,
   Shift range, disabled-on-merge, menu entries; `RebasePlanner` tests for preset map and the
   oldest-commit squash guard.
-- E2E (Tauri): select three non-contiguous commits, squash, assert resulting history.
+- E2E (Tauri): ctrl-select two non-adjacent commits, Drop, assert resulting history.
 - Docs: `USER_GUIDE.md` (Rebase section) and `CHANGELOG.md` (required by pre-push hook).
