@@ -698,10 +698,26 @@ Replace the three squash tests (`shift-clicking a second commit…`, `clicking S
     { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: ["R"] },
   ];
 
-  function renderChain(overrides: Partial<React.ComponentProps<typeof CommitGraph>> = {}) {
+  // `selectedRow` is controlled by the app, and the graph only honors a multi-selection while the
+  // focused commit belongs to it, so these tests need a stateful host rather than a static prop.
+  function Host(props: ComponentProps<typeof CommitGraph>) {
+    const [selectedRow, setSelectedRow] = useState<SelectedRow>(props.selectedRow);
+    return (
+      <CommitGraph
+        {...props}
+        selectedRow={selectedRow}
+        onSelectRow={(next) => {
+          setSelectedRow(next);
+          props.onSelectRow(next);
+        }}
+      />
+    );
+  }
+
+  function renderChain(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
     const onRebaseSelection = vi.fn();
     render(
-      <CommitGraph
+      <Host
         status={status}
         commits={chainCommits}
         selectedRow="uncommitted"
@@ -818,7 +834,7 @@ Replace the three squash tests (`shift-clicking a second commit…`, `clicking S
   });
 
   it("Escape collapses a multi-selection back to the focused commit", () => {
-    renderChain({ selectedRow: { commitId: "D" } });
+    renderChain();
 
     fireEvent.click(row("D"));
     fireEvent.click(row("B"), { ctrlKey: true });
@@ -839,7 +855,7 @@ Replace the three squash tests (`shift-clicking a second commit…`, `clicking S
   });
 ```
 
-Note on the Escape test: `selectedRow` is a controlled prop and `onSelectRow` is a mock, so the test passes `selectedRow={{ commitId: "D" }}` and the effective selection (derived in the component) is `{D, B}` once B is toggled. After Escape it must collapse to `{D}`.
+Add imports at the top of the test file as needed: `useState, type ComponentProps` from `"react"` and `type SelectedRow` from `"../state/useAppState"`.
 
 Replace the fork test (`does not offer Squash across a fork point`) with:
 
