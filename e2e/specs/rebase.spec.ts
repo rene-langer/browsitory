@@ -274,4 +274,49 @@ describe("Browsitory interactive rebase", () => {
     const stillOnTopEntry = await $("li*=e2e: conflict-abort conflicting change");
     await stillOnTopEntry.waitForExist({ timeout: 10000 });
   });
+
+  it("ctrl-selects two non-adjacent commits, drops them through the planner, and keeps the rest", async () => {
+    writeConflictCommit("multi-1.txt", "1\n", "e2e: multi 1 (drop)");
+    writeConflictCommit("multi-2.txt", "2\n", "e2e: multi 2 (keep)");
+    writeConflictCommit("multi-3.txt", "3\n", "e2e: multi 3 (drop)");
+    writeConflictCommit("multi-4.txt", "4\n", "e2e: multi 4 (keep)");
+
+    await browser.refresh();
+
+    const first = await $("li*=e2e: multi 1 (drop)");
+    await first.waitForExist({ timeout: 10000 });
+    await first.click();
+
+    // A synthetic `click` carrying `ctrlKey` instead of a real modifier key press: a held
+    // modifier driven through WebKitGTK/tauri-driver leaves Shift/Ctrl state stuck for the rest
+    // of the session (see the context-menu workaround in the first test). `CommitGraph` only
+    // reads `ctrlKey` off the click event.
+    const third = await $("li*=e2e: multi 3 (drop)");
+    await browser.execute((el) => {
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
+    }, third);
+
+    const dropButton = await $("button=Drop 2 commits");
+    await dropButton.waitForExist({ timeout: 10000 });
+    await dropButton.click();
+
+    // The planner lists the whole span; only the two selected commits are pre-marked Drop.
+    const dropRow1 = await $("//li[contains(., 'multi 1 (drop)')]//select[@aria-label='Action']");
+    await dropRow1.waitForExist({ timeout: 10000 });
+    await expect(dropRow1).toHaveValue("Drop");
+    const keepRow = await $("//li[contains(., 'multi 2 (keep)')]//select[@aria-label='Action']");
+    await expect(keepRow).toHaveValue("Pick");
+    const dropRow3 = await $("//li[contains(., 'multi 3 (drop)')]//select[@aria-label='Action']");
+    await expect(dropRow3).toHaveValue("Drop");
+
+    await $("button=Start rebase").click();
+
+    await browser.waitUntil(
+      async () => !(await $("li*=e2e: multi 1 (drop)").isExisting()),
+      { timeout: 10000 },
+    );
+    await expect($("li*=e2e: multi 3 (drop)")).not.toBeExisting();
+    await expect($("li*=e2e: multi 2 (keep)")).toBeExisting();
+    await expect($("li*=e2e: multi 4 (keep)")).toBeExisting();
+  });
 });
