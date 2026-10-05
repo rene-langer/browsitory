@@ -30,7 +30,7 @@ const BASE_STATE: AppState = {
   mergeMessage: null,
   rebaseProgress: null,
   rebaseOnto: null,
-  squashPreset: null,
+  rebasePreset: null,
   pendingPull: null,
   pullOutcome: null,
   transfer: null,

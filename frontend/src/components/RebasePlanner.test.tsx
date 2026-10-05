@@ -378,7 +378,7 @@ describe("RebasePlanner", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it("pre-marks rows named in presetSquashIds as Squash, with the leader's combined message filled in", async () => {
+  it("pre-marks rows named in presetActions, with the leader's combined message filled in", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
     render(
@@ -388,7 +388,7 @@ describe("RebasePlanner", () => {
         onto="base"
         onStartRebase={vi.fn()}
         onCancel={vi.fn()}
-        presetSquashIds={new Set(["bbb"])}
+        presetActions={new Map([["bbb", "Squash"]])}
       />,
     );
     await screen.findAllByLabelText("Action");
@@ -400,5 +400,45 @@ describe("RebasePlanner", () => {
     const combinedFields = await screen.findAllByLabelText("Combined message");
     expect(combinedFields).toHaveLength(1);
     expect(combinedFields[0]).toHaveValue("add a\n\nadd b");
+  });
+
+  it("pre-marks a preset Drop on a non-adjacent row and leaves the others as Pick", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={client}
+        onto="base"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+        presetActions={new Map([["aaa", "Drop"]])}
+      />,
+    );
+    await screen.findAllByLabelText("Action");
+
+    expect(screen.getAllByLabelText("Action")[0]).toHaveValue("Drop");
+    expect(screen.getAllByLabelText("Action")[1]).toHaveValue("Pick");
+  });
+
+  it("blocks Start and explains when a preset commit is not in the planned history", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+    const onStartRebase = vi.fn();
+
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={client}
+        onto="base"
+        onStartRebase={onStartRebase}
+        onCancel={vi.fn()}
+        presetActions={new Map([["not-on-this-branch", "Drop"]])}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Some selected commits are not on the current branch",
+    );
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
   });
 });
