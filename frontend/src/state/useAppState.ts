@@ -28,6 +28,7 @@ import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useRemoteTransferActions } from "./useRemoteTransferActions";
 import { useStagingActions } from "./useStagingActions";
+import type { PresetAction } from "../lib/rebaseSelection";
 import { useStashActions } from "./useStashActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
@@ -77,9 +78,9 @@ export interface AppState {
   mergeMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
-  // Commit ids to default to "Squash" in the rebase planner, set only when it was opened via
-  // CommitGraph's "Squash N commits" action (as opposed to "Rebase onto here").
-  squashPreset: Set<string> | null;
+  // Per-commit actions to default to in the rebase planner, set only when it was opened via a
+  // CommitGraph multi-select action (as opposed to "Rebase onto here").
+  rebasePreset: ReadonlyMap<string, PresetAction> | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
   transfer: TransferProgress | null;
@@ -167,7 +168,7 @@ export interface UseAppStateResult {
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
   openRebasePlanner(commitId: string): void;
-  openSquashPlanner(ontoId: string, squashIds: string[]): void;
+  openRebaseSelection(onto: string, preset: ReadonlyMap<string, PresetAction>): void;
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
@@ -220,7 +221,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergeMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
-    squashPreset: null,
+    rebasePreset: null,
     pendingPull: null,
     pullOutcome: null,
     transfer: null,
@@ -419,7 +420,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     resolveAddDeleteConflict,
     abortMerge,
     openRebasePlanner,
-    openSquashPlanner,
+    openRebaseSelection,
     closeRebasePlanner,
     startRebase,
     rebaseContinue,
@@ -483,7 +484,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     resolveAddDeleteConflict,
     abortMerge,
     openRebasePlanner,
-    openSquashPlanner,
+    openRebaseSelection,
     closeRebasePlanner,
     startRebase,
     rebaseContinue,

@@ -6,6 +6,7 @@ import type {
   RebaseStepResult,
   RepoClient,
 } from "../ipc/RepoClient";
+import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
 import type { RunMutation } from "./useMutationRunner";
 
@@ -15,7 +16,7 @@ export interface MergeRebaseActions {
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
   openRebasePlanner(commitId: string): void;
-  openSquashPlanner(ontoId: string, squashIds: string[]): void;
+  openRebaseSelection(onto: string, preset: ReadonlyMap<string, PresetAction>): void;
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
@@ -53,18 +54,18 @@ export function useMergeRebaseActions(
 
   const openRebasePlanner = useCallback(
     (commitId: string) => {
-      setState((prev) => ({ ...prev, rebaseOnto: commitId, squashPreset: null }));
+      setState((prev) => ({ ...prev, rebaseOnto: commitId, rebasePreset: null }));
     },
     [setState],
   );
-  const openSquashPlanner = useCallback(
-    (ontoId: string, squashIds: string[]) => {
-      setState((prev) => ({ ...prev, rebaseOnto: ontoId, squashPreset: new Set(squashIds) }));
+  const openRebaseSelection = useCallback(
+    (onto: string, preset: ReadonlyMap<string, PresetAction>) => {
+      setState((prev) => ({ ...prev, rebaseOnto: onto, rebasePreset: preset }));
     },
     [setState],
   );
   const closeRebasePlanner = useCallback(() => {
-    setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
+    setState((prev) => ({ ...prev, rebaseOnto: null, rebasePreset: null }));
   }, [setState]);
 
   const startRebase = useCallback(
@@ -72,7 +73,7 @@ export function useMergeRebaseActions(
       runMutation(async () => {
         const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
         void result;
-        setState((prev) => ({ ...prev, rebaseOnto: null, squashPreset: null }));
+        setState((prev) => ({ ...prev, rebaseOnto: null, rebasePreset: null }));
       }),
     [client, runMutation, repoPath, setState],
   );
@@ -95,7 +96,7 @@ export function useMergeRebaseActions(
     resolveAddDeleteConflict,
     abortMerge,
     openRebasePlanner,
-    openSquashPlanner,
+    openRebaseSelection,
     closeRebasePlanner,
     startRebase,
     rebaseContinue,

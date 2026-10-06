@@ -793,25 +793,38 @@ describe("useAppState", () => {
     expect(result.current.state.rebaseOnto).toBeNull();
   });
 
-  it("opens the rebase planner with a squash preset when squashing a graph selection", async () => {
+  it("opens the rebase planner with the given preset when acting on a graph selection", async () => {
     const client = transferClient({});
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    act(() => result.current.openSquashPlanner("aaa", ["ccc", "bbb"]));
+    act(() =>
+      result.current.openRebaseSelection(
+        "aaa",
+        new Map([
+          ["ccc", "Squash"],
+          ["bbb", "Squash"],
+        ]),
+      ),
+    );
 
     expect(result.current.state.rebaseOnto).toBe("aaa");
-    expect(result.current.state.squashPreset).toEqual(new Set(["ccc", "bbb"]));
+    expect(result.current.state.rebasePreset).toEqual(
+      new Map([
+        ["ccc", "Squash"],
+        ["bbb", "Squash"],
+      ]),
+    );
   });
 
-  it("clears the squash preset when the rebase planner is closed", async () => {
+  it("clears the rebase preset when the rebase planner is closed", async () => {
     const client = transferClient({});
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-    act(() => result.current.openSquashPlanner("aaa", ["ccc", "bbb"]));
+    act(() => result.current.openRebaseSelection("aaa", new Map([["ccc", "Drop"]])));
 
     act(() => result.current.closeRebasePlanner());
 
     expect(result.current.state.rebaseOnto).toBeNull();
-    expect(result.current.state.squashPreset).toBeNull();
+    expect(result.current.state.rebasePreset).toBeNull();
   });
 
   it("reports a dirty pull without leaving reconciliation pending", async () => {
