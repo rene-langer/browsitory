@@ -8,6 +8,7 @@ import type {
 import { ListRow } from "./primitives/ListRow";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
+import type { PresetAction } from "../lib/rebaseSelection";
 import styles from "./RebasePlanner.module.css";
 
 type ActionKind = RebaseAction["kind"];
@@ -124,7 +125,7 @@ export function RebasePlanner({
   onStartRebase,
   onCancel,
   operationDisabled = false,
-  presetSquashIds,
+  presetActions,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -132,12 +133,16 @@ export function RebasePlanner({
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
   onCancel: () => void;
   operationDisabled?: boolean;
-  // Commit ids to default to "Squash" instead of "Pick" — used when the plan is opened from a
-  // multi-select "Squash N commits" action in the commit graph, so the picked range arrives
-  // already grouped instead of the user re-marking every row by hand.
-  presetSquashIds?: ReadonlySet<string>;
+  // Per-commit actions to default to instead of "Pick" — set when the plan is opened from a
+  // multi-select action in the commit graph, so the selection arrives already marked instead of
+  // the user re-marking every row by hand. Every id must appear in the planned span (see
+  // `presetMissing`).
+  presetActions?: ReadonlyMap<string, PresetAction>;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
+  // True when a preset commit isn't in `commitsSince(onto)`, e.g. the selection includes a
+  // commit from another branch. Starting would silently ignore part of the selection.
+  const [presetMissing, setPresetMissing] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -145,17 +150,21 @@ export function RebasePlanner({
       if (!ignore) {
         const initialRows = commits.map((commit) => ({
           commit,
-          actionKind: (presetSquashIds?.has(commit.id) ? "Squash" : "Pick") as ActionKind,
+          actionKind: (presetActions?.get(commit.id) ?? "Pick") as ActionKind,
           rewordMessage: commit.summary,
           combinedMessage: null,
         }));
+        const planned = new Set(commits.map((commit) => commit.id));
+        setPresetMissing(
+          presetActions !== undefined && [...presetActions.keys()].some((id) => !planned.has(id)),
+        );
         setRows(recomputeGroupLeaders(initialRows, initialRows));
       }
     });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, onto, presetSquashIds]);
+  }, [repoPath, client, onto, presetActions]);
 
   const moveRow = (index: number, direction: -1 | 1) => {
     const target = index + direction;
@@ -263,8 +272,14 @@ export function RebasePlanner({
           </ListRow>
         ))}
       </ul>
+      {presetMissing && (
+        <p role="alert">
+          Some selected commits are not on the current branch&apos;s history above this base, so
+          they can&apos;t be part of this rebase.
+        </p>
+      )}
       <Toolbar>
-        <button onClick={start} disabled={operationDisabled}>
+        <button onClick={start} disabled={operationDisabled || presetMissing}>
           Start rebase
         </button>
         <button onClick={onCancel}>Cancel</button>

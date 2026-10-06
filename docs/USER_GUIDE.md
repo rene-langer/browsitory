@@ -127,6 +127,18 @@ before running it. Conflicts, once they happen, are resolved inline in the
 diff pane; a paused rebase shows its progress and lets you continue or
 abort.
 
+**Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
+select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a
+toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash**,
+**Fixup** and **Drop**. Each opens the rebase planner, based on the parent of the oldest selected
+commit and listing every commit from there to the current HEAD. The selected commits are pre-marked
+with the chosen action; for Interactive rebase… they are listed as **Pick**, but are still checked
+against the branch history. With Squash or Fixup the oldest selected commit stays **Pick** and the
+rest fold into it. Squash and Fixup are available only for commits that sit next to each other;
+Drop and Interactive rebase… work for any selection. Selections that include a merge commit or a
+root commit, or commits that aren't on the current branch, can't be rebased. Esc collapses a
+selection back to one commit.
+
 ## Pull requests
 
 For GitHub and Bitbucket remotes, expand **Pull Requests** to save a

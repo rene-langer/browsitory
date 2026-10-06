@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Multi-select commits for interactive rebase
+
+- Ctrl/Cmd+click commits in the graph to select several, including non-adjacent ones (Shift
+  selects a range). A toolbar and the context menu offer Interactive rebase…, Squash, Fixup and
+  Drop, each opening the rebase planner with the selection pre-marked. Squash and Fixup require
+  adjacent commits; Drop and Interactive rebase… accept any selection.
+
 ### UX audit: feedback, states and content
 
 - A persistent status strip now shows while a merge or rebase is in progress (step, conflict
