@@ -66,6 +66,8 @@ current branch with a lease, and check out a commit as a detached HEAD.
     `cleanup_state`. Return `PickOutcome::Committed { commit_id }`.
   - Conflicts → leave state and `MERGE_MSG` (libgit2 writes it). Return
     `PickOutcome::Conflicted { files }`.
+  - Empty result (resulting tree equals HEAD's tree, e.g. commit already applied) → no commit,
+    `cleanup_state`, `PickError::EmptyResult`.
 
 ### `reset.rs` (new)
 
@@ -83,21 +85,29 @@ current branch with a lease, and check out a commit as a detached HEAD.
 ### `remote.rs`
 
 - `force_push_current_branch(repo, remote_name, credentials, reporter, cancel)`:
-  1. Expected = local `refs/remotes/<remote>/<branch>` OID (absent → expected "branch does not
-     exist on remote").
-  2. Connect (push direction, same credential callbacks), read the advertised
-     `refs/heads/<branch>` OID via `remote.list()`.
-  3. Mismatch → `RemoteError` classified as new `TransferErrorKind::StaleLease`. No push.
-  4. Match → `push_refs` with `+refs/heads/<branch>:refs/heads/<branch>` and
-     `TransferOperation::ForcePushBranch` (new variant, for progress labels).
-  - Known limitation: a small check-then-push race window; documented in the user guide.
+  1. Expected = local `refs/remotes/<remote>/<branch>` OID (absent → zero OID, meaning "branch
+     must not exist on remote").
+  2. `push_refs` with `+refs/heads/<branch>:refs/heads/<branch>`,
+     `TransferOperation::ForcePushBranch` (new variant, for progress labels), and a lease.
+  3. Inside the existing `push_negotiation` callback (fires after the remote advertised its refs,
+     before any pack data is sent), compare each `PushUpdate::src()` (remote's current OID) for
+     `refs/heads/<branch>` with expected. Mismatch → abort the push there →
+     `RemoteError::StaleLease`, classified as new `TransferErrorKind::StaleLease`. Remote
+     untouched.
+  - Same check-then-update window as `git push --force-with-lease` (between advertisement and
+    the remote applying the update); documented in the user guide.
 - Refuses on detached HEAD (existing `current_local_branch_name` error).
 
 ### Head / operation info
 
-- `head_info(repo) -> HeadInfo { detached_at: Option<String> /* short sha */, operation:
-  Option<OperationKind> }` with `OperationKind { Merge, CherryPick, Revert }` (rebase keeps its
-  own `get_rebase_progress`). Lives in `repo.rs`.
+- `head_info(repo) -> HeadInfo` in `repo.rs`:
+  - `head_id: Option<String>` — full SHA of HEAD's commit; `None` on unborn HEAD. (`GraphCommit`
+    carries no HEAD marker; the frontend needs this for the HEAD-only menu item and amend
+    prefill.)
+  - `detached_at: Option<String>` — short SHA when HEAD is detached.
+  - `head_pushed: bool` — current branch has an upstream whose tip equals or descends from HEAD.
+  - `operation: Option<OperationKind>` with `OperationKind { Merge, CherryPick, Revert }` (rebase
+    keeps its own `get_rebase_progress`).
 
 ## Plumbing
 
@@ -153,8 +163,9 @@ getHeadInfo(repoPath: string): Promise<HeadInfo>;
 - **Palette**: "Cherry-pick selected commit", "Revert selected commit", "Checkout selected
   commit", "Reset branch to selected commit…", "Amend last commit", "Force push current
   branch…".
-- **Toasts** on success: "Cherry-picked ⟨sha⟩", "Reverted ⟨sha⟩", "Reset to ⟨sha⟩ (mode)",
-  "Checked out ⟨sha⟩", "Amended ⟨sha⟩", "Force pushed ⟨branch⟩".
+- **Toasts** on success, via the existing `announce(label, action)` pattern (label-only, no
+  SHA): "Cherry-picked", "Reverted", "Reset branch", "Checked out commit", "Amended commit",
+  "Force pushed".
 - Optimistic UI: none — these mutate history; refresh after completion.
 
 ## Errors
@@ -167,6 +178,7 @@ Backend error variants map to user-facing messages via the existing error-dialog
 | `DirtyIndex` | "Commit or unstage your staged changes first." |
 | `MergeCommitUnsupported` | "Cherry-picking or reverting merge commits isn't supported yet." |
 | `NothingToAmend` | "There is no commit to amend yet." |
+| `EmptyResult` | "Nothing to apply — those changes are already on this branch." |
 | `StaleLease` | see Force push above |
 
 ## Testing
