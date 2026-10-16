@@ -418,6 +418,49 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it("keeps list key bindings out of an open menu", () => {
+        const onStageFile = vi.fn();
+        const onUnstageFile = vi.fn();
+        render({ onStageFile, onUnstageFile });
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        const item = screen.getByRole("menuitem", { name: "Discard changes…" });
+
+        fireEvent.keyDown(item, { key: "ArrowDown" });
+        fireEvent.keyDown(item, { key: "s" });
+
+        expect(screen.getByRole("option", { name: /src\/a\.ts/, selected: true })).toBeInTheDocument();
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+        expect(onStageFile).not.toHaveBeenCalled();
+        expect(onUnstageFile).not.toHaveBeenCalled();
+      });
+
+      it("keeps list key bindings out of the discard dialog", () => {
+        const onStageFile = vi.fn();
+        const onUnstageFile = vi.fn();
+        render({ onStageFile, onUnstageFile });
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+
+        fireEvent.keyDown(screen.getByText("Cancel"), { key: "s" });
+
+        expect(onStageFile).not.toHaveBeenCalled();
+        expect(onUnstageFile).not.toHaveBeenCalled();
+      });
+
+      it("opens the file menu only from the header, not the diff body", async () => {
+        const hunks: DiffHunk[] = [
+          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "body line" }] },
+        ];
+        renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [fileStatus[0]]);
+
+        fireEvent.contextMenu(await screen.findByText(/body line/));
+        expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
       it("words the untracked delete dialog and ignores without confirming", () => {
         const onIgnorePath = vi.fn();
         const onDiscardFile = vi.fn();

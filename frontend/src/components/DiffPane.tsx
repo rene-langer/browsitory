@@ -233,17 +233,17 @@ function UncommittedFileSection({
       selected={isCurrent}
       onClick={onSelect}
       className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
-      onContextMenu={
-        hasFileActions
-          ? (event) => {
-              event.preventDefault();
-              setMenu({ x: event.clientX, y: event.clientY });
-            }
-          : undefined
-      }
     >
       <div
         className={styles.fileSectionHeader}
+        onContextMenu={
+          hasFileActions
+            ? (event) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY });
+              }
+            : undefined
+        }
         ref={(el) => {
           sectionElRef.current = el;
         }}
@@ -734,6 +734,9 @@ function UncommittedDiffPane({
   };
 
   const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
+    // The file menu and discard dialog render inside their row (React events bubble through the
+    // tree), so keys typed in them must not drive the list underneath.
+    if ((event.target as HTMLElement).closest('[role="menu"], dialog') !== null) return;
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
       navigateGroup(entries, 1);
