@@ -78,11 +78,13 @@ pub(crate) enum Command {
     GetWorkingDiff {
         path: String,
         staged: bool,
+        opts: git_core::diff::DiffOptions,
         reply: Sender<Result<Vec<DiffHunk>, String>>,
     },
     GetCommitDiff {
         commit_id: String,
         path: String,
+        opts: git_core::diff::DiffOptions,
         reply: Sender<Result<Vec<DiffHunk>, String>>,
     },
     GetCommitFiles {
@@ -110,18 +112,56 @@ pub(crate) enum Command {
         path: String,
         old_start: u32,
         new_start: u32,
+        context_lines: u32,
         reply: Sender<Result<(), String>>,
     },
     UnstageHunk {
         path: String,
         old_start: u32,
         new_start: u32,
+        context_lines: u32,
         reply: Sender<Result<(), String>>,
     },
     DiscardHunk {
         path: String,
         old_start: u32,
         new_start: u32,
+        context_lines: u32,
+        reply: Sender<Result<(), String>>,
+    },
+    StageLines {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        reply: Sender<Result<(), String>>,
+    },
+    UnstageLines {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        reply: Sender<Result<(), String>>,
+    },
+    DiscardLines {
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        reply: Sender<Result<(), String>>,
+    },
+    DiscardFile {
+        path: String,
+        reply: Sender<Result<(), String>>,
+    },
+    DiscardAllUnstaged {
+        reply: Sender<Result<(), String>>,
+    },
+    IgnorePath {
+        pattern: String,
         reply: Sender<Result<(), String>>,
     },
     Commit {
@@ -503,13 +543,15 @@ impl Worker {
                     Command::GetWorkingDiff {
                         path,
                         staged,
+                        opts,
                         reply,
-                    } => status::get_working_diff(&repo, path, staged, reply),
+                    } => status::get_working_diff(&repo, path, staged, opts, reply),
                     Command::GetCommitDiff {
                         commit_id,
                         path,
+                        opts,
                         reply,
-                    } => status::get_commit_diff(&repo, commit_id, path, reply),
+                    } => status::get_commit_diff(&repo, commit_id, path, opts, reply),
                     Command::GetCommitFiles { commit_id, reply } => {
                         status::get_commit_files(&repo, commit_id, reply)
                     }
@@ -529,20 +571,96 @@ impl Worker {
                         path,
                         old_start,
                         new_start,
+                        context_lines,
                         reply,
-                    } => status::stage_hunk(&repo, path, old_start, new_start, reply),
+                    } => {
+                        status::stage_hunk(&repo, path, old_start, new_start, context_lines, reply)
+                    }
                     Command::UnstageHunk {
                         path,
                         old_start,
                         new_start,
+                        context_lines,
                         reply,
-                    } => status::unstage_hunk(&repo, path, old_start, new_start, reply),
+                    } => status::unstage_hunk(
+                        &repo,
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        reply,
+                    ),
                     Command::DiscardHunk {
                         path,
                         old_start,
                         new_start,
+                        context_lines,
                         reply,
-                    } => status::discard_hunk(&repo, path, old_start, new_start, reply),
+                    } => status::discard_hunk(
+                        &repo,
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        reply,
+                    ),
+                    Command::StageLines {
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    } => status::stage_lines(
+                        &repo,
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    ),
+                    Command::UnstageLines {
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    } => status::unstage_lines(
+                        &repo,
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    ),
+                    Command::DiscardLines {
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    } => status::discard_lines(
+                        &repo,
+                        path,
+                        old_start,
+                        new_start,
+                        context_lines,
+                        line_indices,
+                        reply,
+                    ),
+                    Command::DiscardFile { path, reply } => {
+                        status::discard_file(&repo, path, reply)
+                    }
+                    Command::DiscardAllUnstaged { reply } => {
+                        status::discard_all_unstaged(&repo, reply)
+                    }
+                    Command::IgnorePath { pattern, reply } => {
+                        status::ignore_path(&repo, pattern, reply)
+                    }
                     Command::Commit { message, reply } => status::commit(&mut repo, message, reply),
                     Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
@@ -1173,12 +1291,21 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let hunks = handle
-            .get_working_diff("tracked.txt".into(), false)
+            .get_working_diff(
+                "tracked.txt".into(),
+                false,
+                git_core::diff::DiffOptions::default(),
+            )
             .unwrap();
         assert_eq!(hunks.len(), 1);
 
         handle
-            .stage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .stage_hunk(
+                "tracked.txt".into(),
+                hunks[0].old_start,
+                hunks[0].new_start,
+                3,
+            )
             .unwrap();
 
         let staged = handle.get_status().unwrap();
@@ -1195,14 +1322,28 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let hunks = handle
-            .get_working_diff("tracked.txt".into(), false)
+            .get_working_diff(
+                "tracked.txt".into(),
+                false,
+                git_core::diff::DiffOptions::default(),
+            )
             .unwrap();
         handle
-            .stage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .stage_hunk(
+                "tracked.txt".into(),
+                hunks[0].old_start,
+                hunks[0].new_start,
+                3,
+            )
             .unwrap();
 
         handle
-            .unstage_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .unstage_hunk(
+                "tracked.txt".into(),
+                hunks[0].old_start,
+                hunks[0].new_start,
+                3,
+            )
             .unwrap();
 
         let status = handle.get_status().unwrap();
@@ -1219,15 +1360,95 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let hunks = handle
-            .get_working_diff("tracked.txt".into(), false)
+            .get_working_diff(
+                "tracked.txt".into(),
+                false,
+                git_core::diff::DiffOptions::default(),
+            )
             .unwrap();
 
         handle
-            .discard_hunk("tracked.txt".into(), hunks[0].old_start, hunks[0].new_start)
+            .discard_hunk(
+                "tracked.txt".into(),
+                hunks[0].old_start,
+                hunks[0].new_start,
+                3,
+            )
             .unwrap();
 
         let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
         assert_eq!(on_disk.replace("\r\n", "\n"), "line one\nline two\n");
+    }
+
+    #[test]
+    fn line_and_file_commands_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "f.txt", "a\nb\nc\n");
+        commit_all(&repo, "base");
+        write_file(dir.path(), "f.txt", "a\nB\nc\nd\n");
+        write_file(dir.path(), "junk.log", "x\n");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let opts = git_core::diff::DiffOptions::default();
+        let hunk = handle
+            .get_working_diff("f.txt".into(), false, opts)
+            .unwrap()
+            .remove(0);
+
+        handle
+            .stage_lines("f.txt".into(), hunk.old_start, hunk.new_start, 3, vec![4])
+            .unwrap();
+        let staged = handle
+            .get_working_diff("f.txt".into(), true, opts)
+            .unwrap()
+            .remove(0);
+        handle
+            .unstage_lines(
+                "f.txt".into(),
+                staged.old_start,
+                staged.new_start,
+                3,
+                vec![staged.lines.len() as u32 - 1],
+            )
+            .unwrap();
+        assert!(handle
+            .get_working_diff("f.txt".into(), true, opts)
+            .unwrap()
+            .is_empty());
+
+        let hunk = handle
+            .get_working_diff("f.txt".into(), false, opts)
+            .unwrap()
+            .remove(0);
+        handle
+            .discard_lines("f.txt".into(), hunk.old_start, hunk.new_start, 3, vec![4])
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "a\nB\nc\n"
+        );
+
+        handle.ignore_path("*.log".into()).unwrap();
+        handle.discard_file("f.txt".into()).unwrap();
+        handle.discard_all_unstaged().unwrap();
+        let status = handle.get_status().unwrap();
+        assert!(
+            status
+                .iter()
+                .all(|e| e.path == ".gitignore" || e.path == "junk.log"),
+            "{status:?}"
+        );
+
+        assert!(handle
+            .stage_lines("f.txt".into(), 99, 99, 3, vec![0])
+            .is_err());
+        assert!(
+            handle.get_status().is_ok(),
+            "worker survives a failed command"
+        );
     }
 
     #[test]

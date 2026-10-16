@@ -329,7 +329,11 @@ fn get_working_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetWorkingDiffParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
-        .get_working_diff(params.path, params.staged)?
+        .get_working_diff(
+            params.path,
+            params.staged,
+            git_core::diff::DiffOptions::default(),
+        )?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
@@ -348,7 +352,11 @@ fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetCommitDiffParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_diff(params.commit_id, params.path)?
+        .get_commit_diff(
+            params.commit_id,
+            params.path,
+            git_core::diff::DiffOptions::default(),
+        )?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
@@ -615,6 +623,7 @@ fn stage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        3,
     )?;
     Ok(Value::Null)
 }
@@ -625,6 +634,7 @@ fn unstage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        3,
     )?;
     Ok(Value::Null)
 }
@@ -635,6 +645,7 @@ fn discard_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        3,
     )?;
     Ok(Value::Null)
 }

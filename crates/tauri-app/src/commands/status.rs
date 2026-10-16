@@ -69,7 +69,7 @@ pub async fn get_working_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .get_working_diff(path, staged)?
+        .get_working_diff(path, staged, git_core::diff::DiffOptions::default())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -83,7 +83,7 @@ pub async fn get_commit_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .get_commit_diff(commit_id, path)?
+        .get_commit_diff(commit_id, path, git_core::diff::DiffOptions::default())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -147,7 +147,7 @@ pub async fn stage_hunk(
     new_start: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start, 3)
 }
 
 #[tauri::command]
@@ -158,7 +158,7 @@ pub async fn unstage_hunk(
     new_start: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start, 3)
 }
 
 #[tauri::command]
@@ -169,7 +169,7 @@ pub async fn discard_hunk(
     new_start: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start, 3)
 }
 
 #[tauri::command]
