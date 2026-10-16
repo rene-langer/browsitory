@@ -223,7 +223,7 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
     let working = sidecar.call(
         2,
         "get_working_diff",
-        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false}),
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false, "opts": {"ignoreWhitespace": false, "contextLines": 3}}),
     );
     let hunks = working["result"]
         .as_array()
@@ -249,7 +249,7 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
     let commit_diff = sidecar.call(
         4,
         "get_commit_diff",
-        serde_json::json!({"repoPath": repo_path, "commitId": head_id, "path": "tracked.txt"}),
+        serde_json::json!({"repoPath": repo_path, "commitId": head_id, "path": "tracked.txt", "opts": {"ignoreWhitespace": false, "contextLines": 3}}),
     );
     let commit_hunks = commit_diff["result"]
         .as_array()
@@ -537,7 +537,7 @@ fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
     let diff = sidecar.call(
         2,
         "get_working_diff",
-        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false}),
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "staged": false, "opts": {"ignoreWhitespace": false, "contextLines": 3}}),
     );
     let hunk = &diff["result"][0];
     let old_start = hunk["oldStart"].as_u64().unwrap();
@@ -546,7 +546,7 @@ fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
     let staged = sidecar.call(
         3,
         "stage_hunk",
-        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start, "contextLines": 3}),
     );
     assert_eq!(staged["result"], serde_json::Value::Null);
 
@@ -556,14 +556,14 @@ fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
     let unstaged = sidecar.call(
         5,
         "unstage_hunk",
-        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start, "contextLines": 3}),
     );
     assert_eq!(unstaged["result"], serde_json::Value::Null);
 
     let discarded = sidecar.call(
         6,
         "discard_hunk",
-        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start}),
+        serde_json::json!({"repoPath": repo_path, "path": "tracked.txt", "oldStart": old_start, "newStart": new_start, "contextLines": 3}),
     );
     assert_eq!(discarded["result"], serde_json::Value::Null);
     let on_disk = std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap();
@@ -1657,4 +1657,78 @@ fn history_rewrite_commands_round_trip_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "commitId": first_id, "mode": "hard"}),
     );
     assert_eq!(reset["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn line_staging_discard_and_ignore_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "a\nb\nc\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "f.txt", "a\nB\nc\nd\n");
+    write_file(dir.path(), "junk.log", "x\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let diff = sidecar.call(
+        2,
+        "get_working_diff",
+        serde_json::json!({
+            "repoPath": repo_path, "path": "f.txt", "staged": false,
+            "opts": {"ignoreWhitespace": false, "contextLines": 3}
+        }),
+    );
+    let hunk = &diff["result"][0];
+    let staged = sidecar.call(
+        3,
+        "stage_lines",
+        serde_json::json!({
+            "repoPath": repo_path, "path": "f.txt",
+            "oldStart": hunk["oldStart"], "newStart": hunk["newStart"],
+            "contextLines": 3, "lineIndices": [4]
+        }),
+    );
+    assert_eq!(staged["result"], serde_json::Value::Null, "{staged}");
+
+    let ignored = sidecar.call(
+        4,
+        "ignore_path",
+        serde_json::json!({"repoPath": repo_path, "pattern": "*.log"}),
+    );
+    assert_eq!(ignored["result"], serde_json::Value::Null);
+    assert!(std::fs::read_to_string(dir.path().join(".gitignore"))
+        .unwrap()
+        .contains("*.log"));
+
+    let discarded = sidecar.call(
+        5,
+        "discard_file",
+        serde_json::json!({"repoPath": repo_path, "path": "f.txt"}),
+    );
+    assert_eq!(discarded["result"], serde_json::Value::Null);
+    let all = sidecar.call(
+        6,
+        "discard_all_unstaged",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(all["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn diff_settings_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let set = sidecar.call(
+        1,
+        "set_diff_settings",
+        serde_json::json!({
+            "settings": {"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false}
+        }),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null, "{set}");
+    let got = sidecar.call(2, "get_diff_settings", serde_json::json!({}));
+    assert_eq!(
+        got["result"],
+        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false})
+    );
 }
