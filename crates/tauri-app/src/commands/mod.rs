@@ -12,6 +12,7 @@ use repo_service::worker::{TransferEvent, Worker};
 
 mod branch;
 mod forge;
+mod history;
 mod merge;
 mod rebase;
 mod reflog;
@@ -26,6 +27,9 @@ pub use branch::{create_branch, delete_branch, list_branches, rename_branch, swi
 pub use forge::{
     create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
     save_forge_token,
+};
+pub use history::{
+    amend_commit, checkout_commit, cherry_pick, get_head_info, reset_to_commit, revert_commit,
 };
 pub use merge::{
     abort_merge, get_conflict_hunks, get_merge_message, resolve_add_delete_conflict,
@@ -456,6 +460,70 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadInfoDto {
+    pub head_id: Option<String>,
+    pub detached_at: Option<String>,
+    pub head_pushed: bool,
+    pub operation: Option<&'static str>,
+}
+
+impl From<git_core::repo::HeadInfo> for HeadInfoDto {
+    fn from(info: git_core::repo::HeadInfo) -> Self {
+        use git_core::repo::OperationKind;
+        Self {
+            head_id: info.head_id,
+            detached_at: info.detached_at,
+            head_pushed: info.head_pushed,
+            operation: info.operation.map(|kind| match kind {
+                OperationKind::Merge => "Merge",
+                OperationKind::CherryPick => "CherryPick",
+                OperationKind::Revert => "Revert",
+            }),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum PickOutcomeDto {
+    Committed {
+        #[serde(rename = "commitId")]
+        commit_id: String,
+    },
+    Conflicted {
+        files: Vec<String>,
+    },
+}
+
+impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
+    fn from(outcome: git_core::pick::PickOutcome) -> Self {
+        match outcome {
+            git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
+            git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResetModeDto {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+impl From<ResetModeDto> for git_core::reset::ResetMode {
+    fn from(dto: ResetModeDto) -> Self {
+        match dto {
+            ResetModeDto::Soft => Self::Soft,
+            ResetModeDto::Mixed => Self::Mixed,
+            ResetModeDto::Hard => Self::Hard,
         }
     }
 }
@@ -964,9 +1032,9 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, ForgeProviderDto, GraphCommitDto, OpenRepoEntryDto,
-        OpenRepoEntryInput, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, SubmoduleInfoDto,
-        WorkspaceDto, WorktreeInfoDto,
+        transfer_event_payload, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
+        OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
+        ResetModeDto, SubmoduleInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1286,6 +1354,63 @@ mod tests {
         assert_eq!(failed.operation, "PushBranch");
         assert_eq!(failed.error_kind.as_deref(), Some("NonFastForward"));
         assert_eq!(failed.message, None);
+    }
+
+    #[test]
+    fn head_info_dto_serializes_camel_case_with_operation_name() {
+        let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
+            head_id: Some("abc".into()),
+            detached_at: None,
+            head_pushed: true,
+            operation: Some(git_core::repo::OperationKind::CherryPick),
+        });
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick"})
+        );
+    }
+
+    #[test]
+    fn pick_outcome_dto_is_kind_tagged() {
+        assert_eq!(
+            serde_json::to_value(PickOutcomeDto::from(
+                git_core::pick::PickOutcome::Committed {
+                    commit_id: "c1".into()
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Committed", "commitId": "c1"})
+        );
+        assert_eq!(
+            serde_json::to_value(PickOutcomeDto::from(
+                git_core::pick::PickOutcome::Conflicted {
+                    files: vec!["a".into()]
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Conflicted", "files": ["a"]})
+        );
+    }
+
+    #[test]
+    fn reset_mode_dto_parses_lowercase() {
+        let mode: ResetModeDto = serde_json::from_value(serde_json::json!("hard")).unwrap();
+        assert_eq!(
+            git_core::reset::ResetMode::from(mode),
+            git_core::reset::ResetMode::Hard
+        );
+    }
+
+    #[test]
+    fn force_push_and_stale_lease_names_reach_the_wire() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "force-push-1".into(),
+            operation: TransferOperation::ForcePushBranch,
+            error: Some(TransferErrorKind::StaleLease),
+        });
+
+        assert_eq!(failed.operation, "ForcePushBranch");
+        assert_eq!(failed.error_kind.as_deref(), Some("StaleLease"));
     }
 
     fn expected_transfer_phase_wire_value(phase: TransferPhase) -> &'static str {

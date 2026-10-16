@@ -196,6 +196,20 @@ pub async fn push_current_branch(
 }
 
 #[tauri::command]
+pub async fn force_push_current_branch(
+    repo_path: String,
+    remote_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id =
+        worker_handle(&state, &repo_path)?.force_push_current_branch(remote_name, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
 pub async fn push_tags(
     repo_path: String,
     remote_name: String,
