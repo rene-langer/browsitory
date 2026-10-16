@@ -254,3 +254,76 @@ describe("CommitBox", () => {
     expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Stage changes to commit");
   });
 });
+
+describe("amend", () => {
+  function renderBox(
+    overrides: Partial<NonNullable<Parameters<typeof CommitBox>[0]["amend"]>> = {},
+    draft?: string,
+  ) {
+    const amend = {
+      available: true,
+      on: false,
+      headMessage: "previous message",
+      pushed: false,
+      onToggle: vi.fn(),
+      onAmend: vi.fn(),
+      ...overrides,
+    };
+    const onCommit = vi.fn();
+    const utils = render(
+      <CommitBox
+        onCommit={onCommit}
+        disabled={true}
+        disabledReason="Stage changes to commit"
+        onAbortMerge={() => {}}
+        initialDraft={draft === undefined ? undefined : { message: draft, lastSeeded: "" }}
+        amend={amend}
+      />,
+    );
+    return { ...utils, amend, onCommit };
+  }
+
+  it("shows the toggle and calls onToggle", () => {
+    const { amend } = renderBox();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Amend last commit" }));
+    expect(amend.onToggle).toHaveBeenCalledWith(true);
+  });
+
+  it("prefills HEAD's message, relabels the button and allows an empty index", () => {
+    const { amend } = renderBox({ on: true });
+    expect(screen.getByLabelText("Commit message")).toHaveValue("previous message");
+    const button = screen.getByRole("button", { name: "Amend" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(amend.onAmend).toHaveBeenCalledWith("previous message");
+  });
+
+  it("restores the typed draft exactly when toggled off", () => {
+    const props = { onCommit: vi.fn(), disabled: true, onAbortMerge: () => {} };
+    const amend = {
+      available: true,
+      headMessage: "previous message",
+      pushed: false,
+      onToggle: vi.fn(),
+      onAmend: vi.fn(),
+    };
+    const { rerender } = render(<CommitBox {...props} amend={{ ...amend, on: false }} />);
+    fireEvent.change(screen.getByLabelText("Commit message"), {
+      target: { value: "half-typed\nwork" },
+    });
+    rerender(<CommitBox {...props} amend={{ ...amend, on: true }} />);
+    expect(screen.getByLabelText("Commit message")).toHaveValue("previous message");
+    rerender(<CommitBox {...props} amend={{ ...amend, on: false }} />);
+    expect(screen.getByLabelText("Commit message")).toHaveValue("half-typed\nwork");
+  });
+
+  it("warns when HEAD is already pushed", () => {
+    renderBox({ on: true, pushed: true });
+    expect(screen.getByText("Already pushed — you'll need to force push.")).toBeInTheDocument();
+  });
+
+  it("hides the toggle when amend is unavailable", () => {
+    renderBox({ available: false });
+    expect(screen.queryByRole("checkbox", { name: "Amend last commit" })).not.toBeInTheDocument();
+  });
+});

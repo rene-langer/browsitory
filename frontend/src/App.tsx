@@ -457,7 +457,10 @@ function RepoWorkspace({
                 onRevert={announce("Reverted", appState.revertCommit)}
                 onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
                 onResetToCommit={announce("Reset branch", appState.resetToCommit)}
-                onEditHeadMessage={() => appState.setAmendMode(true)}
+                onEditHeadMessage={() => {
+                  appState.selectRow("uncommitted");
+                  appState.setAmendMode(true);
+                }}
                 graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               />
               </>
@@ -486,6 +489,10 @@ function RepoWorkspace({
                 onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
                 mergeMessage={appState.state.mergeMessage}
                 onAbortMerge={appState.abortMerge}
+                amendMode={appState.state.amendMode}
+                headInfo={appState.state.headInfo}
+                onSetAmendMode={appState.setAmendMode}
+                onAmendCommit={announce("Amended commit", appState.amendCommit)}
                 rebaseProgress={appState.state.rebaseProgress}
                 onRebaseContinue={appState.rebaseContinue}
                 onRebaseAbort={appState.abortRebase}

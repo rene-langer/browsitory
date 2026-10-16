@@ -20,6 +20,7 @@ export function CommitBox({
   initialMessage,
   initialDraft,
   onDraftChange,
+  amend,
 }: {
   onCommit: (message: string) => void;
   disabled: boolean;
@@ -35,6 +36,17 @@ export function CommitBox({
   initialDraft?: CommitDraft;
   /** Called with the current draft whenever it changes, so the owner can hand it back on remount. */
   onDraftChange?: (draft: CommitDraft) => void;
+  /** Amend-last-commit mode; omit to hide the toggle entirely. */
+  amend?: {
+    /** headId !== null && no operation in progress. */
+    available: boolean;
+    on: boolean;
+    /** HEAD's message, loaded when `on` flips true; null while loading. */
+    headMessage: string | null;
+    pushed: boolean;
+    onToggle: (on: boolean) => void;
+    onAmend: (message: string) => void;
+  };
 }) {
   const [message, setMessage] = useState(initialDraft?.message ?? "");
   // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
@@ -70,7 +82,34 @@ export function CommitBox({
     }
   }, [initialMessage, message, lastSeeded]);
 
+  // Entering amend mode swaps the typed draft out for HEAD's message; leaving it puts the draft
+  // back untouched, so toggling never loses a half-typed message.
+  const [stashedDraft, setStashedDraft] = useState<string | null>(null);
+  const amendOn = amend?.on === true;
+  const headMessage = amend?.headMessage ?? null;
+  useEffect(() => {
+    if (amendOn && stashedDraft === null && headMessage !== null) {
+      // Deliberate seed write: entering amend mode swaps the draft out for HEAD's message.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStashedDraft(message);
+      setMessage(headMessage);
+    } else if (!amendOn && stashedDraft !== null) {
+      setMessage(stashedDraft);
+      setStashedDraft(null);
+    }
+  }, [amendOn, headMessage, stashedDraft, message]);
+
   const commitIfReady = () => {
+    if (amendOn) {
+      if (message.trim() === "") {
+        return;
+      }
+      amend.onAmend(message);
+      setStashedDraft(null);
+      setMessage("");
+      setLastSeeded("");
+      return;
+    }
     if (disabled || message.trim() === "") {
       return;
     }
@@ -96,18 +135,33 @@ export function CommitBox({
         placeholder="Commit message"
         aria-label="Commit message"
       />
-      {disabled && disabledReason !== undefined && (
+      {!amendOn && disabled && disabledReason !== undefined && (
         <p id="commit-disabled-reason" className={styles.reason}>
           {disabledReason}
         </p>
       )}
+      {amend?.available === true && (
+        <label className={styles.amendToggle}>
+          <input
+            type="checkbox"
+            checked={amendOn}
+            onChange={(event) => amend.onToggle(event.target.checked)}
+          />
+          Amend last commit
+        </label>
+      )}
+      {amendOn && amend?.pushed === true && (
+        <p className={styles.reason}>Already pushed — you'll need to force push.</p>
+      )}
       <Toolbar>
         <button
           onClick={commitIfReady}
-          disabled={disabled || message.trim() === ""}
-          aria-describedby={disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined}
+          disabled={amendOn ? message.trim() === "" : disabled || message.trim() === ""}
+          aria-describedby={
+            !amendOn && disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined
+          }
         >
-          Commit
+          {amendOn ? "Amend" : "Commit"}
         </button>
         {initialMessage !== undefined && <button onClick={onAbortMerge}>Abort merge</button>}
       </Toolbar>

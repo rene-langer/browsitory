@@ -19,6 +19,7 @@ import type {
   DiffHunk,
   FileConflictChoice,
   GraphCommit,
+  HeadInfo,
   RepoClient,
   StatusEntry,
   StatusKind,
@@ -307,6 +308,9 @@ function UncommittedFileSection({
   );
 }
 
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null };
+const noop = () => {};
+
 export function DiffPane({
   repoPath,
   client,
@@ -326,6 +330,10 @@ export function DiffPane({
   onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
+  amendMode = false,
+  headInfo = NO_HEAD_INFO,
+  onSetAmendMode = noop,
+  onAmendCommit = noop,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -363,6 +371,10 @@ export function DiffPane({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
+  amendMode?: boolean;
+  headInfo?: HeadInfo;
+  onSetAmendMode?: (on: boolean) => void;
+  onAmendCommit?: (message: string) => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
@@ -387,6 +399,10 @@ export function DiffPane({
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         mergeMessage={mergeMessage}
         onAbortMerge={onAbortMerge}
+        amendMode={amendMode}
+        headInfo={headInfo}
+        onSetAmendMode={onSetAmendMode}
+        onAmendCommit={onAmendCommit}
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
@@ -430,6 +446,10 @@ function UncommittedDiffPane({
   onResolveAddDeleteConflict,
   mergeMessage,
   onAbortMerge,
+  amendMode = false,
+  headInfo = NO_HEAD_INFO,
+  onSetAmendMode = noop,
+  onAmendCommit = noop,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -459,10 +479,30 @@ function UncommittedDiffPane({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
   onAbortMerge: () => void;
+  amendMode?: boolean;
+  headInfo?: HeadInfo;
+  onSetAmendMode?: (on: boolean) => void;
+  onAmendCommit?: (message: string) => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
 }) {
+  const [headMessage, setHeadMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!amendMode || headInfo.headId === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHeadMessage(null);
+      return;
+    }
+    let cancelled = false;
+    void client.getCommitMessage(repoPath, headInfo.headId).then(
+      (text) => !cancelled && setHeadMessage(text),
+      () => !cancelled && setHeadMessage(""),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [amendMode, headInfo.headId, client, repoPath]);
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -702,6 +742,14 @@ function UncommittedDiffPane({
             initialMessage={mergeMessage ?? undefined}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}
+            amend={{
+              available: headInfo.headId !== null && headInfo.operation === null && mergeMessage === null,
+              on: amendMode,
+              headMessage,
+              pushed: headInfo.headPushed,
+              onToggle: onSetAmendMode,
+              onAmend: onAmendCommit,
+            }}
           />
         )}
       </div>
