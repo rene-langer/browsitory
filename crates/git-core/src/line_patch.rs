@@ -42,6 +42,9 @@ pub(crate) struct FileRef<'a> {
     pub new_absent: bool,
     /// Octal mode of the side that exists, e.g. 0o100644.
     pub mode: u32,
+    /// Whether a patch that empties a side absent in the forward diff may delete the file
+    /// (index operations) rather than leave it empty (workdir discard never deletes a file).
+    pub allow_delete: bool,
 }
 
 pub(crate) fn build(
@@ -62,35 +65,24 @@ pub(crate) fn build(
         }
     }
 
-    let mut body: Vec<(char, &[u8])> = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        let picked = selected.contains(&i);
-        let emitted = match (line.origin, direction) {
-            (' ', _) => Some(' '),
-            ('+', Direction::Forward) => picked.then_some('+'),
-            ('-', Direction::Forward) => Some(if picked { '-' } else { ' ' }),
-            ('+', Direction::Reverse) => Some(if picked { '-' } else { ' ' }),
-            ('-', Direction::Reverse) => picked.then_some('+'),
-            // EOF markers are re-derived from each emitted line's own trailing newline.
-            _ => None,
-        };
-        if let Some(origin) = emitted {
-            body.push((origin, &line.content));
-        }
-    }
+    let body = match direction {
+        Direction::Forward => forward_body(lines, &selected),
+        Direction::Reverse => reverse_body(lines, &selected),
+    };
 
-    // A line lacking its trailing newline must be the last line of each side it belongs to
-    // (old side = ' ' and '-', new side = ' ' and '+').
+    // A line lacking its trailing newline must end its side: nothing on the same side may
+    // follow it (old side = ' ' and '-', new side = ' ' and '+'). libgit2's parser is also
+    // stricter than that for the new side: after a no-EOL ' ' or '+' line *nothing* may follow,
+    // while a no-EOL '-' line may only be followed by '+' lines (git's canonical order).
     for (i, (origin, content)) in body.iter().enumerate() {
         if content.ends_with(b"\n") {
             continue;
         }
-        let later_on_same_side = body[i + 1..].iter().any(|(o, _)| match origin {
-            ' ' => true,
+        let anything_disallowed_later = body[i + 1..].iter().any(|(o, _)| match origin {
             '-' => *o != '+',
-            _ => *o != '-',
+            _ => true,
         });
-        if later_on_same_side {
+        if anything_disallowed_later {
             return Err(LinePatchError::NotApplicable);
         }
     }
@@ -116,22 +108,31 @@ pub(crate) fn build(
     let new_start = position + 1;
 
     // The patch's preimage is the forward old side (Forward) or the forward new side (Reverse).
-    // When that side doesn't exist yet the patch creates the file. The postimage always exists:
-    // a partial selection never deletes a file (selecting every line leaves it empty).
-    let preimage_absent = match direction {
-        Direction::Forward => file.old_absent,
-        Direction::Reverse => file.new_absent,
+    // When that side doesn't exist yet the patch creates the file.
+    let (preimage_absent, postimage_absent) = match direction {
+        Direction::Forward => (file.old_absent, file.new_absent),
+        Direction::Reverse => (file.new_absent, file.old_absent),
     };
+    // The postimage side being absent means the hunk spans the whole file; only when every
+    // line is gone (and the caller allows it) does the patch delete the file. Otherwise — a
+    // partial selection, or `allow_delete: false` — the file stays, possibly empty.
+    let deletes_file = postimage_absent && new_count == 0 && file.allow_delete;
 
     let mut out = Vec::new();
     let p = file.path;
     out.extend_from_slice(format!("diff --git a/{p} b/{p}\n").as_bytes());
     if preimage_absent {
         out.extend_from_slice(format!("new file mode {:o}\n--- /dev/null\n", file.mode).as_bytes());
+    } else if deletes_file {
+        out.extend_from_slice(format!("deleted file mode {:o}\n--- a/{p}\n", file.mode).as_bytes());
     } else {
         out.extend_from_slice(format!("--- a/{p}\n").as_bytes());
     }
-    out.extend_from_slice(format!("+++ b/{p}\n").as_bytes());
+    if deletes_file {
+        out.extend_from_slice(b"+++ /dev/null\n");
+    } else {
+        out.extend_from_slice(format!("+++ b/{p}\n").as_bytes());
+    }
     out.extend_from_slice(
         format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@\n").as_bytes(),
     );
@@ -143,6 +144,56 @@ pub(crate) fn build(
         }
     }
     Ok(out)
+}
+
+/// Stage: selected `+` kept, unselected `+` dropped, selected `-` kept, unselected `-` → context.
+/// The forward hunk's order is already canonical, so lines keep their positions.
+fn forward_body<'a>(lines: &'a [PatchLine], selected: &BTreeSet<usize>) -> Vec<(char, &'a [u8])> {
+    let mut body = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let picked = selected.contains(&i);
+        let emitted = match line.origin {
+            ' ' => Some(' '),
+            '+' => picked.then_some('+'),
+            '-' => Some(if picked { '-' } else { ' ' }),
+            // EOF markers are re-derived from each emitted line's own trailing newline.
+            _ => None,
+        };
+        if let Some(origin) = emitted {
+            body.push((origin, line.content.as_slice()));
+        }
+    }
+    body
+}
+
+/// Unstage/discard: the patch's preimage is the forward *new* side. Selected forward `+` → `-`,
+/// unselected forward `+` → context, selected forward `-` → `+` (restored), unselected forward
+/// `-` dropped. Within each change run the restored `+` lines are emitted after the run's
+/// leading `-` lines (git's canonical order) and before its first context line, so a restored
+/// line lands where it was removed and a no-EOL `+` line is never followed by a `-` line.
+fn reverse_body<'a>(lines: &'a [PatchLine], selected: &BTreeSet<usize>) -> Vec<(char, &'a [u8])> {
+    fn flush<'a>(body: &mut Vec<(char, &'a [u8])>, restored: &mut Vec<&'a [u8]>) {
+        body.extend(restored.drain(..).map(|content| ('+', content)));
+    }
+    let mut body = Vec::new();
+    let mut restored: Vec<&[u8]> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let picked = selected.contains(&i);
+        let content = line.content.as_slice();
+        match line.origin {
+            '-' if picked => restored.push(content),
+            '-' => {}
+            '+' if picked => body.push(('-', content)),
+            '+' | ' ' => {
+                flush(&mut body, &mut restored);
+                body.push((' ', content));
+            }
+            // EOF markers are re-derived from each emitted line's own trailing newline.
+            _ => {}
+        }
+    }
+    flush(&mut body, &mut restored);
+    body
 }
 
 #[cfg(test)]
@@ -162,6 +213,7 @@ mod tests {
             old_absent: false,
             new_absent: false,
             mode: 0o100644,
+            allow_delete: true,
         }
     }
 
@@ -326,5 +378,101 @@ mod tests {
             build(&file(), &h, &lines(), &[9], Direction::Forward),
             Err(LinePatchError::OutOfRange)
         );
+    }
+
+    #[test]
+    fn reverse_emits_removes_before_restored_lines_so_a_no_eol_restore_comes_last() {
+        // Forward: old "a" (no EOL) → new "a\nb\n". Undo everything.
+        let lines = vec![
+            l('-', "a"),
+            l('<', "\n\\ No newline at end of file\n"),
+            l('+', "a\n"),
+            l('+', "b\n"),
+        ];
+        let h = HunkRef {
+            old_start: 1,
+            new_start: 1,
+        };
+        let patch = build(&file(), &h, &lines, &[0, 2, 3], Direction::Reverse).unwrap();
+        let text = String::from_utf8(patch).unwrap();
+        assert!(
+            text.ends_with("@@ -1,2 +1,1 @@\n-a\n-b\n+a\n\\ No newline at end of file\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn reverse_puts_a_restored_line_before_the_runs_kept_lines() {
+        // Undo only "-b" of " a -b +B  c +d": b returns just before B.
+        let patch = build(
+            &file(),
+            &HunkRef {
+                old_start: 1,
+                new_start: 1,
+            },
+            &lines(),
+            &[1],
+            Direction::Reverse,
+        )
+        .unwrap();
+        let text = String::from_utf8(patch).unwrap();
+        assert!(
+            text.ends_with("@@ -1,4 +1,5 @@\n a\n+b\n B\n c\n d\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_no_eol_add_followed_by_anything_is_not_applicable() {
+        let lines = vec![l('+', "x"), l('-', "y\n")];
+        let h = HunkRef {
+            old_start: 1,
+            new_start: 1,
+        };
+        assert_eq!(
+            build(&file(), &h, &lines, &[0, 1], Direction::Forward),
+            Err(LinePatchError::NotApplicable)
+        );
+    }
+
+    #[test]
+    fn emptying_an_absent_side_deletes_the_file_only_when_allowed() {
+        let lines = vec![l('-', "x\n"), l('-', "y\n")];
+        let h = HunkRef {
+            old_start: 1,
+            new_start: 0,
+        };
+        let deleted = FileRef {
+            new_absent: true,
+            ..file()
+        };
+        let text =
+            String::from_utf8(build(&deleted, &h, &lines, &[0, 1], Direction::Forward).unwrap())
+                .unwrap();
+        assert!(
+            text.contains(
+                "deleted file mode 100644\n--- a/f.txt\n+++ /dev/null\n@@ -1,2 +1,0 @@\n-x\n-y\n"
+            ),
+            "{text}"
+        );
+
+        let kept = FileRef {
+            allow_delete: false,
+            ..deleted
+        };
+        let text =
+            String::from_utf8(build(&kept, &h, &lines, &[0, 1], Direction::Forward).unwrap())
+                .unwrap();
+        assert!(text.contains("--- a/f.txt\n+++ b/f.txt\n"), "{text}");
+
+        // A partial selection never deletes.
+        let partial = FileRef {
+            new_absent: true,
+            ..file()
+        };
+        let text =
+            String::from_utf8(build(&partial, &h, &lines, &[0], Direction::Forward).unwrap())
+                .unwrap();
+        assert!(text.contains("+++ b/f.txt\n"), "{text}");
     }
 }

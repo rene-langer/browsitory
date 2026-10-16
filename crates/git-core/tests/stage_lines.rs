@@ -311,3 +311,211 @@ fn unstages_a_line_from_the_middle_with_zero_context() {
     .unwrap();
     assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nx\nb\nc\n");
 }
+
+// --- Reverse direction with a missing final newline (fix round 1) ---
+
+#[test]
+fn discarding_every_changed_line_restores_a_no_eol_base() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nb\n");
+    let hunks = working_diff(&repo, "f.txt", false, &DiffOptions::default()).unwrap();
+    discard_lines(
+        &repo,
+        "f.txt",
+        hunks[0].old_start,
+        hunks[0].new_start,
+        3,
+        &changed(&hunks[0]),
+    )
+    .unwrap();
+    assert_eq!(workdir_content(dir.path(), "f.txt"), "a");
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a");
+}
+
+#[test]
+fn discarding_only_an_added_line_after_a_no_eol_base_keeps_the_newline_fix() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nb\n");
+    let hunks = working_diff(&repo, "f.txt", false, &DiffOptions::default()).unwrap();
+    let add_b = hunks[0]
+        .lines
+        .iter()
+        .position(|l| l.content == "b\n")
+        .unwrap() as u32;
+    discard_lines(
+        &repo,
+        "f.txt",
+        hunks[0].old_start,
+        hunks[0].new_start,
+        3,
+        &[add_b],
+    )
+    .unwrap();
+    assert_eq!(workdir_content(dir.path(), "f.txt"), "a\n");
+}
+
+#[test]
+fn unstaging_every_changed_line_restores_a_no_eol_head() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a\nb");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nb\nc");
+    stage_file(&repo, "f.txt").unwrap();
+    let hunks = working_diff(&repo, "f.txt", true, &DiffOptions::default()).unwrap();
+    unstage_lines(
+        &repo,
+        "f.txt",
+        hunks[0].old_start,
+        hunks[0].new_start,
+        3,
+        &changed(&hunks[0]),
+    )
+    .unwrap();
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb");
+    assert_eq!(workdir_content(dir.path(), "f.txt"), "a\nb\nc");
+}
+
+#[test]
+fn unstaging_only_the_last_added_line_after_a_no_eol_head() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a\nb");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nb\nc");
+    stage_file(&repo, "f.txt").unwrap();
+    let hunks = working_diff(&repo, "f.txt", true, &DiffOptions::default()).unwrap();
+    let add_c = hunks[0]
+        .lines
+        .iter()
+        .position(|l| l.content == "c")
+        .unwrap() as u32;
+    unstage_lines(
+        &repo,
+        "f.txt",
+        hunks[0].old_start,
+        hunks[0].new_start,
+        3,
+        &[add_c],
+    )
+    .unwrap();
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\n");
+}
+
+fn changed(hunk: &git_core::diff::DiffHunk) -> Vec<u32> {
+    hunk.lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.origin != git_core::diff::DiffLineOrigin::Context)
+        .map(|(i, _)| i as u32)
+        .collect()
+}
+
+// --- Whole-hunk operations at zero context (fix round 1) ---
+
+fn setup_pure_deletion() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a\nb\nc\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nc\n");
+    (dir, repo)
+}
+
+const ZERO: DiffOptions = DiffOptions {
+    ignore_whitespace: false,
+    context_lines: 0,
+};
+
+#[test]
+fn stage_hunk_stages_a_zero_context_pure_deletion() {
+    let (dir, repo) = setup_pure_deletion();
+    let h = &working_diff(&repo, "f.txt", false, &ZERO).unwrap()[0];
+    git_core::stage::stage_hunk(&repo, "f.txt", h.old_start, h.new_start, 0).unwrap();
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nc\n");
+    assert_eq!(workdir_content(dir.path(), "f.txt"), "a\nc\n");
+}
+
+#[test]
+fn unstage_hunk_unstages_a_zero_context_pure_deletion() {
+    let (_dir, repo) = setup_pure_deletion();
+    stage_file(&repo, "f.txt").unwrap();
+    let h = &working_diff(&repo, "f.txt", true, &ZERO).unwrap()[0];
+    git_core::stage::unstage_hunk(&repo, "f.txt", h.old_start, h.new_start, 0).unwrap();
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\n");
+}
+
+#[test]
+fn discard_hunk_discards_a_zero_context_pure_deletion() {
+    let (dir, repo) = setup_pure_deletion();
+    let h = &working_diff(&repo, "f.txt", false, &ZERO).unwrap()[0];
+    git_core::stage::discard_hunk(&repo, "f.txt", h.old_start, h.new_start, 0).unwrap();
+    assert_eq!(
+        workdir_content(dir.path(), "f.txt").replace("\r\n", "\n"),
+        "a\nb\nc\n"
+    );
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\n");
+}
+
+// --- Whole-hunk behaviour on added/deleted files (characterization; must not change) ---
+
+#[test]
+fn stage_hunk_on_a_deleted_file_stages_the_deletion() {
+    let (dir, repo) = setup_abc();
+    std::fs::remove_file(dir.path().join("f.txt")).unwrap();
+    let h = &working_diff(&repo, "f.txt", false, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::stage_hunk(&repo, "f.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(index_content(&repo, "f.txt"), None);
+}
+
+#[test]
+fn stage_hunk_on_an_untracked_file_adds_it() {
+    let (dir, repo) = setup_abc();
+    common::write_file(dir.path(), "new.txt", "x\ny\n");
+    let h = &working_diff(&repo, "new.txt", false, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::stage_hunk(&repo, "new.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(index_content(&repo, "new.txt").unwrap(), "x\ny\n");
+}
+
+#[test]
+fn unstage_hunk_on_a_newly_added_file_removes_it_from_the_index() {
+    let (dir, repo) = setup_abc();
+    common::write_file(dir.path(), "new.txt", "x\ny\n");
+    stage_file(&repo, "new.txt").unwrap();
+    let h = &working_diff(&repo, "new.txt", true, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::unstage_hunk(&repo, "new.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(index_content(&repo, "new.txt"), None);
+    assert_eq!(workdir_content(dir.path(), "new.txt"), "x\ny\n");
+}
+
+#[test]
+fn unstage_hunk_on_a_staged_deletion_restores_the_index_entry() {
+    let (dir, repo) = setup_abc();
+    std::fs::remove_file(dir.path().join("f.txt")).unwrap();
+    stage_file(&repo, "f.txt").unwrap();
+    let h = &working_diff(&repo, "f.txt", true, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::unstage_hunk(&repo, "f.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\n");
+}
+
+#[test]
+fn discard_hunk_on_a_deleted_file_restores_it() {
+    let (dir, repo) = setup_abc();
+    std::fs::remove_file(dir.path().join("f.txt")).unwrap();
+    let h = &working_diff(&repo, "f.txt", false, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::discard_hunk(&repo, "f.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(
+        workdir_content(dir.path(), "f.txt").replace("\r\n", "\n"),
+        "a\nb\nc\n"
+    );
+}
+
+#[test]
+fn discard_hunk_on_an_untracked_file_empties_it_but_never_deletes_it() {
+    let (dir, repo) = setup_abc();
+    common::write_file(dir.path(), "new.txt", "x\ny\n");
+    let h = &working_diff(&repo, "new.txt", false, &DiffOptions::default()).unwrap()[0];
+    git_core::stage::discard_hunk(&repo, "new.txt", h.old_start, h.new_start, 3).unwrap();
+    assert_eq!(workdir_content(dir.path(), "new.txt"), "");
+}

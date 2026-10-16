@@ -60,6 +60,8 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     Ok(())
 }
 
+/// Stages one whole hunk of the index→workdir diff, identified by the `(old_start, new_start)`
+/// read from `diff::working_diff(.., staged: false, ..)` with the same `context_lines`.
 pub fn stage_hunk(
     repo: &git2::Repository,
     path: &str,
@@ -67,30 +69,17 @@ pub fn stage_hunk(
     new_start: u32,
     context_lines: u32,
 ) -> Result<(), StageError> {
-    // Same options as `diff::working_diff`'s unstaged branch — the hunk identity the caller
-    // passed in was read from that exact diff, so this one must be built identically or the
-    // `(old_start, new_start)` pair won't line up with what's on screen.
-    let mut opts = working_diff_options(path, false, &staging_opts(context_lines));
-    let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
-
-    let matched = std::cell::Cell::new(false);
-    let mut apply_opts = git2::ApplyOptions::new();
-    apply_opts.hunk_callback(|hunk| {
-        let is_match =
-            matches!(hunk, Some(h) if h.old_start() == old_start && h.new_start() == new_start);
-        if is_match {
-            matched.set(true);
-        }
-        is_match
-    });
-    repo.apply(&diff, git2::ApplyLocation::Index, Some(&mut apply_opts))?;
-
-    if !matched.get() {
-        return Err(StageError::HunkNotFound);
-    }
-    Ok(())
+    apply_selection(
+        repo,
+        path,
+        (old_start, new_start),
+        context_lines,
+        Selection::WholeHunk,
+        Target::Stage,
+    )
 }
 
+/// Reverts one whole hunk of the index→workdir diff in the working tree.
 pub fn discard_hunk(
     repo: &git2::Repository,
     path: &str,
@@ -98,29 +87,17 @@ pub fn discard_hunk(
     new_start: u32,
     context_lines: u32,
 ) -> Result<(), StageError> {
-    let mut opts = working_diff_options(path, false, &staging_opts(context_lines));
-    opts.reverse(true);
-    let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
-
-    let matched = std::cell::Cell::new(false);
-    let mut apply_opts = git2::ApplyOptions::new();
-    // Same old/new swap as `unstage_hunk` — see its comment.
-    apply_opts.hunk_callback(|hunk| {
-        let is_match =
-            matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
-        if is_match {
-            matched.set(true);
-        }
-        is_match
-    });
-    repo.apply(&diff, git2::ApplyLocation::WorkDir, Some(&mut apply_opts))?;
-
-    if !matched.get() {
-        return Err(StageError::HunkNotFound);
-    }
-    Ok(())
+    apply_selection(
+        repo,
+        path,
+        (old_start, new_start),
+        context_lines,
+        Selection::WholeHunk,
+        Target::Discard,
+    )
 }
 
+/// Unstages one whole hunk of the HEAD→index diff.
 pub fn unstage_hunk(
     repo: &git2::Repository,
     path: &str,
@@ -128,30 +105,14 @@ pub fn unstage_hunk(
     new_start: u32,
     context_lines: u32,
 ) -> Result<(), StageError> {
-    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let mut opts = working_diff_options(path, true, &staging_opts(context_lines));
-    opts.reverse(true);
-    let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
-
-    let matched = std::cell::Cell::new(false);
-    let mut apply_opts = git2::ApplyOptions::new();
-    // `reverse(true)` swaps which side is "old" and which is "new", so the hunk this callback
-    // sees has old/new flipped relative to the (old_start, new_start) the caller captured from
-    // the forward (non-reversed) diff.
-    apply_opts.hunk_callback(|hunk| {
-        let is_match =
-            matches!(hunk, Some(h) if h.old_start() == new_start && h.new_start() == old_start);
-        if is_match {
-            matched.set(true);
-        }
-        is_match
-    });
-    repo.apply(&diff, git2::ApplyLocation::Index, Some(&mut apply_opts))?;
-
-    if !matched.get() {
-        return Err(StageError::HunkNotFound);
-    }
-    Ok(())
+    apply_selection(
+        repo,
+        path,
+        (old_start, new_start),
+        context_lines,
+        Selection::WholeHunk,
+        Target::Unstage,
+    )
 }
 
 struct FoundHunk {
@@ -206,18 +167,41 @@ fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundH
     found.into_inner().ok_or(StageError::HunkNotFound)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_lines(
+/// Which lines of the target hunk to apply.
+enum Selection<'a> {
+    /// Every `+`/`-` line (the whole-hunk operations).
+    WholeHunk,
+    /// Indices into the hunk's lines as `diff::hunks_from_diff` emits them.
+    Lines(&'a [u32]),
+}
+
+/// The three operations; each fixes which diff the hunk comes from, the patch direction and
+/// where it is applied.
+#[derive(Clone, Copy)]
+enum Target {
+    /// index→workdir hunk, forward, onto the index.
+    Stage,
+    /// HEAD→index hunk, reversed, onto the index.
+    Unstage,
+    /// index→workdir hunk, reversed, onto the working tree.
+    Discard,
+}
+
+/// Single path for every hunk and line operation: re-diff exactly as `diff::working_diff` does,
+/// find the hunk, build a one-hunk patch from the selection (`line_patch`), apply it.
+fn apply_selection(
     repo: &git2::Repository,
     path: &str,
-    old_start: u32,
-    new_start: u32,
+    (old_start, new_start): (u32, u32),
     context_lines: u32,
-    line_indices: &[u32],
-    staged_side: bool,
-    direction: Direction,
-    location: git2::ApplyLocation,
+    selection: Selection,
+    target: Target,
 ) -> Result<(), StageError> {
+    let (staged_side, direction, location) = match target {
+        Target::Stage => (false, Direction::Forward, git2::ApplyLocation::Index),
+        Target::Unstage => (true, Direction::Reverse, git2::ApplyLocation::Index),
+        Target::Discard => (false, Direction::Reverse, git2::ApplyLocation::WorkDir),
+    };
     let mut opts = working_diff_options(path, staged_side, &staging_opts(context_lines));
     let diff = if staged_side {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
@@ -226,11 +210,25 @@ fn apply_lines(
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
     let hunk = find_hunk(&diff, old_start, new_start)?;
+    let all_changed: Vec<u32>;
+    let line_indices = match selection {
+        Selection::Lines(indices) => indices,
+        Selection::WholeHunk => {
+            all_changed = (0..hunk.lines.len() as u32)
+                .filter(|&i| matches!(hunk.lines[i as usize].origin, '+' | '-'))
+                .collect();
+            &all_changed
+        }
+    };
     let file = FileRef {
         path,
         old_absent: hunk.old_absent,
         new_absent: hunk.new_absent,
         mode: hunk.mode,
+        // Emptying the index side of an added/deleted file removes the entry, like `git add`
+        // of a deletion. The working tree never loses a file here — deleting an untracked
+        // file is `discard_file`'s job, behind its own confirmation.
+        allow_delete: !matches!(target, Target::Discard),
     };
     let patch = line_patch::build(
         &file,
@@ -257,16 +255,13 @@ pub fn stage_lines(
     context_lines: u32,
     line_indices: &[u32],
 ) -> Result<(), StageError> {
-    apply_lines(
+    apply_selection(
         repo,
         path,
-        old_start,
-        new_start,
+        (old_start, new_start),
         context_lines,
-        line_indices,
-        false,
-        Direction::Forward,
-        git2::ApplyLocation::Index,
+        Selection::Lines(line_indices),
+        Target::Stage,
     )
 }
 
@@ -279,16 +274,13 @@ pub fn unstage_lines(
     context_lines: u32,
     line_indices: &[u32],
 ) -> Result<(), StageError> {
-    apply_lines(
+    apply_selection(
         repo,
         path,
-        old_start,
-        new_start,
+        (old_start, new_start),
         context_lines,
-        line_indices,
-        true,
-        Direction::Reverse,
-        git2::ApplyLocation::Index,
+        Selection::Lines(line_indices),
+        Target::Unstage,
     )
 }
 
@@ -302,15 +294,12 @@ pub fn discard_lines(
     context_lines: u32,
     line_indices: &[u32],
 ) -> Result<(), StageError> {
-    apply_lines(
+    apply_selection(
         repo,
         path,
-        old_start,
-        new_start,
+        (old_start, new_start),
         context_lines,
-        line_indices,
-        false,
-        Direction::Reverse,
-        git2::ApplyLocation::WorkDir,
+        Selection::Lines(line_indices),
+        Target::Discard,
     )
 }
