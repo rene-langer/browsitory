@@ -519,3 +519,59 @@ fn discard_hunk_on_an_untracked_file_empties_it_but_never_deletes_it() {
     git_core::stage::discard_hunk(&repo, "new.txt", h.old_start, h.new_start, 3).unwrap();
     assert_eq!(workdir_content(dir.path(), "new.txt"), "");
 }
+
+// --- Final-review fixes: symlinked parent on workdir discard, error mapping ---
+
+#[cfg(unix)]
+fn setup_symlinked_parent() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f.txt", "a\nb\nc\n");
+    common::commit_all(&repo, "base");
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("f.txt"), "a\nB\nc\n").unwrap();
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("d")).unwrap();
+    (dir, repo, outside)
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_hunk_does_not_write_through_a_symlinked_parent() {
+    let (_dir, repo, outside) = setup_symlinked_parent();
+    let hunks = working_diff(&repo, "d/f.txt", false, &DiffOptions::default()).unwrap();
+    let h = &hunks[0];
+    let result = git_core::stage::discard_hunk(&repo, "d/f.txt", h.old_start, h.new_start, 3);
+    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert_eq!(workdir_content(outside.path(), "f.txt"), "a\nB\nc\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_lines_does_not_write_through_a_symlinked_parent() {
+    let (_dir, repo, outside) = setup_symlinked_parent();
+    let hunks = working_diff(&repo, "d/f.txt", false, &DiffOptions::default()).unwrap();
+    let h = &hunks[0];
+    let first_changed = changed(h)[0];
+    let result = discard_lines(
+        &repo,
+        "d/f.txt",
+        h.old_start,
+        h.new_start,
+        3,
+        &[first_changed],
+    );
+    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert_eq!(workdir_content(outside.path(), "f.txt"), "a\nB\nc\n");
+}
+
+#[test]
+fn an_index_lock_failure_is_not_reported_as_an_inapplicable_selection() {
+    let (dir, repo) = setup_abc();
+    let (o, n) = only_hunk(&repo, false);
+    std::fs::write(dir.path().join(".git/index.lock"), "").unwrap();
+    let result = git_core::stage::stage_hunk(&repo, "f.txt", o, n, 3);
+    match result {
+        Err(StageError::Index(e)) => assert_eq!(e.code(), git2::ErrorCode::Locked, "{e}"),
+        other => panic!("{other:?}"),
+    }
+}

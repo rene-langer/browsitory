@@ -32,6 +32,8 @@ pub enum StageError {
     InvalidPath,
     #[error("Ignore pattern can't be empty or span several lines.")]
     InvalidPattern,
+    #[error("{0} is a folder (for example a nested repository) and wasn't discarded.")]
+    IsFolder(String),
     #[error("failed to update the working tree: {0}")]
     Io(#[from] std::io::Error),
     #[error("failed to read status: {0}")]
@@ -72,22 +74,41 @@ fn checked_relative(path: &str) -> Result<&Path, StageError> {
     Ok(p)
 }
 
+/// Refuses `rel` when any of its existing leading components (inside `workdir`) is a symlink, so
+/// a working-tree write can never land outside the repository through a symlinked folder.
+fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(), StageError> {
+    let mut current = workdir.to_path_buf();
+    let Some(parent) = rel.parent() else {
+        return Ok(());
+    };
+    for component in parent.components() {
+        current.push(component);
+        match current.symlink_metadata() {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(StageError::InvalidPath),
+            Ok(_) => {}
+            // Nothing below a missing folder exists either; the write will create it.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Throws away the unstaged changes of one file; staged changes are kept. Untracked files are
-/// deleted.
+/// deleted. Folders (for example an untracked nested repository) are never removed.
 pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    ensure_no_symlinked_parent(workdir, rel)?;
     if repo.index()?.get_path(rel, 0).is_some() {
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
         repo.checkout_index(None, Some(&mut checkout))?;
     } else {
         let full = workdir.join(rel);
-        if full.symlink_metadata().is_ok() {
-            // Lexical checks don't see symlinked directories; resolve the parent for real.
-            let parent = full.parent().ok_or(StageError::InvalidPath)?;
-            if !parent.canonicalize()?.starts_with(workdir.canonicalize()?) {
-                return Err(StageError::InvalidPath);
+        if let Ok(meta) = full.symlink_metadata() {
+            if meta.is_dir() {
+                return Err(StageError::IsFolder(path.to_string()));
             }
             std::fs::remove_file(full)?;
         }
@@ -109,14 +130,19 @@ pub fn discard_all_unstaged(repo: &git2::Repository) -> Result<(), StageError> {
 
 /// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
 pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageError> {
-    let pattern = pattern.trim();
-    if pattern.is_empty() || pattern.contains('\n') || pattern.contains('\r') {
+    if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {
         return Err(StageError::InvalidPattern);
     }
     let file = repo
         .workdir()
         .ok_or(StageError::NoWorkdir)?
         .join(".gitignore");
+    if file
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+    {
+        return Err(StageError::InvalidPath);
+    }
     let existing = match std::fs::read_to_string(&file) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -292,6 +318,10 @@ fn apply_selection(
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
     let hunk = find_hunk(&diff, old_start, new_start)?;
+    if matches!(target, Target::Discard) {
+        let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+        ensure_no_symlinked_parent(workdir, checked_relative(path)?)?;
+    }
     let all_changed: Vec<u32>;
     let line_indices = match selection {
         Selection::Lines(indices) => indices,
@@ -322,9 +352,19 @@ fn apply_selection(
         line_indices,
         direction,
     )?;
-    let parsed = git2::Diff::from_buffer(&patch).map_err(|_| StageError::SelectionNotApplicable)?;
+    let parsed = git2::Diff::from_buffer(&patch).map_err(not_applicable_or_index)?;
     repo.apply(&parsed, location, None)
-        .map_err(|_| StageError::SelectionNotApplicable)
+        .map_err(not_applicable_or_index)
+}
+
+/// Only a patch libgit2 can't parse or apply means "this selection doesn't work"; anything else
+/// (a locked index, I/O, the object database) is a real failure and is reported as such.
+fn not_applicable_or_index(e: git2::Error) -> StageError {
+    if e.code() == git2::ErrorCode::ApplyFail || e.class() == git2::ErrorClass::Patch {
+        StageError::SelectionNotApplicable
+    } else {
+        StageError::Index(e)
+    }
 }
 
 /// Stages only the hunk lines at `line_indices` (indices into the index→workdir hunk as

@@ -146,3 +146,72 @@ fn discard_file_does_not_delete_through_a_symlinked_directory() {
     ));
     assert!(outside.path().join("victim.txt").exists());
 }
+
+// --- Final-review fixes: symlinked parents, symlinked .gitignore, pattern validation ---
+
+/// Tracked `d/f.txt`, then `d` replaced by a symlink to an outside dir holding its own `f.txt`.
+#[cfg(unix)]
+fn setup_symlinked_parent() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f.txt", "inside\n");
+    common::commit_all(&repo, "base");
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("f.txt"), "outside\n").unwrap();
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("d")).unwrap();
+    (dir, repo, outside)
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_file_does_not_write_a_tracked_file_through_a_symlinked_parent() {
+    let (_dir, repo, outside) = setup_symlinked_parent();
+    let result = discard_file(&repo, "d/f.txt");
+    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert_eq!(read(outside.path(), "f.txt"), "outside\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn ignore_path_refuses_a_symlinked_gitignore() {
+    let (dir, repo) = common::init_repo();
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("target"), "keep\n").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("target"), dir.path().join(".gitignore"))
+        .unwrap();
+    let result = ignore_path(&repo, "*.log");
+    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert_eq!(read(outside.path(), "target"), "keep\n");
+}
+
+#[test]
+fn ignore_path_rejects_surrounding_whitespace_instead_of_trimming() {
+    let (dir, repo) = common::init_repo();
+    for bad in ["", " *.log", "*.log ", "\t*.log", "a\rb"] {
+        let result = ignore_path(&repo, bad);
+        assert!(
+            matches!(result, Err(StageError::InvalidPattern)),
+            "{bad:?}: {result:?}"
+        );
+    }
+    assert!(!dir.path().join(".gitignore").exists());
+}
+
+#[test]
+fn discard_file_on_an_untracked_folder_explains_instead_of_failing_raw() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "seed.txt", "s\n");
+    common::commit_all(&repo, "base");
+    let _nested = git2::Repository::init(dir.path().join("nested")).unwrap();
+    common::write_file(dir.path(), "nested/inner.txt", "i\n");
+    let result = discard_file(&repo, "nested/");
+    match result {
+        Err(e @ StageError::IsFolder(_)) => assert_eq!(
+            e.to_string(),
+            "nested/ is a folder (for example a nested repository) and wasn't discarded."
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert!(dir.path().join("nested/inner.txt").exists());
+    assert!(dir.path().join("nested/.git").exists());
+}
