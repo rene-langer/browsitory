@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./CommitBox.module.css";
 
@@ -27,6 +27,8 @@ export function CommitBox({
   initialDraft,
   onDraftChange,
   amend,
+  focusMessage = false,
+  onFocusMessageHandled,
 }: {
   onCommit: (message: string) => void;
   disabled: boolean;
@@ -43,6 +45,12 @@ export function CommitBox({
   initialDraft?: CommitDraft;
   /** Called with the current draft whenever it changes, so the owner can hand it back on remount. */
   onDraftChange?: (draft: CommitDraft) => void;
+  /**
+   * One-shot request to focus the message field (e.g. "Edit commit message…"). Honored once the
+   * amend prefill, if amending, is in; `onFocusMessageHandled` then lets the owner clear it.
+   */
+  focusMessage?: boolean;
+  onFocusMessageHandled?: () => void;
   /** Amend-last-commit mode; omit to hide the toggle entirely. */
   amend?: {
     /** headId !== null && no operation in progress. */
@@ -108,6 +116,14 @@ export function CommitBox({
     }
   }, [amendOn, headMessage, stashedDraft, message]);
 
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusReady = !amendOn || stashedDraft !== null;
+  useEffect(() => {
+    if (!focusMessage || !focusReady) return;
+    textareaRef.current?.focus();
+    onFocusMessageHandled?.();
+  }, [focusMessage, focusReady, onFocusMessageHandled]);
+
   const commitIfReady = () => {
     if (amendOn) {
       if (message.trim() === "") {
@@ -136,6 +152,7 @@ export function CommitBox({
   return (
     <div>
       <textarea
+        ref={textareaRef}
         className={styles.textarea}
         value={message}
         onChange={(event) => setMessage(event.target.value)}

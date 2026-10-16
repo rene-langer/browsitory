@@ -31,6 +31,9 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
   }
   const isPush =
     progress.operation === "PushBranch" || progress.operation === "PushTags" || progress.operation === "ForcePushBranch";
+  if (progress.operation === "ForcePushBranch" && progress.errorKind === "NonFastForward") {
+    return "The remote refused the force push.";
+  }
   if (isPush && progress.errorKind === "NonFastForward") {
     return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
   }
@@ -97,6 +100,9 @@ export function useRemoteTransferActions(
   const activeTransferId = useRef<string | null>(null);
   const transferRequestPending = useRef(false);
   const lastPushRemote = useRef<string | null>(null);
+  // The `<remote>/<branch>` a force push targets (the lease and confirm dialog use the force-push
+  // remote and the local branch name), recorded when it starts so a stale-lease failure can name it.
+  const forcePushTarget = useRef<{ remoteName: string; branch: string | null } | null>(null);
   const upstreamRef = useRef<UpstreamInfo | null>(upstream);
   useEffect(() => {
     upstreamRef.current = upstream;
@@ -128,7 +134,13 @@ export function useRemoteTransferActions(
         transferRequestPending.current = false;
         activeTransferId.current = null;
         const current = upstreamRef.current;
-        const upstreamLabel = current !== null ? `${current.remoteName}/${current.remoteBranch}` : (lastPushRemote.current ?? "The remote branch");
+        const target = progress.operation === "ForcePushBranch" ? forcePushTarget.current : null;
+        const upstreamLabel =
+          target !== null && target.branch !== null
+            ? `${target.remoteName}/${target.branch}`
+            : current !== null
+              ? `${current.remoteName}/${current.remoteBranch}`
+              : (lastPushRemote.current ?? "The remote branch");
         const offer =
           progress.operation === "PushBranch" && progress.errorKind === "NonFastForward" && lastPushRemote.current !== null
             ? { remoteName: lastPushRemote.current }
@@ -304,7 +316,12 @@ export function useRemoteTransferActions(
   );
   const forcePushCurrentBranch = useCallback(
     (remoteName: string) => {
-      setState((prev) => ({ ...prev, forcePushOffer: null, forcePushConfirm: null }));
+      forcePushTarget.current = { remoteName, branch: upstreamRef.current?.localBranch ?? null };
+      setState((prev) => {
+        const branch = prev.branches.find((candidate) => candidate.isCurrent)?.name;
+        if (branch !== undefined) forcePushTarget.current = { remoteName, branch };
+        return { ...prev, forcePushOffer: null, forcePushConfirm: null };
+      });
       return startTransfer("ForcePushBranch", () => client.forcePushCurrentBranch(repoPath, remoteName));
     },
     [client, startTransfer, repoPath, setState],

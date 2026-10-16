@@ -10,7 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Commit context menu: Cherry-pick, Revert, Checkout (detached) and "Reset ⟨branch⟩ to here…"
   (soft, mixed or hard; hard asks first). Cherry-pick and revert conflicts use the merge
-  conflict flow, with their own status-strip label and abort button.
+  conflict flow, with their own status-strip label and abort button. A cherry-pick finished
+  after resolving conflicts keeps the original author, and aborting one leaves unrelated
+  unstaged edits alone (including when a conflicted file name contains glob characters).
 - "Amend last commit" toggle in the commit box, plus "Edit commit message…" on the latest
   commit; warns when that commit is already pushed.
 - Force push with lease: offered when a push is rejected as non-fast-forward, and from the

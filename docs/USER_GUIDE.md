@@ -158,7 +158,8 @@ Right-click a commit in the graph:
   staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked files;
   untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not available
   on a detached HEAD.
-- **Edit commit message…** appears on the latest commit only and amends its message.
+- **Edit commit message…** appears on the latest commit only. It opens the amend box with that
+  commit's message filled in and the cursor in the message field.
 
 **Amend last commit.** Tick **Amend last commit** under the commit message. The message fills
 with the last commit's, and the **Commit** button becomes **Amend**: anything staged is folded
@@ -175,7 +176,7 @@ fetch between reviewing and pushing refreshes the lease, so review the remote br
 last fetch, not before.
 
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
-and to amend the last commit.
+and to amend the last commit (where the commit menu offers them).
 
 ## Pull requests
 

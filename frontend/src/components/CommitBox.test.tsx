@@ -322,6 +322,19 @@ describe("amend", () => {
     expect(screen.getByText("Already pushed — you'll need to force push.")).toBeInTheDocument();
   });
 
+  it("focuses the message field once the amend prefill is in, then reports it handled", () => {
+    const onFocusMessageHandled = vi.fn();
+    const props = { onCommit: vi.fn(), disabled: true, onAbortMerge: () => {}, focusMessage: true, onFocusMessageHandled };
+    const amend = { available: true, on: true, pushed: false, onToggle: vi.fn(), onAmend: vi.fn() };
+    const { rerender } = render(<CommitBox {...props} amend={{ ...amend, headMessage: null }} />);
+    expect(screen.getByLabelText("Commit message")).not.toHaveFocus();
+    expect(onFocusMessageHandled).not.toHaveBeenCalled();
+    rerender(<CommitBox {...props} amend={{ ...amend, headMessage: "previous message" }} />);
+    expect(screen.getByLabelText("Commit message")).toHaveValue("previous message");
+    expect(screen.getByLabelText("Commit message")).toHaveFocus();
+    expect(onFocusMessageHandled).toHaveBeenCalledTimes(1);
+  });
+
   it("hides the toggle when amend is unavailable", () => {
     renderBox({ available: false });
     expect(screen.queryByRole("checkbox", { name: "Amend last commit" })).not.toBeInTheDocument();

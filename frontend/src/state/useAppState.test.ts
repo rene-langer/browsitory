@@ -3142,6 +3142,41 @@ describe("history actions", () => {
     );
   });
 
+  it("labels a stale lease with the force-pushed remote and local branch, not the upstream", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      listBranches: async () => [{ name: "feature", isCurrent: true }],
+      getCurrentUpstream: async () => ({ localBranch: "feature", remoteName: "origin", remoteBranch: "other" }),
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.forcePushCurrentBranch("fork"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe(
+      "fork/feature changed since your last fetch. Fetch and review before force pushing.",
+    );
+  });
+
+  it("gives a rejected force push its own message", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe("The remote refused the force push.");
+  });
+
   it("treats a failed force push as a push failure", async () => {
     let listener: ((progress: TransferProgress) => void) | null = null;
     const client = transferClient({

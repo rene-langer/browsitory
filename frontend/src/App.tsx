@@ -78,6 +78,8 @@ function RepoWorkspace({
     [onCommitDraftChange, repoPath],
   );
   const panelVisibility = useSidebarPanelVisibility();
+  const [focusCommitMessage, setFocusCommitMessage] = useState(false);
+  const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
@@ -484,6 +486,7 @@ function RepoWorkspace({
                 onEditHeadMessage={() => {
                   appState.selectRow("uncommitted");
                   appState.setAmendMode(true);
+                  setFocusCommitMessage(true);
                 }}
                 graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               />
@@ -517,6 +520,8 @@ function RepoWorkspace({
                 headInfo={appState.state.headInfo}
                 onSetAmendMode={appState.setAmendMode}
                 onAmendCommit={announce("Amended commit", appState.amendCommit)}
+                focusCommitMessage={focusCommitMessage}
+                onCommitMessageFocused={clearFocusCommitMessage}
                 rebaseProgress={appState.state.rebaseProgress}
                 onRebaseContinue={appState.rebaseContinue}
                 onRebaseAbort={appState.abortRebase}

@@ -172,6 +172,20 @@ describe("DiffPane", () => {
       { path: "b.txt", staged: true, kind: "New" },
     ];
 
+    it("focuses the commit message once the amend prefill is in and reports it", async () => {
+      const onCommitMessageFocused = vi.fn();
+      renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
+        amendMode: true,
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null },
+        focusCommitMessage: true,
+        onCommitMessageFocused,
+      });
+
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
+      expect(screen.getByLabelText("Commit message")).toHaveFocus();
+      expect(onCommitMessageFocused).toHaveBeenCalled();
+    });
+
     it("renders an icon-only Stage control for unstaged entries and Unstage for staged ones", () => {
       renderUncommitted(fakeClient({}), status);
 

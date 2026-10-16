@@ -334,6 +334,8 @@ export function DiffPane({
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
   onAmendCommit = noop,
+  focusCommitMessage = false,
+  onCommitMessageFocused,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -375,6 +377,8 @@ export function DiffPane({
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
   onAmendCommit?: (message: string) => void;
+  focusCommitMessage?: boolean;
+  onCommitMessageFocused?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
@@ -403,6 +407,8 @@ export function DiffPane({
         headInfo={headInfo}
         onSetAmendMode={onSetAmendMode}
         onAmendCommit={onAmendCommit}
+        focusCommitMessage={focusCommitMessage}
+        onCommitMessageFocused={onCommitMessageFocused}
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
@@ -450,6 +456,8 @@ function UncommittedDiffPane({
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
   onAmendCommit = noop,
+  focusCommitMessage = false,
+  onCommitMessageFocused,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -483,6 +491,8 @@ function UncommittedDiffPane({
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
   onAmendCommit?: (message: string) => void;
+  focusCommitMessage?: boolean;
+  onCommitMessageFocused?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
@@ -749,6 +759,8 @@ function UncommittedDiffPane({
             initialMessage={mergeMessage ?? undefined}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}
+            focusMessage={focusCommitMessage}
+            onFocusMessageHandled={onCommitMessageFocused}
             amend={{
               available: headInfo.headId !== null && headInfo.operation === null && mergeMessage === null,
               on: amendMode,
