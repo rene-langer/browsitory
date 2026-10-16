@@ -10,6 +10,11 @@ import styles from "./CommitBox.module.css";
 export interface CommitDraft {
   message: string;
   lastSeeded: string;
+  /**
+   * The pre-amend draft while amend mode has swapped it out for HEAD's message (null/absent
+   * otherwise). Persisted so a remount while amending can't lose it.
+   */
+  stashed?: string | null;
 }
 
 export function CommitBox({
@@ -54,12 +59,14 @@ export function CommitBox({
   // edited it" (message !== lastSeeded) — and only ever overwrite the former.
   const [lastSeeded, setLastSeeded] = useState(initialDraft?.lastSeeded ?? "");
 
+  const [stashedDraft, setStashedDraft] = useState<string | null>(initialDraft?.stashed ?? null);
+
   // Write-through rather than lifting the state itself: the owner only needs the value back on
   // the next mount, and making it controlled from `App` would re-render the whole workspace on
   // every keystroke.
   useEffect(() => {
-    onDraftChange?.({ message, lastSeeded });
-  }, [message, lastSeeded, onDraftChange]);
+    onDraftChange?.({ message, lastSeeded, stashed: stashedDraft });
+  }, [message, lastSeeded, stashedDraft, onDraftChange]);
 
   // Seeds the field when a merge starts or when the pre-fill message changes to a different
   // merge's message, and clears it when a merge ends — but in every case only if the field still
@@ -84,8 +91,8 @@ export function CommitBox({
 
   // Entering amend mode swaps the typed draft out for HEAD's message; leaving it puts the draft
   // back untouched, so toggling never loses a half-typed message.
-  const [stashedDraft, setStashedDraft] = useState<string | null>(null);
-  const amendOn = amend?.on === true;
+  // Amend mode is only effective while it's actually available (e.g. not mid-merge).
+  const amendOn = amend !== undefined && amend.on && amend.available;
   const headMessage = amend?.headMessage ?? null;
   useEffect(() => {
     if (amendOn && stashedDraft === null && headMessage !== null) {
@@ -104,10 +111,9 @@ export function CommitBox({
       if (message.trim() === "") {
         return;
       }
+      // Leave message and stash alone: on success amend mode turns off and the stashed draft
+      // is restored; on failure the typed message stays put.
       amend.onAmend(message);
-      setStashedDraft(null);
-      setMessage("");
-      setLastSeeded("");
       return;
     }
     if (disabled || message.trim() === "") {

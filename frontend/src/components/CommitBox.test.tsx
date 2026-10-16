@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CommitBox } from "./CommitBox";
+import { CommitBox, type CommitDraft } from "./CommitBox";
 
 describe("CommitBox", () => {
   it("Commit button is disabled when disabled=true", () => {
@@ -225,10 +225,10 @@ describe("CommitBox", () => {
     expect(textarea).toHaveValue("restored");
 
     fireEvent.change(textarea, { target: { value: "restored, then edited" } });
-    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "restored, then edited", lastSeeded: "" });
+    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "restored, then edited", lastSeeded: "", stashed: null });
 
     fireEvent.click(screen.getByText("Commit"));
-    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "", lastSeeded: "" });
+    expect(onDraftChange).toHaveBeenLastCalledWith({ message: "", lastSeeded: "", stashed: null });
   });
 
   it("still clears a restored merge pre-fill when the merge ends", () => {
@@ -325,5 +325,63 @@ describe("amend", () => {
   it("hides the toggle when amend is unavailable", () => {
     renderBox({ available: false });
     expect(screen.queryByRole("checkbox", { name: "Amend last commit" })).not.toBeInTheDocument();
+  });
+});
+
+describe("amend draft safety", () => {
+  const base = { onCommit: vi.fn(), disabled: true, onAbortMerge: () => {} };
+  const amend = {
+    available: true,
+    headMessage: "previous message",
+    pushed: false,
+    onToggle: vi.fn(),
+    onAmend: vi.fn(),
+  };
+
+  it("survives a remount while amending and still restores the original draft", () => {
+    let saved: CommitDraft | undefined;
+    const onDraftChange = (draft: CommitDraft) => {
+      saved = draft;
+    };
+    const first = render(
+      <CommitBox {...base} amend={{ ...amend, on: false }} onDraftChange={onDraftChange} />,
+    );
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "my draft" } });
+    first.rerender(<CommitBox {...base} amend={{ ...amend, on: true }} onDraftChange={onDraftChange} />);
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "edited amend" } });
+    first.unmount();
+
+    const second = render(
+      <CommitBox
+        {...base}
+        amend={{ ...amend, on: true }}
+        initialDraft={saved}
+        onDraftChange={onDraftChange}
+      />,
+    );
+    expect(screen.getByLabelText("Commit message")).toHaveValue("edited amend");
+    second.rerender(<CommitBox {...base} amend={{ ...amend, on: false }} initialDraft={saved} />);
+    expect(screen.getByLabelText("Commit message")).toHaveValue("my draft");
+  });
+
+  it("keeps the typed amend message on submit and restores the draft once amend ends", () => {
+    const onAmend = vi.fn();
+    const { rerender } = render(<CommitBox {...base} amend={{ ...amend, on: false, onAmend }} />);
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "my draft" } });
+    rerender(<CommitBox {...base} amend={{ ...amend, on: true, onAmend }} />);
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "new text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Amend" }));
+    expect(onAmend).toHaveBeenCalledWith("new text");
+    // Failure: amend still on, typed text kept.
+    expect(screen.getByLabelText("Commit message")).toHaveValue("new text");
+    // Success: amend mode turns off, original draft returns.
+    rerender(<CommitBox {...base} amend={{ ...amend, on: false, onAmend }} />);
+    expect(screen.getByLabelText("Commit message")).toHaveValue("my draft");
+  });
+
+  it("ignores amend mode while unavailable", () => {
+    render(<CommitBox {...base} amend={{ ...amend, available: false, on: true }} />);
+    expect(screen.getByRole("button", { name: "Commit" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Commit message")).toHaveValue("");
   });
 });
