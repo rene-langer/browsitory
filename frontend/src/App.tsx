@@ -36,6 +36,7 @@ import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
+import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import { useWorkspaces } from "./state/useWorkspaces";
@@ -547,7 +548,15 @@ function RepoWorkspace({
   );
 }
 
-export default function App({
+export default function App(props: { client: RepoClient; updateBanner?: ReactNode }) {
+  return (
+    <DiffSettingsProvider client={props.client}>
+      <AppContent {...props} />
+    </DiffSettingsProvider>
+  );
+}
+
+function AppContent({
   client,
   updateBanner = null,
 }: {

@@ -120,9 +120,15 @@ export interface UseAppStateResult {
   // action from the UI locked the app up on a large changeset.
   stageAllFiles(paths: string[]): Promise<void>;
   unstageAllFiles(paths: string[]): Promise<void>;
-  stageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
-  unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
-  discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
+  stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardFile(path: string): Promise<void>;
+  discardAllUnstaged(): Promise<void>;
+  ignorePath(pattern: string): Promise<void>;
   commit(message: string): Promise<void>;
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
   // below. Naming a new branch is the one create-form action here with an obvious single trigger
@@ -360,6 +366,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stageHunk,
     unstageHunk,
     discardHunk,
+    stageLines,
+    unstageLines,
+    discardLines,
+    discardFile,
+    discardAllUnstaged,
+    ignorePath,
     commit,
   } = useStagingActions(client, repoPath, runMutation, runOptimisticMutation, setState);
 
@@ -475,6 +487,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stageHunk,
     unstageHunk,
     discardHunk,
+    stageLines,
+    unstageLines,
+    discardLines,
+    discardFile,
+    discardAllUnstaged,
+    ignorePath,
     commit,
     createBranch,
     createWorktree,

@@ -24,7 +24,7 @@ import type {
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
-import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
@@ -108,9 +108,9 @@ function UncommittedFileSection({
   onSelect: () => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -148,10 +148,12 @@ function UncommittedFileSection({
   //
   // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
   // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
+  const { settings } = useDiffSettingsContext();
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
     client
-      .getWorkingDiff(repoPath, entry.path, entry.staged, DEFAULT_DIFF_OPTIONS)
+      .getWorkingDiff(repoPath, entry.path, entry.staged, diffOptions)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -175,7 +177,7 @@ function UncommittedFileSection({
     if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -298,9 +300,9 @@ function UncommittedFileSection({
           ) : (
             <DiffView
               hunks={hunks}
-              onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart) : undefined}
-              onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart) : undefined}
-              onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart)}
+              onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
+              onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
+              onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines)}
             />
           )}
         </div>
@@ -364,9 +366,9 @@ export function DiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -478,9 +480,9 @@ function UncommittedDiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -533,12 +535,12 @@ function UncommittedDiffPane({
     });
   };
   const wrapHunkAction =
-    (action: (path: string, oldStart: number, newStart: number) => void | Promise<void>) =>
-    (path: string, oldStart: number, newStart: number) => {
+    (action: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, contextLines: number) => {
       // `useAppState`'s hunk actions never reject (`runMutation` records failures in
       // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
       // failed mutation may still have partially applied.
-      void Promise.resolve(action(path, oldStart, newStart)).finally(() => bumpPathVersions(path));
+      void Promise.resolve(action(path, oldStart, newStart, contextLines)).finally(() => bumpPathVersions(path));
     };
   // One number per section: the path's own version plus the pane-wide refresh generation. Both
   // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
@@ -799,10 +801,12 @@ function CommitFileSection({
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
 
+  const { settings } = useDiffSettingsContext();
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
     client
-      .getCommitDiff(repoPath, commitId, path, DEFAULT_DIFF_OPTIONS)
+      .getCommitDiff(repoPath, commitId, path, diffOptions)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -823,7 +827,7 @@ function CommitFileSection({
     if (mode !== "diff" || collapsed) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId, path, mode, collapsed]);
+  }, [repoPath, client, commitId, path, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
 
   const loadBlame = () => {
     let ignore = false;

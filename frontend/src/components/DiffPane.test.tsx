@@ -249,7 +249,7 @@ describe("DiffPane", () => {
 
       fireEvent.click(await screen.findByText("Stage hunk"));
 
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
     });
 
     it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
@@ -309,7 +309,7 @@ describe("DiffPane", () => {
       getWorkingDiff.mockClear();
 
       fireEvent.click(await screen.findByText("Stage hunk"));
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
       // Nothing refetches while the mutation is still in flight — a refetch now could read the
       // index before the backend applied the change, with nothing to correct it afterward.
       await act(async () => {});

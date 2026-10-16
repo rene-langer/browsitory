@@ -15,9 +15,15 @@ export interface StagingActions {
   // action from the UI locked the app up on a large changeset.
   stageAllFiles(paths: string[]): Promise<void>;
   unstageAllFiles(paths: string[]): Promise<void>;
-  stageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
-  unstageHunk(path: string, oldStart: number, newStart: number): Promise<void>;
-  discardHunk(path: string, oldStart: number, newStart: number): Promise<void>;
+  stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardFile(path: string): Promise<void>;
+  discardAllUnstaged(): Promise<void>;
+  ignorePath(pattern: string): Promise<void>;
   commit(message: string): Promise<void>;
 }
 
@@ -96,18 +102,45 @@ export function useStagingActions(
     [client, runOptimisticMutation, repoPath],
   );
   const stageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, 3)),
+    (path: string, oldStart: number, newStart: number, contextLines: number) =>
+      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, contextLines)),
     [client, runMutation, repoPath],
   );
   const unstageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, 3)),
+    (path: string, oldStart: number, newStart: number, contextLines: number) =>
+      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, contextLines)),
     [client, runMutation, repoPath],
   );
   const discardHunk = useCallback(
-    (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, 3)),
+    (path: string, oldStart: number, newStart: number, contextLines: number) =>
+      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, contextLines)),
+    [client, runMutation, repoPath],
+  );
+  const stageLines = useCallback(
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
+      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    [client, runMutation, repoPath],
+  );
+  const unstageLines = useCallback(
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
+      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    [client, runMutation, repoPath],
+  );
+  const discardLines = useCallback(
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
+      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    [client, runMutation, repoPath],
+  );
+  const discardFile = useCallback(
+    (path: string) => runMutation(() => client.discardFile(repoPath, path)),
+    [client, runMutation, repoPath],
+  );
+  const discardAllUnstaged = useCallback(
+    () => runMutation(() => client.discardAllUnstaged(repoPath)),
+    [client, runMutation, repoPath],
+  );
+  const ignorePath = useCallback(
+    (pattern: string) => runMutation(() => client.ignorePath(repoPath, pattern)),
     [client, runMutation, repoPath],
   );
   const commit = useCallback(
@@ -124,6 +157,12 @@ export function useStagingActions(
     stageHunk,
     unstageHunk,
     discardHunk,
+    stageLines,
+    unstageLines,
+    discardLines,
+    discardFile,
+    discardAllUnstaged,
+    ignorePath,
     commit,
   };
 }

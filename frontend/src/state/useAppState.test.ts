@@ -1814,7 +1814,7 @@ describe("useAppState", () => {
     await act(() => result.current.refresh());
     expect(result.current.state.status).toEqual([]);
 
-    await act(() => result.current.stageHunk("a.txt", 3, 4));
+    await act(() => result.current.stageHunk("a.txt", 3, 4, 3));
 
     expect(stageHunkArgs).toEqual(["a.txt", 3, 4]);
     expect(result.current.state.status).toEqual([entryA]);
@@ -1884,7 +1884,7 @@ describe("useAppState", () => {
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.unstageHunk("a.txt", 3, 4));
+    await act(() => result.current.unstageHunk("a.txt", 3, 4, 3));
 
     expect(unstageHunkArgs).toEqual(["a.txt", 3, 4]);
   });
@@ -1953,7 +1953,7 @@ describe("useAppState", () => {
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.discardHunk("a.txt", 3, 4));
+    await act(() => result.current.discardHunk("a.txt", 3, 4, 3));
 
     expect(discardHunkArgs).toEqual(["a.txt", 3, 4]);
   });
