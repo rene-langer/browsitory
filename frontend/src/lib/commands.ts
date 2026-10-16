@@ -235,12 +235,16 @@ export function buildCommands(
         keywords: ["checkout", "detach", "commit"],
         run: () => void appState.checkoutCommit(selectedCommit.id),
       });
-      commands.push({
-        id: "reset-selected",
-        label: `Reset to ${selectedCommit.shortId}…`,
-        keywords: ["reset", "soft", "mixed", "hard"],
-        run: () => goToCommitMenu(selectedCommit.id),
-      });
+      // Same condition as CommitGraph's context-menu Reset item (disabled without a current
+      // branch), so the palette never opens a menu whose Reset entry is greyed out.
+      if (state.branches.some((branch) => branch.isCurrent)) {
+        commands.push({
+          id: "reset-selected",
+          label: `Reset to ${selectedCommit.shortId}…`,
+          keywords: ["reset", "soft", "mixed", "hard"],
+          run: () => goToCommitMenu(selectedCommit.id),
+        });
+      }
     }
     if (state.headInfo.headId !== null) {
       commands.push({

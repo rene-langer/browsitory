@@ -730,6 +730,18 @@ describe("history commands", () => {
     expect(requestForcePush).toHaveBeenCalledWith("origin");
   });
 
+  it("omits reset when there is no current branch (detached HEAD)", () => {
+    const ids = buildCommands(
+      makeAppState({
+        ...historyState,
+        branches: [{ name: "main", isCurrent: false }],
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+      }),
+    ).map((c) => c.id);
+    expect(ids).not.toContain("reset-selected");
+    expect(ids).toContain("checkout-selected");
+  });
+
   it("groups force push under Remotes", () => {
     expect(commandGroup("force-push")).toBe("Remotes");
   });
