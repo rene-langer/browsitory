@@ -240,6 +240,7 @@ export function DiffView({
     return (
       <>
         {toolbar}
+        {hint}
         <p className={styles.placeholder}>No text differences (binary file or mode-only change)</p>
       </>
     );
@@ -281,6 +282,9 @@ export function DiffView({
       onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
         if (event.button !== 0) return;
         dragging.current = { hunkIndex, line: lineIndex };
+        // A drag ending on another row fires `click` on a common ancestor, not this row, so the
+        // hunk must become active here for `s`/`d` to target the dragged lines.
+        setActiveIndex(hunkIndex);
         // Anchor a plain-click drag right away; the following `click` re-applies it harmlessly.
         if (!event.shiftKey && !event.ctrlKey && !event.metaKey) apply({ type: "click", hunkIndex, line: lineIndex });
       },
@@ -309,8 +313,14 @@ export function DiffView({
     if (event.target !== event.currentTarget || event.ctrlKey || event.metaKey || event.altKey) return;
     const hunk = hunks[active];
     const lines = selectedIn(active);
+    // With lines selected, `s`/`d` act on those lines only. A missing line callback means "no
+    // such action here", never "fall back to the whole hunk" — that hunk was not what the user
+    // picked (and for discard, it may not even be this section's diff side).
+    const byLines = lines.length > 0;
     const stageLines = onStageLines ?? onUnstageLines;
-    const discardLines = lines.length > 0 ? onDiscardLines : undefined;
+    const discard = byLines
+      ? onDiscardLines && (() => onDiscardLines(hunk.oldStart, hunk.newStart, lines))
+      : onDiscardHunk && (() => onDiscardHunk(hunk.oldStart, hunk.newStart));
     let handled = true;
     if (event.key === "]") {
       moveTo(Math.min(active + 1, hunks.length - 1));
@@ -322,14 +332,15 @@ export function DiffView({
       const delta = event.key === "ArrowDown" ? 1 : -1;
       if (selection.hunkIndex !== active) apply({ type: "focusHunk", hunkIndex: active });
       apply(event.shiftKey ? { type: "extend", delta } : { type: "moveCursor", delta });
+    } else if (event.key === "s" && byLines) {
+      if (stageLines !== undefined) stageLines(hunk.oldStart, hunk.newStart, lines);
+      else handled = false;
     } else if (event.key === "s") {
-      if (lines.length > 0 && stageLines !== undefined) stageLines(hunk.oldStart, hunk.newStart, lines);
-      else if (onStageHunk !== undefined) onStageHunk(hunk.oldStart, hunk.newStart);
+      if (onStageHunk !== undefined) onStageHunk(hunk.oldStart, hunk.newStart);
       else if (onUnstageHunk !== undefined) onUnstageHunk(hunk.oldStart, hunk.newStart);
-    } else if (event.key === "d" && (discardLines !== undefined || onDiscardHunk !== undefined)) {
+    } else if (event.key === "d" && discard !== undefined) {
       if (confirmingDiscardIndex === active) {
-        if (discardLines !== undefined) discardLines(hunk.oldStart, hunk.newStart, lines);
-        else onDiscardHunk?.(hunk.oldStart, hunk.newStart);
+        discard();
         setConfirmingDiscardIndex(null);
       } else {
         setConfirmingDiscardIndex(active);

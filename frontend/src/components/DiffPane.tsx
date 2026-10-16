@@ -308,7 +308,7 @@ function UncommittedFileSection({
               hunks={hunks}
               onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
-              onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines)}
+              onDiscardHunk={!entry.staged ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onStageLines={!entry.staged ? (o, n, idx) => onStageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
               onUnstageLines={entry.staged ? (o, n, idx) => onUnstageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
               onDiscardLines={!entry.staged ? (o, n, idx) => onDiscardLines(entry.path, o, n, settings.contextLines, idx) : undefined}

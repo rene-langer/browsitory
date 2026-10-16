@@ -470,6 +470,40 @@ describe("DiffView line selection", () => {
     expect(screen.getByText("3 lines selected")).toBeInTheDocument();
   });
 
+  it("d twice with lines selected never falls back to the hunk discard", () => {
+    const onDiscardHunk = vi.fn();
+    const { container } = render(
+      <DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} onDiscardHunk={onDiscardHunk} />,
+    );
+    fireEvent.click(row(container, 2));
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    expect(onDiscardHunk).not.toHaveBeenCalled();
+  });
+
+  it("dragging lines in another hunk makes that hunk active for s", () => {
+    const second: DiffHunk = { ...lineHunk, oldStart: 20, newStart: 21 };
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const { container } = render(
+      <DiffView hunks={[lineHunk, second]} onStageHunk={onStageHunk} onStageLines={onStageLines} />,
+    );
+    const cell = (index: number) =>
+      container.querySelector<HTMLElement>(`[data-hunk-index="1"][data-line-index="${index}"]`)!;
+    fireEvent.mouseDown(cell(1), { button: 0 });
+    fireEvent.mouseEnter(cell(2));
+    fireEvent.mouseUp(window);
+    fireEvent.keyDown(screen.getByRole("group", { name: "Diff hunks" }), { key: "s" });
+    expect(onStageLines).toHaveBeenCalledWith(20, 21, [1, 2]);
+    expect(onStageHunk).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ignore-whitespace hint when the diff comes back empty", () => {
+    render(<DiffView hunks={[]} onStageHunk={vi.fn()} onStageLines={vi.fn()} partialActionsDisabled />);
+    expect(screen.getByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+  });
+
   it("selection clears when hunks change", () => {
     const { container, rerender } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
     fireEvent.click(row(container, 2));

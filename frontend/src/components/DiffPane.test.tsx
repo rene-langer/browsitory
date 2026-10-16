@@ -1072,6 +1072,27 @@ describe("DiffPane line staging", () => {
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2]));
   });
 
+  it("a staged section never discards, with or without a line selection", async () => {
+    const onDiscardHunk = vi.fn();
+    const onDiscardLines = vi.fn();
+    const { container } = renderUncommitted(
+      fakeClient({ getWorkingDiff: async () => [lineHunk] }),
+      [{ path: "f.txt", staged: true, kind: "Modified" }],
+      { onDiscardHunk, onDiscardLines },
+    );
+    await screen.findByText("Unstage hunk");
+    expect(screen.queryByRole("button", { name: "Discard hunk" })).toBeNull();
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onDiscardHunk).not.toHaveBeenCalled();
+    expect(onDiscardLines).not.toHaveBeenCalled();
+  });
+
   it("ignore whitespace hides hunk actions in both sections but keeps file-level staging", async () => {
     render(
       <TestDiffSettings ignoreWhitespace>
