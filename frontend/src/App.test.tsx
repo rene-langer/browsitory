@@ -221,6 +221,68 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 
+  describe("palette discard commands", () => {
+    function discardClient(overrides: Partial<RepoClient> = {}) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+        getCommitGraph: async () => [],
+        listBranches: async () => [],
+        listStashes: async () => [],
+        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }),
+        discardFile: vi.fn().mockResolvedValue(undefined),
+        discardAllUnstaged: vi.fn().mockResolvedValue(undefined),
+        ...overrides,
+      });
+    }
+
+    async function runPaletteCommand(label: string) {
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      const input = await screen.findByRole("combobox", { name: "Command palette" });
+      fireEvent.change(input, { target: { value: label } });
+      fireEvent.click(await screen.findByRole("option", { name: label }));
+    }
+
+    it("opens the file confirm without discarding, then cancels and confirms", async () => {
+      const client = discardClient();
+      render(<App client={client} />);
+      fireEvent.click(await screen.findByText("a.txt (Modified)"));
+
+      await runPaletteCommand("Discard changes in current file");
+      expect(await screen.findByText("Discard changes to a.txt? This can't be undone.")).toBeInTheDocument();
+      expect(client.discardFile).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(screen.queryByText("Discard changes to a.txt? This can't be undone.")).not.toBeInTheDocument();
+      expect(client.discardFile).not.toHaveBeenCalled();
+
+      await runPaletteCommand("Discard changes in current file");
+      fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+      await waitFor(() => expect(client.discardFile).toHaveBeenCalledTimes(1));
+      expect(client.discardFile).toHaveBeenCalledWith("/repos/a", "a.txt");
+    });
+
+    it("opens the discard-all confirm without discarding, then cancels and confirms", async () => {
+      const client = discardClient();
+      render(<App client={client} />);
+      await screen.findByText("a.txt (Modified)");
+
+      await runPaletteCommand("Discard all unstaged changes");
+      expect(await screen.findByText("Discard changes to 1 file? This can't be undone.")).toBeInTheDocument();
+      expect(client.discardAllUnstaged).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(screen.queryByText("Discard changes to 1 file? This can't be undone.")).not.toBeInTheDocument();
+      expect(client.discardAllUnstaged).not.toHaveBeenCalled();
+
+      await runPaletteCommand("Discard all unstaged changes");
+      fireEvent.click(await screen.findByRole("button", { name: "Discard all" }));
+      await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledTimes(1));
+    });
+  });
+
   it("closes a focused, inactive tab on Delete without switching away from the active one", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({

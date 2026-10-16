@@ -778,6 +778,22 @@ function UncommittedDiffPane({
       ? discardableEntries.find((entry) => entry.path === discardRequest.path)
       : undefined;
 
+  // A request whose target is gone (refresh, staging, unmount) must not linger: otherwise the
+  // destructive dialog would pop up unprompted when the path later reappears.
+  const requestTargetGone =
+    discardRequest !== null &&
+    (discardRequest.kind === "all"
+      ? discardableEntries.length === 0
+      : discardFileEntry === undefined);
+  useEffect(() => {
+    if (requestTargetGone) setDiscardRequest(null);
+  }, [requestTargetGone, setDiscardRequest]);
+  const setDiscardRequestRef = useRef(setDiscardRequest);
+  useEffect(() => {
+    setDiscardRequestRef.current = setDiscardRequest;
+  });
+  useEffect(() => () => setDiscardRequestRef.current(null), []);
+
   // Report the current file to the palette; only unstaged, non-conflicted entries can be discarded.
   const currentDiscardablePath =
     current !== null && !current.staged
@@ -891,7 +907,7 @@ function UncommittedDiffPane({
           </ul>
         </div>
       )}
-      {discardRequest?.kind === "all" && (
+      {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard all changes"
           message={discardAllConfirmMessage(discardableEntries)}

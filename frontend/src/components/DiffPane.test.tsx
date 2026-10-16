@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
-import { DiffPane } from "./DiffPane";
+import { DiffPane, type DiscardRequest } from "./DiffPane";
 import styles from "./DiffPane.module.css";
 
 const TEST_REPO_PATH = "/repo";
@@ -514,6 +514,41 @@ describe("DiffPane", () => {
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
         expect(onCurrentFileChange).toHaveBeenCalledWith(null);
+      });
+
+      it("clears a file request whose path disappears, and does not reopen when it returns", () => {
+        function Harness({ status }: { status: StatusEntry[] }) {
+          const [req, setReq] = useState<DiscardRequest | null>({ kind: "file", path: "src/a.ts" });
+          return (
+            <DiffPane
+              repoPath={TEST_REPO_PATH}
+              client={fakeClient({ getConflictHunks: async () => [] })}
+              selectedRow="uncommitted"
+              status={status}
+              mergeMessage={null}
+              rebaseProgress={null}
+              {...noopHandlers}
+              discardRequest={req}
+              onDiscardRequestChange={setReq}
+            />
+          );
+        }
+        const { rerender } = rtlRender(<Harness status={fileStatus} />);
+        expect(screen.getByText("Discard changes")).toBeInTheDocument();
+
+        rerender(<Harness status={[fileStatus[1]]} />);
+        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+
+        rerender(<Harness status={fileStatus} />);
+        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+      });
+
+      it("clears an all request when nothing is discardable and shows no dialog", () => {
+        const onDiscardRequestChange = vi.fn();
+        renderUncommitted(fakeClient({}), [], { discardRequest: { kind: "all" }, onDiscardRequestChange });
+
+        expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+        expect(screen.queryByRole("button", { name: "Discard all" })).not.toBeInTheDocument();
       });
 
       it("disables Discard all when every unstaged entry is conflicted", () => {
