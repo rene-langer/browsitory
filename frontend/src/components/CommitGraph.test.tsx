@@ -740,6 +740,7 @@ describe("CommitGraph", () => {
 
   it("an external focus change collapses the selection, and it does not resurface later", () => {
     const props = {
+      ...historyProps,
       status,
       commits: chainCommits,
       pending: false,
@@ -764,6 +765,7 @@ describe("CommitGraph", () => {
 
   it("prunes selected ids that are no longer in the loaded commits", () => {
     const props = {
+      ...historyProps,
       status,
       pending: false,
       onSelectRow: vi.fn(),
@@ -931,6 +933,7 @@ describe("CommitGraph — keyboard access", () => {
 
 describe("CommitGraph history metadata and pagination", () => {
   const baseProps = {
+    ...historyProps,
     status,
     commits,
     selectedRow: "uncommitted" as const,

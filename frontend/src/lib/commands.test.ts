@@ -7,7 +7,7 @@ import {
   recordCommandUsed,
   type Command,
 } from "./commands";
-import type { UseAppStateResult } from "../state/useAppState";
+import type { AppState, UseAppStateResult } from "../state/useAppState";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -691,11 +691,11 @@ describe("history commands", () => {
     branchRefs: [],
     remoteBranchRefs: [],
   });
-  const historyState = {
+  const historyState: Partial<AppState> = {
     selectedRow: { commitId: "c2" },
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
     headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null },
-  } as const;
+  };
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
     const ids = buildCommands(makeAppState(historyState)).map((command) => command.id);
