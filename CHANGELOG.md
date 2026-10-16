@@ -11,21 +11,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Select individual lines in a diff (click, Shift+click, Ctrl/Cmd+click, drag, or ↑/↓ with
   Shift) and stage, unstage or discard just those lines. `s` and `d` act on the selection when
   there is one, otherwise on the hunk.
-- Keyboard: `↑`/`↓` move a line cursor inside the active hunk, `Shift+↑`/`Shift+↓` extend the
-  selection, `s` and `d` `d` act on the selection (or the hunk when nothing is selected), and
-  `[` / `]` move between hunks and clear the selection.
+- Keyboard: `↑`/`↓` move a line cursor inside the active hunk and select that line,
+  `Shift+↑`/`Shift+↓` extend the selection, `s` and `d` `d` act on the selection (or the hunk
+  when nothing is selected), and `[` / `]` move between hunks and clear the selection.
+- Line actions refuse to run if the file changed since its diff was shown (for example an edit
+  inside the hunk in another editor); nothing is changed and the diff refreshes instead.
 - Staging, unstaging or discarding a whole hunk now also works with zero context lines and for
-  hunks of untracked, newly added or deleted files, which previously failed.
+  hunks of untracked, newly added or deleted files, which previously failed. Discarding a whole
+  hunk of an untracked file empties the file rather than deleting it (use Discard changes… on
+  the file to delete it).
+- Whole-hunk staging no longer carries a file's mode change (chmod, such as the executable
+  bit); stage the whole file to stage a mode change.
 - Diff toolbar: Ignore whitespace, context lines (0-20) and Syntax highlighting, remembered
   across sessions. While whitespace is ignored, partial staging is turned off in the working
-  tree and a hint appears in its place; file-level stage and unstage still work.
-- Diffs are syntax-highlighted for common languages (up to 2,000 lines per file).
+  tree and a hint appears in its place; file-level stage and unstage still work. Right after
+  changing an option, hunk and line actions reappear once the diff has reloaded with it.
+- Diffs are syntax-highlighted for common languages, unless a file's diff has more than 2,000
+  lines in total across its hunks.
 - File "⋯" menu (also right-click or Shift+F10 on a file header): Discard changes…, and for
   untracked files Ignore file / Ignore all *.ext / Ignore folder, which append to `.gitignore`.
-  Discard refuses paths outside the repository, including through symlinked folders, and
-  ignoring never overwrites a `.gitignore` that can't be read.
-- "Discard all…" next to "Stage all" discards every unstaged change, with confirmation; untracked files are deleted and
-  conflicted files are skipped.
+  Discarding (a file, a hunk or lines; tracked or untracked) refuses paths outside the
+  repository, including through symlinked folders. Ignoring refuses a `.gitignore` that is a
+  symlink, never overwrites one that can't be read, and rejects patterns with leading or
+  trailing spaces.
+- "Discard all…" next to "Stage all" discards the unstaged changes of exactly the files its
+  confirmation lists; untracked files are deleted and conflicted files are skipped. Folders
+  such as untracked nested repositories are never deleted, and files that couldn't be discarded
+  are named in an error once the rest are done.
 - Palette commands for each diff option and for discarding.
 
 ### Cherry-pick, revert, reset, amend and force push

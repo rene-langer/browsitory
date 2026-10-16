@@ -28,6 +28,7 @@ describe("Browsitory line staging and discard", () => {
     await row.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), row);
 
+    await $(".diff-line-add").waitForExist({ timeout: 10000 });
     const addLines = await $$(".diff-line-add");
     await browser.execute((el) => (el as HTMLElement).click(), addLines[0]);
     await browser.execute(
