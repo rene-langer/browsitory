@@ -22,41 +22,72 @@ pub struct GraphCommit {
     pub remote_branch_refs: Vec<String>,
 }
 
+/// Local/remote branch names keyed by the commit they point at — the badges on graph rows.
+pub(crate) struct RefDecorations {
+    local: HashMap<Oid, Vec<String>>,
+    remote: HashMap<Oid, Vec<String>>,
+}
+
+impl RefDecorations {
+    pub(crate) fn load(repo: &Repository) -> Result<Self, git2::Error> {
+        let mut local: HashMap<Oid, Vec<String>> = HashMap::new();
+        for entry in repo.branches(Some(BranchType::Local))? {
+            let (branch, _) = entry?;
+            let Ok(Some(name)) = branch.name() else {
+                continue;
+            };
+            if let Some(oid) = branch.get().target() {
+                local.entry(oid).or_default().push(name.to_string());
+            }
+        }
+
+        let mut remote: HashMap<Oid, Vec<String>> = HashMap::new();
+        for entry in repo.branches(Some(BranchType::Remote))? {
+            let (branch, _) = entry?;
+            // Symbolic refs like `origin/HEAD` point at another ref rather than a commit
+            // directly and would otherwise duplicate whatever branch they alias — skip them so
+            // they don't produce a fake "origin/HEAD" badge on every default-branch commit.
+            if branch.get().kind() != Some(ReferenceType::Direct) {
+                continue;
+            }
+            let Ok(Some(name)) = branch.name() else {
+                continue;
+            };
+            if let Some(oid) = branch.get().target() {
+                remote.entry(oid).or_default().push(name.to_string());
+            }
+        }
+        Ok(Self { local, remote })
+    }
+
+    pub(crate) fn graph_commit(&self, commit: &git2::Commit) -> GraphCommit {
+        let oid = commit.id();
+        let id = oid.to_string();
+        GraphCommit {
+            short_id: id[..7].to_string(),
+            summary: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            author_name: commit.author().name().ok().unwrap_or_default().to_string(),
+            author_email: commit.author().email().ok().unwrap_or_default().to_string(),
+            timestamp: commit.time().seconds(),
+            parent_ids: commit.parent_ids().map(|p| p.to_string()).collect(),
+            branch_refs: self.local.get(&oid).cloned().unwrap_or_default(),
+            remote_branch_refs: self.remote.get(&oid).cloned().unwrap_or_default(),
+            id,
+        }
+    }
+}
+
 pub fn graph_log(
     repo: &Repository,
     limit: usize,
     selected_branches: Option<&[String]>,
 ) -> Result<Vec<GraphCommit>, GraphError> {
-    let mut tips_by_oid: HashMap<Oid, Vec<String>> = HashMap::new();
-    for entry in repo.branches(Some(BranchType::Local))? {
-        let (branch, _) = entry?;
-        let Ok(Some(name)) = branch.name() else {
-            continue;
-        };
-        if let Some(oid) = branch.get().target() {
-            tips_by_oid.entry(oid).or_default().push(name.to_string());
-        }
-    }
-
-    let mut remote_tips_by_oid: HashMap<Oid, Vec<String>> = HashMap::new();
-    for entry in repo.branches(Some(BranchType::Remote))? {
-        let (branch, _) = entry?;
-        // Symbolic refs like `origin/HEAD` point at another ref rather than a commit
-        // directly and would otherwise duplicate whatever branch they alias — skip them so
-        // they don't produce a fake "origin/HEAD" badge on every default-branch commit.
-        if branch.get().kind() != Some(ReferenceType::Direct) {
-            continue;
-        }
-        let Ok(Some(name)) = branch.name() else {
-            continue;
-        };
-        if let Some(oid) = branch.get().target() {
-            remote_tips_by_oid
-                .entry(oid)
-                .or_default()
-                .push(name.to_string());
-        }
-    }
+    let decorations = RefDecorations::load(repo)?;
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
@@ -76,37 +107,9 @@ pub fn graph_log(
 
     let mut commits = Vec::new();
     for oid_result in revwalk.take(limit) {
-        let oid = oid_result?;
-        let commit = repo.find_commit(oid)?;
-
-        let id = oid.to_string();
-        let short_id = id[..7].to_string();
-        let summary = commit
-            .summary()
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-            .to_string();
-        let author_name = commit.author().name().ok().unwrap_or_default().to_string();
-        let author_email = commit.author().email().ok().unwrap_or_default().to_string();
-        let timestamp = commit.time().seconds();
-        let parent_ids = commit.parent_ids().map(|p| p.to_string()).collect();
-        let branch_refs = tips_by_oid.get(&oid).cloned().unwrap_or_default();
-        let remote_branch_refs = remote_tips_by_oid.get(&oid).cloned().unwrap_or_default();
-
-        commits.push(GraphCommit {
-            id,
-            short_id,
-            summary,
-            author_name,
-            author_email,
-            timestamp,
-            parent_ids,
-            branch_refs,
-            remote_branch_refs,
-        });
+        let commit = repo.find_commit(oid_result?)?;
+        commits.push(decorations.graph_commit(&commit));
     }
-
     Ok(commits)
 }
 
