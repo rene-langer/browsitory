@@ -116,19 +116,19 @@ Wired through `repo-service` worker, Tauri commands, VSCode sidecar dispatch (ca
 
 ## Frontend
 
-### Entry points
+### Entry points and state
 
-- Working-tree file menu (`FileActionsMenu`): "File history", hidden for untracked files.
-- Commit-file header in `DiffPane`: "History" button next to Blame.
-- Command palette: "File history of selected file", enabled when a file is selected in either
-  view.
-
-### State (`useAppState`)
-
-`fileHistory: { path: string; entries: FileHistoryEntry[]; limit: number; hasMore: boolean;
-error: string | null } | null`. Actions: `openFileHistory(path)`, `loadMoreFileHistory()`,
-`closeFileHistory()`. `refresh()` re-fetches history (same limit) while it is open. A stale
-response (path changed or closed meanwhile) is dropped via a generation counter, like reflog.
+- Working-tree entry point is a **History button next to Blame** (hidden for untracked files),
+  not a file-menu item: the file menu only exists for unstaged, non-conflicted rows, while
+  history is useful for staged files too.
+- File-history state lives in its own hook `frontend/src/state/useFileHistory.ts` (used by
+  `RepoWorkspace` in `App.tsx`), not inside `useAppState` (already 21 KB and split into action
+  hooks).
+- Palette command is "File history of current file" and uses the existing
+  `DiffCommands.currentFile` (the commit view has no single selected file).
+- Opening history selects its newest entry once loaded.
+- In history mode the commit diff pane shows only the history file, with a "Show all N files"
+  button.
 
 ### Graph in history mode
 
