@@ -16,6 +16,7 @@ function renderBar(overrides: Partial<React.ComponentProps<typeof SyncBar>> = {}
   const props = {
     remotes: [remote],
     upstream,
+    detachedAt: null,
     operationDisabled: false,
     operationDisabledReason: null,
     onFetch: vi.fn(),
@@ -75,5 +76,13 @@ describe("SyncBar", () => {
     const fetch = screen.getByRole("button", { name: /Fetch/ });
     expect(fetch).toBeDisabled();
     expect(fetch).toHaveAttribute("title", "A transfer is in progress.");
+  });
+
+  it("shows a detached HEAD and disables push and pull", () => {
+    renderBar({ detachedAt: "abc1234" });
+
+    expect(screen.getByText("HEAD detached at abc1234")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
   });
 });

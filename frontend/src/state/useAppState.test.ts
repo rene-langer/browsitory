@@ -13,6 +13,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
+import type { TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -3087,5 +3088,72 @@ describe("history actions", () => {
     fail = false;
     await act(() => result.current.amendCommit("m"));
     expect(result.current.state.amendMode).toBe(false);
+  });
+
+  it("offers a force push after a non-fast-forward branch push and runs it", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const forcePushCurrentBranch = vi.fn(async () => "force-push-1");
+    const client = transferClient({
+      pushCurrentBranch: async () => "push-1",
+      forcePushCurrentBranch,
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.pushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.forcePushOffer).toEqual({ remoteName: "origin" });
+
+    act(() => result.current.requestForcePush("origin"));
+    expect(result.current.state.forcePushConfirm).toEqual({ remoteName: "origin" });
+
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin");
+    expect(result.current.state.forcePushOffer).toBeNull();
+    expect(result.current.state.forcePushConfirm).toBeNull();
+  });
+
+  it("cancelForcePush clears both the offer and the confirm", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.requestForcePush("origin"));
+    act(() => result.current.cancelForcePush());
+    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.forcePushOffer).toBeNull();
+  });
+
+  it("explains a stale lease", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main" }),
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe(
+      "origin/main changed since your last fetch. Fetch and review before force pushing.",
+    );
+  });
+
+  it("treats a failed force push as a push failure", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe("Push failed");
   });
 });

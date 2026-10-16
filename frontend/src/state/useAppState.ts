@@ -80,6 +80,10 @@ export interface AppState {
   stashes: StashEntry[];
   mergeMessage: string | null;
   headInfo: HeadInfo;
+  // Set when a branch push fails NonFastForward; shows the "Force push (with lease)" button.
+  forcePushOffer: { remoteName: string } | null;
+  // Non-null while the force-push confirm dialog is open.
+  forcePushConfirm: { remoteName: string } | null;
   // CommitBox amend toggle.
   amendMode: boolean;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
@@ -164,6 +168,9 @@ export interface UseAppStateResult {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
+  requestForcePush(remoteName: string): void;
+  cancelForcePush(): void;
+  forcePushCurrentBranch(remoteName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -232,6 +239,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stashes: [],
     mergeMessage: null,
     headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+    forcePushOffer: null,
+    forcePushConfirm: null,
     amendMode: false,
     rebaseProgress: null,
     rebaseOnto: null,
@@ -410,6 +419,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    requestForcePush,
+    cancelForcePush,
+    forcePushCurrentBranch,
   } = useRemoteTransferActions(
     client,
     repoPath,
@@ -421,6 +433,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithMessage,
     runOptimisticMutationWithOutcome,
     setState,
+    state.upstream,
   );
 
   const { saveStash, applyStash, dropStash } = useStashActions(
@@ -493,6 +506,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    requestForcePush,
+    cancelForcePush,
+    forcePushCurrentBranch,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

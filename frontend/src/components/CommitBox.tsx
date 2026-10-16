@@ -22,6 +22,7 @@ export function CommitBox({
   disabled,
   disabledReason,
   onAbortMerge,
+  abortLabel = "Abort merge",
   initialMessage,
   initialDraft,
   onDraftChange,
@@ -32,6 +33,7 @@ export function CommitBox({
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
   onAbortMerge: () => void;
+  abortLabel?: string;
   initialMessage?: string;
   /**
    * Draft to start from on mount (read once, like `useState`'s initial value). `App` keeps one per
@@ -169,7 +171,7 @@ export function CommitBox({
         >
           {amendOn ? "Amend" : "Commit"}
         </button>
-        {initialMessage !== undefined && <button onClick={onAbortMerge}>Abort merge</button>}
+        {initialMessage !== undefined && <button onClick={onAbortMerge}>{abortLabel}</button>}
       </Toolbar>
     </div>
   );

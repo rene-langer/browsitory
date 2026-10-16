@@ -7,7 +7,7 @@ const noop = () => {};
 describe("OperationStatusStrip", () => {
   it("renders nothing when idle", () => {
     const { container } = render(
-      <OperationStatusStrip merging={false} rebaseProgress={null} conflictCount={0} onAbortMerge={noop} onAbortRebase={noop} />,
+      <OperationStatusStrip merging={false} operation={null} rebaseProgress={null} conflictCount={0} onAbortMerge={noop} onAbortRebase={noop} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -15,7 +15,7 @@ describe("OperationStatusStrip", () => {
   it("shows merge state with conflict reason and abort", () => {
     const onAbortMerge = vi.fn();
     render(
-      <OperationStatusStrip merging rebaseProgress={null} conflictCount={1} onAbortMerge={onAbortMerge} onAbortRebase={noop} />,
+      <OperationStatusStrip merging operation="Merge" rebaseProgress={null} conflictCount={1} onAbortMerge={onAbortMerge} onAbortRebase={noop} />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Merging");
     expect(screen.getByText("Resolve 1 conflict to continue")).toBeInTheDocument();
@@ -28,6 +28,7 @@ describe("OperationStatusStrip", () => {
     render(
       <OperationStatusStrip
         merging={false}
+        operation={null}
         rebaseProgress={{ currentStep: 2, totalSteps: 5 }}
         conflictCount={3}
         onAbortMerge={noop}
@@ -38,5 +39,26 @@ describe("OperationStatusStrip", () => {
     expect(screen.getByText("Resolve 3 conflicts to continue")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Abort rebase" }));
     expect(onAbortRebase).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["CherryPick", "Cherry-picking", "Abort cherry-pick"],
+    ["Revert", "Reverting", "Abort revert"],
+    ["Merge", "Merging", "Abort merge"],
+  ] as const)("labels a paused %s", (operation, label, abort) => {
+    const onAbortMerge = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging
+        operation={operation}
+        rebaseProgress={null}
+        conflictCount={1}
+        onAbortMerge={onAbortMerge}
+        onAbortRebase={() => {}}
+      />,
+    );
+    expect(screen.getByText(label)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: abort }));
+    expect(onAbortMerge).toHaveBeenCalled();
   });
 });

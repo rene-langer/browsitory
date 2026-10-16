@@ -739,6 +739,13 @@ function UncommittedDiffPane({
             disabled={stagedCount === 0 || conflictCount > 0}
             disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
             onAbortMerge={onAbortMerge}
+            abortLabel={
+              headInfo.operation === "CherryPick"
+                ? "Abort cherry-pick"
+                : headInfo.operation === "Revert"
+                  ? "Abort revert"
+                  : "Abort merge"
+            }
             initialMessage={mergeMessage ?? undefined}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}

@@ -21,6 +21,7 @@ import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
+import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -185,6 +186,7 @@ function RepoWorkspace({
       },
     [dismissError],
   );
+  const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? "";
   const pullOutcome = appState.state.pullOutcome;
   useEffect(() => {
     if (pullOutcome === null) return;
@@ -235,6 +237,7 @@ function RepoWorkspace({
     >
       <OperationStatusStrip
         merging={appState.state.mergeMessage !== null}
+        operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={appState.abortMerge}
@@ -244,7 +247,27 @@ function RepoWorkspace({
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+          {appState.state.forcePushOffer !== null && appState.state.forcePushConfirm === null && (
+            <button type="button" onClick={() => appState.requestForcePush(appState.state.forcePushOffer!.remoteName)}>
+              Force push (with lease)…
+            </button>
+          )}
         </div>
+      )}
+      {active && appState.state.forcePushConfirm !== null && (
+        <ConfirmDialog
+          ariaLabel="Confirm force push"
+          message={
+            <p>
+              Overwrites {appState.state.forcePushConfirm.remoteName}/{currentBranchName} with your local branch.
+            </p>
+          }
+          confirmLabel="Force push"
+          onConfirm={() =>
+            void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
+          }
+          onCancel={appState.cancelForcePush}
+        />
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
@@ -434,6 +457,7 @@ function RepoWorkspace({
               <SyncBar
                 remotes={appState.state.remotes}
                 upstream={appState.state.upstream}
+                detachedAt={appState.state.headInfo.detachedAt}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
                 onFetch={appState.fetchRemote}
