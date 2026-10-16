@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { packageVsix, parseOptions } from "./package-vsix.mjs";
+import { assertClassicScriptBundle, packageVsix, parseOptions } from "./package-vsix.mjs";
 
 test("stages only the selected sidecar and cleans generated assets", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "browsitory-vsix-"));
@@ -44,4 +44,20 @@ test("accepts pnpm's argument separator", () => {
   assert.equal(options.target, "linux-x64");
   assert.equal(options.sidecarPath, "/tmp/vscode-sidecar");
   assert.equal(options.outputPath, "/tmp/browsitory.vsix");
+});
+
+test("rejects a webview bundle with import.meta or extra chunks", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "browsitory-bundle-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const assets = path.join(root, "assets");
+  await mkdir(assets, { recursive: true });
+  await writeFile(path.join(assets, "vscode-main.js"), "ok()");
+  await assertClassicScriptBundle(root);
+
+  await writeFile(path.join(assets, "vscode-main.js"), "u=import.meta.url");
+  await assert.rejects(assertClassicScriptBundle(root), /import\.meta/);
+
+  await writeFile(path.join(assets, "vscode-main.js"), "ok()");
+  await writeFile(path.join(assets, "rust.js"), "x");
+  await assert.rejects(assertClassicScriptBundle(root), /extra files: rust\.js/);
 });

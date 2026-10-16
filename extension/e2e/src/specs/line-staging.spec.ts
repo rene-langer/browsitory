@@ -19,6 +19,8 @@ describe("Browsitory VSCode extension line staging", () => {
     git("commit", "-m", "vscode-e2e: seed line fixture");
     await vscode.workspace.fs.writeFile(target, Buffer.from("a\nB\nc\nd\n"));
 
+    // first-flow.spec.ts leaves its panel open; a reused panel would show pre-fixture state.
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     await vscode.commands.executeCommand("browsitory.open");
     const cdpPort = process.env["BROWSITORY_VSCODE_E2E_CDP_PORT"];
     if (!cdpPort) throw new Error("BROWSITORY_VSCODE_E2E_CDP_PORT not set");
