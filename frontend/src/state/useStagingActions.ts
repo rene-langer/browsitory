@@ -22,7 +22,7 @@ export interface StagingActions {
   unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
-  discardAllUnstaged(): Promise<void>;
+  discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
   commit(message: string): Promise<void>;
 }
@@ -136,7 +136,7 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const discardAllUnstaged = useCallback(
-    () => runMutation(() => client.discardAllUnstaged(repoPath)),
+    (paths: string[]) => runMutation(() => client.discardAllUnstaged(repoPath, paths)),
     [client, runMutation, repoPath],
   );
   const ignorePath = useCallback(

@@ -217,9 +217,14 @@ pub(super) fn discard_file(
         reply.send(git_core::stage::discard_file(repo, &path).map_err(|error| error.to_string()));
 }
 
-pub(super) fn discard_all_unstaged(repo: &git2::Repository, reply: Sender<Result<(), String>>) {
-    let _ =
-        reply.send(git_core::stage::discard_all_unstaged(repo).map_err(|error| error.to_string()));
+pub(super) fn discard_all_unstaged(
+    repo: &git2::Repository,
+    paths: Vec<String>,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::stage::discard_all_unstaged(repo, &paths).map_err(|error| error.to_string()),
+    );
 }
 
 pub(super) fn ignore_path(
@@ -506,10 +511,11 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn discard_all_unstaged(&self) -> Result<(), String> {
+    /// Discards exactly `paths` (the list the user confirmed), never a fresh status read.
+    pub fn discard_all_unstaged(&self, paths: Vec<String>) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
-            .send(Command::DiscardAllUnstaged { reply: tx })
+            .send(Command::DiscardAllUnstaged { paths, reply: tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?

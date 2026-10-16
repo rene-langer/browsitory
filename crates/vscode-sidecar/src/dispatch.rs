@@ -712,10 +712,18 @@ fn discard_file(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscardAllParams {
+    repo_path: String,
+    /// Exactly the paths the confirm dialog listed.
+    paths: Vec<String>,
+}
+
 fn discard_all_unstaged(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
+    let params: DiscardAllParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.discard_all_unstaged()?;
+    worker_handle(repos, &params.repo_path)?.discard_all_unstaged(params.paths)?;
     Ok(Value::Null)
 }
 

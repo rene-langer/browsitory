@@ -34,6 +34,12 @@ pub enum StageError {
     InvalidPattern,
     #[error("{0} is a folder (for example a nested repository) and wasn't discarded.")]
     IsFolder(String),
+    /// "Discard all" went through every listed path but some couldn't be discarded.
+    #[error("{message}")]
+    DiscardIncomplete {
+        failed: Vec<String>,
+        message: String,
+    },
     #[error("failed to update the working tree: {0}")]
     Io(#[from] std::io::Error),
     #[error("failed to read status: {0}")]
@@ -116,16 +122,46 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     Ok(())
 }
 
-/// Discards every unstaged change (conflicted entries are skipped).
-pub fn discard_all_unstaged(repo: &git2::Repository) -> Result<(), StageError> {
-    let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
-    for entry in entries
-        .iter()
-        .filter(|e| !e.staged && e.kind != crate::status::StatusKind::Conflicted)
-    {
-        discard_file(repo, &entry.path)?;
+/// At most this many paths are named in a `DiscardIncomplete` message.
+const MAX_NAMED_FAILURES: usize = 3;
+
+/// Discards the unstaged changes of exactly `paths` (the list the user confirmed), each the way
+/// `discard_file` does. Conflicted entries are skipped. A path that can't be discarded (a folder
+/// such as a nested repository, an I/O error) doesn't stop the rest; they are all reported
+/// together afterwards as `DiscardIncomplete`.
+pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
+    let conflicted: std::collections::HashSet<String> = crate::status::status(repo)
+        .map_err(|e| StageError::Status(e.to_string()))?
+        .into_iter()
+        .filter(|e| e.kind == crate::status::StatusKind::Conflicted)
+        .map(|e| e.path)
+        .collect();
+    let mut failed = Vec::new();
+    let mut any_folder = false;
+    for path in paths.iter().filter(|p| !conflicted.contains(*p)) {
+        match discard_file(repo, path) {
+            Ok(()) => {}
+            Err(StageError::IsFolder(_)) => {
+                any_folder = true;
+                failed.push(path.clone());
+            }
+            Err(_) => failed.push(path.clone()),
+        }
     }
-    Ok(())
+    if failed.is_empty() {
+        return Ok(());
+    }
+    let count = failed.len();
+    let mut names = failed[..count.min(MAX_NAMED_FAILURES)].join(", ");
+    if count > MAX_NAMED_FAILURES {
+        names.push_str(&format!(" and {} more", count - MAX_NAMED_FAILURES));
+    }
+    let noun = if count == 1 { "file" } else { "files" };
+    let mut message = format!("Couldn't discard {count} {noun}: {names}.");
+    if any_folder {
+        message.push_str(" Folders (for example nested repositories) are never discarded.");
+    }
+    Err(StageError::DiscardIncomplete { failed, message })
 }
 
 /// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.

@@ -496,6 +496,8 @@ describe("DiffPane", () => {
         fireEvent.click(screen.getByText("Discard all"));
 
         expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
+        // Exactly what the dialog counted: the unstaged, non-conflicted entries.
+        expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["src/a.ts", "logs/run.log"]);
       });
 
       it("opens the file confirm from a lifted request and reports the current file", () => {

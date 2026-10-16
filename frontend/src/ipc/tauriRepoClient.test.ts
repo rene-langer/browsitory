@@ -337,8 +337,8 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] });
     await tauriRepoClient.discardFile("/repo", "f.txt");
     expect(invoke).toHaveBeenLastCalledWith("discard_file", { repoPath: "/repo", path: "f.txt" });
-    await tauriRepoClient.discardAllUnstaged("/repo");
-    expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo" });
+    await tauriRepoClient.discardAllUnstaged("/repo", ["a.txt", "nested/"]);
+    expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt", "nested/"] });
     await tauriRepoClient.ignorePath("/repo", "*.log");
     expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
     await tauriRepoClient.getDiffSettings();

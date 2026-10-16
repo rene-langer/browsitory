@@ -280,6 +280,7 @@ describe("App", () => {
       await runPaletteCommand("Discard all unstaged changes");
       fireEvent.click(await screen.findByRole("button", { name: "Discard all" }));
       await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledTimes(1));
+      expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]);
     });
   });
 

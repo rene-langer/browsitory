@@ -442,7 +442,8 @@ export function DiffPane({
   onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
-  onDiscardAllUnstaged: () => void;
+  // The paths the confirm dialog listed; only those are discarded.
+  onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
@@ -586,7 +587,8 @@ function UncommittedDiffPane({
   onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
-  onDiscardAllUnstaged: () => void;
+  // The paths the confirm dialog listed; only those are discarded.
+  onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
@@ -914,7 +916,7 @@ function UncommittedDiffPane({
           confirmLabel="Discard all"
           onConfirm={() => {
             setDiscardRequest(null);
-            onDiscardAllUnstaged();
+            onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
           }}
           onCancel={() => setDiscardRequest(null)}
         />

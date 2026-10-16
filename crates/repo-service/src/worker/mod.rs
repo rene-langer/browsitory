@@ -161,6 +161,7 @@ pub(crate) enum Command {
         reply: Sender<Result<(), String>>,
     },
     DiscardAllUnstaged {
+        paths: Vec<String>,
         reply: Sender<Result<(), String>>,
     },
     IgnorePath {
@@ -664,8 +665,8 @@ impl Worker {
                     Command::DiscardFile { path, reply } => {
                         status::discard_file(&repo, path, reply)
                     }
-                    Command::DiscardAllUnstaged { reply } => {
-                        status::discard_all_unstaged(&repo, reply)
+                    Command::DiscardAllUnstaged { paths, reply } => {
+                        status::discard_all_unstaged(&repo, paths, reply)
                     }
                     Command::IgnorePath { pattern, reply } => {
                         status::ignore_path(&repo, pattern, reply)
@@ -1475,7 +1476,12 @@ mod tests {
 
         handle.ignore_path("*.log".into()).unwrap();
         handle.discard_file("f.txt".into()).unwrap();
-        handle.discard_all_unstaged().unwrap();
+        write_file(dir.path(), "u.tmp", "u\n");
+        write_file(dir.path(), "late.tmp", "late\n");
+        handle.discard_all_unstaged(vec!["u.tmp".into()]).unwrap();
+        assert!(!dir.path().join("u.tmp").exists());
+        assert!(dir.path().join("late.tmp").exists(), "only listed paths");
+        std::fs::remove_file(dir.path().join("late.tmp")).unwrap();
         let status = handle.get_status().unwrap();
         assert!(
             status

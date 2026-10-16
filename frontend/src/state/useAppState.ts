@@ -127,7 +127,7 @@ export interface UseAppStateResult {
   unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
-  discardAllUnstaged(): Promise<void>;
+  discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
   commit(message: string): Promise<void>;
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`

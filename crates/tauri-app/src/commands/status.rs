@@ -261,9 +261,10 @@ pub async fn discard_file(
 #[tauri::command]
 pub async fn discard_all_unstaged(
     repo_path: String,
+    paths: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_all_unstaged()
+    worker_handle(&state, &repo_path)?.discard_all_unstaged(paths)
 }
 
 #[tauri::command]

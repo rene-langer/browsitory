@@ -236,7 +236,7 @@ export const vscodeRepoClient: RepoClient = {
   discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
     call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => call<void>("discard_file", { repoPath, path }),
-  discardAllUnstaged: (repoPath: string) => call<void>("discard_all_unstaged", { repoPath }),
+  discardAllUnstaged: (repoPath: string, paths: string[]) => call<void>("discard_all_unstaged", { repoPath, paths }),
   ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => call<DiffSettings>("get_diff_settings", {}),
   setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),

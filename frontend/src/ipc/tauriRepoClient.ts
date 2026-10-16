@@ -116,7 +116,7 @@ export const tauriRepoClient: RepoClient = {
   discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
     loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => loggedInvoke("discard_file", { repoPath, path }),
-  discardAllUnstaged: (repoPath: string) => loggedInvoke("discard_all_unstaged", { repoPath }),
+  discardAllUnstaged: (repoPath: string, paths: string[]) => loggedInvoke("discard_all_unstaged", { repoPath, paths }),
   ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => loggedInvoke<DiffSettings>("get_diff_settings"),
   setDiffSettings: (settings: DiffSettings) => loggedInvoke("set_diff_settings", { settings }),

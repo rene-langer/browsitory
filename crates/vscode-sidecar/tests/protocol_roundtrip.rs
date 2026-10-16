@@ -1739,12 +1739,19 @@ fn line_staging_discard_and_ignore_round_trip_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "path": "f.txt"}),
     );
     assert_eq!(discarded["result"], serde_json::Value::Null);
+    write_file(dir.path(), "u.tmp", "u\n");
+    write_file(dir.path(), "late.tmp", "late\n");
     let all = sidecar.call(
         6,
         "discard_all_unstaged",
-        serde_json::json!({"repoPath": repo_path}),
+        serde_json::json!({"repoPath": repo_path, "paths": ["u.tmp"]}),
     );
-    assert_eq!(all["result"], serde_json::Value::Null);
+    assert!(all.get("error").is_none(), "{all}");
+    assert!(!dir.path().join("u.tmp").exists());
+    assert!(
+        dir.path().join("late.tmp").exists(),
+        "only the listed paths"
+    );
 }
 
 #[test]

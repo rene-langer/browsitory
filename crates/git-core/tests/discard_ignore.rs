@@ -79,13 +79,94 @@ fn discard_all_unstaged_resets_tracked_deletes_untracked_and_keeps_the_index() {
     stage_file(&repo, "b.txt").unwrap();
     common::write_file(dir.path(), "u.txt", "u\n");
 
-    discard_all_unstaged(&repo).unwrap();
+    discard_all_unstaged(&repo, &unstaged_paths(&repo)).unwrap();
 
     assert_eq!(read(dir.path(), "a.txt"), "a1\n");
     assert_eq!(read(dir.path(), "b.txt"), "b2\n");
     assert!(!dir.path().join("u.txt").exists());
     let statuses = git_core::status::status(&repo).unwrap();
     assert!(statuses.iter().all(|e| e.staged), "{statuses:?}");
+}
+
+/// The list the "Discard all" dialog shows: unstaged, non-conflicted entries.
+fn unstaged_paths(repo: &git2::Repository) -> Vec<String> {
+    git_core::status::status(repo)
+        .unwrap()
+        .into_iter()
+        .filter(|e| !e.staged && e.kind != git_core::status::StatusKind::Conflicted)
+        .map(|e| e.path)
+        .collect()
+}
+
+#[test]
+fn discard_all_skips_a_nested_repo_discards_the_rest_and_names_what_it_skipped() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a1\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "a.txt", "a2\n");
+    common::write_file(dir.path(), "u.txt", "u\n");
+    let _nested = git2::Repository::init(dir.path().join("nested")).unwrap();
+    common::write_file(dir.path(), "nested/inner.txt", "i\n");
+    let paths = unstaged_paths(&repo);
+    assert!(paths.contains(&"nested/".to_string()), "{paths:?}");
+
+    let result = discard_all_unstaged(&repo, &paths);
+
+    match result {
+        Err(e @ StageError::DiscardIncomplete { .. }) => {
+            let text = e.to_string();
+            assert!(
+                text.starts_with("Couldn't discard 1 file: nested/"),
+                "{text}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(read(dir.path(), "a.txt"), "a1\n");
+    assert!(!dir.path().join("u.txt").exists());
+    assert!(dir.path().join("nested/inner.txt").exists());
+    assert!(dir.path().join("nested/.git").exists());
+}
+
+#[test]
+fn discard_all_only_touches_the_listed_paths() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a1\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "u.txt", "u\n");
+    let paths = unstaged_paths(&repo);
+    // Created after the dialog listed what it would discard.
+    common::write_file(dir.path(), "late.txt", "late\n");
+    common::write_file(dir.path(), "a.txt", "a2\n");
+
+    discard_all_unstaged(&repo, &paths).unwrap();
+
+    assert!(!dir.path().join("u.txt").exists());
+    assert_eq!(read(dir.path(), "late.txt"), "late\n");
+    assert_eq!(read(dir.path(), "a.txt"), "a2\n");
+}
+
+#[test]
+fn discard_all_still_skips_conflicted_entries() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "shared.txt", "one\ntwo\n");
+    common::commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    common::write_file(dir.path(), "shared.txt", "one\nfeature\n");
+    common::commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    common::write_file(dir.path(), "shared.txt", "one\nmain\n");
+    common::commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+    let conflicted = read(dir.path(), "shared.txt");
+    assert!(conflicted.contains("<<<<<<<"), "{conflicted}");
+
+    discard_all_unstaged(&repo, &["shared.txt".to_string()]).unwrap();
+
+    assert_eq!(read(dir.path(), "shared.txt"), conflicted);
 }
 
 #[test]
@@ -214,4 +295,21 @@ fn discard_file_on_an_untracked_folder_explains_instead_of_failing_raw() {
     }
     assert!(dir.path().join("nested/inner.txt").exists());
     assert!(dir.path().join("nested/.git").exists());
+}
+
+#[test]
+fn discard_all_caps_the_names_it_lists() {
+    let (dir, repo) = common::init_repo();
+    let paths: Vec<String> = (1..=5)
+        .map(|i| {
+            common::write_file(dir.path(), &format!("d{i}/x.txt"), "x\n");
+            format!("d{i}/")
+        })
+        .collect();
+    let err = discard_all_unstaged(&repo, &paths).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 5 files: d1/, d2/, d3/ and 2 more. \
+         Folders (for example nested repositories) are never discarded."
+    );
 }

@@ -42,10 +42,10 @@ describe("useStagingActions", () => {
   it("file, discard-all and ignore actions call through", async () => {
     const { client, actions } = setup();
     await actions.discardFile("f.txt");
-    await actions.discardAllUnstaged();
+    await actions.discardAllUnstaged(["a.txt", "u.txt"]);
     await actions.ignorePath("*.log");
     expect(client.discardFile).toHaveBeenCalledWith("/repo", "f.txt");
-    expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repo");
+    expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repo", ["a.txt", "u.txt"]);
     expect(client.ignorePath).toHaveBeenCalledWith("/repo", "*.log");
   });
 });

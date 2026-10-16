@@ -272,7 +272,8 @@ export interface RepoClient {
   discardHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
   discardLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(repoPath: string, path: string): Promise<void>;
-  discardAllUnstaged(repoPath: string): Promise<void>;
+  // Discards exactly `paths` (the list the user confirmed); folders are skipped and reported.
+  discardAllUnstaged(repoPath: string, paths: string[]): Promise<void>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;
