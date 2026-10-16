@@ -150,6 +150,8 @@ export interface WebviewSession {
   click(selector: string): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
   clickByText(tag: string, text: string): Promise<void>;
+  /** Clicks the `index`-th match (negative counts from the end) of `selector`. */
+  clickBySelector(selector: string, index?: number): Promise<void>;
   contextMenuByText(tag: string, text: string): Promise<void>;
   waitForText(tag: string, text: string, timeoutMs?: number): Promise<void>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
@@ -228,6 +230,18 @@ class CdpWebviewSession implements WebviewSession {
           return candidate.textContent && candidate.textContent.trim() === ${JSON.stringify(text)};
         });
         if (!el) throw new Error(${JSON.stringify(`no <${tag}> with text ${text}`)});
+        el.click();
+      })()
+    `);
+  }
+
+  async clickBySelector(selector: string, index = 0): Promise<void> {
+    await this.evaluate(`
+      (function () {
+        var els = Array.from(document.querySelectorAll(${JSON.stringify(selector)}));
+        var i = ${index} < 0 ? els.length + ${index} : ${index};
+        var el = els[i];
+        if (!el) throw new Error(${JSON.stringify(`no match ${index} for ${selector}`)});
         el.click();
       })()
     `);
