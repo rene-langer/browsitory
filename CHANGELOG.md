@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Line staging, diff options, syntax highlighting, discard and ignore
+
+- Select individual lines in a diff (click, Shift+click, Ctrl/Cmd+click, drag, or ↑/↓ with
+  Shift) and stage, unstage or discard just those lines. `s` and `d` act on the selection when
+  there is one, otherwise on the hunk.
+- Keyboard: `↑`/`↓` move a line cursor inside the active hunk, `Shift+↑`/`Shift+↓` extend the
+  selection, `s` and `d` `d` act on the selection (or the hunk when nothing is selected), and
+  `[` / `]` move between hunks and clear the selection.
+- Staging, unstaging or discarding a whole hunk now also works with zero context lines and for
+  hunks of untracked, newly added or deleted files, which previously failed.
+- Diff toolbar: Ignore whitespace, context lines (0-20) and Syntax highlighting, remembered
+  across sessions. While whitespace is ignored, partial staging is turned off in the working
+  tree and a hint appears in its place; file-level stage and unstage still work.
+- Diffs are syntax-highlighted for common languages (up to 2,000 lines per file).
+- File "⋯" menu (also right-click or Shift+F10 on a file header): Discard changes…, and for
+  untracked files Ignore file / Ignore all *.ext / Ignore folder, which append to `.gitignore`.
+  Discard refuses paths outside the repository, including through symlinked folders, and
+  ignoring never overwrites a `.gitignore` that can't be read.
+- "Discard all…" next to "Stage all" discards every unstaged change, with confirmation.
+- Palette commands for each diff option and for discarding.
+
 ### Cherry-pick, revert, reset, amend and force push
 
 - Commit context menu: Cherry-pick, Revert, Checkout (detached) and "Reset ⟨branch⟩ to here…"
@@ -59,6 +80,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Staged files no longer offer a discard action (button or `d`); it could previously revert an
+  unrelated hunk of unstaged changes.
 - Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
   loads; empty diffs now read "No text differences (binary file or mode-only change)".
   Collapsed file sections no longer fetch their diff until expanded, and sections far from the

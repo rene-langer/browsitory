@@ -58,6 +58,25 @@ aside — expand **Stashes** in the sidebar to get them back.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
+### Staging individual lines
+
+In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add
+or remove one, or dragging across several. Then use **Stage lines**, **Unstage lines** or
+**Discard lines** in the hunk header. With the keyboard, `↑`/`↓` move a line cursor inside the
+active hunk, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump to the previous or
+next hunk (which clears the selection). `s` stages or unstages and `d` `d` discards the
+selection, or the whole hunk when nothing is selected.
+
+### Discarding and ignoring files
+
+Open a file's **⋯** menu (or right-click the file header, or press Shift+F10) for **Discard
+changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
+appears, and discarding cannot be undone. **Discard all…** next to **Stage all** discards
+every unstaged change after confirmation.
+
+For untracked files the menu also offers **Ignore file**, **Ignore all \*.ext** and **Ignore
+folder**. Each appends a pattern to the repository's `.gitignore` (creating it if needed).
+
 ## Browsing history and diffs
 
 Click any commit in the graph to see the files it touched; click a file to
@@ -74,6 +93,14 @@ current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.
 
 ![Viewing a past commit's diff](assets/commit-diff.png)
+
+### Diff options
+
+The diff toolbar has three controls, remembered across sessions: **Ignore whitespace**,
+**Context lines** (0 to 20) and **Syntax highlighting**. While whitespace is ignored, line
+staging is unavailable in the working tree and a hint says so; staging whole files still
+works. Highlighting covers common languages and is skipped for files over 2,000 lines. The
+command palette has an entry for each option.
 
 ## Branches and remotes
 
