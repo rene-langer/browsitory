@@ -45,6 +45,9 @@ import releaseNotesData from "./generated/releaseNotes.json";
 
 const allReleaseNotes = releaseNotesData as ReleaseNotesEntry[];
 
+// Toast copy for line-level stage/unstage/discard ("Staged 1 line", "Discarded 3 lines").
+const linesToast = (verb: string, n: number) => `${verb} ${n} ${n === 1 ? "line" : "lines"}`;
+
 function RepoWorkspace({
   repoPath,
   active,
@@ -510,6 +513,9 @@ function RepoWorkspace({
                 onStageHunk={appState.stageHunk}
                 onUnstageHunk={appState.unstageHunk}
                 onDiscardHunk={appState.discardHunk}
+                onStageLines={(p, o, n, c, idx) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx)}
+                onUnstageLines={(p, o, n, c, idx) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx)}
+                onDiscardLines={(p, o, n, c, idx) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx)}
                 onCommit={announce("Committed", appState.commit)}
                 onSaveStash={announce("Changes stashed", appState.saveStash)}
                 onSelectRow={appState.selectRow}

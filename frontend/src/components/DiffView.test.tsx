@@ -2,6 +2,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
 import { wordDiff } from "../lib/wordDiff";
+import type { ReactNode } from "react";
+import { DiffSettingsContext, type DiffSettingsApi } from "../state/useDiffSettings";
 import { DiffView } from "./DiffView";
 
 // Pass-through spy on the real `wordDiff`, so tests can count how often DiffView recomputes it.
@@ -356,5 +358,137 @@ describe("DiffView", () => {
 
     expect(screen.getByText("Discard hunk")).toBeInTheDocument();
     expect(screen.queryByText("Confirm discard")).not.toBeInTheDocument();
+  });
+});
+
+const lineHunk: DiffHunk = {
+  oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
+  lines: [
+    { origin: "Context", content: "a\n" },
+    { origin: "Remove", content: "b\n" },
+    { origin: "Add", content: "B\n" },
+    { origin: "Context", content: "c\n" },
+    { origin: "Add", content: "d\n" },
+  ],
+};
+
+const row = (container: HTMLElement, index: number) =>
+  container.querySelector<HTMLElement>(`[data-hunk-index="0"][data-line-index="${index}"]`)!;
+
+const TestDiffSettings = ({
+  value,
+  children,
+}: {
+  value: Pick<DiffSettingsApi, "settings" | "update">;
+  children: ReactNode;
+}) => (
+  <DiffSettingsContext.Provider value={{ error: null, dismissError: () => {}, ...value }}>
+    {children}
+  </DiffSettingsContext.Provider>
+);
+
+describe("DiffView line selection", () => {
+  it("click then shift-click selects a range and stages those lines", () => {
+    const onStageLines = vi.fn();
+    const { container } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />);
+    fireEvent.click(row(container, 1));
+    fireEvent.click(row(container, 4), { shiftKey: true });
+    expect(screen.getByRole("button", { name: "Stage lines (3)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (3)" }));
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2, 4]);
+  });
+
+  it("ctrl-click toggles single lines", () => {
+    const onStageLines = vi.fn();
+    const { container } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />);
+    fireEvent.click(row(container, 2));
+    fireEvent.click(row(container, 4), { ctrlKey: true });
+    expect(row(container, 2)).toHaveAttribute("aria-selected", "true");
+    expect(row(container, 4)).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("2 lines selected")).toBeInTheDocument();
+  });
+
+  it("s stages the selection, or the hunk when nothing is selected", () => {
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const { container } = render(<DiffView hunks={[lineHunk]} onStageHunk={onStageHunk} onStageLines={onStageLines} />);
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "s" });
+    expect(onStageHunk).toHaveBeenCalledWith(1, 1);
+    fireEvent.click(row(container, 4));
+    fireEvent.keyDown(group, { key: "s" });
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [4]);
+  });
+
+  it("arrow keys move a line cursor and shift-arrow extends", () => {
+    const onStageLines = vi.fn();
+    render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />);
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    fireEvent.keyDown(group, { key: "ArrowDown", shiftKey: true });
+    fireEvent.keyDown(group, { key: "s" });
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2]);
+  });
+
+  it("d twice discards the selected lines", () => {
+    const onDiscardLines = vi.fn();
+    const { container } = render(
+      <DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onDiscardHunk={vi.fn()} onDiscardLines={onDiscardLines} />,
+    );
+    fireEvent.click(row(container, 2));
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    expect(onDiscardLines).toHaveBeenCalledWith(1, 1, [2]);
+  });
+
+  it("partialActionsDisabled hides hunk and line actions and shows the hint", () => {
+    render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} partialActionsDisabled />);
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+    expect(screen.getByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+  });
+
+  it("split view cells select by their index in the hunk", () => {
+    const onStageLines = vi.fn();
+    const { container } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />);
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    fireEvent.click(row(container, 2));
+    fireEvent.click(row(container, 4), { shiftKey: true });
+    expect(row(container, 2)).toHaveAttribute("data-diff-column", "new");
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (2)" }));
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [2, 4]);
+  });
+
+  it("dragging across lines selects the range", () => {
+    const onStageLines = vi.fn();
+    const { container } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />);
+    fireEvent.mouseDown(row(container, 1), { button: 0 });
+    fireEvent.mouseEnter(row(container, 2));
+    fireEvent.mouseEnter(row(container, 4));
+    fireEvent.mouseUp(window);
+    fireEvent.mouseEnter(row(container, 1));
+    expect(screen.getByText("3 lines selected")).toBeInTheDocument();
+  });
+
+  it("selection clears when hunks change", () => {
+    const { container, rerender } = render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+    fireEvent.click(row(container, 2));
+    rerender(<DiffView hunks={[{ ...lineHunk }]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+    expect(screen.queryByText(/lines? selected/)).toBeNull();
+  });
+});
+
+describe("DiffView options toolbar", () => {
+  it("toggles ignore whitespace and steps context lines through the settings context", () => {
+    const update = vi.fn();
+    render(
+      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }, update }}>
+        <DiffView hunks={[lineHunk]} />
+      </TestDiffSettings>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ignore whitespace" }));
+    expect(update).toHaveBeenCalledWith({ ignoreWhitespace: true });
+    fireEvent.click(screen.getByRole("button", { name: "More context lines" }));
+    expect(update).toHaveBeenCalledWith({ contextLines: 4 });
   });
 });

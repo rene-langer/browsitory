@@ -88,6 +88,9 @@ function UncommittedFileSection({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
@@ -111,6 +114,9 @@ function UncommittedFileSection({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -303,6 +309,10 @@ function UncommittedFileSection({
               onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines)}
+              onStageLines={!entry.staged ? (o, n, idx) => onStageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
+              onUnstageLines={entry.staged ? (o, n, idx) => onUnstageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
+              onDiscardLines={!entry.staged ? (o, n, idx) => onDiscardLines(entry.path, o, n, settings.contextLines, idx) : undefined}
+              partialActionsDisabled={settings.ignoreWhitespace}
             />
           )}
         </div>
@@ -326,6 +336,9 @@ export function DiffPane({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -369,6 +382,9 @@ export function DiffPane({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -399,6 +415,9 @@ export function DiffPane({
         onStageHunk={onStageHunk}
         onUnstageHunk={onUnstageHunk}
         onDiscardHunk={onDiscardHunk}
+        onStageLines={onStageLines}
+        onUnstageLines={onUnstageLines}
+        onDiscardLines={onDiscardLines}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
@@ -448,6 +467,9 @@ function UncommittedDiffPane({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -483,6 +505,9 @@ function UncommittedDiffPane({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -541,6 +566,14 @@ function UncommittedDiffPane({
       // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
       // failed mutation may still have partially applied.
       void Promise.resolve(action(path, oldStart, newStart, contextLines)).finally(() => bumpPathVersions(path));
+    };
+  const wrapLineAction =
+    (action: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => {
+      // Same settle-then-bump contract as `wrapHunkAction`.
+      void Promise.resolve(action(path, oldStart, newStart, contextLines, lineIndices)).finally(() =>
+        bumpPathVersions(path),
+      );
     };
   // One number per section: the path's own version plus the pane-wide refresh generation. Both
   // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
@@ -665,6 +698,9 @@ function UncommittedDiffPane({
         onStageHunk={wrapHunkAction(onStageHunk)}
         onUnstageHunk={wrapHunkAction(onUnstageHunk)}
         onDiscardHunk={wrapHunkAction(onDiscardHunk)}
+        onStageLines={wrapLineAction(onStageLines)}
+        onUnstageLines={wrapLineAction(onUnstageLines)}
+        onDiscardLines={wrapLineAction(onDiscardLines)}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}

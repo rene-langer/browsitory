@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { ReactNode } from "react";
+import { DiffSettingsContext } from "../state/useDiffSettings";
 import { DiffPane } from "./DiffPane";
 import styles from "./DiffPane.module.css";
 
@@ -130,6 +132,9 @@ const noopHandlers = {
   onStageHunk: vi.fn(),
   onUnstageHunk: vi.fn(),
   onDiscardHunk: vi.fn(),
+  onStageLines: vi.fn(),
+  onUnstageLines: vi.fn(),
+  onDiscardLines: vi.fn(),
   onCommit: vi.fn(),
   onSaveStash: vi.fn(),
   onSelectRow: vi.fn(),
@@ -1026,5 +1031,86 @@ describe("DiffPane", () => {
       expect(screen.getByRole("button", { name: "Collapse src/main.rs" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
     });
+  });
+});
+
+describe("DiffPane line staging", () => {
+  const lineHunk: DiffHunk = {
+    oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
+    lines: [
+      { origin: "Context", content: "a\n" },
+      { origin: "Remove", content: "b\n" },
+      { origin: "Add", content: "B\n" },
+      { origin: "Context", content: "c\n" },
+      { origin: "Add", content: "d\n" },
+    ],
+  };
+
+  const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
+    <DiffSettingsContext.Provider
+      value={{
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true },
+        update: () => {},
+        error: null,
+        dismissError: () => {},
+      }}
+    >
+      {children}
+    </DiffSettingsContext.Provider>
+  );
+
+  it("stages a clicked line with the path, hunk starts, context lines and line index", async () => {
+    const onStageLines = vi.fn();
+    const { container } = renderUncommitted(
+      fakeClient({ getWorkingDiff: async () => [lineHunk] }),
+      [{ path: "f.txt", staged: false, kind: "Modified" }],
+      { onStageLines },
+    );
+    await screen.findByText("Stage hunk");
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2]));
+  });
+
+  it("ignore whitespace hides hunk actions in both sections but keeps file-level staging", async () => {
+    render(
+      <TestDiffSettings ignoreWhitespace>
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getWorkingDiff: async () => [lineHunk] })}
+          selectedRow="uncommitted"
+          status={[
+            { path: "f.txt", staged: false, kind: "Modified" },
+            { path: "f.txt", staged: true, kind: "Modified" },
+          ]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </TestDiffSettings>,
+    );
+    expect(await screen.findAllByText("Turn off Ignore whitespace to stage partially.")).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByText("B")).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unstage hunk" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stage f.txt" })).toBeInTheDocument();
+  });
+
+  it("commit diffs show lines and no partial-staging hint", async () => {
+    render(
+      <TestDiffSettings ignoreWhitespace>
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getCommitFiles: async () => ["f.txt"], getCommitDiff: async () => [lineHunk], getCommitMessage: async () => "" })}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </TestDiffSettings>,
+    );
+    expect(await screen.findByText("B")).toBeInTheDocument();
+    expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
   });
 });
