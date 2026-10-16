@@ -1,4 +1,4 @@
-use git2::{IndexConflict, Repository, ResetType};
+use git2::{IndexConflict, Repository};
 use std::path::Path;
 use thiserror::Error;
 
@@ -183,11 +183,63 @@ pub fn resolve_conflict(
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
-    if !is_merging(repo) && !repo.index()?.has_conflicts() {
+    use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
+    let in_operation = matches!(
+        repo.state(),
+        Merge | CherryPick | CherryPickSequence | Revert | RevertSequence
+    );
+    if !in_operation && !repo.index()?.has_conflicts() {
         return Err(MergeError::NotMerging);
     }
     let head_commit = repo.head()?.peel_to_commit()?;
-    repo.reset(head_commit.as_object(), ResetType::Hard, None)?;
+    let head_tree = head_commit.tree()?;
+
+    // Like `git merge --abort` (reset --merge): only restore paths the operation touched, so
+    // unrelated unstaged edits survive.
+    let mut touched: Vec<String> = Vec::new();
+    let mut index = repo.index()?;
+    for delta in repo
+        .diff_tree_to_index(Some(&head_tree), Some(&index), None)?
+        .deltas()
+    {
+        for file in [delta.old_file(), delta.new_file()] {
+            if let Some(path) = file.path().and_then(|p| p.to_str()) {
+                touched.push(path.to_string());
+            }
+        }
+    }
+    for conflict in index.conflicts()?.filter_map(|c| c.ok()) {
+        if let Some(entry) = conflict.our.or(conflict.their).or(conflict.ancestor) {
+            touched.push(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
+    touched.sort();
+    touched.dedup();
+
+    index.read_tree(&head_tree)?;
+    index.write()?;
+
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    let mut to_checkout = Vec::new();
+    for path in &touched {
+        if head_tree.get_path(Path::new(path)).is_ok() {
+            to_checkout.push(path.as_str());
+        } else {
+            // Added by the operation: not in HEAD, so remove it.
+            let full = workdir.join(path);
+            if full.is_file() {
+                std::fs::remove_file(full)?;
+            }
+        }
+    }
+    if !to_checkout.is_empty() {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        for path in to_checkout {
+            checkout.path(path);
+        }
+        repo.checkout_head(Some(&mut checkout))?;
+    }
     repo.cleanup_state()?;
     Ok(())
 }

@@ -246,3 +246,62 @@ fn base_branch_ref(repo: &git2::Repository) -> String {
     }
     panic!("no base branch");
 }
+
+/// main edits shared.txt to "ours"; returns the sha of a branch commit editing it to "theirs".
+fn conflicting_pick_setup(dir: &std::path::Path, repo: &git2::Repository) -> String {
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature2", &base, false).unwrap();
+    repo.set_head("refs/heads/feature2").unwrap();
+    common::write_file(dir, "shared.txt", "theirs\n");
+    common::commit_all(repo, "theirs edit");
+    let theirs = repo.head().unwrap().target().unwrap().to_string();
+    repo.set_head(base_branch_ref(repo).as_str()).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    common::write_file(dir, "shared.txt", "ours\n");
+    common::commit_all(repo, "ours edit");
+    theirs
+}
+
+#[test]
+fn aborting_a_conflicted_cherry_pick_keeps_unrelated_unstaged_edits() {
+    let (dir, repo, _) = repo_with_feature_branch();
+    let theirs = conflicting_pick_setup(dir.path(), &repo);
+    // feature.txt is not tracked on main; use a tracked unrelated file instead.
+    common::write_file(dir.path(), "other.txt", "orig\n");
+    common::commit_all(&repo, "add other");
+    common::write_file(dir.path(), "other.txt", "my unsaved other work\n");
+
+    assert!(matches!(
+        cherry_pick(&repo, &theirs).unwrap(),
+        PickOutcome::Conflicted { .. }
+    ));
+    abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("other.txt")).unwrap(),
+        "my unsaved other work\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "ours\n"
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn aborting_after_resolving_and_staging_a_cherry_pick_still_works() {
+    let (dir, repo, _) = repo_with_feature_branch();
+    let theirs = conflicting_pick_setup(dir.path(), &repo);
+    cherry_pick(&repo, &theirs).unwrap();
+    common::write_file(dir.path(), "shared.txt", "resolved\n");
+    stage(&repo, "shared.txt");
+
+    abort_merge(&repo).unwrap();
+
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "ours\n"
+    );
+}
