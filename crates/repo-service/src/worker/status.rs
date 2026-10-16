@@ -75,6 +75,31 @@ pub(super) fn get_blame(
     );
 }
 
+pub(super) fn get_file_history(
+    repo: &git2::Repository,
+    path: String,
+    limit: usize,
+    reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
+) {
+    let _ = reply.send(
+        git_core::history::file_history(repo, &path, limit).map_err(|error| error.to_string()),
+    );
+}
+
+pub(super) fn get_commit_rename_diff(
+    repo: &git2::Repository,
+    commit_id: String,
+    old_path: String,
+    new_path: String,
+    opts: git_core::diff::DiffOptions,
+    reply: Sender<Result<Vec<DiffHunk>, String>>,
+) {
+    let _ = reply.send(
+        git_core::diff::commit_rename_diff(repo, &commit_id, &old_path, &new_path, &opts)
+            .map_err(|error| error.to_string()),
+    );
+}
+
 pub(super) fn stage_file(repo: &git2::Repository, path: String, reply: Sender<Result<(), String>>) {
     let _ = reply.send(git_core::stage::stage_file(repo, &path).map_err(|error| error.to_string()));
 }
@@ -339,6 +364,44 @@ impl WorkerHandle {
             .send(Command::GetBlame {
                 commit_id,
                 path,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_file_history(
+        &self,
+        path: String,
+        limit: usize,
+    ) -> Result<Vec<git_core::history::FileHistoryEntry>, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetFileHistory {
+                path,
+                limit,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_commit_rename_diff(
+        &self,
+        commit_id: String,
+        old_path: String,
+        new_path: String,
+        opts: git_core::diff::DiffOptions,
+    ) -> Result<Vec<DiffHunk>, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetCommitRenameDiff {
+                commit_id,
+                old_path,
+                new_path,
+                opts,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
