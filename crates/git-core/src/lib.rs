@@ -5,6 +5,7 @@ pub mod diff;
 pub mod forge;
 pub mod graph;
 pub mod merge;
+pub mod pick;
 pub mod rebase;
 pub mod reflog;
 pub mod remote;
