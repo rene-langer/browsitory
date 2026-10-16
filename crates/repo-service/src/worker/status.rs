@@ -130,6 +130,8 @@ pub(super) fn discard_hunk(
     );
 }
 
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn stage_lines(
     repo: &git2::Repository,
     path: String,
@@ -137,6 +139,7 @@ pub(super) fn stage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
@@ -147,11 +150,14 @@ pub(super) fn stage_lines(
             new_start,
             context_lines,
             &line_indices,
+            &expected_lines,
         )
         .map_err(|error| error.to_string()),
     );
 }
 
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn unstage_lines(
     repo: &git2::Repository,
     path: String,
@@ -159,6 +165,7 @@ pub(super) fn unstage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
@@ -169,11 +176,14 @@ pub(super) fn unstage_lines(
             new_start,
             context_lines,
             &line_indices,
+            &expected_lines,
         )
         .map_err(|error| error.to_string()),
     );
 }
 
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn discard_lines(
     repo: &git2::Repository,
     path: String,
@@ -181,6 +191,7 @@ pub(super) fn discard_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
@@ -191,6 +202,7 @@ pub(super) fn discard_lines(
             new_start,
             context_lines,
             &line_indices,
+            &expected_lines,
         )
         .map_err(|error| error.to_string()),
     );
@@ -417,6 +429,7 @@ impl WorkerHandle {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -426,6 +439,7 @@ impl WorkerHandle {
                 new_start,
                 context_lines,
                 line_indices,
+                expected_lines,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -440,6 +454,7 @@ impl WorkerHandle {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -449,6 +464,7 @@ impl WorkerHandle {
                 new_start,
                 context_lines,
                 line_indices,
+                expected_lines,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -463,6 +479,7 @@ impl WorkerHandle {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -472,6 +489,7 @@ impl WorkerHandle {
                 new_start,
                 context_lines,
                 line_indices,
+                expected_lines,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

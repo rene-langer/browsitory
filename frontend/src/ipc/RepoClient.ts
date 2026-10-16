@@ -266,11 +266,11 @@ export interface RepoClient {
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
   stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  stageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  unstageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  unstageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  discardLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(repoPath: string, path: string): Promise<void>;
   discardAllUnstaged(repoPath: string): Promise<void>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;

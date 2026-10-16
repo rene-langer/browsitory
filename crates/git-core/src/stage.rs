@@ -279,8 +279,12 @@ fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundH
 enum Selection<'a> {
     /// Every `+`/`-` line (the whole-hunk operations).
     WholeHunk,
-    /// Indices into the hunk's lines as `diff::hunks_from_diff` emits them.
-    Lines(&'a [u32]),
+    /// Indices into the hunk's lines as `diff::hunks_from_diff` emits them, plus every line's
+    /// content as the caller displayed it; the hunk must still read exactly like that.
+    Lines {
+        indices: &'a [u32],
+        expected: &'a [String],
+    },
 }
 
 /// The three operations; each fixes which diff the hunk comes from, the patch direction and
@@ -324,7 +328,21 @@ fn apply_selection(
     }
     let all_changed: Vec<u32>;
     let line_indices = match selection {
-        Selection::Lines(indices) => indices,
+        Selection::Lines { indices, expected } => {
+            // `(old_start, new_start)` survives edits elsewhere in the hunk, so the indices
+            // only mean what the user selected if the content is unchanged.
+            let current = hunk
+                .lines
+                .iter()
+                .map(|l| String::from_utf8_lossy(&l.content));
+            if !current.eq(expected
+                .iter()
+                .map(|e| std::borrow::Cow::Borrowed(e.as_str())))
+            {
+                return Err(StageError::HunkNotFound);
+            }
+            indices
+        }
         Selection::WholeHunk => {
             all_changed = (0..hunk.lines.len() as u32)
                 .filter(|&i| matches!(hunk.lines[i as usize].origin, '+' | '-'))
@@ -368,7 +386,9 @@ fn not_applicable_or_index(e: git2::Error) -> StageError {
 }
 
 /// Stages only the hunk lines at `line_indices` (indices into the index→workdir hunk as
-/// `diff::working_diff` returns it).
+/// `diff::working_diff` returns it). `expected_lines` is every line's `content` of the hunk as
+/// displayed; if the hunk no longer matches it, nothing happens and `HunkNotFound` is returned.
+/// The same holds for `unstage_lines` and `discard_lines`.
 pub fn stage_lines(
     repo: &git2::Repository,
     path: &str,
@@ -376,13 +396,17 @@ pub fn stage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: &[u32],
+    expected_lines: &[String],
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
         context_lines,
-        Selection::Lines(line_indices),
+        Selection::Lines {
+            indices: line_indices,
+            expected: expected_lines,
+        },
         Target::Stage,
     )
 }
@@ -395,13 +419,17 @@ pub fn unstage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: &[u32],
+    expected_lines: &[String],
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
         context_lines,
-        Selection::Lines(line_indices),
+        Selection::Lines {
+            indices: line_indices,
+            expected: expected_lines,
+        },
         Target::Unstage,
     )
 }
@@ -415,13 +443,17 @@ pub fn discard_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: &[u32],
+    expected_lines: &[String],
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
         context_lines,
-        Selection::Lines(line_indices),
+        Selection::Lines {
+            indices: line_indices,
+            expected: expected_lines,
+        },
         Target::Discard,
     )
 }

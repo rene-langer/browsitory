@@ -1679,16 +1679,49 @@ fn line_staging_discard_and_ignore_round_trip_through_the_sidecar() {
         }),
     );
     let hunk = &diff["result"][0];
+    let shown: Vec<serde_json::Value> = hunk["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["content"].clone())
+        .collect();
+    let stale = sidecar.call(
+        30,
+        "stage_lines",
+        serde_json::json!({
+            "repoPath": repo_path, "path": "f.txt",
+            "oldStart": hunk["oldStart"], "newStart": hunk["newStart"],
+            "contextLines": 3, "lineIndices": [4], "expectedLines": ["something else\n"]
+        }),
+    );
+    assert!(
+        stale["error"].to_string().contains("hunk not found"),
+        "{stale}"
+    );
     let staged = sidecar.call(
         3,
         "stage_lines",
         serde_json::json!({
             "repoPath": repo_path, "path": "f.txt",
             "oldStart": hunk["oldStart"], "newStart": hunk["newStart"],
-            "contextLines": 3, "lineIndices": [4]
+            "contextLines": 3, "lineIndices": [4], "expectedLines": shown
         }),
     );
+    assert!(staged.get("error").is_none(), "{staged}");
     assert_eq!(staged["result"], serde_json::Value::Null, "{staged}");
+    let staged_diff = sidecar.call(
+        31,
+        "get_working_diff",
+        serde_json::json!({
+            "repoPath": repo_path, "path": "f.txt", "staged": true,
+            "opts": {"ignoreWhitespace": false, "contextLines": 3}
+        }),
+    );
+    assert_eq!(
+        staged_diff["result"].as_array().map(Vec::len),
+        Some(1),
+        "{staged_diff}"
+    );
 
     let ignored = sidecar.call(
         4,

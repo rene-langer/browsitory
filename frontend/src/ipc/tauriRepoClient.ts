@@ -109,12 +109,12 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
   discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
     loggedInvoke("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    loggedInvoke("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
-  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    loggedInvoke("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
-  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => loggedInvoke("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string) => loggedInvoke("discard_all_unstaged", { repoPath }),
   ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),

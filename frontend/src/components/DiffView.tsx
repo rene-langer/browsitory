@@ -111,7 +111,11 @@ function buildSplitRows(lines: DiffLine[]): SplitRow[] {
   return rows;
 }
 
-type LineCallback = (oldStart: number, newStart: number, lineIndices: number[]) => void;
+// `expectedLines` is every line's content of the hunk as displayed; the backend refuses the
+// action (and the diff refetches) if the hunk no longer reads exactly like that.
+type LineCallback = (oldStart: number, newStart: number, lineIndices: number[], expectedLines: string[]) => void;
+
+const shownLines = (hunk: DiffHunk) => hunk.lines.map((l) => l.content);
 
 /**
  * `hunks === null` means "not loaded yet" (renders a loading placeholder); `[]` is a real,
@@ -322,7 +326,7 @@ export function DiffView({
     const byLines = lines.length > 0;
     const stageLines = onStageLines ?? onUnstageLines;
     const discard = byLines
-      ? onDiscardLines && (() => onDiscardLines(hunk.oldStart, hunk.newStart, lines))
+      ? onDiscardLines && (() => onDiscardLines(hunk.oldStart, hunk.newStart, lines, shownLines(hunk)))
       : onDiscardHunk && (() => onDiscardHunk(hunk.oldStart, hunk.newStart));
     let handled = true;
     if (event.key === "]") {
@@ -336,7 +340,7 @@ export function DiffView({
       if (selection.hunkIndex !== active) apply({ type: "focusHunk", hunkIndex: active });
       apply(event.shiftKey ? { type: "extend", delta } : { type: "moveCursor", delta });
     } else if (event.key === "s" && byLines) {
-      if (stageLines !== undefined) stageLines(hunk.oldStart, hunk.newStart, lines);
+      if (stageLines !== undefined) stageLines(hunk.oldStart, hunk.newStart, lines, shownLines(hunk));
       else handled = false;
     } else if (event.key === "s") {
       if (onStageHunk !== undefined) onStageHunk(hunk.oldStart, hunk.newStart);
@@ -392,13 +396,13 @@ export function DiffView({
           const n = lines.length;
           const { oldStart, newStart } = hunk;
           const stage = byLines
-            ? onStageLines && { label: `Stage lines (${n})`, run: () => onStageLines(oldStart, newStart, lines) }
+            ? onStageLines && { label: `Stage lines (${n})`, run: () => onStageLines(oldStart, newStart, lines, shownLines(hunk)) }
             : onStageHunk && { label: "Stage hunk", run: () => onStageHunk(oldStart, newStart) };
           const unstage = byLines
-            ? onUnstageLines && { label: `Unstage lines (${n})`, run: () => onUnstageLines(oldStart, newStart, lines) }
+            ? onUnstageLines && { label: `Unstage lines (${n})`, run: () => onUnstageLines(oldStart, newStart, lines, shownLines(hunk)) }
             : onUnstageHunk && { label: "Unstage hunk", run: () => onUnstageHunk(oldStart, newStart) };
           const discard = byLines
-            ? onDiscardLines && { label: `Discard lines (${n})`, run: () => onDiscardLines(oldStart, newStart, lines) }
+            ? onDiscardLines && { label: `Discard lines (${n})`, run: () => onDiscardLines(oldStart, newStart, lines, shownLines(hunk)) }
             : onDiscardHunk && { label: "Discard hunk", run: () => onDiscardHunk(oldStart, newStart) };
           // Split-view cells: the line's index in `hunk.lines` (the selection's coordinate space).
           const cell = (line: DiffLine) => indexOf!.get(line)!;

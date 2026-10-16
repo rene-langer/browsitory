@@ -180,6 +180,8 @@ pub async fn discard_hunk(
     worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start, context_lines)
 }
 
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn stage_lines(
     repo_path: String,
@@ -188,6 +190,7 @@ pub async fn stage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state, &repo_path)?.stage_lines(
@@ -196,9 +199,12 @@ pub async fn stage_lines(
         new_start,
         context_lines,
         line_indices,
+        expected_lines,
     )
 }
 
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn unstage_lines(
     repo_path: String,
@@ -207,6 +213,7 @@ pub async fn unstage_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state, &repo_path)?.unstage_lines(
@@ -215,9 +222,12 @@ pub async fn unstage_lines(
         new_start,
         context_lines,
         line_indices,
+        expected_lines,
     )
 }
 
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn discard_lines(
     repo_path: String,
@@ -226,6 +236,7 @@ pub async fn discard_lines(
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state, &repo_path)?.discard_lines(
@@ -234,6 +245,7 @@ pub async fn discard_lines(
         new_start,
         context_lines,
         line_indices,
+        expected_lines,
     )
 }
 

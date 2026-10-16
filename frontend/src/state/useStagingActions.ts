@@ -18,9 +18,9 @@ export interface StagingActions {
   stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
   unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
   discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
-  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
-  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
@@ -117,18 +117,18 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const stageLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const unstageLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const discardLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, contextLines, lineIndices)),
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const discardFile = useCallback(

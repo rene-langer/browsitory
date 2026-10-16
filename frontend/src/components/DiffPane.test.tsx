@@ -1263,7 +1263,7 @@ describe("DiffPane line staging", () => {
     await screen.findByText("Stage hunk");
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
-    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2]));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2], ["a\n", "b\n", "B\n", "c\n", "d\n"]));
   });
 
   it("a staged section never discards, with or without a line selection", async () => {

@@ -229,12 +229,12 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
   discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
     call<void>("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    call<void>("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
-  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    call<void>("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
-  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) =>
-    call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => call<void>("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string) => call<void>("discard_all_unstaged", { repoPath }),
   ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),

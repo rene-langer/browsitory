@@ -1,7 +1,66 @@
 mod common;
 
 use git_core::diff::{working_diff, DiffOptions};
-use git_core::stage::{discard_lines, stage_file, stage_lines, unstage_lines, StageError};
+use git_core::stage::{stage_file, StageError};
+
+/// The displayed content of hunk `(o, n)` as the UI would send it: every line's `content`, in
+/// order, from `working_diff` with the same context. Empty when no such hunk exists.
+fn shown(
+    repo: &git2::Repository,
+    path: &str,
+    staged: bool,
+    o: u32,
+    n: u32,
+    ctx: u32,
+) -> Vec<String> {
+    let opts = DiffOptions {
+        ignore_whitespace: false,
+        context_lines: ctx,
+    };
+    working_diff(repo, path, staged, &opts)
+        .unwrap()
+        .into_iter()
+        .find(|h| h.old_start == o && h.new_start == n)
+        .map(|h| h.lines.into_iter().map(|l| l.content).collect())
+        .unwrap_or_default()
+}
+
+/// Line ops against the hunk exactly as currently displayed (the common, non-stale case).
+fn stage_lines(
+    repo: &git2::Repository,
+    path: &str,
+    o: u32,
+    n: u32,
+    ctx: u32,
+    idx: &[u32],
+) -> Result<(), StageError> {
+    let expected = shown(repo, path, false, o, n, ctx);
+    git_core::stage::stage_lines(repo, path, o, n, ctx, idx, &expected)
+}
+
+fn unstage_lines(
+    repo: &git2::Repository,
+    path: &str,
+    o: u32,
+    n: u32,
+    ctx: u32,
+    idx: &[u32],
+) -> Result<(), StageError> {
+    let expected = shown(repo, path, true, o, n, ctx);
+    git_core::stage::unstage_lines(repo, path, o, n, ctx, idx, &expected)
+}
+
+fn discard_lines(
+    repo: &git2::Repository,
+    path: &str,
+    o: u32,
+    n: u32,
+    ctx: u32,
+    idx: &[u32],
+) -> Result<(), StageError> {
+    let expected = shown(repo, path, false, o, n, ctx);
+    git_core::stage::discard_lines(repo, path, o, n, ctx, idx, &expected)
+}
 
 fn index_content(repo: &git2::Repository, path: &str) -> Option<String> {
     let mut index = repo.index().unwrap();
@@ -574,4 +633,67 @@ fn an_index_lock_failure_is_not_reported_as_an_inapplicable_selection() {
         Err(StageError::Index(e)) => assert_eq!(e.code(), git2::ErrorCode::Locked, "{e}"),
         other => panic!("{other:?}"),
     }
+}
+
+// --- Final-review fix: line ops refuse a hunk whose content changed since it was shown ---
+
+/// base "a\nb\nc\n" → workdir "a\nX\nb\nY\nc\n"; displayed hunk " a +X  b +Y  c".
+fn setup_stale_view() -> (tempfile::TempDir, git2::Repository, (u32, u32), Vec<String>) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "a\nb\nc\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "a\nX\nb\nY\nc\n");
+    let h = working_diff(&repo, "f.txt", false, &DiffOptions::default()).unwrap()[0].clone();
+    let displayed: Vec<String> = h.lines.iter().map(|l| l.content.clone()).collect();
+    assert_eq!(displayed, ["a\n", "X\n", "b\n", "Y\n", "c\n"]);
+    (dir, repo, (h.old_start, h.new_start), displayed)
+}
+
+#[test]
+fn discard_lines_refuses_a_hunk_edited_since_it_was_shown() {
+    let (dir, repo, (o, n), displayed) = setup_stale_view();
+    // The user adds a line above Y in an editor; the hunk keeps its (old_start, new_start).
+    common::write_file(dir.path(), "f.txt", "a\nX\nb\nMINE\nY\nc\n");
+
+    let result = git_core::stage::discard_lines(&repo, "f.txt", o, n, 3, &[3], &displayed);
+
+    assert!(
+        matches!(result, Err(StageError::HunkNotFound)),
+        "{result:?}"
+    );
+    assert_eq!(
+        workdir_content(dir.path(), "f.txt"),
+        "a\nX\nb\nMINE\nY\nc\n"
+    );
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\n");
+}
+
+#[test]
+fn stage_and_unstage_lines_refuse_a_stale_hunk() {
+    let (dir, repo, (o, n), displayed) = setup_stale_view();
+    common::write_file(dir.path(), "f.txt", "a\nX\nb\nMINE\nY\nc\n");
+    let result = git_core::stage::stage_lines(&repo, "f.txt", o, n, 3, &[3], &displayed);
+    assert!(
+        matches!(result, Err(StageError::HunkNotFound)),
+        "{result:?}"
+    );
+    assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\n");
+
+    stage_file(&repo, "f.txt").unwrap();
+    let result = git_core::stage::unstage_lines(&repo, "f.txt", o, n, 3, &[3], &displayed);
+    assert!(
+        matches!(result, Err(StageError::HunkNotFound)),
+        "{result:?}"
+    );
+    assert_eq!(
+        index_content(&repo, "f.txt").unwrap(),
+        "a\nX\nb\nMINE\nY\nc\n"
+    );
+}
+
+#[test]
+fn discard_lines_with_matching_content_still_works() {
+    let (dir, repo, (o, n), displayed) = setup_stale_view();
+    git_core::stage::discard_lines(&repo, "f.txt", o, n, 3, &[3], &displayed).unwrap();
+    assert_eq!(workdir_content(dir.path(), "f.txt"), "a\nX\nb\nc\n");
 }

@@ -329,12 +329,12 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 });
     await tauriRepoClient.discardHunk("/repo", "f.txt", 1, 2, 5);
     expect(invoke).toHaveBeenLastCalledWith("discard_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 });
-    await tauriRepoClient.stageLines("/repo", "f.txt", 1, 2, 5, [3, 4]);
-    expect(invoke).toHaveBeenLastCalledWith("stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3, 4] });
-    await tauriRepoClient.unstageLines("/repo", "f.txt", 1, 2, 5, [3]);
-    expect(invoke).toHaveBeenLastCalledWith("unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3] });
-    await tauriRepoClient.discardLines("/repo", "f.txt", 1, 2, 5, [3]);
-    expect(invoke).toHaveBeenLastCalledWith("discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3] });
+    await tauriRepoClient.stageLines("/repo", "f.txt", 1, 2, 5, [3, 4], ["a\n", "+b\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3, 4], expectedLines: ["a\n", "+b\n"] });
+    await tauriRepoClient.unstageLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] });
+    await tauriRepoClient.discardLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] });
     await tauriRepoClient.discardFile("/repo", "f.txt");
     expect(invoke).toHaveBeenLastCalledWith("discard_file", { repoPath: "/repo", path: "f.txt" });
     await tauriRepoClient.discardAllUnstaged("/repo");

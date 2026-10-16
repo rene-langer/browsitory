@@ -123,9 +123,9 @@ export interface UseAppStateResult {
   stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
   unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
   discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
-  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
-  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(): Promise<void>;
   ignorePath(pattern: string): Promise<void>;

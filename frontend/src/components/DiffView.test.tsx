@@ -372,6 +372,9 @@ const lineHunk: DiffHunk = {
   ],
 };
 
+// What every line callback must send as `expectedLines`: the hunk exactly as displayed.
+const shown = lineHunk.lines.map((l) => l.content);
+
 const row = (container: HTMLElement, index: number) =>
   container.querySelector<HTMLElement>(`[data-hunk-index="0"][data-line-index="${index}"]`)!;
 
@@ -395,7 +398,7 @@ describe("DiffView line selection", () => {
     fireEvent.click(row(container, 4), { shiftKey: true });
     expect(screen.getByRole("button", { name: "Stage lines (3)" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (3)" }));
-    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2, 4]);
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2, 4], shown);
   });
 
   it("ctrl-click toggles single lines", () => {
@@ -417,7 +420,7 @@ describe("DiffView line selection", () => {
     expect(onStageHunk).toHaveBeenCalledWith(1, 1);
     fireEvent.click(row(container, 4));
     fireEvent.keyDown(group, { key: "s" });
-    expect(onStageLines).toHaveBeenCalledWith(1, 1, [4]);
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [4], shown);
   });
 
   it("arrow keys move a line cursor and shift-arrow extends", () => {
@@ -427,7 +430,7 @@ describe("DiffView line selection", () => {
     fireEvent.keyDown(group, { key: "ArrowDown" });
     fireEvent.keyDown(group, { key: "ArrowDown", shiftKey: true });
     fireEvent.keyDown(group, { key: "s" });
-    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2]);
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2], shown);
   });
 
   it("d twice discards the selected lines", () => {
@@ -439,7 +442,7 @@ describe("DiffView line selection", () => {
     const group = screen.getByRole("group", { name: "Diff hunks" });
     fireEvent.keyDown(group, { key: "d" });
     fireEvent.keyDown(group, { key: "d" });
-    expect(onDiscardLines).toHaveBeenCalledWith(1, 1, [2]);
+    expect(onDiscardLines).toHaveBeenCalledWith(1, 1, [2], shown);
   });
 
   it("partialActionsDisabled hides hunk and line actions and shows the hint", () => {
@@ -456,7 +459,7 @@ describe("DiffView line selection", () => {
     fireEvent.click(row(container, 4), { shiftKey: true });
     expect(row(container, 2)).toHaveAttribute("data-diff-column", "new");
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (2)" }));
-    expect(onStageLines).toHaveBeenCalledWith(1, 1, [2, 4]);
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [2, 4], shown);
   });
 
   it("dragging across lines selects the range", () => {
@@ -495,7 +498,7 @@ describe("DiffView line selection", () => {
     fireEvent.mouseEnter(cell(2));
     fireEvent.mouseUp(window);
     fireEvent.keyDown(screen.getByRole("group", { name: "Diff hunks" }), { key: "s" });
-    expect(onStageLines).toHaveBeenCalledWith(20, 21, [1, 2]);
+    expect(onStageLines).toHaveBeenCalledWith(20, 21, [1, 2], shown);
     expect(onStageHunk).not.toHaveBeenCalled();
   });
 

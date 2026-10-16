@@ -31,12 +31,12 @@ describe("useStagingActions", () => {
 
   it("line actions call through with repoPath", async () => {
     const { client, actions } = setup();
-    await actions.stageLines("f.txt", 1, 2, 5, [3]);
-    await actions.unstageLines("f.txt", 1, 2, 5, [3]);
-    await actions.discardLines("f.txt", 1, 2, 5, [3]);
-    expect(client.stageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3]);
-    expect(client.unstageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3]);
-    expect(client.discardLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3]);
+    await actions.stageLines("f.txt", 1, 2, 5, [3], ["x\n"]);
+    await actions.unstageLines("f.txt", 1, 2, 5, [3], ["x\n"]);
+    await actions.discardLines("f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(client.stageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(client.unstageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(client.discardLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
   });
 
   it("file, discard-all and ignore actions call through", async () => {

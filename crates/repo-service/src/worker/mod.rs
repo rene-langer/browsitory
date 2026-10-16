@@ -135,6 +135,7 @@ pub(crate) enum Command {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
         reply: Sender<Result<(), String>>,
     },
     UnstageLines {
@@ -143,6 +144,7 @@ pub(crate) enum Command {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
         reply: Sender<Result<(), String>>,
     },
     DiscardLines {
@@ -151,6 +153,7 @@ pub(crate) enum Command {
         new_start: u32,
         context_lines: u32,
         line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
         reply: Sender<Result<(), String>>,
     },
     DiscardFile {
@@ -610,6 +613,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     } => status::stage_lines(
                         &repo,
@@ -618,6 +622,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     ),
                     Command::UnstageLines {
@@ -626,6 +631,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     } => status::unstage_lines(
                         &repo,
@@ -634,6 +640,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     ),
                     Command::DiscardLines {
@@ -642,6 +649,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     } => status::discard_lines(
                         &repo,
@@ -650,6 +658,7 @@ impl Worker {
                         new_start,
                         context_lines,
                         line_indices,
+                        expected_lines,
                         reply,
                     ),
                     Command::DiscardFile { path, reply } => {
@@ -1396,8 +1405,33 @@ mod tests {
             .unwrap()
             .remove(0);
 
+        let shown = |h: &git_core::diff::DiffHunk| -> Vec<String> {
+            h.lines.iter().map(|l| l.content.clone()).collect()
+        };
+        // A hunk shown with different content (stale view) is refused, nothing changes.
+        let stale = handle.stage_lines(
+            "f.txt".into(),
+            hunk.old_start,
+            hunk.new_start,
+            3,
+            vec![4],
+            vec!["not what is on disk\n".into()],
+        );
+        assert!(stale.unwrap_err().contains("hunk not found"));
+        assert!(handle
+            .get_working_diff("f.txt".into(), true, opts)
+            .unwrap()
+            .is_empty());
+
         handle
-            .stage_lines("f.txt".into(), hunk.old_start, hunk.new_start, 3, vec![4])
+            .stage_lines(
+                "f.txt".into(),
+                hunk.old_start,
+                hunk.new_start,
+                3,
+                vec![4],
+                shown(&hunk),
+            )
             .unwrap();
         let staged = handle
             .get_working_diff("f.txt".into(), true, opts)
@@ -1410,6 +1444,7 @@ mod tests {
                 staged.new_start,
                 3,
                 vec![staged.lines.len() as u32 - 1],
+                shown(&staged),
             )
             .unwrap();
         assert!(handle
@@ -1422,7 +1457,14 @@ mod tests {
             .unwrap()
             .remove(0);
         handle
-            .discard_lines("f.txt".into(), hunk.old_start, hunk.new_start, 3, vec![4])
+            .discard_lines(
+                "f.txt".into(),
+                hunk.old_start,
+                hunk.new_start,
+                3,
+                vec![4],
+                shown(&hunk),
+            )
             .unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("f.txt"))
@@ -1443,7 +1485,7 @@ mod tests {
         );
 
         assert!(handle
-            .stage_lines("f.txt".into(), 99, 99, 3, vec![0])
+            .stage_lines("f.txt".into(), 99, 99, 3, vec![0], vec![])
             .is_err());
         assert!(
             handle.get_status().is_ok(),

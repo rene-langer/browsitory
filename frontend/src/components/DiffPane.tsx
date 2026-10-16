@@ -120,9 +120,9 @@ function UncommittedFileSection({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -344,9 +344,9 @@ function UncommittedFileSection({
               onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onDiscardHunk={!entry.staged ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
-              onStageLines={!entry.staged ? (o, n, idx) => onStageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
-              onUnstageLines={entry.staged ? (o, n, idx) => onUnstageLines(entry.path, o, n, settings.contextLines, idx) : undefined}
-              onDiscardLines={!entry.staged ? (o, n, idx) => onDiscardLines(entry.path, o, n, settings.contextLines, idx) : undefined}
+              onStageLines={!entry.staged ? (o, n, idx, shown) => onStageLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
+              onUnstageLines={entry.staged ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
+              onDiscardLines={!entry.staged ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
               partialActionsDisabled={settings.ignoreWhitespace}
             />
           )}
@@ -438,9 +438,9 @@ export function DiffPane({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
   onDiscardAllUnstaged: () => void;
   onIgnorePath: (pattern: string) => void;
@@ -582,9 +582,9 @@ function UncommittedDiffPane({
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
   onDiscardAllUnstaged: () => void;
   onIgnorePath: (pattern: string) => void;
@@ -648,10 +648,10 @@ function UncommittedDiffPane({
       void Promise.resolve(action(path, oldStart, newStart, contextLines)).finally(() => bumpPathVersions(path));
     };
   const wrapLineAction =
-    (action: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>) =>
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => {
+    (action: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => {
       // Same settle-then-bump contract as `wrapHunkAction`.
-      void Promise.resolve(action(path, oldStart, newStart, contextLines, lineIndices)).finally(() =>
+      void Promise.resolve(action(path, oldStart, newStart, contextLines, lineIndices, expectedLines)).finally(() =>
         bumpPathVersions(path),
       );
     };

@@ -662,6 +662,8 @@ struct LinesParams {
     new_start: u32,
     context_lines: u32,
     line_indices: Vec<u32>,
+    /// Every line's `content` of the hunk as the webview displayed it (stale-view guard).
+    expected_lines: Vec<String>,
 }
 
 fn stage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -672,6 +674,7 @@ fn stage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
         params.new_start,
         params.context_lines,
         params.line_indices,
+        params.expected_lines,
     )?;
     Ok(Value::Null)
 }
@@ -684,6 +687,7 @@ fn unstage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
         params.new_start,
         params.context_lines,
         params.line_indices,
+        params.expected_lines,
     )?;
     Ok(Value::Null)
 }
@@ -696,6 +700,7 @@ fn discard_lines(params: Value, repos: &Repos) -> Result<Value, String> {
         params.new_start,
         params.context_lines,
         params.line_indices,
+        params.expected_lines,
     )?;
     Ok(Value::Null)
 }
