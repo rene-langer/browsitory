@@ -123,3 +123,26 @@ fn ignore_path_rejects_empty_and_multiline_patterns() {
         Err(StageError::InvalidPattern)
     ));
 }
+
+#[test]
+fn ignore_path_keeps_a_non_utf8_gitignore_untouched() {
+    let (dir, repo) = common::init_repo();
+    let bytes: &[u8] = b"caf\xe9\n";
+    std::fs::write(dir.path().join(".gitignore"), bytes).unwrap();
+    assert!(ignore_path(&repo, "*.log").is_err());
+    assert_eq!(std::fs::read(dir.path().join(".gitignore")).unwrap(), bytes);
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_file_does_not_delete_through_a_symlinked_directory() {
+    let (dir, repo) = common::init_repo();
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("victim.txt"), "keep\n").unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+    assert!(matches!(
+        discard_file(&repo, "link/victim.txt"),
+        Err(StageError::InvalidPath)
+    ));
+    assert!(outside.path().join("victim.txt").exists());
+}

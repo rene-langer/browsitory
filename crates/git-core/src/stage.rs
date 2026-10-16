@@ -83,7 +83,12 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         repo.checkout_index(None, Some(&mut checkout))?;
     } else {
         let full = workdir.join(rel);
-        if full.exists() {
+        if full.symlink_metadata().is_ok() {
+            // Lexical checks don't see symlinked directories; resolve the parent for real.
+            let parent = full.parent().ok_or(StageError::InvalidPath)?;
+            if !parent.canonicalize()?.starts_with(workdir.canonicalize()?) {
+                return Err(StageError::InvalidPath);
+            }
             std::fs::remove_file(full)?;
         }
     }
@@ -112,7 +117,11 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
         .workdir()
         .ok_or(StageError::NoWorkdir)?
         .join(".gitignore");
-    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+    let existing = match std::fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
     if existing.lines().any(|line| line.trim_end() == pattern) {
         return Ok(());
     }
