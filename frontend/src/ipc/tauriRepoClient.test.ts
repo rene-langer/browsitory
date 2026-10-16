@@ -291,4 +291,22 @@ describe("tauriRepoClient transfer progress subscription", () => {
     unsubscribe();
     expect(unlisten).toHaveBeenCalledTimes(2);
   });
+
+  it("invokes the history-rewrite commands with camelCase args", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await tauriRepoClient.cherryPick("/repo", "abc");
+    expect(invoke).toHaveBeenLastCalledWith("cherry_pick", { repoPath: "/repo", commitId: "abc" });
+    await tauriRepoClient.revertCommit("/repo", "abc");
+    expect(invoke).toHaveBeenLastCalledWith("revert_commit", { repoPath: "/repo", commitId: "abc" });
+    await tauriRepoClient.resetToCommit("/repo", "abc", "hard");
+    expect(invoke).toHaveBeenLastCalledWith("reset_to_commit", { repoPath: "/repo", commitId: "abc", mode: "hard" });
+    await tauriRepoClient.checkoutCommit("/repo", "abc");
+    expect(invoke).toHaveBeenLastCalledWith("checkout_commit", { repoPath: "/repo", commitId: "abc" });
+    await tauriRepoClient.amendCommit("/repo", "msg");
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg" });
+    await tauriRepoClient.getHeadInfo("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_head_info", { repoPath: "/repo" });
+    await tauriRepoClient.forcePushCurrentBranch("/repo", "origin");
+    expect(invoke).toHaveBeenLastCalledWith("force_push_current_branch", { repoPath: "/repo", remoteName: "origin" });
+  });
 });

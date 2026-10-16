@@ -73,9 +73,14 @@ export interface UpstreamInfo {
   behind?: number | null;
 }
 
-export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags";
+export type OperationKind = "Merge" | "CherryPick" | "Revert";
+export interface HeadInfo { headId: string | null; detachedAt: string | null; headPushed: boolean; operation: OperationKind | null; }
+export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
+export type ResetMode = "soft" | "mixed" | "hard";
+
+export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags" | "ForcePushBranch";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease";
 
 export interface TransferProgress {
   operationId: string;
@@ -304,6 +309,14 @@ export interface RepoClient {
   resolveConflict(repoPath: string, path: string, resolvedContent: string): Promise<void>;
   abortMerge(repoPath: string): Promise<void>;
   getMergeMessage(repoPath: string): Promise<string | null>;
+  getHeadInfo(repoPath: string): Promise<HeadInfo>;
+  amendCommit(repoPath: string, message: string): Promise<void>;
+  cherryPick(repoPath: string, commitId: string): Promise<PickOutcome>;
+  revertCommit(repoPath: string, commitId: string): Promise<PickOutcome>;
+  resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
+  checkoutCommit(repoPath: string, commitId: string): Promise<void>;
+  /** Resolves with the transfer operation id; progress arrives via `subscribeTransferProgress`. */
+  forcePushCurrentBranch(repoPath: string, remoteName: string): Promise<string>;
   resolveAddDeleteConflict(repoPath: string, path: string, choice: FileConflictChoice): Promise<void>;
   commitsSince(repoPath: string, onto: string): Promise<RebasePlanCommit[]>;
   startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
