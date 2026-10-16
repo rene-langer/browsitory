@@ -8,6 +8,8 @@ import type {
   ConflictSegment,
   CreatePullRequest,
   DiffHunk,
+  DiffOptions,
+  DiffSettings,
   FileConflictChoice,
   ForgeProvider,
   ForgeRepository,
@@ -91,22 +93,33 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
   setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     loggedInvoke("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
-  getWorkingDiff: (repoPath: string, path: string, staged: boolean) =>
-    loggedInvoke<DiffHunk[]>("get_working_diff", { repoPath, path, staged }),
-  getCommitDiff: (repoPath: string, commitId: string, path: string) =>
-    loggedInvoke<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
+  getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions) =>
+    loggedInvoke<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts }),
+  getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
+    loggedInvoke<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     loggedInvoke<string[]>("get_commit_files", { repoPath, commitId }),
   getCommitMessage: (repoPath: string, commitId: string) =>
     loggedInvoke<string>("get_commit_message", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => loggedInvoke("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => loggedInvoke("unstage_file", { repoPath, path }),
-  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    loggedInvoke("stage_hunk", { repoPath, path, oldStart, newStart }),
-  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    loggedInvoke("unstage_hunk", { repoPath, path, oldStart, newStart }),
-  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    loggedInvoke("discard_hunk", { repoPath, path, oldStart, newStart }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    loggedInvoke("stage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    loggedInvoke("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    loggedInvoke("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardFile: (repoPath: string, path: string) => loggedInvoke("discard_file", { repoPath, path }),
+  discardAllUnstaged: (repoPath: string, paths: string[]) => loggedInvoke("discard_all_unstaged", { repoPath, paths }),
+  ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),
+  getDiffSettings: () => loggedInvoke<DiffSettings>("get_diff_settings"),
+  setDiffSettings: (settings: DiffSettings) => loggedInvoke("set_diff_settings", { settings }),
   commit: (repoPath: string, message: string) => loggedInvoke("commit", { repoPath, message }),
   listBranches: (repoPath: string) => loggedInvoke<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>

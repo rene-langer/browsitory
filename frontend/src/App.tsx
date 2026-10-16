@@ -36,6 +36,9 @@ import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
+import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
+import { useDiffSettingsContext } from "./state/useDiffSettings";
+import type { DiscardRequest } from "./components/DiffPane";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import { useWorkspaces } from "./state/useWorkspaces";
@@ -43,6 +46,9 @@ import styles from "./App.module.css";
 import releaseNotesData from "./generated/releaseNotes.json";
 
 const allReleaseNotes = releaseNotesData as ReleaseNotesEntry[];
+
+// Toast copy for line-level stage/unstage/discard ("Staged 1 line", "Discarded 3 lines").
+const linesToast = (verb: string, n: number) => `${verb} ${n} ${n === 1 ? "line" : "lines"}`;
 
 function RepoWorkspace({
   repoPath,
@@ -82,6 +88,10 @@ function RepoWorkspace({
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
+  const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const diffSettings = useDiffSettingsContext();
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
   const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_BREAKPOINT);
   useEffect(() => {
@@ -301,6 +311,20 @@ function RepoWorkspace({
               panelVisibility.visibility,
               () => setShortcutsOpen(true),
               () => onCloseRepoTab(repoPath),
+              {
+                settings: diffSettings.settings,
+                update: diffSettings.update,
+                currentFile,
+                requestDiscardCurrentFile: () => {
+                  if (currentFile === null) return;
+                  appState.selectRow("uncommitted");
+                  setDiscardRequest({ kind: "file", path: currentFile });
+                },
+                requestDiscardAllUnstaged: () => {
+                  appState.selectRow("uncommitted");
+                  setDiscardRequest({ kind: "all" });
+                },
+              },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -500,6 +524,9 @@ function RepoWorkspace({
                 commits={appState.state.commits}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}
+                discardRequest={discardRequest}
+                onDiscardRequestChange={setDiscardRequest}
+                onCurrentFileChange={setCurrentFile}
                 initialCommitDraft={getCommitDraft(repoPath)}
                 onCommitDraftChange={handleCommitDraftChange}
                 onStageFile={appState.stageFile}
@@ -509,6 +536,12 @@ function RepoWorkspace({
                 onStageHunk={appState.stageHunk}
                 onUnstageHunk={appState.unstageHunk}
                 onDiscardHunk={appState.discardHunk}
+                onStageLines={(p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown)}
+                onUnstageLines={(p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown)}
+                onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
+                onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
+                onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
+                onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
                 onCommit={announce("Committed", appState.commit)}
                 onSaveStash={announce("Changes stashed", appState.saveStash)}
                 onSelectRow={appState.selectRow}
@@ -547,7 +580,15 @@ function RepoWorkspace({
   );
 }
 
-export default function App({
+export default function App(props: { client: RepoClient; updateBanner?: ReactNode }) {
+  return (
+    <DiffSettingsProvider client={props.client}>
+      <AppContent {...props} />
+    </DiffSettingsProvider>
+  );
+}
+
+function AppContent({
   client,
   updateBanner = null,
 }: {

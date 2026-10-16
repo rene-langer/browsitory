@@ -11,6 +11,16 @@ describe("ShortcutSheet", () => {
     expect(screen.getByText("Ctrl/Cmd+Enter")).toBeInTheDocument();
   });
 
+  it("lists the line-selection shortcuts", () => {
+    render(<ShortcutSheet onClose={vi.fn()} />);
+    expect(screen.getByText("Move line cursor")).toBeInTheDocument();
+    expect(screen.getByText("Extend line selection")).toBeInTheDocument();
+    expect(screen.getByText("↑ / ↓")).toBeInTheDocument();
+    expect(screen.getByText("Shift+↑ / Shift+↓")).toBeInTheDocument();
+    expect(screen.getByText(/Stage or unstage the selected lines or hunk/)).toBeInTheDocument();
+    expect(screen.getByText(/Discard the selected lines or hunk/)).toBeInTheDocument();
+  });
+
   it("Close calls onClose", () => {
     const onClose = vi.fn();
     render(<ShortcutSheet onClose={onClose} />);

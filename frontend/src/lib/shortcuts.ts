@@ -41,6 +41,16 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Diff",
+    shortcuts: [
+      { keys: "↑ / ↓", description: "Move line cursor" },
+      { keys: "Shift+↑ / Shift+↓", description: "Extend line selection" },
+      { keys: "s", description: "Stage or unstage the selected lines or hunk" },
+      { keys: "d", description: "Discard the selected lines or hunk (press twice to confirm)" },
+      { keys: "[ / ]", description: "Previous / next hunk" },
+    ],
+  },
+  {
     title: "Commit message",
     shortcuts: [{ keys: "Ctrl/Cmd+Enter", description: "Commit" }],
   },

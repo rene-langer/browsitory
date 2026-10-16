@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { cp, copyFile, mkdir, rm } from "node:fs/promises";
+import { cp, copyFile, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,23 @@ const supportedTargets = new Set([
   "darwin-arm64",
   "win32-x64",
 ]);
+
+// The webview loads the bundle as a classic <script> under a nonce-only CSP: `import.meta` is a
+// SyntaxError there and lazy chunks/wasm would be blocked. frontend/vite.vscode.config.ts inlines
+// everything; this fails the package step if that regresses.
+export async function assertClassicScriptBundle(frontendDist) {
+  const assets = path.join(frontendDist, "assets");
+  const extra = (await readdir(assets)).filter(
+    (name) => (name.endsWith(".js") && name !== "vscode-main.js") || name.endsWith(".wasm"),
+  );
+  if (extra.length > 0) {
+    throw new Error(`webview bundle must be a single script; found extra files: ${extra.join(", ")}`);
+  }
+  const main = await readFile(path.join(assets, "vscode-main.js"), "utf8");
+  if (main.includes("import.meta")) {
+    throw new Error("webview bundle must not contain import.meta (classic script)");
+  }
+}
 
 export async function packageVsix({
   target,
@@ -27,6 +44,7 @@ export async function packageVsix({
     }
   }
 
+  await assertClassicScriptBundle(frontendDist);
   const binDirectory = path.join(extensionRoot, "bin");
   const webviewDirectory = path.join(extensionRoot, "webview");
   const sidecarName = target === "win32-x64" ? "vscode-sidecar.exe" : "vscode-sidecar";

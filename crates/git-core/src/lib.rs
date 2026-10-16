@@ -4,6 +4,7 @@ pub mod commit;
 pub mod diff;
 pub mod forge;
 pub mod graph;
+mod line_patch;
 pub mod merge;
 pub mod pick;
 pub mod rebase;

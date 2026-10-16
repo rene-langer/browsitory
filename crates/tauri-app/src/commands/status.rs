@@ -1,4 +1,7 @@
-use super::{worker_handle, AppState, BlameLineDto, DiffHunkDto, GraphCommitDto, StatusEntryDto};
+use super::{
+    worker_handle, AppState, BlameLineDto, DiffHunkDto, DiffOptionsDto, GraphCommitDto,
+    StatusEntryDto,
+};
 use std::path::Path;
 use tauri::State;
 
@@ -66,10 +69,11 @@ pub async fn get_working_diff(
     repo_path: String,
     path: String,
     staged: bool,
+    opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .get_working_diff(path, staged)?
+        .get_working_diff(path, staged, opts.into())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -80,10 +84,11 @@ pub async fn get_commit_diff(
     repo_path: String,
     commit_id: String,
     path: String,
+    opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .get_commit_diff(commit_id, path)?
+        .get_commit_diff(commit_id, path, opts.into())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -145,9 +150,10 @@ pub async fn stage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start, context_lines)
 }
 
 #[tauri::command]
@@ -156,9 +162,10 @@ pub async fn unstage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start, context_lines)
 }
 
 #[tauri::command]
@@ -167,9 +174,106 @@ pub async fn discard_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start)
+    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start, context_lines)
+}
+
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn stage_lines(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.stage_lines(
+        path,
+        old_start,
+        new_start,
+        context_lines,
+        line_indices,
+        expected_lines,
+    )
+}
+
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn unstage_lines(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.unstage_lines(
+        path,
+        old_start,
+        new_start,
+        context_lines,
+        line_indices,
+        expected_lines,
+    )
+}
+
+// Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn discard_lines(
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.discard_lines(
+        path,
+        old_start,
+        new_start,
+        context_lines,
+        line_indices,
+        expected_lines,
+    )
+}
+
+#[tauri::command]
+pub async fn discard_file(
+    repo_path: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.discard_file(path)
+}
+
+#[tauri::command]
+pub async fn discard_all_unstaged(
+    repo_path: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.discard_all_unstaged(paths)
+}
+
+#[tauri::command]
+pub async fn ignore_path(
+    repo_path: String,
+    pattern: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    worker_handle(&state, &repo_path)?.ignore_path(pattern)
 }
 
 #[tauri::command]

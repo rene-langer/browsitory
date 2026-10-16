@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { DiffHunk, DiffLine, DiffLineOrigin } from "../ipc/RepoClient";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { MAX_CONTEXT_LINES, type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
+import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { Toolbar } from "./primitives/Toolbar";
 import { wordDiff, type Segment } from "../lib/wordDiff";
+import { useHunkTokens } from "../lib/highlight";
+import { languageForPath } from "../lib/languageForPath";
+import { logFailure } from "../lib/logger";
+import { DiffLineContent } from "./DiffLineContent";
 import styles from "./DiffView.module.css";
 
 const DISCARD_DISARM_MS = 5000;
@@ -59,13 +65,9 @@ function computeWordSegments(hunks: DiffHunk[] | null): Map<DiffLine, Segment[]>
   return segments;
 }
 
-/** Renders a line's content as plain text, or word-level highlighted segments when paired. */
-function renderContent(line: DiffLine, wordSegments: Map<DiffLine, Segment[]>): ReactNode {
-  const segments = wordSegments.get(line);
-  if (segments === undefined) return line.content;
-  return segments.map((segment, segmentIndex) =>
-    segment.changed ? <mark key={segmentIndex}>{segment.text}</mark> : <span key={segmentIndex}>{segment.text}</span>,
-  );
+// Highlight failures are never user-facing: log and fall back to plain text.
+function logHighlightError(error: unknown): void {
+  logFailure("Syntax highlighting failed", error);
 }
 
 type SplitRow =
@@ -109,6 +111,12 @@ function buildSplitRows(lines: DiffLine[]): SplitRow[] {
   return rows;
 }
 
+// `expectedLines` is every line's content of the hunk as displayed; the backend refuses the
+// action (and the diff refetches) if the hunk no longer reads exactly like that.
+type LineCallback = (oldStart: number, newStart: number, lineIndices: number[], expectedLines: string[]) => void;
+
+const shownLines = (hunk: DiffHunk) => hunk.lines.map((l) => l.content);
+
 /**
  * `hunks === null` means "not loaded yet" (renders a loading placeholder); `[]` is a real,
  * resolved empty diff (binary file, mode-only change, or no changes).
@@ -116,32 +124,52 @@ function buildSplitRows(lines: DiffLine[]): SplitRow[] {
  * Hunk actions are not tab stops: the diff container is one tab stop and handles `[`/`]`
  * (previous/next hunk), `s` (stage or unstage the active hunk) and `d` (discard; press twice).
  * The per-hunk buttons stay clickable but are removed from the tab order.
+ *
+ * With line callbacks, Add/Remove lines are selectable (click, shift-click, ctrl/cmd-click, drag,
+ * ArrowUp/ArrowDown with optional Shift) within one hunk; `s`/`d` and the hunk header buttons
+ * then act on the selected lines instead of the whole hunk.
  */
 export function DiffView({
   hunks,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
+  partialActionsDisabled = false,
+  path,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
   onUnstageHunk?: (oldStart: number, newStart: number) => void;
   onDiscardHunk?: (oldStart: number, newStart: number) => void;
+  onStageLines?: LineCallback;
+  onUnstageLines?: LineCallback;
+  onDiscardLines?: LineCallback;
+  partialActionsDisabled?: boolean;
+  path?: string;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [split, setSplit] = useState(false);
+  const [selection, setSelection] = useState<LineSelection>(EMPTY_SELECTION);
+  const dragging = useRef<{ hunkIndex: number; line: number } | null>(null);
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
+  const { settings, update } = useDiffSettingsContext();
+  const tokens = useHunkTokens(hunks, path ? languageForPath(path) : null, settings.syntaxHighlight, logHighlightError);
 
   // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
   // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
-  // `TagPanel` does) rather than an effect, which would cost a second render per refetch.
+  // `TagPanel` does) rather than an effect, which would cost a second render per refetch. The
+  // line selection is indexed the same way, so it resets too.
   if (previousHunks !== hunks) {
     setPreviousHunks(hunks);
     setConfirmingDiscardIndex(null);
     setActiveIndex(0);
+    setSelection(EMPTY_SELECTION);
   }
 
   // The armed state must not linger: it disarms after a short timeout (also on blur / Escape).
@@ -151,6 +179,56 @@ export function DiffView({
     return () => clearTimeout(timer);
   }, [confirmingDiscardIndex]);
 
+  // A drag ends wherever the button is released, even outside the diff.
+  useEffect(() => {
+    const endDrag = () => {
+      dragging.current = null;
+    };
+    window.addEventListener("mouseup", endDrag);
+    return () => window.removeEventListener("mouseup", endDrag);
+  }, []);
+
+  const toolbar = (
+    <Toolbar aria-label="Diff view options">
+      <button type="button" onClick={() => setSplit((prev) => !prev)}>
+        {split ? "Unified view" : "Split view"}
+      </button>
+      <button
+        type="button"
+        aria-pressed={settings.ignoreWhitespace}
+        onClick={() => update({ ignoreWhitespace: !settings.ignoreWhitespace })}
+      >
+        Ignore whitespace
+      </button>
+      <span className={styles.contextStepper}>
+        <button
+          type="button"
+          aria-label="Fewer context lines"
+          disabled={settings.contextLines <= 0}
+          onClick={() => update({ contextLines: settings.contextLines - 1 })}
+        >
+          −
+        </button>
+        <span aria-label="Context lines">{settings.contextLines}</span>
+        <button
+          type="button"
+          aria-label="More context lines"
+          disabled={settings.contextLines >= MAX_CONTEXT_LINES}
+          onClick={() => update({ contextLines: settings.contextLines + 1 })}
+        >
+          +
+        </button>
+      </span>
+      <button
+        type="button"
+        aria-pressed={settings.syntaxHighlight}
+        onClick={() => update({ syntaxHighlight: !settings.syntaxHighlight })}
+      >
+        Syntax highlighting
+      </button>
+    </Toolbar>
+  );
+
   if (hunks === null) {
     return (
       <p role="status" className={styles.placeholder}>
@@ -159,12 +237,40 @@ export function DiffView({
     );
   }
 
+  const hint = partialActionsDisabled ? (
+    <p className={styles.hint}>Turn off Ignore whitespace to stage partially.</p>
+  ) : null;
+
+  // The toolbar stays even for an empty diff: ignoring whitespace can hide every hunk, and the
+  // toggle must remain reachable to turn it back off.
   if (hunks.length === 0) {
-    return <p className={styles.placeholder}>No text differences (binary file or mode-only change)</p>;
+    return (
+      <>
+        {toolbar}
+        {hint}
+        <p className={styles.placeholder}>No text differences (binary file or mode-only change)</p>
+      </>
+    );
   }
 
-  const hasActions = onStageHunk !== undefined || onUnstageHunk !== undefined || onDiscardHunk !== undefined;
+  const lineActions =
+    !partialActionsDisabled &&
+    (onStageLines !== undefined || onUnstageLines !== undefined || onDiscardLines !== undefined);
+  const hasActions =
+    !partialActionsDisabled &&
+    (onStageHunk !== undefined || onUnstageHunk !== undefined || onDiscardHunk !== undefined || lineActions);
   const active = Math.min(activeIndex, hunks.length - 1);
+  const selectedCount = selection.selected.size;
+
+  // Any selection change disarms a pending discard, so "Confirm discard" can never switch from
+  // the hunk (or lines) it was armed for to a different target.
+  const apply = (action: SelectionAction) => {
+    setSelection((prev) => reduceSelection(prev, action, hunks));
+    setConfirmingDiscardIndex(null);
+  };
+
+  const selectedIn = (hunkIndex: number) =>
+    selection.hunkIndex === hunkIndex ? [...selection.selected].sort((a, b) => a - b) : [];
 
   const moveTo = (index: number) => {
     setActiveIndex(index);
@@ -172,20 +278,76 @@ export function DiffView({
     hunkRefs.current[index]?.scrollIntoView?.({ block: "nearest" });
   };
 
+  // Handlers only go on Add/Remove rows, so `shiftClick`/`dragTo` always target a selectable line
+  // and the reducer's cursor never lands on a Context line.
+  const lineProps = (hunkIndex: number, lineIndex: number) => {
+    const base = { "data-hunk-index": hunkIndex, "data-line-index": lineIndex };
+    if (!lineActions) return base;
+    return {
+      ...base,
+      "aria-selected": selection.hunkIndex === hunkIndex && selection.selected.has(lineIndex),
+      onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
+        if (event.button !== 0) return;
+        dragging.current = { hunkIndex, line: lineIndex };
+        // A drag ending on another row fires `click` on a common ancestor, not this row, so the
+        // hunk must become active here for `s`/`d` to target the dragged lines.
+        setActiveIndex(hunkIndex);
+        // Anchor a plain-click drag right away; the following `click` re-applies it harmlessly.
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) apply({ type: "click", hunkIndex, line: lineIndex });
+      },
+      onMouseEnter: () => {
+        if (dragging.current?.hunkIndex === hunkIndex) apply({ type: "dragTo", hunkIndex, line: lineIndex });
+      },
+      onClick: (event: MouseEvent<HTMLDivElement>) => {
+        setActiveIndex(hunkIndex);
+        apply(
+          event.shiftKey
+            ? { type: "shiftClick", hunkIndex, line: lineIndex }
+            : event.ctrlKey || event.metaKey
+              ? { type: "toggle", hunkIndex, line: lineIndex }
+              : { type: "click", hunkIndex, line: lineIndex },
+        );
+      },
+    };
+  };
+
+  const lineClass = (hunkIndex: number, lineIndex: number) => {
+    if (!lineActions || selection.hunkIndex !== hunkIndex) return "";
+    return `${selection.selected.has(lineIndex) ? ` ${styles.lineSelected}` : ""}${selection.cursor === lineIndex ? ` ${styles.lineCursor}` : ""}`;
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || event.ctrlKey || event.metaKey || event.altKey) return;
     const hunk = hunks[active];
+    const lines = selectedIn(active);
+    // With lines selected, `s`/`d` act on those lines only. A missing line callback means "no
+    // such action here", never "fall back to the whole hunk" — that hunk was not what the user
+    // picked (and for discard, it may not even be this section's diff side).
+    const byLines = lines.length > 0;
+    const stageLines = onStageLines ?? onUnstageLines;
+    const discard = byLines
+      ? onDiscardLines && (() => onDiscardLines(hunk.oldStart, hunk.newStart, lines, shownLines(hunk)))
+      : onDiscardHunk && (() => onDiscardHunk(hunk.oldStart, hunk.newStart));
     let handled = true;
     if (event.key === "]") {
       moveTo(Math.min(active + 1, hunks.length - 1));
+      apply({ type: "clear" });
     } else if (event.key === "[") {
       moveTo(Math.max(active - 1, 0));
+      apply({ type: "clear" });
+    } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && lineActions) {
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      if (selection.hunkIndex !== active) apply({ type: "focusHunk", hunkIndex: active });
+      apply(event.shiftKey ? { type: "extend", delta } : { type: "moveCursor", delta });
+    } else if (event.key === "s" && byLines) {
+      if (stageLines !== undefined) stageLines(hunk.oldStart, hunk.newStart, lines, shownLines(hunk));
+      else handled = false;
     } else if (event.key === "s") {
       if (onStageHunk !== undefined) onStageHunk(hunk.oldStart, hunk.newStart);
       else if (onUnstageHunk !== undefined) onUnstageHunk(hunk.oldStart, hunk.newStart);
-    } else if (event.key === "d" && onDiscardHunk !== undefined) {
+    } else if (event.key === "d" && discard !== undefined) {
       if (confirmingDiscardIndex === active) {
-        onDiscardHunk(hunk.oldStart, hunk.newStart);
+        discard();
         setConfirmingDiscardIndex(null);
       } else {
         setConfirmingDiscardIndex(active);
@@ -196,7 +358,7 @@ export function DiffView({
       handled = false;
     }
     if (handled) {
-      // The enclosing file list owns j/k/s for file navigation; hunk keys must not leak to it.
+      // The enclosing file list owns j/k/s/arrows for file navigation; hunk keys must not leak to it.
       event.preventDefault();
       event.stopPropagation();
     }
@@ -204,11 +366,8 @@ export function DiffView({
 
   return (
     <>
-      <Toolbar aria-label="Diff view options">
-        <button type="button" onClick={() => setSplit((prev) => !prev)}>
-          {split ? "Unified view" : "Split view"}
-        </button>
-      </Toolbar>
+      {toolbar}
+      {hint}
       <div
         className={styles.diff}
         {...(hasActions
@@ -216,16 +375,37 @@ export function DiffView({
               tabIndex: 0,
               role: "group",
               "aria-label": "Diff hunks",
-              "aria-keyshortcuts": "[ ] s d",
+              "aria-keyshortcuts": "[ ] s d ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown",
               onKeyDown: handleKeyDown,
             }
           : {})}
       >
+        {lineActions && (
+          <span role="status" aria-live="polite" className={styles.srOnly}>
+            {selectedCount > 0 ? `${selectedCount} ${selectedCount === 1 ? "line" : "lines"} selected` : ""}
+          </span>
+        )}
         {hunks.map((hunk, hunkIndex) => {
           let oldLine = hunk.oldStart;
           let newLine = hunk.newStart;
           const armed = confirmingDiscardIndex === hunkIndex;
           const splitRows = split ? buildSplitRows(hunk.lines) : null;
+          const indexOf = split ? new Map(hunk.lines.map((l, i) => [l, i])) : null;
+          const lines = selectedIn(hunkIndex);
+          const byLines = lines.length > 0;
+          const n = lines.length;
+          const { oldStart, newStart } = hunk;
+          const stage = byLines
+            ? onStageLines && { label: `Stage lines (${n})`, run: () => onStageLines(oldStart, newStart, lines, shownLines(hunk)) }
+            : onStageHunk && { label: "Stage hunk", run: () => onStageHunk(oldStart, newStart) };
+          const unstage = byLines
+            ? onUnstageLines && { label: `Unstage lines (${n})`, run: () => onUnstageLines(oldStart, newStart, lines, shownLines(hunk)) }
+            : onUnstageHunk && { label: "Unstage hunk", run: () => onUnstageHunk(oldStart, newStart) };
+          const discard = byLines
+            ? onDiscardLines && { label: `Discard lines (${n})`, run: () => onDiscardLines(oldStart, newStart, lines, shownLines(hunk)) }
+            : onDiscardHunk && { label: "Discard hunk", run: () => onDiscardHunk(oldStart, newStart) };
+          // Split-view cells: the line's index in `hunk.lines` (the selection's coordinate space).
+          const cell = (line: DiffLine) => indexOf!.get(line)!;
           return (
             <div
               key={hunkIndex}
@@ -240,21 +420,25 @@ export function DiffView({
                 </span>
                 {hasActions && (
                   <Toolbar>
-                    {onStageHunk !== undefined && (
-                      <button tabIndex={-1} onClick={() => onStageHunk(hunk.oldStart, hunk.newStart)}>
-                        Stage hunk
+                    {stage && (
+                      <button tabIndex={-1} onClick={stage.run}>
+                        {stage.label}
                       </button>
                     )}
-                    {onUnstageHunk !== undefined && (
-                      <button tabIndex={-1} onClick={() => onUnstageHunk(hunk.oldStart, hunk.newStart)}>
-                        Unstage hunk
+                    {unstage && (
+                      <button tabIndex={-1} onClick={unstage.run}>
+                        {unstage.label}
                       </button>
                     )}
-                    {onDiscardHunk !== undefined && (
+                    {discard && (
                       <button
                         tabIndex={-1}
                         className={armed ? styles.armedDiscard : undefined}
-                        title={armed ? "Permanently discards this hunk. Cannot be undone." : undefined}
+                        title={
+                          armed
+                            ? `Permanently discards ${byLines ? "the selected lines" : "this hunk"}. Cannot be undone.`
+                            : undefined
+                        }
                         onBlur={() => setConfirmingDiscardIndex(null)}
                         onKeyDown={(event) => {
                           if (event.key === "Escape" && armed) {
@@ -264,14 +448,14 @@ export function DiffView({
                         }}
                         onClick={() => {
                           if (armed) {
-                            onDiscardHunk(hunk.oldStart, hunk.newStart);
+                            discard.run();
                             setConfirmingDiscardIndex(null);
                           } else {
                             setConfirmingDiscardIndex(hunkIndex);
                           }
                         }}
                       >
-                        {armed ? "Confirm discard" : "Discard hunk"}
+                        {armed ? "Confirm discard" : discard.label}
                       </button>
                     )}
                   </Toolbar>
@@ -297,18 +481,21 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Context")}
                           </span>
-                          <span className={styles.content}>{row.line.content}</span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                         </div>
                       );
                     }
                     if (row.kind === "pair") {
                       const oldNo = oldLine++;
                       const newNo = newLine++;
+                      const oldIndex = cell(row.oldLine);
+                      const newIndex = cell(row.newLine);
                       return (
                         <div key={rowIndex} className={styles.splitRow}>
                           <div
                             data-diff-column="old"
-                            className={`${styles.splitColumn} ${styles.line} ${styles.lineRemove} diff-line diff-line-remove`}
+                            {...lineProps(hunkIndex, oldIndex)}
+                            className={`${styles.splitColumn} ${styles.line} ${styles.lineRemove} diff-line diff-line-remove${lineClass(hunkIndex, oldIndex)}`}
                           >
                             <span className={styles.gutter} aria-hidden="true">
                               {oldNo}
@@ -316,11 +503,12 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.oldLine, wordSegments)}</span>
+                            <span className={styles.content}><DiffLineContent line={row.oldLine} tokens={tokens?.get(row.oldLine)} segments={wordSegments.get(row.oldLine)} /></span>
                           </div>
                           <div
                             data-diff-column="new"
-                            className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add`}
+                            {...lineProps(hunkIndex, newIndex)}
+                            className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add${lineClass(hunkIndex, newIndex)}`}
                           >
                             <span className={styles.gutter} aria-hidden="true">
                               {newNo}
@@ -328,18 +516,20 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Add")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.newLine, wordSegments)}</span>
+                            <span className={styles.content}><DiffLineContent line={row.newLine} tokens={tokens?.get(row.newLine)} segments={wordSegments.get(row.newLine)} /></span>
                           </div>
                         </div>
                       );
                     }
                     if (row.kind === "old-only") {
                       const oldNo = oldLine++;
+                      const index = cell(row.line);
                       return (
                         <div key={rowIndex} className={styles.splitRow}>
                           <div
                             data-diff-column="old"
-                            className={`${styles.splitColumn} ${styles.line} ${styles.lineRemove} diff-line diff-line-remove`}
+                            {...lineProps(hunkIndex, index)}
+                            className={`${styles.splitColumn} ${styles.line} ${styles.lineRemove} diff-line diff-line-remove${lineClass(hunkIndex, index)}`}
                           >
                             <span className={styles.gutter} aria-hidden="true">
                               {oldNo}
@@ -347,19 +537,21 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}>{row.line.content}</span>
+                            <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                           </div>
                           <div className={styles.splitColumn} aria-hidden="true" />
                         </div>
                       );
                     }
                     const newNo = newLine++;
+                    const index = cell(row.line);
                     return (
                       <div key={rowIndex} className={styles.splitRow}>
                         <div className={styles.splitColumn} aria-hidden="true" />
                         <div
                           data-diff-column="new"
-                          className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add`}
+                          {...lineProps(hunkIndex, index)}
+                          className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add${lineClass(hunkIndex, index)}`}
                         >
                           <span className={styles.gutter} aria-hidden="true">
                             {newNo}
@@ -367,7 +559,7 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Add")}
                           </span>
-                          <span className={styles.content}>{row.line.content}</span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                         </div>
                       </div>
                     );
@@ -378,10 +570,12 @@ export function DiffView({
                   {hunk.lines.map((line, lineIndex) => {
                     const oldNo = line.origin !== "Add" ? oldLine++ : null;
                     const newNo = line.origin !== "Remove" ? newLine++ : null;
+                    const selectable = line.origin !== "Context";
                     return (
                       <div
                         key={lineIndex}
-                        className={`${styles.line} ${styles[`line${line.origin}`]} diff-line diff-line-${line.origin.toLowerCase()}`}
+                        {...(selectable ? lineProps(hunkIndex, lineIndex) : {})}
+                        className={`${styles.line} ${styles[`line${line.origin}`]} diff-line diff-line-${line.origin.toLowerCase()}${selectable ? lineClass(hunkIndex, lineIndex) : ""}`}
                       >
                         <span className={styles.gutter} aria-hidden="true">
                           {oldNo ?? ""}
@@ -392,7 +586,7 @@ export function DiffView({
                         <span className={styles.marker} aria-hidden="true">
                           {originPrefix(line.origin)}
                         </span>
-                        <span className={styles.content}>{renderContent(line, wordSegments)}</span>
+                        <span className={styles.content}><DiffLineContent line={line} tokens={tokens?.get(line)} segments={wordSegments.get(line)} /></span>
                       </div>
                     );
                   })}

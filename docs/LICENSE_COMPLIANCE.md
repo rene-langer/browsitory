@@ -58,6 +58,7 @@ their own verification date in the Notes column.
 | @tauri-apps/plugin-process | MIT OR Apache-2.0 | frontend half of `tauri-plugin-process`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-process license`, verified 2026-08-26. |
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 | @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
+| shiki 4.5.0 | MIT | `frontend` — syntax highlighting in diffs, using its JavaScript regex engine (no WebAssembly, so no CSP change) and CSS-variables theme. Languages load on demand. Source: [npm](https://www.npmjs.com/package/shiki/v/4.5.0); verified with `npm info shiki@4.5.0 license` on 2026-10-16. |
 
 ## JavaScript, `extension/` (`npm info <package> license`)
 

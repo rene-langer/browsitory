@@ -310,3 +310,41 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("force_push_current_branch", { repoPath: "/repo", remoteName: "origin" });
   });
 });
+
+describe("tauriRepoClient diff pane commands", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+  });
+
+  it("invokes the diff-pane commands with camelCase args", async () => {
+    const opts = { ignoreWhitespace: true, contextLines: 5 };
+    await tauriRepoClient.getWorkingDiff("/repo", "f.txt", false, opts);
+    expect(invoke).toHaveBeenLastCalledWith("get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts });
+    await tauriRepoClient.getCommitDiff("/repo", "abc", "f.txt", opts);
+    expect(invoke).toHaveBeenLastCalledWith("get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts });
+    await tauriRepoClient.stageHunk("/repo", "f.txt", 1, 2, 5);
+    expect(invoke).toHaveBeenLastCalledWith("stage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 });
+    await tauriRepoClient.unstageHunk("/repo", "f.txt", 1, 2, 5);
+    expect(invoke).toHaveBeenLastCalledWith("unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 });
+    await tauriRepoClient.discardHunk("/repo", "f.txt", 1, 2, 5);
+    expect(invoke).toHaveBeenLastCalledWith("discard_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 });
+    await tauriRepoClient.stageLines("/repo", "f.txt", 1, 2, 5, [3, 4], ["a\n", "+b\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3, 4], expectedLines: ["a\n", "+b\n"] });
+    await tauriRepoClient.unstageLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] });
+    await tauriRepoClient.discardLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    expect(invoke).toHaveBeenLastCalledWith("discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] });
+    await tauriRepoClient.discardFile("/repo", "f.txt");
+    expect(invoke).toHaveBeenLastCalledWith("discard_file", { repoPath: "/repo", path: "f.txt" });
+    await tauriRepoClient.discardAllUnstaged("/repo", ["a.txt", "nested/"]);
+    expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt", "nested/"] });
+    await tauriRepoClient.ignorePath("/repo", "*.log");
+    expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
+    await tauriRepoClient.getDiffSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_diff_settings", undefined);
+    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+    await tauriRepoClient.setDiffSettings(settings);
+    expect(invoke).toHaveBeenLastCalledWith("set_diff_settings", { settings });
+  });
+});

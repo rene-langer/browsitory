@@ -25,20 +25,24 @@ pub(super) fn get_working_diff(
     repo: &git2::Repository,
     path: String,
     staged: bool,
+    opts: git_core::diff::DiffOptions,
     reply: Sender<Result<Vec<DiffHunk>, String>>,
 ) {
-    let _ = reply
-        .send(git_core::diff::working_diff(repo, &path, staged).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::diff::working_diff(repo, &path, staged, &opts).map_err(|error| error.to_string()),
+    );
 }
 
 pub(super) fn get_commit_diff(
     repo: &git2::Repository,
     commit_id: String,
     path: String,
+    opts: git_core::diff::DiffOptions,
     reply: Sender<Result<Vec<DiffHunk>, String>>,
 ) {
     let _ = reply.send(
-        git_core::diff::commit_diff(repo, &commit_id, &path).map_err(|error| error.to_string()),
+        git_core::diff::commit_diff(repo, &commit_id, &path, &opts)
+            .map_err(|error| error.to_string()),
     );
 }
 
@@ -89,10 +93,11 @@ pub(super) fn stage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::stage_hunk(repo, &path, old_start, new_start)
+        git_core::stage::stage_hunk(repo, &path, old_start, new_start, context_lines)
             .map_err(|error| error.to_string()),
     );
 }
@@ -102,10 +107,11 @@ pub(super) fn unstage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::unstage_hunk(repo, &path, old_start, new_start)
+        git_core::stage::unstage_hunk(repo, &path, old_start, new_start, context_lines)
             .map_err(|error| error.to_string()),
     );
 }
@@ -115,12 +121,119 @@ pub(super) fn discard_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::discard_hunk(repo, &path, old_start, new_start)
+        git_core::stage::discard_hunk(repo, &path, old_start, new_start, context_lines)
             .map_err(|error| error.to_string()),
     );
+}
+
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn stage_lines(
+    repo: &git2::Repository,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::stage::stage_lines(
+            repo,
+            &path,
+            old_start,
+            new_start,
+            context_lines,
+            &line_indices,
+            &expected_lines,
+        )
+        .map_err(|error| error.to_string()),
+    );
+}
+
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn unstage_lines(
+    repo: &git2::Repository,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::stage::unstage_lines(
+            repo,
+            &path,
+            old_start,
+            new_start,
+            context_lines,
+            &line_indices,
+            &expected_lines,
+        )
+        .map_err(|error| error.to_string()),
+    );
+}
+
+// Mirrors its `Command` variant field for field.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn discard_lines(
+    repo: &git2::Repository,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    expected_lines: Vec<String>,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::stage::discard_lines(
+            repo,
+            &path,
+            old_start,
+            new_start,
+            context_lines,
+            &line_indices,
+            &expected_lines,
+        )
+        .map_err(|error| error.to_string()),
+    );
+}
+
+pub(super) fn discard_file(
+    repo: &git2::Repository,
+    path: String,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ =
+        reply.send(git_core::stage::discard_file(repo, &path).map_err(|error| error.to_string()));
+}
+
+pub(super) fn discard_all_unstaged(
+    repo: &git2::Repository,
+    paths: Vec<String>,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::stage::discard_all_unstaged(repo, &paths).map_err(|error| error.to_string()),
+    );
+}
+
+pub(super) fn ignore_path(
+    repo: &git2::Repository,
+    pattern: String,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ =
+        reply.send(git_core::stage::ignore_path(repo, &pattern).map_err(|error| error.to_string()));
 }
 
 pub(super) fn commit(
@@ -158,12 +271,18 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn get_working_diff(&self, path: String, staged: bool) -> Result<Vec<DiffHunk>, String> {
+    pub fn get_working_diff(
+        &self,
+        path: String,
+        staged: bool,
+        opts: git_core::diff::DiffOptions,
+    ) -> Result<Vec<DiffHunk>, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::GetWorkingDiff {
                 path,
                 staged,
+                opts,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -175,12 +294,14 @@ impl WorkerHandle {
         &self,
         commit_id: String,
         path: String,
+        opts: git_core::diff::DiffOptions,
     ) -> Result<Vec<DiffHunk>, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::GetCommitDiff {
                 commit_id,
                 path,
+                opts,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -243,13 +364,20 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn stage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+    pub fn stage_hunk(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+    ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::StageHunk {
                 path,
                 old_start,
                 new_start,
+                context_lines,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -257,13 +385,20 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn unstage_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+    pub fn unstage_hunk(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+    ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::UnstageHunk {
                 path,
                 old_start,
                 new_start,
+                context_lines,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -271,15 +406,125 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn discard_hunk(&self, path: String, old_start: u32, new_start: u32) -> Result<(), String> {
+    pub fn discard_hunk(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+    ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::DiscardHunk {
                 path,
                 old_start,
                 new_start,
+                context_lines,
                 reply: tx,
             })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn stage_lines(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
+    ) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::StageLines {
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn unstage_lines(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
+    ) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::UnstageLines {
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn discard_lines(
+        &self,
+        path: String,
+        old_start: u32,
+        new_start: u32,
+        context_lines: u32,
+        line_indices: Vec<u32>,
+        expected_lines: Vec<String>,
+    ) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::DiscardLines {
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn discard_file(&self, path: String) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::DiscardFile { path, reply: tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    /// Discards exactly `paths` (the list the user confirmed), never a fresh status read.
+    pub fn discard_all_unstaged(&self, paths: Vec<String>) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::DiscardAllUnstaged { paths, reply: tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn ignore_path(&self, pattern: String) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::IgnorePath { pattern, reply: tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
