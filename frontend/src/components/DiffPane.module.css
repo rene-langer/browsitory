@@ -105,3 +105,9 @@
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
 }
+
+.renamedFrom {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
