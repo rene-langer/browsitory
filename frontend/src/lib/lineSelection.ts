@@ -106,9 +106,16 @@ export function reduceSelection(
     }
 
     case "moveCursor": {
+      // Like a click on the new cursor line: a visible cursor must never leave the selection
+      // empty, or `s` / `d d` would act on the whole hunk instead of the line the user sees.
       if (state.hunkIndex === null) return state;
       const cursor = step(hunks, state.hunkIndex, state.cursor, action.delta);
-      return { hunkIndex: state.hunkIndex, anchor: cursor, cursor, selected: new Set() };
+      return {
+        hunkIndex: state.hunkIndex,
+        anchor: cursor,
+        cursor,
+        selected: cursor === null ? new Set() : new Set([cursor]),
+      };
     }
 
     case "extend": {

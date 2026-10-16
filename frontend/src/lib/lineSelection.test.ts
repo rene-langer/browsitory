@@ -46,17 +46,35 @@ describe("reduceSelection", () => {
   it("keyboard cursor skips context lines and extend grows the selection", () => {
     let s = run([{ type: "focusHunk", hunkIndex: 0 }, { type: "moveCursor", delta: 1 }]);
     expect(s.cursor).toBe(1);
+    expect(sel(s)).toEqual([1]);
     s = run([{ type: "extend", delta: 1 }, { type: "extend", delta: 1 }], s);
     expect(sel(s)).toEqual([1, 2, 4]);
     expect(s.cursor).toBe(4);
   });
 
-  it("moveCursor clears the selection and stops at the ends", () => {
+  // A visible cursor with nothing selected would make s / d d act on the whole hunk, so the
+  // cursor line is always the selection, exactly like a click.
+  it("moveCursor selects exactly the cursor line and stops at the ends", () => {
     let s = run([{ type: "click", hunkIndex: 0, line: 4 }, { type: "moveCursor", delta: 1 }]);
     expect(s.cursor).toBe(4);
-    expect(sel(s)).toEqual([]);
+    expect(sel(s)).toEqual([4]);
     s = run([{ type: "moveCursor", delta: -1 }, { type: "moveCursor", delta: -1 }, { type: "moveCursor", delta: -1 }], s);
     expect(s.cursor).toBe(1);
+    expect(s.anchor).toBe(1);
+    expect(sel(s)).toEqual([1]);
+  });
+
+  it("moveCursor collapses a range to the cursor line, and extend grows from there", () => {
+    let s = run([
+      { type: "click", hunkIndex: 0, line: 1 },
+      { type: "shiftClick", hunkIndex: 0, line: 4 },
+      { type: "moveCursor", delta: -1 },
+    ]);
+    expect(s.cursor).toBe(2);
+    expect(sel(s)).toEqual([2]);
+    s = run([{ type: "extend", delta: 1 }], s);
+    expect(sel(s)).toEqual([2, 4]);
+    expect(s.anchor).toBe(2);
   });
 
   it("never selects an EOF marker", () => {

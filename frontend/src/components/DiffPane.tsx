@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type {
   BlameLine,
   DiffHunk,
+  DiffOptions,
   FileConflictChoice,
   GraphCommit,
   HeadInfo,
@@ -135,6 +136,10 @@ function UncommittedFileSection({
   const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
+  // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
+  // settings: after a settings change the shown hunks are still the old ones until the refetch
+  // lands, and their (oldStart, newStart) only mean something under the options they came from.
+  const [fetchedOptions, setFetchedOptions] = useState<DiffOptions | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
@@ -169,11 +174,13 @@ function UncommittedFileSection({
   const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
+    const requested = diffOptions;
     client
-      .getWorkingDiff(repoPath, entry.path, entry.staged, diffOptions)
+      .getWorkingDiff(repoPath, entry.path, entry.staged, requested)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
+          setFetchedOptions(requested);
           setError(null);
         }
       })
@@ -226,6 +233,15 @@ function UncommittedFileSection({
   }, [repoPath, client, entry.path, mode, status]);
 
   const Icon = STATUS_ICONS[entry.kind];
+  // While a settings change is refetching, the shown hunks belong to the old options: offer no
+  // hunk or line action until the matching hunks arrive.
+  const optionsCurrent =
+    fetchedOptions !== null &&
+    fetchedOptions.ignoreWhitespace === settings.ignoreWhitespace &&
+    fetchedOptions.contextLines === settings.contextLines;
+  const fetchedContext = fetchedOptions?.contextLines ?? settings.contextLines;
+  const unstagedActions = optionsCurrent && !entry.staged;
+  const stagedActions = optionsCurrent && entry.staged;
 
   return (
     <ListRow
@@ -341,13 +357,13 @@ function UncommittedFileSection({
             <DiffView
               hunks={hunks}
               path={entry.path}
-              onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
-              onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
-              onDiscardHunk={!entry.staged ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
-              onStageLines={!entry.staged ? (o, n, idx, shown) => onStageLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
-              onUnstageLines={entry.staged ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
-              onDiscardLines={!entry.staged ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, settings.contextLines, idx, shown) : undefined}
-              partialActionsDisabled={settings.ignoreWhitespace}
+              onStageHunk={unstagedActions ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onUnstageHunk={stagedActions ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onDiscardHunk={unstagedActions ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onStageLines={unstagedActions ? (o, n, idx, shown) => onStageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              onUnstageLines={stagedActions ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
             />
           )}
         </div>

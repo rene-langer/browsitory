@@ -433,6 +433,33 @@ describe("DiffView line selection", () => {
     expect(onStageLines).toHaveBeenCalledWith(1, 1, [1, 2], shown);
   });
 
+  it("arrow cursor then d twice discards only the cursor line, never the hunk", () => {
+    const onDiscardHunk = vi.fn();
+    const onDiscardLines = vi.fn();
+    render(
+      <DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onDiscardHunk={onDiscardHunk} onDiscardLines={onDiscardLines} />,
+    );
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    expect(screen.getByText("1 line selected")).toBeInTheDocument();
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    expect(onDiscardHunk).not.toHaveBeenCalled();
+    expect(onDiscardLines).toHaveBeenCalledWith(1, 1, [2], shown);
+  });
+
+  it("arrow cursor then s stages only the cursor line", () => {
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    render(<DiffView hunks={[lineHunk]} onStageHunk={onStageHunk} onStageLines={onStageLines} />);
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    fireEvent.keyDown(group, { key: "s" });
+    expect(onStageHunk).not.toHaveBeenCalled();
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [1], shown);
+  });
+
   it("d twice discards the selected lines", () => {
     const onDiscardLines = vi.fn();
     const { container } = render(

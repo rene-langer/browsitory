@@ -1331,3 +1331,130 @@ describe("DiffPane line staging", () => {
     expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
   });
 });
+
+describe("DiffPane diff options contract", () => {
+  const lineHunk: DiffHunk = {
+    oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
+    lines: [
+      { origin: "Context", content: "a\n" },
+      { origin: "Remove", content: "b\n" },
+      { origin: "Add", content: "B\n" },
+      { origin: "Context", content: "c\n" },
+      { origin: "Add", content: "d\n" },
+    ],
+  };
+  const shown = lineHunk.lines.map((l) => l.content);
+  const status: StatusEntry[] = [{ path: "f.txt", staged: false, kind: "Modified" }];
+
+  function pane(
+    client: RepoClient,
+    settings: { ignoreWhitespace: boolean; contextLines: number },
+    handlers: Partial<React.ComponentProps<typeof DiffPane>>,
+  ) {
+    return (
+      <DiffSettingsContext.Provider
+        value={{ settings: { ...settings, syntaxHighlight: false }, update: () => {}, error: null, dismissError: () => {} }}
+      >
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+          {...handlers}
+        />
+      </DiffSettingsContext.Provider>
+    );
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it("fetches with non-default options and forwards their context lines to hunk and line actions", async () => {
+    const getWorkingDiff = vi.fn(async () => [lineHunk]);
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const { container } = render(
+      pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk, onStageLines }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 7, [2], shown));
+  });
+
+  it("offers no hunk or line action while a context-lines change is refetching, then uses the new value", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const onStageHunk = vi.fn();
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender, container } = render(pane(client, { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk }));
+    await screen.findByRole("button", { name: "Stage hunk" });
+
+    rerender(pane(client, { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk }));
+
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard hunk" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Diff hunks" })).toBeNull();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    expect(screen.queryByRole("button", { name: /^(Stage|Unstage|Discard) lines/ })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+    expect(onStageHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps partial actions off until hunks fetched without ignore-whitespace arrive", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender } = render(pane(client, { ignoreWhitespace: true, contextLines: 3 }, {}));
+    expect(await screen.findByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+
+    rerender(pane(client, { ignoreWhitespace: false, contextLines: 3 }, {}));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    expect(await screen.findByRole("button", { name: "Stage hunk" })).toBeInTheDocument();
+    expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
+  });
+
+  it("hides partial actions as soon as ignore-whitespace is turned on, before the refetch lands", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender } = render(pane(client, { ignoreWhitespace: false, contextLines: 3 }, {}));
+    await screen.findByRole("button", { name: "Stage hunk" });
+
+    rerender(pane(client, { ignoreWhitespace: true, contextLines: 3 }, {}));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    expect(await screen.findByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+  });
+});
