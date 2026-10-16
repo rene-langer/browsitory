@@ -305,3 +305,80 @@ fn aborting_after_resolving_and_staging_a_cherry_pick_still_works() {
         "ours\n"
     );
 }
+
+#[test]
+fn abort_treats_conflicted_paths_literally_not_as_globs() {
+    let (dir, repo, _) = repo_with_feature_branch();
+    common::write_file(dir.path(), "[ab].txt", "base\n");
+    common::write_file(dir.path(), "a.txt", "orig\n");
+    common::commit_all(&repo, "add bracket and a");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature3", &base, false).unwrap();
+    repo.set_head("refs/heads/feature3").unwrap();
+    common::write_file(dir.path(), "[ab].txt", "theirs\n");
+    common::commit_all(&repo, "theirs bracket");
+    let theirs = repo.head().unwrap().target().unwrap().to_string();
+    repo.set_head(base_branch_ref(&repo).as_str()).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    common::write_file(dir.path(), "[ab].txt", "ours\n");
+    common::commit_all(&repo, "ours bracket");
+    common::write_file(dir.path(), "a.txt", "my unsaved a work\n");
+
+    assert!(matches!(
+        cherry_pick(&repo, &theirs).unwrap(),
+        PickOutcome::Conflicted { .. }
+    ));
+    abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "my unsaved a work\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("[ab].txt")).unwrap(),
+        "ours\n"
+    );
+}
+
+#[test]
+fn finishing_a_conflicted_cherry_pick_keeps_the_original_author() {
+    let (dir, repo, _) = repo_with_feature_branch();
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature2", &base, false).unwrap();
+    repo.set_head("refs/heads/feature2").unwrap();
+    common::write_file(dir.path(), "shared.txt", "theirs\n");
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let other = git2::Signature::now("Other Author", "other@example.com").unwrap();
+    let theirs = repo
+        .commit(Some("HEAD"), &other, &other, "theirs edit", &tree, &[&base])
+        .unwrap()
+        .to_string();
+    drop(tree);
+    repo.set_head(base_branch_ref(&repo).as_str()).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    common::write_file(dir.path(), "shared.txt", "ours\n");
+    common::commit_all(&repo, "ours edit");
+
+    assert!(matches!(
+        cherry_pick(&repo, &theirs).unwrap(),
+        PickOutcome::Conflicted { .. }
+    ));
+    common::write_file(dir.path(), "shared.txt", "resolved\n");
+    stage(&repo, "shared.txt");
+    drop(base);
+    let mut repo = repo;
+    git_core::commit::commit(&mut repo, "theirs edit").unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.author().name().unwrap(), "Other Author");
+    assert_eq!(head.author().email().unwrap(), "other@example.com");
+    assert_eq!(head.committer().name().unwrap(), "Test User");
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}

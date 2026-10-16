@@ -196,21 +196,21 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
 
     // Like `git merge --abort` (reset --merge): only restore paths the operation touched, so
     // unrelated unstaged edits survive.
-    let mut touched: Vec<String> = Vec::new();
+    let mut touched: Vec<Vec<u8>> = Vec::new();
     let mut index = repo.index()?;
     for delta in repo
         .diff_tree_to_index(Some(&head_tree), Some(&index), None)?
         .deltas()
     {
         for file in [delta.old_file(), delta.new_file()] {
-            if let Some(path) = file.path().and_then(|p| p.to_str()) {
-                touched.push(path.to_string());
+            if let Some(path) = file.path_bytes() {
+                touched.push(path.to_vec());
             }
         }
     }
     for conflict in index.conflicts()?.filter_map(|c| c.ok()) {
         if let Some(entry) = conflict.our.or(conflict.their).or(conflict.ancestor) {
-            touched.push(String::from_utf8_lossy(&entry.path).into_owned());
+            touched.push(entry.path);
         }
     }
     touched.sort();
@@ -221,12 +221,13 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     let mut to_checkout = Vec::new();
-    for path in &touched {
-        if head_tree.get_path(Path::new(path)).is_ok() {
-            to_checkout.push(path.as_str());
+    for path in touched {
+        let rel = path_from_bytes(&path);
+        if head_tree.get_path(&rel).is_ok() {
+            to_checkout.push(path);
         } else {
             // Added by the operation: not in HEAD, so remove it.
-            let full = workdir.join(path);
+            let full = workdir.join(&rel);
             if full.is_file() {
                 std::fs::remove_file(full)?;
             }
@@ -234,7 +235,8 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     }
     if !to_checkout.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force();
+        // Paths are literal file names, not globs (`[ab].txt` must not match `a.txt`).
+        checkout.force().disable_pathspec_match(true);
         for path in to_checkout {
             checkout.path(path);
         }
@@ -242,6 +244,17 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     }
     repo.cleanup_state()?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn path_from_bytes(bytes: &[u8]) -> std::path::PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(bytes: &[u8]) -> std::path::PathBuf {
+    std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
 pub fn merge_message(repo: &Repository) -> Option<String> {

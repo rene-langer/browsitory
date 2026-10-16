@@ -18,6 +18,11 @@ pub enum CommitError {
 /// once conflicts (if any) are resolved and staged. `repo` needs to be `&mut` only because
 /// reading `MERGE_HEAD` via `mergehead_foreach` requires it — no other part of this function
 /// does.
+///
+/// Finishing a paused cherry-pick (`CherryPick`/`CherryPickSequence`) authors the commit as the
+/// picked commit's author (read from `CHERRY_PICK_HEAD`, like `git cherry-pick --continue`) with
+/// the current user as committer. Finishing a paused revert authors it as the current user. Either
+/// way the result is single-parent and the operation state is cleared.
 pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, CommitError> {
     // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
@@ -33,6 +38,18 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
             true
         })?;
     }
+
+    let pick_author = if matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
+    ) {
+        repo.find_reference("CHERRY_PICK_HEAD")
+            .ok()
+            .and_then(|r| r.peel_to_commit().ok())
+            .map(|c| c.author().to_owned())
+    } else {
+        None
+    };
 
     let oid = {
         let mut index = repo.index()?;
@@ -51,7 +68,7 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
 
         repo.commit(
             Some("HEAD"),
-            &signature,
+            pick_author.as_ref().unwrap_or(&signature),
             &signature,
             message,
             &tree,
@@ -64,7 +81,10 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
     // but the state files must still be cleared or `repo.state()` stays non-Clean.
     let finishes_pick = matches!(
         repo.state(),
-        git2::RepositoryState::CherryPick | git2::RepositoryState::Revert
+        git2::RepositoryState::CherryPick
+            | git2::RepositoryState::CherryPickSequence
+            | git2::RepositoryState::Revert
+            | git2::RepositoryState::RevertSequence
     );
     if is_merging || finishes_pick {
         repo.cleanup_state()?;
