@@ -67,6 +67,8 @@ pub fn dispatch(
         "get_commit_graph" => get_commit_graph(params, repos),
         "get_working_diff" => get_working_diff(params, repos),
         "get_commit_diff" => get_commit_diff(params, repos),
+        "get_file_history" => get_file_history(params, repos),
+        "get_commit_rename_diff" => get_commit_rename_diff(params, repos),
         "list_recent_repos" => list_recent_repos(),
         "list_open_repos" => list_open_repos_handler(),
         "persist_open_repos" => persist_open_repos(params),
@@ -359,6 +361,64 @@ fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_commit_diff(params.commit_id, params.path, params.opts.into())?
+        .into_iter()
+        .map(DiffHunkDto::from)
+        .collect();
+    serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileHistoryEntryDto {
+    commit: GraphCommitDto,
+    path: String,
+    // Serialized as `null` (not omitted) — the TS type is `string | null`.
+    old_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetFileHistoryParams {
+    repo_path: String,
+    path: String,
+    limit: usize,
+}
+
+fn get_file_history(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetFileHistoryParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let entries: Vec<FileHistoryEntryDto> = worker_handle(repos, &params.repo_path)?
+        .get_file_history(params.path, params.limit)?
+        .into_iter()
+        .map(|e| FileHistoryEntryDto {
+            commit: GraphCommitDto::from(e.commit),
+            path: e.path,
+            old_path: e.old_path,
+        })
+        .collect();
+    serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetCommitRenameDiffParams {
+    repo_path: String,
+    commit_id: String,
+    old_path: String,
+    new_path: String,
+    opts: DiffOptionsDto,
+}
+
+fn get_commit_rename_diff(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetCommitRenameDiffParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
+        .get_commit_rename_diff(
+            params.commit_id,
+            params.old_path,
+            params.new_path,
+            params.opts.into(),
+        )?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
