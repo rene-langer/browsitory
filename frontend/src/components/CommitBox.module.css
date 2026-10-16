@@ -18,3 +18,9 @@
   color: var(--color-warning-text);
   font-size: var(--text-sm);
 }
+
+.amendToggle {
+  display: flex;
+  gap: var(--space-1, 4px);
+  align-items: center;
+}

@@ -29,6 +29,7 @@ use crate::pull_requests::{
 
 mod branch;
 mod forge;
+mod history;
 mod merge;
 mod rebase;
 mod reflog;
@@ -342,6 +343,36 @@ pub(crate) enum Command {
         events: Sender<TransferEvent>,
         reply: Sender<Result<PullOutcome, String>>,
     },
+    GetHeadInfo {
+        reply: Sender<Result<git_core::repo::HeadInfo, String>>,
+    },
+    AmendCommit {
+        message: String,
+        reply: Sender<Result<(), String>>,
+    },
+    CherryPick {
+        commit_id: String,
+        reply: Sender<Result<git_core::pick::PickOutcome, String>>,
+    },
+    RevertCommit {
+        commit_id: String,
+        reply: Sender<Result<git_core::pick::PickOutcome, String>>,
+    },
+    ResetToCommit {
+        commit_id: String,
+        mode: git_core::reset::ResetMode,
+        reply: Sender<Result<(), String>>,
+    },
+    CheckoutCommit {
+        commit_id: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ForcePushCurrentBranch {
+        remote_name: String,
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
+    },
     PushCurrentBranch {
         remote_name: String,
         operation_id: String,
@@ -649,6 +680,40 @@ impl Worker {
                         reply,
                     } => merge::resolve(&repo, path, resolved_content, reply),
                     Command::AbortMerge { reply } => merge::abort(&repo, reply),
+                    Command::GetHeadInfo { reply } => history::head_info(&repo, reply),
+                    Command::AmendCommit { message, reply } => {
+                        history::amend(&repo, message, reply)
+                    }
+                    Command::CherryPick { commit_id, reply } => {
+                        history::cherry_pick(&repo, commit_id, reply)
+                    }
+                    Command::RevertCommit { commit_id, reply } => {
+                        history::revert(&repo, commit_id, reply)
+                    }
+                    Command::ResetToCommit {
+                        commit_id,
+                        mode,
+                        reply,
+                    } => history::reset(&repo, commit_id, mode, reply),
+                    Command::CheckoutCommit { commit_id, reply } => {
+                        history::checkout(&repo, commit_id, reply)
+                    }
+                    Command::ForcePushCurrentBranch {
+                        remote_name,
+                        operation_id,
+                        events,
+                        reply,
+                    } => remote::force_push_branch(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::GetMergeMessage { reply } => merge::message(&repo, reply),
                     Command::ResolveAddDeleteConflict {
                         path,
@@ -2198,5 +2263,89 @@ mod tests {
         let fresh_handle =
             ensure_worker(&workers, &path).expect("respawn a fresh worker for the same path");
         assert!(fresh_handle.get_status().is_ok());
+    }
+
+    #[test]
+    fn history_commands_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "base\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        let base = repo.head().unwrap().target().unwrap().to_string();
+        git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
+        git_core::branch::switch_branch(&repo, "side").unwrap();
+        write_file(dir.path(), "side.txt", "side\n");
+        commit_all(&repo, "side commit");
+        let side = repo.head().unwrap().target().unwrap().to_string();
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(handle.get_head_info().unwrap().head_id, Some(base.clone()));
+
+        let outcome = handle.cherry_pick(side.clone()).unwrap();
+        assert!(matches!(
+            outcome,
+            git_core::pick::PickOutcome::Committed { .. }
+        ));
+
+        handle.amend_commit("side, amended".into()).unwrap();
+        let picked = handle.get_head_info().unwrap().head_id.unwrap();
+
+        let reverted = handle.revert_commit(picked).unwrap();
+        assert!(matches!(
+            reverted,
+            git_core::pick::PickOutcome::Committed { .. }
+        ));
+
+        handle
+            .reset_to_commit(base.clone(), git_core::reset::ResetMode::Hard)
+            .unwrap();
+        assert_eq!(handle.get_head_info().unwrap().head_id, Some(base.clone()));
+
+        handle.checkout_commit(side).unwrap();
+        assert!(handle.get_head_info().unwrap().detached_at.is_some());
+
+        assert!(handle.cherry_pick("not-a-sha".into()).is_err());
+        assert!(
+            handle.get_head_info().is_ok(),
+            "worker survives a failed command"
+        );
+    }
+
+    #[test]
+    fn force_push_streams_a_completed_force_push_event() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).expect("open local repo");
+        // Record the remote tip as the lease's expected value.
+        local
+            .find_remote("origin")
+            .expect("origin")
+            .fetch(&["refs/heads/*:refs/remotes/origin/*"], None, None)
+            .expect("fetch remote tip");
+        write_file(local_dir.path(), "README.md", "rewritten local history\n");
+        commit_all(&local, "local commit");
+        drop(local);
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let operation_id = worker
+            .handle()
+            .force_push_current_branch("origin".into(), event_tx)
+            .expect("start force push");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(operation_id.starts_with("force-push-"));
+        assert!(matches!(
+            events.last(),
+            Some(TransferEvent::Completed {
+                operation_id: id,
+                operation: TransferOperation::ForcePushBranch,
+                error: None,
+            }) if id == &operation_id
+        ));
     }
 }

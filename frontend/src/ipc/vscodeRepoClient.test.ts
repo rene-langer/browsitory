@@ -992,4 +992,35 @@ describe("vscodeRepoClient", () => {
     });
     await expect(createPromise).resolves.toMatchObject({ number: 7 });
   });
+
+  it("wires the history-rewrite, head-info and force-push commands", async () => {
+    const p1 = vscodeRepoClient.getHeadInfo("/repo");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, method: "get_head_info", params: { repoPath: "/repo" } });
+    respond(1, null);
+    await p1;
+    const p2 = vscodeRepoClient.amendCommit("/repo", "msg");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, method: "amend_commit", params: { repoPath: "/repo", message: "msg" } });
+    respond(2, null);
+    await p2;
+    const p3 = vscodeRepoClient.cherryPick("/repo", "abc");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 3, method: "cherry_pick", params: { repoPath: "/repo", commitId: "abc" } });
+    respond(3, null);
+    await p3;
+    const p4 = vscodeRepoClient.revertCommit("/repo", "abc");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 4, method: "revert_commit", params: { repoPath: "/repo", commitId: "abc" } });
+    respond(4, null);
+    await p4;
+    const p5 = vscodeRepoClient.resetToCommit("/repo", "abc", "soft");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 5, method: "reset_to_commit", params: { repoPath: "/repo", commitId: "abc", mode: "soft" } });
+    respond(5, null);
+    await p5;
+    const p6 = vscodeRepoClient.checkoutCommit("/repo", "abc");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 6, method: "checkout_commit", params: { repoPath: "/repo", commitId: "abc" } });
+    respond(6, null);
+    await p6;
+    const p7 = vscodeRepoClient.forcePushCurrentBranch("/repo", "origin");
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 7, method: "force_push_current_branch", params: { repoPath: "/repo", remoteName: "origin" } });
+    respond(7, null);
+    await p7;
+  });
 });

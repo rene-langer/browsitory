@@ -1582,3 +1582,79 @@ fn a_slow_request_on_one_repo_does_not_delay_a_fast_request_on_another() {
     assert_eq!(second["id"], 3);
     assert!(start.elapsed() >= Duration::from_millis(SLOW_DELAY_MS));
 }
+
+#[test]
+fn history_rewrite_commands_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    let first = repo.head().unwrap().peel_to_commit().unwrap();
+    let first_id = first.id().to_string();
+    let main_ref = repo.head().unwrap().name().unwrap().to_string();
+    repo.branch("side", &first, false).unwrap();
+    drop(first);
+    let side_ref = repo
+        .find_branch("side", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .name()
+        .unwrap()
+        .to_string();
+    repo.set_head(&side_ref).unwrap();
+    write_file(dir.path(), "side.txt", "side");
+    commit_all(&repo, "side commit");
+    let side_id = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    repo.set_head(&main_ref).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "main.txt", "main");
+    commit_all(&repo, "second commit");
+    drop(repo);
+
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let info = sidecar.call(
+        2,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(info["result"]["headId"].as_str().unwrap().len(), 40);
+    assert_eq!(info["result"]["operation"], serde_json::Value::Null);
+    assert_eq!(info["result"]["detachedAt"], serde_json::Value::Null);
+
+    let picked = sidecar.call(
+        3,
+        "cherry_pick",
+        serde_json::json!({"repoPath": repo_path, "commitId": side_id}),
+    );
+    assert_eq!(picked["result"]["kind"], "Committed");
+    assert!(picked["result"]["commitId"].is_string());
+
+    let checked_out = sidecar.call(
+        4,
+        "checkout_commit",
+        serde_json::json!({"repoPath": repo_path, "commitId": first_id}),
+    );
+    assert_eq!(checked_out["result"], serde_json::Value::Null);
+    let detached = sidecar.call(
+        5,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert!(detached["result"]["detachedAt"].is_string());
+
+    let reset = sidecar.call(
+        6,
+        "reset_to_commit",
+        serde_json::json!({"repoPath": repo_path, "commitId": first_id, "mode": "hard"}),
+    );
+    assert_eq!(reset["result"], serde_json::Value::Null);
+}

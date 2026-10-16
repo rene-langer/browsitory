@@ -239,6 +239,38 @@ fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
 }
 
 #[test]
+fn abort_merge_keeps_unrelated_unstaged_edits() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\n");
+    write_file(dir.path(), "other.txt", "orig\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "shared.txt", "feature\n");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "shared.txt", "main\n");
+    commit_all(&repo, "main commit");
+    write_file(dir.path(), "other.txt", "my unsaved work\n");
+    git_core::merge::start_merge(&repo, "feature").unwrap();
+    assert!(repo.index().unwrap().has_conflicts());
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("other.txt")).unwrap(),
+        "my unsaved work\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "main\n"
+    );
+}
+
+#[test]
 fn abort_merge_errors_and_leaves_uncommitted_work_untouched_when_no_merge_is_in_progress() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "base.txt", "v1\n");

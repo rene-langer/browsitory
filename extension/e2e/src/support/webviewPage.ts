@@ -150,6 +150,7 @@ export interface WebviewSession {
   click(selector: string): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
   clickByText(tag: string, text: string): Promise<void>;
+  contextMenuByText(tag: string, text: string): Promise<void>;
   waitForText(tag: string, text: string, timeoutMs?: number): Promise<void>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
   close(): Promise<void>;
@@ -228,6 +229,19 @@ class CdpWebviewSession implements WebviewSession {
         });
         if (!el) throw new Error(${JSON.stringify(`no <${tag}> with text ${text}`)});
         el.click();
+      })()
+    `);
+  }
+
+  async contextMenuByText(tag: string, text: string): Promise<void> {
+    await this.evaluate(`
+      (function () {
+        var els = Array.from(document.querySelectorAll(${JSON.stringify(tag)}));
+        var el = els.find(function (candidate) {
+          return candidate.textContent && candidate.textContent.indexOf(${JSON.stringify(text)}) !== -1;
+        });
+        if (!el) throw new Error(${JSON.stringify(`no <${tag}> containing ${text}`)});
+        el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
       })()
     `);
   }

@@ -32,6 +32,9 @@ import type {
   UpstreamInfo,
   Workspace,
   WorktreeInfo,
+  HeadInfo,
+  PickOutcome,
+  ResetMode,
 } from "./RepoClient";
 
 let transferListenersReady: Promise<void> = Promise.resolve();
@@ -212,6 +215,15 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("resolve_conflict", { repoPath, path, resolvedContent }),
   abortMerge: (repoPath: string) => loggedInvoke("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => loggedInvoke<string | null>("get_merge_message", { repoPath }),
+  getHeadInfo: (repoPath: string) => loggedInvoke<HeadInfo>("get_head_info", { repoPath }),
+  amendCommit: (repoPath: string, message: string) => loggedInvoke<void>("amend_commit", { repoPath, message }),
+  cherryPick: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("cherry_pick", { repoPath, commitId }),
+  revertCommit: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("revert_commit", { repoPath, commitId }),
+  resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
+    loggedInvoke<void>("reset_to_commit", { repoPath, commitId, mode }),
+  checkoutCommit: (repoPath: string, commitId: string) => loggedInvoke<void>("checkout_commit", { repoPath, commitId }),
+  forcePushCurrentBranch: (repoPath: string, remoteName: string) =>
+    loggedInvoke<string>("force_push_current_branch", { repoPath, remoteName }),
   resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
     loggedInvoke("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>

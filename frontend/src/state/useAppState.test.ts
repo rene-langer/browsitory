@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   BranchInfo,
   GraphCommit,
@@ -13,6 +13,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
+import type { TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -118,6 +119,13 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: async () => unimplemented(),
     abortMerge: async () => unimplemented(),
     getMergeMessage: async () => null,
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+    amendCommit: async () => { throw new Error("unimplemented"); },
+    cherryPick: async () => { throw new Error("unimplemented"); },
+    revertCommit: async () => { throw new Error("unimplemented"); },
+    resetToCommit: async () => { throw new Error("unimplemented"); },
+    checkoutCommit: async () => { throw new Error("unimplemented"); },
+    forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
     resolveAddDeleteConflict: async () => unimplemented(),
     commitsSince: async () => unimplemented(),
     startRebase: async () => unimplemented(),
@@ -1110,6 +1118,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1171,6 +1186,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1232,6 +1254,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1713,6 +1742,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1771,6 +1807,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1825,6 +1868,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1879,6 +1929,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1939,6 +1996,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -1995,6 +2059,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2170,6 +2241,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2225,6 +2303,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2279,6 +2364,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2331,6 +2423,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2386,6 +2485,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2446,6 +2552,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2504,6 +2617,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2559,6 +2679,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2659,6 +2786,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2714,6 +2848,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2768,6 +2909,13 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      amendCommit: async () => { throw new Error("unimplemented"); },
+      cherryPick: async () => { throw new Error("unimplemented"); },
+      revertCommit: async () => { throw new Error("unimplemented"); },
+      resetToCommit: async () => { throw new Error("unimplemented"); },
+      checkoutCommit: async () => { throw new Error("unimplemented"); },
+      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
       resolveAddDeleteConflict: async () => unimplemented(),
       commitsSince: async () => unimplemented(),
       startRebase: async () => unimplemented(),
@@ -2886,5 +3034,211 @@ describe("useAppState pull requests", () => {
     // ...and remote B's own stale rows are cleared rather than left looking like a successful list.
     expect(result.current.state.pullRequests["remote-b"]).toBeUndefined();
     expect(result.current.state.error).toContain("the provider rejected the request");
+  });
+});
+
+describe("history actions", () => {
+  it("loads headInfo on refresh", async () => {
+    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null };
+    const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.headInfo).toEqual(info);
+  });
+
+  it("cherryPick calls the client then refreshes", async () => {
+    const cherryPick = vi.fn(async () => ({ kind: "Committed", commitId: "n1" }) as const);
+    const getStatus = vi.fn(async () => []);
+    const { result } = renderHook(() => useAppState(transferClient({ cherryPick, getStatus }), TEST_REPO_PATH));
+    await act(() => result.current.cherryPick("c1"));
+    expect(cherryPick).toHaveBeenCalledWith(TEST_REPO_PATH, "c1");
+    expect(getStatus).toHaveBeenCalled();
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("surfaces a backend refusal as state.error", async () => {
+    const revertCommit = vi.fn(async () => {
+      throw new Error("Cherry-picking or reverting merge commits isn't supported yet.");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ revertCommit }), TEST_REPO_PATH));
+    await act(() => result.current.revertCommit("m1"));
+    expect(result.current.state.error).toContain("merge commits isn't supported");
+  });
+
+  it("resetToCommit and checkoutCommit pass their arguments through", async () => {
+    const resetToCommit = vi.fn(async () => {});
+    const checkoutCommit = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useAppState(transferClient({ resetToCommit, checkoutCommit }), TEST_REPO_PATH),
+    );
+    await act(() => result.current.resetToCommit("c1", "hard"));
+    await act(() => result.current.checkoutCommit("c2"));
+    expect(resetToCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "c1", "hard");
+    expect(checkoutCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "c2");
+  });
+
+  it("amendCommit turns amend mode off on success and keeps it on failure", async () => {
+    let fail = true;
+    const amendCommit = vi.fn(async () => {
+      if (fail) throw new Error("boom");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ amendCommit }), TEST_REPO_PATH));
+    act(() => result.current.setAmendMode(true));
+    await act(() => result.current.amendCommit("m"));
+    expect(result.current.state.amendMode).toBe(true);
+    fail = false;
+    await act(() => result.current.amendCommit("m"));
+    expect(result.current.state.amendMode).toBe(false);
+  });
+
+  it("offers a force push after a non-fast-forward branch push and runs it", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const forcePushCurrentBranch = vi.fn(async () => "force-push-1");
+    const client = transferClient({
+      pushCurrentBranch: async () => "push-1",
+      forcePushCurrentBranch,
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.pushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.forcePushOffer).toEqual({ remoteName: "origin" });
+
+    act(() => result.current.requestForcePush("origin"));
+    expect(result.current.state.forcePushConfirm).toEqual({ remoteName: "origin" });
+
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin");
+    expect(result.current.state.forcePushOffer).toBeNull();
+    expect(result.current.state.forcePushConfirm).toBeNull();
+  });
+
+  it("cancelForcePush clears both the offer and the confirm", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.requestForcePush("origin"));
+    act(() => result.current.cancelForcePush());
+    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.forcePushOffer).toBeNull();
+  });
+
+  it("explains a stale lease", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main" }),
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe(
+      "origin/main changed since your last fetch. Fetch and review before force pushing.",
+    );
+  });
+
+  it("labels a stale lease with the force-pushed remote and local branch, not the upstream", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      listBranches: async () => [{ name: "feature", isCurrent: true }],
+      getCurrentUpstream: async () => ({ localBranch: "feature", remoteName: "origin", remoteBranch: "other" }),
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.forcePushCurrentBranch("fork"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe(
+      "fork/feature changed since your last fetch. Fetch and review before force pushing.",
+    );
+  });
+
+  it("gives a rejected force push its own message", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe("The remote refused the force push.");
+  });
+
+  it("treats a failed force push as a push failure", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      forcePushCurrentBranch: async () => "force-push-1",
+      subscribeTransferProgress: (callback) => {
+        listener = callback;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.forcePushCurrentBranch("origin"));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null }));
+    expect(result.current.state.error).toBe("Push failed");
+  });
+
+  describe("force push offer lifecycle", () => {
+    const failed = (operationId: string, operation: TransferProgress["operation"], errorKind: TransferProgress["errorKind"]): TransferProgress => ({
+      operationId, operation, phase: "Failed", errorKind, current: 0, total: 0, receivedBytes: 0, message: null,
+    });
+    async function setup() {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      let n = 0;
+      const client = transferClient({
+        pushCurrentBranch: async () => `push-${++n}`,
+        forcePushCurrentBranch: async () => "force-1",
+        subscribeTransferProgress: (callback) => {
+          listener = callback;
+          return () => {};
+        },
+      });
+      const hook = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => hook.result.current.pushCurrentBranch("origin"));
+      act(() => listener!(failed("push-1", "PushBranch", "NonFastForward")));
+      return { ...hook, emit: (p: TransferProgress) => act(() => listener!(p)) };
+    }
+
+    it("is cleared by dismissing the error", async () => {
+      const { result } = await setup();
+      expect(result.current.state.forcePushOffer).not.toBeNull();
+      act(() => result.current.dismissError());
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is cleared when a new push starts", async () => {
+      const { result } = await setup();
+      await act(() => result.current.pushCurrentBranch("origin"));
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is cleared when a push succeeds", async () => {
+      const { result, emit } = await setup();
+      await act(() => result.current.pushCurrentBranch("origin"));
+      emit({ ...failed("push-2", "PushBranch", null), phase: "Completed" });
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is not set by a force push failing non-fast-forward", async () => {
+      const { result, emit } = await setup();
+      act(() => result.current.dismissError());
+      await act(() => result.current.forcePushCurrentBranch("origin"));
+      emit(failed("force-1", "ForcePushBranch", "NonFastForward"));
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
   });
 });

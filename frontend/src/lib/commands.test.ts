@@ -7,7 +7,7 @@ import {
   recordCommandUsed,
   type Command,
 } from "./commands";
-import type { UseAppStateResult } from "../state/useAppState";
+import type { AppState, UseAppStateResult } from "../state/useAppState";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -55,6 +55,10 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       createBranchDraft: null,
       stashes: [{ index: 0, message: "WIP", commitId: "ccc" }],
       mergeMessage: null,
+      forcePushOffer: null,
+      forcePushConfirm: null,
+      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+      amendMode: false,
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
@@ -108,6 +112,15 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeCreateBranchDraft: vi.fn(),
     openAddRemoteDraft: vi.fn(),
     closeAddRemoteDraft: vi.fn(),
+    requestForcePush: vi.fn(),
+    cherryPick: vi.fn(),
+    revertCommit: vi.fn(),
+    resetToCommit: vi.fn(),
+    checkoutCommit: vi.fn(),
+    amendCommit: vi.fn(),
+    setAmendMode: vi.fn(),
+    cancelForcePush: vi.fn(),
+    forcePushCurrentBranch: vi.fn(),
     saveStash: vi.fn(),
     applyStash: vi.fn(),
     dropStash: vi.fn(),
@@ -655,5 +668,81 @@ describe("recordCommandUsed / loadRecentCommandIds", () => {
 
   it("returns an empty array when nothing is stored", () => {
     expect(loadRecentCommandIds()).toEqual([]);
+  });
+});
+
+describe("history commands", () => {
+  const HISTORY_IDS = [
+    "cherry-pick-selected",
+    "revert-selected",
+    "checkout-selected",
+    "reset-selected",
+    "amend-last-commit",
+    "force-push",
+  ];
+  const graphCommit = (id: string, parentIds: string[]) => ({
+    id,
+    shortId: id,
+    summary: `commit ${id}`,
+    authorName: "Test",
+    authorEmail: "test@example.com",
+    timestamp: 0,
+    parentIds,
+    branchRefs: [],
+    remoteBranchRefs: [],
+  });
+  const historyState: Partial<AppState> = {
+    selectedRow: { commitId: "c2" },
+    commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
+    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null },
+  };
+
+  it("offers the history commands when a commit is selected and nothing is running", () => {
+    const ids = buildCommands(makeAppState(historyState)).map((command) => command.id);
+    expect(ids).toEqual(expect.arrayContaining(HISTORY_IDS));
+  });
+
+  it("omits them while a merge is in progress", () => {
+    const ids = buildCommands(makeAppState({ ...historyState, mergeMessage: "Merge x" })).map((c) => c.id);
+    for (const id of HISTORY_IDS) expect(ids).not.toContain(id);
+  });
+
+  it("omits cherry-pick for HEAD and force push on a detached HEAD", () => {
+    const ids = buildCommands(
+      makeAppState({
+        ...historyState,
+        selectedRow: { commitId: "c1" },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+      }),
+    ).map((c) => c.id);
+    expect(ids).not.toContain("cherry-pick-selected");
+    expect(ids).not.toContain("force-push");
+  });
+
+  it("runs cherry-pick on the selected commit and force push through the confirm", () => {
+    const cherryPick = vi.fn();
+    const requestForcePush = vi.fn();
+    const appState = { ...makeAppState(historyState), cherryPick, requestForcePush };
+    const commands = buildCommands(appState);
+    commands.find((command) => command.id === "cherry-pick-selected")!.run();
+    commands.find((command) => command.id === "force-push")!.run();
+    expect(cherryPick).toHaveBeenCalledWith("c2");
+    expect(requestForcePush).toHaveBeenCalledWith("origin");
+  });
+
+  it("omits reset when there is no current branch (detached HEAD)", () => {
+    const ids = buildCommands(
+      makeAppState({
+        ...historyState,
+        branches: [{ name: "main", isCurrent: false }],
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+      }),
+    ).map((c) => c.id);
+    expect(ids).not.toContain("reset-selected");
+    expect(ids).toContain("checkout-selected");
+  });
+
+  it("groups force push under Remotes", () => {
+    expect(commandGroup("force-push")).toBe("Remotes");
   });
 });

@@ -10,6 +10,7 @@ import styles from "./SyncBar.module.css";
 export function SyncBar({
   remotes,
   upstream,
+  detachedAt,
   operationDisabled,
   operationDisabledReason,
   onFetch,
@@ -18,6 +19,7 @@ export function SyncBar({
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
+  detachedAt: string | null;
   operationDisabled: boolean;
   operationDisabledReason: string | null;
   onFetch: (remoteName: string) => void | Promise<void>;
@@ -29,7 +31,9 @@ export function SyncBar({
   const fetchTitle = busyTitle ?? (fetchRemote === null ? "No remote configured." : `Fetch from ${fetchRemote}`);
   const upstreamTitle = (verb: string) =>
     busyTitle ?? (upstream === null ? "No upstream set for the current branch." : `${verb} ${upstream.remoteName}/${upstream.remoteBranch}`);
-  const showCounts = upstream !== null && upstream.ahead != null && upstream.behind != null;
+  const detached = detachedAt !== null;
+  const detachedTitle = "Check out a branch to push or pull.";
+  const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
 
   return (
     <div className={styles.bar}>
@@ -44,21 +48,22 @@ export function SyncBar({
         </button>
         <button
           type="button"
-          disabled={operationDisabled || upstream === null}
-          title={upstreamTitle("Pull from")}
+          disabled={operationDisabled || detached || upstream === null}
+          title={detached ? detachedTitle : upstreamTitle("Pull from")}
           onClick={() => void onPull()}
         >
           Pull
         </button>
         <button
           type="button"
-          disabled={operationDisabled || upstream === null}
-          title={upstreamTitle("Push to")}
+          disabled={operationDisabled || detached || upstream === null}
+          title={detached ? detachedTitle : upstreamTitle("Push to")}
           onClick={() => upstream !== null && void onPush(upstream.remoteName)}
         >
           Push
         </button>
       </Toolbar>
+      {detached && <span>HEAD detached at {detachedAt}</span>}
       {showCounts && (
         <span
           className={styles.counts}

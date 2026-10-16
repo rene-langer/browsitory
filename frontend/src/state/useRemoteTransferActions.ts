@@ -9,9 +9,10 @@ import type {
   RunOptimisticMutationWithMessage,
   RunOptimisticMutationWithOutcome,
 } from "./useMutationRunner";
+import type { UpstreamInfo } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 
-function transferFailureMessage(progress: TransferProgress): string {
+function transferFailureMessage(progress: TransferProgress, upstreamLabel: string): string {
   // A cancellation reaches the UI as a `Failed` terminal event — the transfer really did stop
   // short — but the user pressed Cancel themselves, so it must not read as "Fetch failed".
   // Reporting it here (rather than treating it as a completion) also keeps `state.error`
@@ -25,7 +26,14 @@ function transferFailureMessage(progress: TransferProgress): string {
   if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
   if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
   if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
-  const isPush = progress.operation === "PushBranch" || progress.operation === "PushTags";
+  if (progress.errorKind === "StaleLease") {
+    return `${upstreamLabel} changed since your last fetch. Fetch and review before force pushing.`;
+  }
+  const isPush =
+    progress.operation === "PushBranch" || progress.operation === "PushTags" || progress.operation === "ForcePushBranch";
+  if (progress.operation === "ForcePushBranch" && progress.errorKind === "NonFastForward") {
+    return "The remote refused the force push.";
+  }
   if (isPush && progress.errorKind === "NonFastForward") {
     return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
   }
@@ -66,6 +74,9 @@ export interface RemoteTransferActions {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
+  requestForcePush(remoteName: string): void;
+  cancelForcePush(): void;
+  forcePushCurrentBranch(remoteName: string): Promise<void>;
 }
 
 // Owns everything transfer-progress-shaped (fetch/push/pull), plus the rest of remote/upstream/tag
@@ -84,9 +95,18 @@ export function useRemoteTransferActions(
   runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
+  upstream: UpstreamInfo | null,
 ): RemoteTransferActions {
   const activeTransferId = useRef<string | null>(null);
   const transferRequestPending = useRef(false);
+  const lastPushRemote = useRef<string | null>(null);
+  // The `<remote>/<branch>` a force push targets (the lease and confirm dialog use the force-push
+  // remote and the local branch name), recorded when it starts so a stale-lease failure can name it.
+  const forcePushTarget = useRef<{ remoteName: string; branch: string | null } | null>(null);
+  const upstreamRef = useRef<UpstreamInfo | null>(upstream);
+  useEffect(() => {
+    upstreamRef.current = upstream;
+  }, [upstream]);
 
   useEffect(() => {
     return client.subscribeTransferProgress((progress) => {
@@ -101,6 +121,7 @@ export function useRemoteTransferActions(
 
       if (progress.phase === "Completed") {
         transferRequestPending.current = false;
+        setState((prev) => ({ ...prev, forcePushOffer: null }));
         void refresh().finally(() => {
           if (activeTransferId.current !== progress.operationId) return;
           activeTransferId.current = null;
@@ -112,11 +133,24 @@ export function useRemoteTransferActions(
       if (progress.phase === "Failed") {
         transferRequestPending.current = false;
         activeTransferId.current = null;
+        const current = upstreamRef.current;
+        const target = progress.operation === "ForcePushBranch" ? forcePushTarget.current : null;
+        const upstreamLabel =
+          target !== null && target.branch !== null
+            ? `${target.remoteName}/${target.branch}`
+            : current !== null
+              ? `${current.remoteName}/${current.remoteBranch}`
+              : (lastPushRemote.current ?? "The remote branch");
+        const offer =
+          progress.operation === "PushBranch" && progress.errorKind === "NonFastForward" && lastPushRemote.current !== null
+            ? { remoteName: lastPushRemote.current }
+            : null;
         setState((prev) => ({
           ...prev,
           transfer: null,
-          error: transferFailureMessage(progress),
+          error: transferFailureMessage(progress, upstreamLabel),
           pending: false,
+          forcePushOffer: offer,
         }));
         return;
       }
@@ -205,7 +239,7 @@ export function useRemoteTransferActions(
       try {
         transferRequestPending.current = true;
         activeTransferId.current = null;
-        setState((prev) => ({ ...prev, pending: true, error: null }));
+        setState((prev) => ({ ...prev, pending: true, error: null, forcePushOffer: null }));
         const operationId = await start();
         if (transferRequestPending.current && activeTransferId.current === null) {
           activeTransferId.current = operationId;
@@ -266,9 +300,31 @@ export function useRemoteTransferActions(
     [client, runOptimisticMutation, repoPath],
   );
   const pushCurrentBranch = useCallback(
-    (remoteName: string) =>
-      startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName)),
+    (remoteName: string) => {
+      lastPushRemote.current = remoteName;
+      return startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName));
+    },
     [client, startTransfer, repoPath],
+  );
+  const requestForcePush = useCallback(
+    (remoteName: string) => setState((prev) => ({ ...prev, forcePushConfirm: { remoteName } })),
+    [setState],
+  );
+  const cancelForcePush = useCallback(
+    () => setState((prev) => ({ ...prev, forcePushOffer: null, forcePushConfirm: null })),
+    [setState],
+  );
+  const forcePushCurrentBranch = useCallback(
+    (remoteName: string) => {
+      forcePushTarget.current = { remoteName, branch: upstreamRef.current?.localBranch ?? null };
+      setState((prev) => {
+        const branch = prev.branches.find((candidate) => candidate.isCurrent)?.name;
+        if (branch !== undefined) forcePushTarget.current = { remoteName, branch };
+        return { ...prev, forcePushOffer: null, forcePushConfirm: null };
+      });
+      return startTransfer("ForcePushBranch", () => client.forcePushCurrentBranch(repoPath, remoteName));
+    },
+    [client, startTransfer, repoPath, setState],
   );
   const pushTags = useCallback(
     (remoteName: string, names: string[]) =>
@@ -342,5 +398,8 @@ export function useRemoteTransferActions(
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    requestForcePush,
+    cancelForcePush,
+    forcePushCurrentBranch,
   };
 }

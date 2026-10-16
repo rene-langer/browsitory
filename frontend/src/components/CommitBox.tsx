@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./CommitBox.module.css";
 
@@ -10,6 +10,11 @@ import styles from "./CommitBox.module.css";
 export interface CommitDraft {
   message: string;
   lastSeeded: string;
+  /**
+   * The pre-amend draft while amend mode has swapped it out for HEAD's message (null/absent
+   * otherwise). Persisted so a remount while amending can't lose it.
+   */
+  stashed?: string | null;
 }
 
 export function CommitBox({
@@ -17,15 +22,20 @@ export function CommitBox({
   disabled,
   disabledReason,
   onAbortMerge,
+  abortLabel = "Abort merge",
   initialMessage,
   initialDraft,
   onDraftChange,
+  amend,
+  focusMessage = false,
+  onFocusMessageHandled,
 }: {
   onCommit: (message: string) => void;
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
   onAbortMerge: () => void;
+  abortLabel?: string;
   initialMessage?: string;
   /**
    * Draft to start from on mount (read once, like `useState`'s initial value). `App` keeps one per
@@ -35,6 +45,23 @@ export function CommitBox({
   initialDraft?: CommitDraft;
   /** Called with the current draft whenever it changes, so the owner can hand it back on remount. */
   onDraftChange?: (draft: CommitDraft) => void;
+  /**
+   * One-shot request to focus the message field (e.g. "Edit commit message…"). Honored once the
+   * amend prefill, if amending, is in; `onFocusMessageHandled` then lets the owner clear it.
+   */
+  focusMessage?: boolean;
+  onFocusMessageHandled?: () => void;
+  /** Amend-last-commit mode; omit to hide the toggle entirely. */
+  amend?: {
+    /** headId !== null && no operation in progress. */
+    available: boolean;
+    on: boolean;
+    /** HEAD's message, loaded when `on` flips true; null while loading. */
+    headMessage: string | null;
+    pushed: boolean;
+    onToggle: (on: boolean) => void;
+    onAmend: (message: string) => void;
+  };
 }) {
   const [message, setMessage] = useState(initialDraft?.message ?? "");
   // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
@@ -42,12 +69,14 @@ export function CommitBox({
   // edited it" (message !== lastSeeded) — and only ever overwrite the former.
   const [lastSeeded, setLastSeeded] = useState(initialDraft?.lastSeeded ?? "");
 
+  const [stashedDraft, setStashedDraft] = useState<string | null>(initialDraft?.stashed ?? null);
+
   // Write-through rather than lifting the state itself: the owner only needs the value back on
   // the next mount, and making it controlled from `App` would re-render the whole workspace on
   // every keystroke.
   useEffect(() => {
-    onDraftChange?.({ message, lastSeeded });
-  }, [message, lastSeeded, onDraftChange]);
+    onDraftChange?.({ message, lastSeeded, stashed: stashedDraft });
+  }, [message, lastSeeded, stashedDraft, onDraftChange]);
 
   // Seeds the field when a merge starts or when the pre-fill message changes to a different
   // merge's message, and clears it when a merge ends — but in every case only if the field still
@@ -70,7 +99,41 @@ export function CommitBox({
     }
   }, [initialMessage, message, lastSeeded]);
 
+  // Entering amend mode swaps the typed draft out for HEAD's message; leaving it puts the draft
+  // back untouched, so toggling never loses a half-typed message.
+  // Amend mode is only effective while it's actually available (e.g. not mid-merge).
+  const amendOn = amend !== undefined && amend.on && amend.available;
+  const headMessage = amend?.headMessage ?? null;
+  useEffect(() => {
+    if (amendOn && stashedDraft === null && headMessage !== null) {
+      // Deliberate seed write: entering amend mode swaps the draft out for HEAD's message.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStashedDraft(message);
+      setMessage(headMessage);
+    } else if (!amendOn && stashedDraft !== null) {
+      setMessage(stashedDraft);
+      setStashedDraft(null);
+    }
+  }, [amendOn, headMessage, stashedDraft, message]);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusReady = !amendOn || stashedDraft !== null;
+  useEffect(() => {
+    if (!focusMessage || !focusReady) return;
+    textareaRef.current?.focus();
+    onFocusMessageHandled?.();
+  }, [focusMessage, focusReady, onFocusMessageHandled]);
+
   const commitIfReady = () => {
+    if (amendOn) {
+      if (message.trim() === "") {
+        return;
+      }
+      // Leave message and stash alone: on success amend mode turns off and the stashed draft
+      // is restored; on failure the typed message stays put.
+      amend.onAmend(message);
+      return;
+    }
     if (disabled || message.trim() === "") {
       return;
     }
@@ -89,6 +152,7 @@ export function CommitBox({
   return (
     <div>
       <textarea
+        ref={textareaRef}
         className={styles.textarea}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
@@ -96,20 +160,35 @@ export function CommitBox({
         placeholder="Commit message"
         aria-label="Commit message"
       />
-      {disabled && disabledReason !== undefined && (
+      {!amendOn && disabled && disabledReason !== undefined && (
         <p id="commit-disabled-reason" className={styles.reason}>
           {disabledReason}
         </p>
       )}
+      {amend?.available === true && (
+        <label className={styles.amendToggle}>
+          <input
+            type="checkbox"
+            checked={amendOn}
+            onChange={(event) => amend.onToggle(event.target.checked)}
+          />
+          Amend last commit
+        </label>
+      )}
+      {amendOn && amend?.pushed === true && (
+        <p className={styles.reason}>Already pushed — you'll need to force push.</p>
+      )}
       <Toolbar>
         <button
           onClick={commitIfReady}
-          disabled={disabled || message.trim() === ""}
-          aria-describedby={disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined}
+          disabled={amendOn ? message.trim() === "" : disabled || message.trim() === ""}
+          aria-describedby={
+            !amendOn && disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined
+          }
         >
-          Commit
+          {amendOn ? "Amend" : "Commit"}
         </button>
-        {initialMessage !== undefined && <button onClick={onAbortMerge}>Abort merge</button>}
+        {initialMessage !== undefined && <button onClick={onAbortMerge}>{abortLabel}</button>}
       </Toolbar>
     </div>
   );

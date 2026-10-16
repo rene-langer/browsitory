@@ -12,7 +12,9 @@ import type {
   RemoteAuthMode,
   RemoteInfo,
   ReflogEntry,
+  HeadInfo,
   RepoClient,
+  ResetMode,
   StashEntry,
   StatusEntry,
   SubmoduleInfo,
@@ -24,6 +26,7 @@ import type {
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
+import { useHistoryActions } from "./useHistoryActions";
 import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useRemoteTransferActions } from "./useRemoteTransferActions";
@@ -76,6 +79,13 @@ export interface AppState {
   addRemoteDraftOpen: boolean;
   stashes: StashEntry[];
   mergeMessage: string | null;
+  headInfo: HeadInfo;
+  // Set when a branch push fails NonFastForward; shows the "Force push (with lease)" button.
+  forcePushOffer: { remoteName: string } | null;
+  // Non-null while the force-push confirm dialog is open.
+  forcePushConfirm: { remoteName: string } | null;
+  // CommitBox amend toggle.
+  amendMode: boolean;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
@@ -158,6 +168,9 @@ export interface UseAppStateResult {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
+  requestForcePush(remoteName: string): void;
+  cancelForcePush(): void;
+  forcePushCurrentBranch(remoteName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -173,6 +186,12 @@ export interface UseAppStateResult {
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
   abortRebase(): Promise<void>;
+  cherryPick(commitId: string): Promise<void>;
+  revertCommit(commitId: string): Promise<void>;
+  resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
+  checkoutCommit(commitId: string): Promise<void>;
+  amendCommit(message: string): Promise<void>;
+  setAmendMode(on: boolean): void;
   listPullRequests(remoteName: string, account: string): Promise<void>;
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
@@ -219,6 +238,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     addRemoteDraftOpen: false,
     stashes: [],
     mergeMessage: null,
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+    forcePushOffer: null,
+    forcePushConfirm: null,
+    amendMode: false,
     rebaseProgress: null,
     rebaseOnto: null,
     rebasePreset: null,
@@ -241,7 +264,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
       const limit = graphLimit.current;
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories, headInfo] =
         await Promise.all([
           client.getStatus(repoPath),
           client.getCommitGraph(repoPath, limit, graphBranchSelection),
@@ -256,6 +279,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           client.getMergeMessage(repoPath),
           client.getRebaseProgress(repoPath),
           client.detectForgeRepository(repoPath),
+          client.getHeadInfo(repoPath),
         ]);
       const remoteUpstreams = Object.fromEntries(
         await Promise.all(
@@ -290,6 +314,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         remoteUpstreams,
         stashes,
         mergeMessage,
+        headInfo,
         rebaseProgress,
         forgeRepositories,
         error: null,
@@ -394,6 +419,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    requestForcePush,
+    cancelForcePush,
+    forcePushCurrentBranch,
   } = useRemoteTransferActions(
     client,
     repoPath,
@@ -405,6 +433,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithMessage,
     runOptimisticMutationWithOutcome,
     setState,
+    state.upstream,
   );
 
   const { saveStash, applyStash, dropStash } = useStashActions(
@@ -427,10 +456,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     abortRebase,
   } = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
+  const { cherryPick, revertCommit, resetToCommit, checkoutCommit, amendCommit, setAmendMode } =
+    useHistoryActions(client, repoPath, runMutation, setState);
+
   const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
     useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const dismissError = useCallback(() => {
-    setState((prev) => ({ ...prev, error: null }));
+    setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null }));
   }, []);
 
   return {
@@ -474,6 +506,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    requestForcePush,
+    cancelForcePush,
+    forcePushCurrentBranch,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,
@@ -489,6 +524,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     startRebase,
     rebaseContinue,
     abortRebase,
+    cherryPick,
+    revertCommit,
+    resetToCommit,
+    checkoutCommit,
+    amendCommit,
+    setAmendMode,
     listPullRequests,
     saveForgeToken,
     forgetForgeToken,

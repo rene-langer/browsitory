@@ -47,6 +47,7 @@ export function ListRow({
   onMouseEnter,
   onMouseLeave,
   className,
+  "data-commit-id": dataCommitId,
   children,
 }: {
   id?: string;
@@ -59,6 +60,8 @@ export function ListRow({
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   className?: string;
+  // Lets the command palette find a commit row to open its context menu.
+  "data-commit-id"?: string;
   children: ReactNode;
 }) {
   const interactive = onClick !== undefined;
@@ -84,6 +87,7 @@ export function ListRow({
   return (
     <li
       id={id}
+      data-commit-id={dataCommitId}
       className={[styles.row, interactive ? styles.interactive : null, className]
         .filter((part) => part !== null && part !== undefined && part !== "")
         .join(" ")}
