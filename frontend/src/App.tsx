@@ -37,6 +37,8 @@ import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
+import { useDiffSettingsContext } from "./state/useDiffSettings";
+import type { DiscardRequest } from "./components/DiffPane";
 import { useOpenRepos, type OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import { useWorkspaces } from "./state/useWorkspaces";
@@ -86,6 +88,10 @@ function RepoWorkspace({
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
+  const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const diffSettings = useDiffSettingsContext();
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
   const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_BREAKPOINT);
   useEffect(() => {
@@ -305,6 +311,20 @@ function RepoWorkspace({
               panelVisibility.visibility,
               () => setShortcutsOpen(true),
               () => onCloseRepoTab(repoPath),
+              {
+                settings: diffSettings.settings,
+                update: diffSettings.update,
+                currentFile,
+                requestDiscardCurrentFile: () => {
+                  if (currentFile === null) return;
+                  appState.selectRow("uncommitted");
+                  setDiscardRequest({ kind: "file", path: currentFile });
+                },
+                requestDiscardAllUnstaged: () => {
+                  appState.selectRow("uncommitted");
+                  setDiscardRequest({ kind: "all" });
+                },
+              },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -504,6 +524,9 @@ function RepoWorkspace({
                 commits={appState.state.commits}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}
+                discardRequest={discardRequest}
+                onDiscardRequestChange={setDiscardRequest}
+                onCurrentFileChange={setCurrentFile}
                 initialCommitDraft={getCommitDraft(repoPath)}
                 onCommitDraftChange={handleCommitDraftChange}
                 onStageFile={appState.stageFile}

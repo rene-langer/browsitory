@@ -498,6 +498,24 @@ describe("DiffPane", () => {
         expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
       });
 
+      it("opens the file confirm from a lifted request and reports the current file", () => {
+        const onDiscardFile = vi.fn();
+        const onDiscardRequestChange = vi.fn();
+        const onCurrentFileChange = vi.fn();
+        render({
+          onDiscardFile,
+          discardRequest: { kind: "file", path: "src/a.ts" },
+          onDiscardRequestChange,
+          onCurrentFileChange,
+        });
+
+        fireEvent.click(screen.getByText("Discard changes"));
+
+        expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
+        expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+        expect(onCurrentFileChange).toHaveBeenCalledWith(null);
+      });
+
       it("disables Discard all when every unstaged entry is conflicted", () => {
         renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), [fileStatus[2]]);
 

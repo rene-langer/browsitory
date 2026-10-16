@@ -752,3 +752,60 @@ describe("history commands", () => {
     expect(commandGroup("force-push")).toBe("Remotes");
   });
 });
+
+describe("diff option and discard commands", () => {
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+  const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
+    const diffCommands = {
+      settings,
+      update: vi.fn(),
+      currentFile: null as string | null,
+      requestDiscardCurrentFile: vi.fn(),
+      requestDiscardAllUnstaged: vi.fn(),
+      ...extra,
+    };
+    return { diffCommands, commands: buildCommands(state, undefined, [], undefined, undefined, undefined, undefined, diffCommands) };
+  };
+
+  it("adds diff option commands that update settings", () => {
+    const { commands, diffCommands } = build(makeAppState());
+    commands.find((c) => c.id === "toggle-ignore-whitespace")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ ignoreWhitespace: true });
+    commands.find((c) => c.id === "increase-context-lines")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 4 });
+    commands.find((c) => c.id === "decrease-context-lines")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 2 });
+    commands.find((c) => c.id === "toggle-syntax-highlighting")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ syntaxHighlight: false });
+    expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
+    expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
+  });
+
+  it("offers discard commands that only request a confirmation", () => {
+    const state = makeAppState({ status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const { commands, diffCommands } = build(state, { currentFile: "a.txt" });
+    commands.find((c) => c.id === "discard-current-file")!.run();
+    expect(diffCommands.requestDiscardCurrentFile).toHaveBeenCalled();
+    commands.find((c) => c.id === "discard-all-unstaged")!.run();
+    expect(diffCommands.requestDiscardAllUnstaged).toHaveBeenCalled();
+  });
+
+  it("omits discard-all when only conflicted entries are unstaged", () => {
+    const state = makeAppState({ status: [{ path: "a.txt", staged: false, kind: "Conflicted" }] });
+    const { commands } = build(state);
+    expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
+  });
+
+  it("omits discard commands while an operation is running", () => {
+    const state = makeAppState({ pending: true, status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const { commands } = build(state, { currentFile: "a.txt" });
+    expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
+    expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
+    expect(commands.some((c) => c.id === "toggle-ignore-whitespace")).toBe(true);
+  });
+
+  it("groups the new commands", () => {
+    expect(commandGroup("toggle-ignore-whitespace")).toBe("Diff");
+    expect(commandGroup("discard-all-unstaged")).toBe("Diff");
+  });
+});

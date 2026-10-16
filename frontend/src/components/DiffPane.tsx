@@ -98,7 +98,7 @@ function UncommittedFileSection({
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
-  onDiscardFile,
+  onRequestDiscardFile,
   onIgnorePath,
   sectionRef,
 }: {
@@ -126,12 +126,11 @@ function UncommittedFileSection({
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
-  onDiscardFile: (path: string) => void;
+  onRequestDiscardFile: (path: string) => void;
   onIgnorePath: (pattern: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   // Discard/ignore apply to unstaged, non-conflicted entries only.
   const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
@@ -357,20 +356,8 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? setConfirmingDiscard(true) : onIgnorePath(a.pattern)))}
+          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? onRequestDiscardFile(entry.path) : onIgnorePath(a.pattern)))}
           onClose={() => setMenu(null)}
-        />
-      )}
-      {confirmingDiscard && (
-        <ConfirmDialog
-          ariaLabel="Discard changes"
-          message={discardConfirmMessage(entry)}
-          confirmLabel={isUntracked(entry) ? "Delete file" : "Discard changes"}
-          onConfirm={() => {
-            setConfirmingDiscard(false);
-            onDiscardFile(entry.path);
-          }}
-          onCancel={() => setConfirmingDiscard(false)}
         />
       )}
     </ListRow>
@@ -418,6 +405,9 @@ export function DiffPane({
   refreshGeneration = 0,
   initialCommitDraft,
   onCommitDraftChange,
+  discardRequest,
+  onDiscardRequestChange,
+  onCurrentFileChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -426,6 +416,13 @@ export function DiffPane({
   // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
   // only so tests that don't exercise refreshes needn't pass it.
   refreshGeneration?: number;
+  // Discard confirmation state, lifted so the command palette can open the same dialogs as the
+  // file menu and "Discard all…". Optional: when `onDiscardRequestChange` is absent the pane keeps
+  // the state itself.
+  discardRequest?: DiscardRequest | null;
+  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  // Reports the current unstaged, discardable file (null when none).
+  onCurrentFileChange?: (path: string | null) => void;
   // Passed straight through to `CommitBox` — see its `initialDraft`/`onDraftChange`.
   initialCommitDraft?: CommitDraft;
   onCommitDraftChange?: (draft: CommitDraft) => void;
@@ -502,6 +499,9 @@ export function DiffPane({
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         onCommitDraftChange={onCommitDraftChange}
+        discardRequest={discardRequest}
+        onDiscardRequestChange={onDiscardRequestChange}
+        onCurrentFileChange={onCurrentFileChange}
       />
     );
   }
@@ -516,6 +516,9 @@ export function DiffPane({
     />
   );
 }
+
+/** What the discard confirm dialogs are currently asking about; null when none is open. */
+export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" };
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -555,6 +558,9 @@ function UncommittedDiffPane({
   onRebaseContinue,
   onRebaseAbort,
   refreshGeneration,
+  discardRequest: discardRequestProp,
+  onDiscardRequestChange,
+  onCurrentFileChange,
   initialCommitDraft,
   onCommitDraftChange,
 }: {
@@ -562,6 +568,9 @@ function UncommittedDiffPane({
   client: RepoClient;
   status: StatusEntry[];
   refreshGeneration: number;
+  discardRequest?: DiscardRequest | null;
+  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  onCurrentFileChange?: (path: string | null) => void;
   initialCommitDraft?: CommitDraft;
   onCommitDraftChange?: (draft: CommitDraft) => void;
   onStageFile: (path: string) => void;
@@ -759,8 +768,25 @@ function UncommittedDiffPane({
     }
   };
 
-  const [confirmingDiscardAll, setConfirmingDiscardAll] = useState(false);
+  const [localDiscardRequest, setLocalDiscardRequest] = useState<DiscardRequest | null>(null);
+  const discardRequest = onDiscardRequestChange !== undefined ? (discardRequestProp ?? null) : localDiscardRequest;
+  const setDiscardRequest = onDiscardRequestChange ?? setLocalDiscardRequest;
   const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
+
+  const discardFileEntry =
+    discardRequest?.kind === "file"
+      ? discardableEntries.find((entry) => entry.path === discardRequest.path)
+      : undefined;
+
+  // Report the current file to the palette; only unstaged, non-conflicted entries can be discarded.
+  const currentDiscardablePath =
+    current !== null && !current.staged
+      ? (discardableEntries.find((entry) => entry.path === current.path)?.path ?? null)
+      : null;
+  useEffect(() => {
+    onCurrentFileChange?.(currentDiscardablePath);
+  }, [currentDiscardablePath, onCurrentFileChange]);
+  useEffect(() => () => onCurrentFileChange?.(null), [onCurrentFileChange]);
 
   const handleStageAll = () => {
     onStageAllFiles(stageAllPaths);
@@ -795,7 +821,7 @@ function UncommittedDiffPane({
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
-        onDiscardFile={wrapFileAction(onDiscardFile)}
+        onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onIgnorePath={onIgnorePath}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
@@ -827,7 +853,7 @@ function UncommittedDiffPane({
             </button>
             <button
               type="button"
-              onClick={() => setConfirmingDiscardAll(true)}
+              onClick={() => setDiscardRequest({ kind: "all" })}
               disabled={discardableEntries.length === 0}
             >
               Discard all…
@@ -865,16 +891,28 @@ function UncommittedDiffPane({
           </ul>
         </div>
       )}
-      {confirmingDiscardAll && (
+      {discardRequest?.kind === "all" && (
         <ConfirmDialog
           ariaLabel="Discard all changes"
           message={discardAllConfirmMessage(discardableEntries)}
           confirmLabel="Discard all"
           onConfirm={() => {
-            setConfirmingDiscardAll(false);
+            setDiscardRequest(null);
             onDiscardAllUnstaged();
           }}
-          onCancel={() => setConfirmingDiscardAll(false)}
+          onCancel={() => setDiscardRequest(null)}
+        />
+      )}
+      {discardFileEntry !== undefined && (
+        <ConfirmDialog
+          ariaLabel="Discard changes"
+          message={discardConfirmMessage(discardFileEntry)}
+          confirmLabel={isUntracked(discardFileEntry) ? "Delete file" : "Discard changes"}
+          onConfirm={() => {
+            setDiscardRequest(null);
+            wrapFileAction(onDiscardFile)(discardFileEntry.path);
+          }}
+          onCancel={() => setDiscardRequest(null)}
         />
       )}
       <div className={styles.commitDock} role="group" aria-label="Commit actions">
