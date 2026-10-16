@@ -79,6 +79,20 @@ function expandRemoteBranches(remoteName: string): void {
   remoteToggle.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
 }
 
+// "Reset to …" needs the mode dialog that lives in the commit row's context menu, so open that
+// menu rather than reimplementing it (same navigate-to-the-real-UI pattern as above).
+function goToCommitMenu(commitId: string): void {
+  const row = document.querySelector<HTMLElement>(
+    `[data-active-repo="true"] [data-commit-id="${CSS.escape(commitId)}"]`,
+  );
+  if (row === null) return;
+  row.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
+  const rect = row.getBoundingClientRect();
+  row.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.top }),
+  );
+}
+
 function goToSidebarSection(title: string): void {
   // Scoped to the active tab's workspace, not the whole document: every open repo's
   // `RepoWorkspace` stays mounted simultaneously (inactive ones are only `display: none`), so a
@@ -192,6 +206,63 @@ export function buildCommands(
     keywords: ["refresh", "reload"],
     run: () => void appState.refresh(),
   });
+
+  if (!repositoryOperationDisabled) {
+    const selected = state.selectedRow === "uncommitted" ? null : state.selectedRow.commitId;
+    const selectedCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+    if (selectedCommit !== undefined) {
+      const isMerge = selectedCommit.parentIds.length > 1;
+      const isHead = state.headInfo.headId === selectedCommit.id;
+      if (!isMerge && !isHead) {
+        commands.push({
+          id: "cherry-pick-selected",
+          label: `Cherry-pick ${selectedCommit.shortId}`,
+          keywords: ["cherry", "pick", "apply", "commit"],
+          run: () => void appState.cherryPick(selectedCommit.id),
+        });
+      }
+      if (!isMerge) {
+        commands.push({
+          id: "revert-selected",
+          label: `Revert ${selectedCommit.shortId}`,
+          keywords: ["revert", "undo", "commit"],
+          run: () => void appState.revertCommit(selectedCommit.id),
+        });
+      }
+      commands.push({
+        id: "checkout-selected",
+        label: `Checkout ${selectedCommit.shortId} (detached)`,
+        keywords: ["checkout", "detach", "commit"],
+        run: () => void appState.checkoutCommit(selectedCommit.id),
+      });
+      commands.push({
+        id: "reset-selected",
+        label: `Reset to ${selectedCommit.shortId}…`,
+        keywords: ["reset", "soft", "mixed", "hard"],
+        run: () => goToCommitMenu(selectedCommit.id),
+      });
+    }
+    if (state.headInfo.headId !== null) {
+      commands.push({
+        id: "amend-last-commit",
+        label: "Amend last commit",
+        keywords: ["amend", "edit", "message", "commit"],
+        run: () => {
+          appState.selectRow("uncommitted");
+          appState.setAmendMode(true);
+        },
+      });
+    }
+    if (state.upstream !== null && state.headInfo.detachedAt === null) {
+      const remoteName = state.upstream.remoteName;
+      commands.push({
+        id: "force-push",
+        label: "Force push current branch…",
+        keywords: ["force", "push", "lease"],
+        run: () => appState.requestForcePush(remoteName),
+      });
+    }
+  }
 
   if (!repositoryOperationDisabled) {
     for (const branch of state.branches) {
@@ -371,7 +442,8 @@ export function commandGroup(id: string): CommandGroup {
     id.startsWith("push-branch:") ||
     id.startsWith("push-tags:") ||
     id.startsWith("browse-remote-branches:") ||
-    id === "add-remote"
+    id === "add-remote" ||
+    id === "force-push"
   ) {
     return "Remotes";
   }

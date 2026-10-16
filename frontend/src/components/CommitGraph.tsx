@@ -330,6 +330,7 @@ export function CommitGraph({
         <ListRow
           key={commit.id}
           className="commit-row"
+          data-commit-id={commit.id}
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
