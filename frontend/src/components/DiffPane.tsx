@@ -11,12 +11,14 @@ import {
   Minus,
   Pencil,
   Plus,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
   BlameLine,
   DiffHunk,
+  DiffOptions,
   FileConflictChoice,
   GraphCommit,
   HeadInfo,
@@ -24,6 +26,7 @@ import type {
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
@@ -31,6 +34,9 @@ import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { discardAllConfirmMessage, discardConfirmMessage, fileMenuItems, isUntracked } from "./FileActionsMenu";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
@@ -87,9 +93,14 @@ function UncommittedFileSection({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
+  onRequestDiscardFile,
+  onIgnorePath,
   sectionRef,
 }: {
   repoPath: string;
@@ -107,16 +118,28 @@ function UncommittedFileSection({
   onSelect: () => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
+  onRequestDiscardFile: (path: string) => void;
+  onIgnorePath: (pattern: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // Discard/ignore apply to unstaged, non-conflicted entries only.
+  const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
+  // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
+  // settings: after a settings change the shown hunks are still the old ones until the refetch
+  // lands, and their (oldStart, newStart) only mean something under the options they came from.
+  const [fetchedOptions, setFetchedOptions] = useState<DiffOptions | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
@@ -147,13 +170,17 @@ function UncommittedFileSection({
   //
   // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
   // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
+  const { settings } = useDiffSettingsContext();
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
+    const requested = diffOptions;
     client
-      .getWorkingDiff(repoPath, entry.path, entry.staged)
+      .getWorkingDiff(repoPath, entry.path, entry.staged, requested)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
+          setFetchedOptions(requested);
           setError(null);
         }
       })
@@ -174,7 +201,7 @@ function UncommittedFileSection({
     if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -206,6 +233,15 @@ function UncommittedFileSection({
   }, [repoPath, client, entry.path, mode, status]);
 
   const Icon = STATUS_ICONS[entry.kind];
+  // While a settings change is refetching, the shown hunks belong to the old options: offer no
+  // hunk or line action until the matching hunks arrive.
+  const optionsCurrent =
+    fetchedOptions !== null &&
+    fetchedOptions.ignoreWhitespace === settings.ignoreWhitespace &&
+    fetchedOptions.contextLines === settings.contextLines;
+  const fetchedContext = fetchedOptions?.contextLines ?? settings.contextLines;
+  const unstagedActions = optionsCurrent && !entry.staged;
+  const stagedActions = optionsCurrent && entry.staged;
 
   return (
     <ListRow
@@ -215,6 +251,14 @@ function UncommittedFileSection({
     >
       <div
         className={styles.fileSectionHeader}
+        onContextMenu={
+          hasFileActions
+            ? (event) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY });
+              }
+            : undefined
+        }
         ref={(el) => {
           sectionElRef.current = el;
         }}
@@ -234,6 +278,21 @@ function UncommittedFileSection({
           >
             Blame
           </button>
+          {hasFileActions && (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`Actions for ${entry.path}`}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                event.stopPropagation();
+                const r = event.currentTarget.getBoundingClientRect();
+                setMenu({ x: r.left, y: r.bottom });
+              }}
+            >
+              <MoreHorizontal size={14} aria-hidden="true" />
+            </button>
+          )}
           {entry.staged ? (
             <button
               type="button"
@@ -297,12 +356,25 @@ function UncommittedFileSection({
           ) : (
             <DiffView
               hunks={hunks}
-              onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart) : undefined}
-              onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart) : undefined}
-              onDiscardHunk={(oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart)}
+              path={entry.path}
+              onStageHunk={unstagedActions ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onUnstageHunk={stagedActions ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onDiscardHunk={unstagedActions ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
+              onStageLines={unstagedActions ? (o, n, idx, shown) => onStageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              onUnstageLines={stagedActions ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
             />
           )}
         </div>
+      )}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? onRequestDiscardFile(entry.path) : onIgnorePath(a.pattern)))}
+          onClose={() => setMenu(null)}
+        />
       )}
     </ListRow>
   );
@@ -323,6 +395,12 @@ export function DiffPane({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
+  onDiscardFile,
+  onDiscardAllUnstaged,
+  onIgnorePath,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -343,6 +421,9 @@ export function DiffPane({
   refreshGeneration = 0,
   initialCommitDraft,
   onCommitDraftChange,
+  discardRequest,
+  onDiscardRequestChange,
+  onCurrentFileChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -351,6 +432,13 @@ export function DiffPane({
   // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
   // only so tests that don't exercise refreshes needn't pass it.
   refreshGeneration?: number;
+  // Discard confirmation state, lifted so the command palette can open the same dialogs as the
+  // file menu and "Discard all…". Optional: when `onDiscardRequestChange` is absent the pane keeps
+  // the state itself.
+  discardRequest?: DiscardRequest | null;
+  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  // Reports the current unstaged, discardable file (null when none).
+  onCurrentFileChange?: (path: string | null) => void;
   // Passed straight through to `CommitBox` — see its `initialDraft`/`onDraftChange`.
   initialCommitDraft?: CommitDraft;
   onCommitDraftChange?: (draft: CommitDraft) => void;
@@ -363,9 +451,16 @@ export function DiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardFile: (path: string) => void | Promise<void>;
+  // The paths the confirm dialog listed; only those are discarded.
+  onDiscardAllUnstaged: (paths: string[]) => void;
+  onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -396,6 +491,12 @@ export function DiffPane({
         onStageHunk={onStageHunk}
         onUnstageHunk={onUnstageHunk}
         onDiscardHunk={onDiscardHunk}
+        onStageLines={onStageLines}
+        onUnstageLines={onUnstageLines}
+        onDiscardLines={onDiscardLines}
+        onDiscardFile={onDiscardFile}
+        onDiscardAllUnstaged={onDiscardAllUnstaged}
+        onIgnorePath={onIgnorePath}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
@@ -415,6 +516,9 @@ export function DiffPane({
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         onCommitDraftChange={onCommitDraftChange}
+        discardRequest={discardRequest}
+        onDiscardRequestChange={onDiscardRequestChange}
+        onCurrentFileChange={onCurrentFileChange}
       />
     );
   }
@@ -429,6 +533,9 @@ export function DiffPane({
     />
   );
 }
+
+/** What the discard confirm dialogs are currently asking about; null when none is open. */
+export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" };
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -445,6 +552,12 @@ function UncommittedDiffPane({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onStageLines,
+  onUnstageLines,
+  onDiscardLines,
+  onDiscardFile,
+  onDiscardAllUnstaged,
+  onIgnorePath,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -462,6 +575,9 @@ function UncommittedDiffPane({
   onRebaseContinue,
   onRebaseAbort,
   refreshGeneration,
+  discardRequest: discardRequestProp,
+  onDiscardRequestChange,
+  onCurrentFileChange,
   initialCommitDraft,
   onCommitDraftChange,
 }: {
@@ -469,6 +585,9 @@ function UncommittedDiffPane({
   client: RepoClient;
   status: StatusEntry[];
   refreshGeneration: number;
+  discardRequest?: DiscardRequest | null;
+  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  onCurrentFileChange?: (path: string | null) => void;
   initialCommitDraft?: CommitDraft;
   onCommitDraftChange?: (draft: CommitDraft) => void;
   onStageFile: (path: string) => void;
@@ -477,9 +596,16 @@ function UncommittedDiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardFile: (path: string) => void | Promise<void>;
+  // The paths the confirm dialog listed; only those are discarded.
+  onDiscardAllUnstaged: (paths: string[]) => void;
+  onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -532,13 +658,25 @@ function UncommittedDiffPane({
     });
   };
   const wrapHunkAction =
-    (action: (path: string, oldStart: number, newStart: number) => void | Promise<void>) =>
-    (path: string, oldStart: number, newStart: number) => {
+    (action: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, contextLines: number) => {
       // `useAppState`'s hunk actions never reject (`runMutation` records failures in
       // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
       // failed mutation may still have partially applied.
-      void Promise.resolve(action(path, oldStart, newStart)).finally(() => bumpPathVersions(path));
+      void Promise.resolve(action(path, oldStart, newStart, contextLines)).finally(() => bumpPathVersions(path));
     };
+  const wrapLineAction =
+    (action: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => {
+      // Same settle-then-bump contract as `wrapHunkAction`.
+      void Promise.resolve(action(path, oldStart, newStart, contextLines, lineIndices, expectedLines)).finally(() =>
+        bumpPathVersions(path),
+      );
+    };
+  const wrapFileAction = (action: (path: string) => void | Promise<void>) => (path: string) => {
+    // Same settle-then-bump contract as `wrapHunkAction`.
+    void Promise.resolve(action(path)).finally(() => bumpPathVersions(path));
+  };
   // One number per section: the path's own version plus the pane-wide refresh generation. Both
   // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
   // both (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when
@@ -623,6 +761,9 @@ function UncommittedDiffPane({
   };
 
   const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
+    // The file menu and discard dialog render inside their row (React events bubble through the
+    // tree), so keys typed in them must not drive the list underneath.
+    if ((event.target as HTMLElement).closest('[role="menu"], dialog') !== null) return;
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
       navigateGroup(entries, 1);
@@ -632,8 +773,54 @@ function UncommittedDiffPane({
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      // Opens the selected row's actions menu by activating its "⋯" button (conflicted and staged
+      // rows have none, so this is then a no-op).
+      const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
+        '[aria-selected="true"] button[aria-haspopup="menu"]',
+      );
+      if (trigger !== null) {
+        event.preventDefault();
+        trigger.click();
+      }
     }
   };
+
+  const [localDiscardRequest, setLocalDiscardRequest] = useState<DiscardRequest | null>(null);
+  const discardRequest = onDiscardRequestChange !== undefined ? (discardRequestProp ?? null) : localDiscardRequest;
+  const setDiscardRequest = onDiscardRequestChange ?? setLocalDiscardRequest;
+  const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
+
+  const discardFileEntry =
+    discardRequest?.kind === "file"
+      ? discardableEntries.find((entry) => entry.path === discardRequest.path)
+      : undefined;
+
+  // A request whose target is gone (refresh, staging, unmount) must not linger: otherwise the
+  // destructive dialog would pop up unprompted when the path later reappears.
+  const requestTargetGone =
+    discardRequest !== null &&
+    (discardRequest.kind === "all"
+      ? discardableEntries.length === 0
+      : discardFileEntry === undefined);
+  useEffect(() => {
+    if (requestTargetGone) setDiscardRequest(null);
+  }, [requestTargetGone, setDiscardRequest]);
+  const setDiscardRequestRef = useRef(setDiscardRequest);
+  useEffect(() => {
+    setDiscardRequestRef.current = setDiscardRequest;
+  });
+  useEffect(() => () => setDiscardRequestRef.current(null), []);
+
+  // Report the current file to the palette; only unstaged, non-conflicted entries can be discarded.
+  const currentDiscardablePath =
+    current !== null && !current.staged
+      ? (discardableEntries.find((entry) => entry.path === current.path)?.path ?? null)
+      : null;
+  useEffect(() => {
+    onCurrentFileChange?.(currentDiscardablePath);
+  }, [currentDiscardablePath, onCurrentFileChange]);
+  useEffect(() => () => onCurrentFileChange?.(null), [onCurrentFileChange]);
 
   const handleStageAll = () => {
     onStageAllFiles(stageAllPaths);
@@ -662,9 +849,14 @@ function UncommittedDiffPane({
         onStageHunk={wrapHunkAction(onStageHunk)}
         onUnstageHunk={wrapHunkAction(onUnstageHunk)}
         onDiscardHunk={wrapHunkAction(onDiscardHunk)}
+        onStageLines={wrapLineAction(onStageLines)}
+        onUnstageLines={wrapLineAction(onUnstageLines)}
+        onDiscardLines={wrapLineAction(onDiscardLines)}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
+        onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
+        onIgnorePath={onIgnorePath}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -692,6 +884,13 @@ function UncommittedDiffPane({
                 that still costs a full refresh. */}
             <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
               Stage all
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiscardRequest({ kind: "all" })}
+              disabled={discardableEntries.length === 0}
+            >
+              Discard all…
             </button>
           </div>
           <ul
@@ -725,6 +924,30 @@ function UncommittedDiffPane({
             {stagedEntries.map(renderSection)}
           </ul>
         </div>
+      )}
+      {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
+        <ConfirmDialog
+          ariaLabel="Discard all changes"
+          message={discardAllConfirmMessage(discardableEntries)}
+          confirmLabel="Discard all"
+          onConfirm={() => {
+            setDiscardRequest(null);
+            onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
+          }}
+          onCancel={() => setDiscardRequest(null)}
+        />
+      )}
+      {discardFileEntry !== undefined && (
+        <ConfirmDialog
+          ariaLabel="Discard changes"
+          message={discardConfirmMessage(discardFileEntry)}
+          confirmLabel={isUntracked(discardFileEntry) ? "Delete file" : "Discard changes"}
+          onConfirm={() => {
+            setDiscardRequest(null);
+            wrapFileAction(onDiscardFile)(discardFileEntry.path);
+          }}
+          onCancel={() => setDiscardRequest(null)}
+        />
       )}
       <div className={styles.commitDock} role="group" aria-label="Commit actions">
         {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
@@ -798,10 +1021,12 @@ function CommitFileSection({
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
 
+  const { settings } = useDiffSettingsContext();
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
     client
-      .getCommitDiff(repoPath, commitId, path)
+      .getCommitDiff(repoPath, commitId, path, diffOptions)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -822,7 +1047,7 @@ function CommitFileSection({
     if (mode !== "diff" || collapsed) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId, path, mode, collapsed]);
+  }, [repoPath, client, commitId, path, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
 
   const loadBlame = () => {
     let ignore = false;
@@ -885,7 +1110,7 @@ function CommitFileSection({
               onRetry={loadDiff}
             />
           ) : (
-            <DiffView hunks={hunks} />
+            <DiffView hunks={hunks} path={path} />
           )}
         </div>
       )}

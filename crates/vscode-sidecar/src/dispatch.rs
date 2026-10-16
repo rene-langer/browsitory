@@ -77,6 +77,8 @@ pub fn dispatch(
         "delete_workspace" => delete_workspace(params),
         "get_graph_branch_selection" => get_graph_branch_selection(params),
         "set_graph_branch_selection" => set_graph_branch_selection(params),
+        "get_diff_settings" => get_diff_settings(),
+        "set_diff_settings" => set_diff_settings(params),
         "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(params),
         "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
@@ -86,6 +88,12 @@ pub fn dispatch(
         "stage_hunk" => stage_hunk(params, repos),
         "unstage_hunk" => unstage_hunk(params, repos),
         "discard_hunk" => discard_hunk(params, repos),
+        "stage_lines" => stage_lines(params, repos),
+        "unstage_lines" => unstage_lines(params, repos),
+        "discard_lines" => discard_lines(params, repos),
+        "discard_file" => discard_file(params, repos),
+        "discard_all_unstaged" => discard_all_unstaged(params, repos),
+        "ignore_path" => ignore_path(params, repos),
         "commit" => commit(params, repos),
         "list_branches" => list_branches(params, repos),
         "create_branch" => create_branch(params, repos),
@@ -323,13 +331,14 @@ struct GetWorkingDiffParams {
     repo_path: String,
     path: String,
     staged: bool,
+    opts: DiffOptionsDto,
 }
 
 fn get_working_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetWorkingDiffParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
-        .get_working_diff(params.path, params.staged)?
+        .get_working_diff(params.path, params.staged, params.opts.into())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
@@ -342,13 +351,14 @@ struct GetCommitDiffParams {
     repo_path: String,
     commit_id: String,
     path: String,
+    opts: DiffOptionsDto,
 }
 
 fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetCommitDiffParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_diff(params.commit_id, params.path)?
+        .get_commit_diff(params.commit_id, params.path, params.opts.into())?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
@@ -607,6 +617,7 @@ struct HunkParams {
     path: String,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
 }
 
 fn stage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -615,6 +626,7 @@ fn stage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        params.context_lines,
     )?;
     Ok(Value::Null)
 }
@@ -625,6 +637,7 @@ fn unstage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        params.context_lines,
     )?;
     Ok(Value::Null)
 }
@@ -635,7 +648,157 @@ fn discard_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
         params.path,
         params.old_start,
         params.new_start,
+        params.context_lines,
     )?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinesParams {
+    repo_path: String,
+    path: String,
+    old_start: u32,
+    new_start: u32,
+    context_lines: u32,
+    line_indices: Vec<u32>,
+    /// Every line's `content` of the hunk as the webview displayed it (stale-view guard).
+    expected_lines: Vec<String>,
+}
+
+fn stage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.stage_lines(
+        params.path,
+        params.old_start,
+        params.new_start,
+        params.context_lines,
+        params.line_indices,
+        params.expected_lines,
+    )?;
+    Ok(Value::Null)
+}
+
+fn unstage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.unstage_lines(
+        params.path,
+        params.old_start,
+        params.new_start,
+        params.context_lines,
+        params.line_indices,
+        params.expected_lines,
+    )?;
+    Ok(Value::Null)
+}
+
+fn discard_lines(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.discard_lines(
+        params.path,
+        params.old_start,
+        params.new_start,
+        params.context_lines,
+        params.line_indices,
+        params.expected_lines,
+    )?;
+    Ok(Value::Null)
+}
+
+fn discard_file(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoFilePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.discard_file(params.path)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscardAllParams {
+    repo_path: String,
+    /// Exactly the paths the confirm dialog listed.
+    paths: Vec<String>,
+}
+
+fn discard_all_unstaged(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: DiscardAllParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.discard_all_unstaged(params.paths)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IgnorePathParams {
+    repo_path: String,
+    pattern: String,
+}
+
+fn ignore_path(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: IgnorePathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.ignore_path(params.pattern)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct DiffOptionsDto {
+    ignore_whitespace: bool,
+    context_lines: u32,
+}
+
+impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
+    fn from(dto: DiffOptionsDto) -> Self {
+        git_core::diff::DiffOptions {
+            ignore_whitespace: dto.ignore_whitespace,
+            context_lines: dto.context_lines,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffSettingsDto {
+    ignore_whitespace: bool,
+    context_lines: u32,
+    syntax_highlight: bool,
+}
+
+impl From<config::DiffSettings> for DiffSettingsDto {
+    fn from(s: config::DiffSettings) -> Self {
+        DiffSettingsDto {
+            ignore_whitespace: s.ignore_whitespace,
+            context_lines: s.context_lines,
+            syntax_highlight: s.syntax_highlight,
+        }
+    }
+}
+
+impl From<DiffSettingsDto> for config::DiffSettings {
+    fn from(d: DiffSettingsDto) -> Self {
+        config::DiffSettings {
+            ignore_whitespace: d.ignore_whitespace,
+            context_lines: d.context_lines,
+            syntax_highlight: d.syntax_highlight,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SetDiffSettingsParams {
+    settings: DiffSettingsDto,
+}
+
+fn get_diff_settings() -> Result<Value, String> {
+    let settings = config::get_diff_settings().map_err(|error| error.to_string())?;
+    serde_json::to_value(DiffSettingsDto::from(settings)).map_err(|error| error.to_string())
+}
+
+fn set_diff_settings(params: Value) -> Result<Value, String> {
+    let params: SetDiffSettingsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::set_diff_settings(&params.settings.into()).map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 

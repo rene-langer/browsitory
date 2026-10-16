@@ -1,7 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
-import { DiffPane } from "./DiffPane";
+import { useState, type ReactNode } from "react";
+import { DiffSettingsContext } from "../state/useDiffSettings";
+import { DiffPane, type DiscardRequest } from "./DiffPane";
 import styles from "./DiffPane.module.css";
 
 const TEST_REPO_PATH = "/repo";
@@ -107,6 +110,14 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     stageHunk: unused,
     unstageHunk: unused,
     discardHunk: unused,
+    stageLines: unused,
+    unstageLines: unused,
+    discardLines: unused,
+    discardFile: unused,
+    discardAllUnstaged: unused,
+    ignorePath: unused,
+    getDiffSettings: unused,
+    setDiffSettings: unused,
     commit: unused,
     logFrontendError: unused,
     ...overrides,
@@ -121,11 +132,17 @@ const noopHandlers = {
   onStageHunk: vi.fn(),
   onUnstageHunk: vi.fn(),
   onDiscardHunk: vi.fn(),
+  onStageLines: vi.fn(),
+  onUnstageLines: vi.fn(),
+  onDiscardLines: vi.fn(),
   onCommit: vi.fn(),
   onSaveStash: vi.fn(),
   onSelectRow: vi.fn(),
   onResolveConflict: vi.fn(),
   onResolveAddDeleteConflict: vi.fn(),
+  onDiscardFile: vi.fn(),
+  onDiscardAllUnstaged: vi.fn(),
+  onIgnorePath: vi.fn(),
   onAbortMerge: vi.fn(),
   onRebaseContinue: vi.fn(),
   onRebaseAbort: vi.fn(),
@@ -201,8 +218,8 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
       expect(await screen.findAllByText(/changed line/)).toHaveLength(2);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
@@ -240,7 +257,7 @@ describe("DiffPane", () => {
 
       fireEvent.click(await screen.findByText("Stage hunk"));
 
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
     });
 
     it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
@@ -275,8 +292,8 @@ describe("DiffPane", () => {
       );
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
@@ -300,7 +317,7 @@ describe("DiffPane", () => {
       getWorkingDiff.mockClear();
 
       fireEvent.click(await screen.findByText("Stage hunk"));
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
       // Nothing refetches while the mutation is still in flight — a refetch now could read the
       // index before the backend applied the change, with nothing to correct it afterward.
       await act(async () => {});
@@ -309,8 +326,8 @@ describe("DiffPane", () => {
       await act(async () => settle());
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("refetches every open diff when refreshGeneration advances, with no hunk action involved", async () => {
@@ -337,8 +354,8 @@ describe("DiffPane", () => {
       );
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
@@ -348,6 +365,199 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
 
       expect(onStageFile).toHaveBeenCalledWith("a.txt");
+    });
+
+    describe("file actions", () => {
+      const fileStatus: StatusEntry[] = [
+        { path: "src/a.ts", staged: false, kind: "Modified" },
+        { path: "logs/run.log", staged: false, kind: "New" },
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const render = (overrides: Partial<React.ComponentProps<typeof DiffPane>> = {}) =>
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), fileStatus, overrides);
+
+      it("discards a tracked file after confirming from the actions button", () => {
+        const onDiscardFile = vi.fn();
+        render({ onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
+        expect(within(dialog).getByText("Discard changes to src/a.ts? This can't be undone.")).toBeInTheDocument();
+        expect(onDiscardFile).not.toHaveBeenCalled();
+        fireEvent.click(within(dialog).getByText("Discard changes"));
+
+        expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
+      });
+
+      it("does not discard when the dialog is cancelled", () => {
+        const onDiscardFile = vi.fn();
+        render({ onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        fireEvent.click(screen.getByText("Cancel"));
+
+        expect(onDiscardFile).not.toHaveBeenCalled();
+      });
+
+      it("opens the same menu on right-click of the file header", () => {
+        render();
+
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("opens the menu for the selected row with Shift+F10", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "F10", shiftKey: true });
+
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("keeps list key bindings out of an open menu", () => {
+        const onStageFile = vi.fn();
+        const onUnstageFile = vi.fn();
+        render({ onStageFile, onUnstageFile });
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        const item = screen.getByRole("menuitem", { name: "Discard changes…" });
+
+        fireEvent.keyDown(item, { key: "ArrowDown" });
+        fireEvent.keyDown(item, { key: "s" });
+
+        expect(screen.getByRole("option", { name: /src\/a\.ts/, selected: true })).toBeInTheDocument();
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+        expect(onStageFile).not.toHaveBeenCalled();
+        expect(onUnstageFile).not.toHaveBeenCalled();
+      });
+
+      it("keeps list key bindings out of the discard dialog", () => {
+        const onStageFile = vi.fn();
+        const onUnstageFile = vi.fn();
+        render({ onStageFile, onUnstageFile });
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+
+        fireEvent.keyDown(screen.getByText("Cancel"), { key: "s" });
+
+        expect(onStageFile).not.toHaveBeenCalled();
+        expect(onUnstageFile).not.toHaveBeenCalled();
+      });
+
+      it("opens the file menu only from the header, not the diff body", async () => {
+        const hunks: DiffHunk[] = [
+          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "body line" }] },
+        ];
+        renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [fileStatus[0]]);
+
+        fireEvent.contextMenu(await screen.findByText(/body line/));
+        expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("words the untracked delete dialog and ignores without confirming", () => {
+        const onIgnorePath = vi.fn();
+        const onDiscardFile = vi.fn();
+        render({ onIgnorePath, onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for logs/run.log" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Ignore all *.log" }));
+
+        expect(onIgnorePath).toHaveBeenCalledWith("*.log");
+        expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for logs/run.log" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        expect(screen.getByText("Delete untracked file logs/run.log? This can't be undone.")).toBeInTheDocument();
+        expect(screen.getByText("Delete file")).toBeInTheDocument();
+      });
+
+      it("gives conflicted files no actions button", () => {
+        render();
+
+        expect(screen.queryByRole("button", { name: "Actions for shared.txt" })).not.toBeInTheDocument();
+      });
+
+      it("Discard all confirms then calls onDiscardAllUnstaged", () => {
+        const onDiscardAllUnstaged = vi.fn();
+        render({ onDiscardAllUnstaged });
+
+        fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
+        expect(
+          screen.getByText("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone."),
+        ).toBeInTheDocument();
+        expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Discard all"));
+
+        expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
+        // Exactly what the dialog counted: the unstaged, non-conflicted entries.
+        expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["src/a.ts", "logs/run.log"]);
+      });
+
+      it("opens the file confirm from a lifted request and reports the current file", () => {
+        const onDiscardFile = vi.fn();
+        const onDiscardRequestChange = vi.fn();
+        const onCurrentFileChange = vi.fn();
+        render({
+          onDiscardFile,
+          discardRequest: { kind: "file", path: "src/a.ts" },
+          onDiscardRequestChange,
+          onCurrentFileChange,
+        });
+
+        fireEvent.click(screen.getByText("Discard changes"));
+
+        expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
+        expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+        expect(onCurrentFileChange).toHaveBeenCalledWith(null);
+      });
+
+      it("clears a file request whose path disappears, and does not reopen when it returns", () => {
+        function Harness({ status }: { status: StatusEntry[] }) {
+          const [req, setReq] = useState<DiscardRequest | null>({ kind: "file", path: "src/a.ts" });
+          return (
+            <DiffPane
+              repoPath={TEST_REPO_PATH}
+              client={fakeClient({ getConflictHunks: async () => [] })}
+              selectedRow="uncommitted"
+              status={status}
+              mergeMessage={null}
+              rebaseProgress={null}
+              {...noopHandlers}
+              discardRequest={req}
+              onDiscardRequestChange={setReq}
+            />
+          );
+        }
+        const { rerender } = rtlRender(<Harness status={fileStatus} />);
+        expect(screen.getByText("Discard changes")).toBeInTheDocument();
+
+        rerender(<Harness status={[fileStatus[1]]} />);
+        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+
+        rerender(<Harness status={fileStatus} />);
+        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+      });
+
+      it("clears an all request when nothing is discardable and shows no dialog", () => {
+        const onDiscardRequestChange = vi.fn();
+        renderUncommitted(fakeClient({}), [], { discardRequest: { kind: "all" }, onDiscardRequestChange });
+
+        expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+        expect(screen.queryByRole("button", { name: "Discard all" })).not.toBeInTheDocument();
+      });
+
+      it("disables Discard all when every unstaged entry is conflicted", () => {
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), [fileStatus[2]]);
+
+        expect(screen.getByRole("button", { name: "Discard all…" })).toBeDisabled();
+      });
     });
 
     // One bulk call, not one per file: each per-file call is a separate `runMutation` in
@@ -621,7 +831,7 @@ describe("DiffPane", () => {
       );
 
       expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
-      await waitFor(() => expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false));
+      await waitFor(() => expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false, DEFAULT_DIFF_OPTIONS));
     });
 
     it("keeps each conflicted file's resolution state independent of the others", async () => {
@@ -899,7 +1109,7 @@ describe("DiffPane", () => {
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
-      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
+      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs", DEFAULT_DIFF_OPTIONS);
     });
 
     it("no CommitBox or stage/unstage buttons render", async () => {
@@ -1017,5 +1227,234 @@ describe("DiffPane", () => {
       expect(screen.getByRole("button", { name: "Collapse src/main.rs" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
     });
+  });
+});
+
+describe("DiffPane line staging", () => {
+  const lineHunk: DiffHunk = {
+    oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
+    lines: [
+      { origin: "Context", content: "a\n" },
+      { origin: "Remove", content: "b\n" },
+      { origin: "Add", content: "B\n" },
+      { origin: "Context", content: "c\n" },
+      { origin: "Add", content: "d\n" },
+    ],
+  };
+
+  const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
+    <DiffSettingsContext.Provider
+      value={{
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true },
+        update: () => {},
+        error: null,
+        dismissError: () => {},
+      }}
+    >
+      {children}
+    </DiffSettingsContext.Provider>
+  );
+
+  it("stages a clicked line with the path, hunk starts, context lines and line index", async () => {
+    const onStageLines = vi.fn();
+    const { container } = renderUncommitted(
+      fakeClient({ getWorkingDiff: async () => [lineHunk] }),
+      [{ path: "f.txt", staged: false, kind: "Modified" }],
+      { onStageLines },
+    );
+    await screen.findByText("Stage hunk");
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2], ["a\n", "b\n", "B\n", "c\n", "d\n"]));
+  });
+
+  it("a staged section never discards, with or without a line selection", async () => {
+    const onDiscardHunk = vi.fn();
+    const onDiscardLines = vi.fn();
+    const { container } = renderUncommitted(
+      fakeClient({ getWorkingDiff: async () => [lineHunk] }),
+      [{ path: "f.txt", staged: true, kind: "Modified" }],
+      { onDiscardHunk, onDiscardLines },
+    );
+    await screen.findByText("Unstage hunk");
+    expect(screen.queryByRole("button", { name: "Discard hunk" })).toBeNull();
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.keyDown(group, { key: "d" });
+    fireEvent.keyDown(group, { key: "d" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onDiscardHunk).not.toHaveBeenCalled();
+    expect(onDiscardLines).not.toHaveBeenCalled();
+  });
+
+  it("ignore whitespace hides hunk actions in both sections but keeps file-level staging", async () => {
+    render(
+      <TestDiffSettings ignoreWhitespace>
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getWorkingDiff: async () => [lineHunk] })}
+          selectedRow="uncommitted"
+          status={[
+            { path: "f.txt", staged: false, kind: "Modified" },
+            { path: "f.txt", staged: true, kind: "Modified" },
+          ]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </TestDiffSettings>,
+    );
+    expect(await screen.findAllByText("Turn off Ignore whitespace to stage partially.")).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByText("B")).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unstage hunk" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stage f.txt" })).toBeInTheDocument();
+  });
+
+  it("commit diffs show lines and no partial-staging hint", async () => {
+    render(
+      <TestDiffSettings ignoreWhitespace>
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getCommitFiles: async () => ["f.txt"], getCommitDiff: async () => [lineHunk], getCommitMessage: async () => "" })}
+          selectedRow={{ commitId: "abc123" }}
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </TestDiffSettings>,
+    );
+    expect(await screen.findByText("B")).toBeInTheDocument();
+    expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
+  });
+});
+
+describe("DiffPane diff options contract", () => {
+  const lineHunk: DiffHunk = {
+    oldStart: 1, oldLines: 3, newStart: 1, newLines: 4,
+    lines: [
+      { origin: "Context", content: "a\n" },
+      { origin: "Remove", content: "b\n" },
+      { origin: "Add", content: "B\n" },
+      { origin: "Context", content: "c\n" },
+      { origin: "Add", content: "d\n" },
+    ],
+  };
+  const shown = lineHunk.lines.map((l) => l.content);
+  const status: StatusEntry[] = [{ path: "f.txt", staged: false, kind: "Modified" }];
+
+  function pane(
+    client: RepoClient,
+    settings: { ignoreWhitespace: boolean; contextLines: number },
+    handlers: Partial<React.ComponentProps<typeof DiffPane>>,
+  ) {
+    return (
+      <DiffSettingsContext.Provider
+        value={{ settings: { ...settings, syntaxHighlight: false }, update: () => {}, error: null, dismissError: () => {} }}
+      >
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow="uncommitted"
+          status={status}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+          {...handlers}
+        />
+      </DiffSettingsContext.Provider>
+    );
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it("fetches with non-default options and forwards their context lines to hunk and line actions", async () => {
+    const getWorkingDiff = vi.fn(async () => [lineHunk]);
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const { container } = render(
+      pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk, onStageLines }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 7, [2], shown));
+  });
+
+  it("offers no hunk or line action while a context-lines change is refetching, then uses the new value", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const onStageHunk = vi.fn();
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender, container } = render(pane(client, { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk }));
+    await screen.findByRole("button", { name: "Stage hunk" });
+
+    rerender(pane(client, { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk }));
+
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard hunk" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Diff hunks" })).toBeNull();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    expect(screen.queryByRole("button", { name: /^(Stage|Unstage|Discard) lines/ })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+    expect(onStageHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps partial actions off until hunks fetched without ignore-whitespace arrive", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender } = render(pane(client, { ignoreWhitespace: true, contextLines: 3 }, {}));
+    expect(await screen.findByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+
+    rerender(pane(client, { ignoreWhitespace: false, contextLines: 3 }, {}));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    expect(await screen.findByRole("button", { name: "Stage hunk" })).toBeInTheDocument();
+    expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
+  });
+
+  it("hides partial actions as soon as ignore-whitespace is turned on, before the refetch lands", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender } = render(pane(client, { ignoreWhitespace: false, contextLines: 3 }, {}));
+    await screen.findByRole("button", { name: "Stage hunk" });
+
+    rerender(pane(client, { ignoreWhitespace: true, contextLines: 3 }, {}));
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    expect(await screen.findByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
   });
 });

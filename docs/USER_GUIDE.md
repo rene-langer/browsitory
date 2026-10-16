@@ -58,6 +58,36 @@ aside — expand **Stashes** in the sidebar to get them back.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
+### Staging individual lines
+
+In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add
+or remove one, or dragging across several. Then use **Stage lines**, **Unstage lines** or
+**Discard lines** in the hunk header. With the keyboard, `↑`/`↓` move a line cursor inside the
+active hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump
+to the previous or next hunk (which clears the selection). `s` stages or unstages and `d` `d`
+discards the selection, or the whole hunk when nothing is selected.
+
+If the file changed since its diff was shown (for example you edited it in another editor),
+line actions don't run; the diff refreshes so you can select again. Discarding a whole hunk of
+an untracked file empties the file rather than deleting it. Staging a whole hunk doesn't stage a
+file's mode change (such as the executable bit); stage the whole file for that.
+
+### Discarding and ignoring files
+
+Open a file's **⋯** menu, right-click the file header, or press Shift+F10 (or the Menu key)
+with the file row focused, for **Discard changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
+appears, and discarding cannot be undone. **Discard all…** next to **Stage all** discards
+the unstaged changes of exactly the files its confirmation lists. It deletes untracked files
+and skips conflicted ones. Folders, such as an untracked nested repository, are never deleted;
+any file that couldn't be discarded is named in an error after the rest are done. Discarding
+never writes or deletes outside the repository, including through a symlinked folder.
+
+For untracked files the menu also offers ignore items. Each appends a pattern to the
+repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left
+alone and reported). **Ignore file** is always offered.
+**Ignore all \*.ext** appears only when the file name has an extension. **Ignore folder
+⟨folder⟩/** appears only when the file is in a subfolder.
+
 ## Browsing history and diffs
 
 Click any commit in the graph to see the files it touched; click a file to
@@ -74,6 +104,16 @@ current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.
 
 ![Viewing a past commit's diff](assets/commit-diff.png)
+
+### Diff options
+
+The diff toolbar has three controls, remembered across sessions: **Ignore whitespace**,
+**Context lines** (0 to 20) and **Syntax highlighting**. While whitespace is ignored, partial
+staging (lines and hunks) is unavailable in the working tree and a hint says so; staging and
+unstaging whole files still works. Right after you change an option, hunk and line actions
+return once the diff has reloaded with it. Highlighting covers common languages and is skipped
+when a file's diff has more than 2,000 lines in total across its hunks. The command palette has
+an entry for each option.
 
 ## Branches and remotes
 

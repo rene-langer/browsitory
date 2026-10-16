@@ -1,3 +1,4 @@
+import { MAX_CONTEXT_LINES, type DiffSettings } from "../ipc/RepoClient";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -119,6 +120,17 @@ function scrollBehavior(): ScrollBehavior {
     : "smooth";
 }
 
+export interface DiffCommands {
+  settings: DiffSettings;
+  update(partial: Partial<DiffSettings>): void;
+  /** DiffPane's current unstaged file, if any. */
+  currentFile: string | null;
+  /** Opens the same confirm dialog as the file menu; never discards directly. */
+  requestDiscardCurrentFile(): void;
+  /** Opens the discard-all confirm dialog; never discards directly. */
+  requestDiscardAllUnstaged(): void;
+}
+
 export function buildCommands(
   appState: UseAppStateResult,
   onOpenRepoTab: (path: string) => void = () => {},
@@ -130,6 +142,7 @@ export function buildCommands(
   // intercept — unlike Ctrl/Cmd+W, which Tauri's default macOS menu binds to "Close Window" and a
   // VSCode webview may hand to the workbench before the page ever sees it.
   onCloseActiveRepoTab?: () => void,
+  diffCommands?: DiffCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -400,6 +413,55 @@ export function buildCommands(
     // restore-reflog command is emitted.
   }
 
+  if (diffCommands !== undefined) {
+    const { settings, update } = diffCommands;
+    commands.push(
+      {
+        id: "toggle-ignore-whitespace",
+        label: "Toggle ignore whitespace",
+        keywords: ["diff", "whitespace", "ignore"],
+        run: () => update({ ignoreWhitespace: !settings.ignoreWhitespace }),
+      },
+      {
+        id: "increase-context-lines",
+        label: "Increase context lines",
+        keywords: ["diff", "context", "lines", "more"],
+        run: () => update({ contextLines: Math.min(settings.contextLines + 1, MAX_CONTEXT_LINES) }),
+      },
+      {
+        id: "decrease-context-lines",
+        label: "Decrease context lines",
+        keywords: ["diff", "context", "lines", "fewer", "less"],
+        run: () => update({ contextLines: Math.max(settings.contextLines - 1, 0) }),
+      },
+      {
+        id: "toggle-syntax-highlighting",
+        label: "Toggle syntax highlighting",
+        keywords: ["diff", "syntax", "highlight", "colors"],
+        run: () => update({ syntaxHighlight: !settings.syntaxHighlight }),
+      },
+    );
+    // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
+    if (!repositoryOperationDisabled) {
+      if (diffCommands.currentFile !== null) {
+        commands.push({
+          id: "discard-current-file",
+          label: "Discard changes in current file",
+          keywords: ["discard", "revert", "file"],
+          run: diffCommands.requestDiscardCurrentFile,
+        });
+      }
+      if (state.status.some((entry) => !entry.staged && entry.kind !== "Conflicted")) {
+        commands.push({
+          id: "discard-all-unstaged",
+          label: "Discard all unstaged changes",
+          keywords: ["discard", "revert", "all", "unstaged"],
+          run: diffCommands.requestDiscardAllUnstaged,
+        });
+      }
+    }
+  }
+
   for (const title of SIDEBAR_SECTIONS) {
     const panelId = sidebarSectionPanelId(title);
     if (panelId !== null && !panelVisibility[panelId]) continue;
@@ -435,7 +497,7 @@ export function buildCommands(
 }
 
 // Heading order used when the palette shows its unfiltered, grouped view.
-export const COMMAND_GROUPS = ["Branches", "Remotes", "Stash", "Go to", "Repositories", "General"] as const;
+export const COMMAND_GROUPS = ["Branches", "Remotes", "Stash", "Diff", "Go to", "Repositories", "General"] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 /** Derives a command's display group from its id; unknown ids fall into "General". */
@@ -452,6 +514,16 @@ export function commandGroup(id: string): CommandGroup {
     return "Remotes";
   }
   if (id === "save-stash" || id.startsWith("apply-stash:") || id.startsWith("drop-stash:")) return "Stash";
+  if (
+    id === "toggle-ignore-whitespace" ||
+    id === "increase-context-lines" ||
+    id === "decrease-context-lines" ||
+    id === "toggle-syntax-highlighting" ||
+    id === "discard-current-file" ||
+    id === "discard-all-unstaged"
+  ) {
+    return "Diff";
+  }
   if (id.startsWith("go-to:")) return "Go to";
   if (id.startsWith("switch-repo:") || id === "close-tab") return "Repositories";
   return "General";

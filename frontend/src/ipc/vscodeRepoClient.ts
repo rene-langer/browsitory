@@ -4,6 +4,8 @@ import type {
   ConflictSegment,
   CreatePullRequest,
   DiffHunk,
+  DiffOptions,
+  DiffSettings,
   FileConflictChoice,
   ForgeProvider,
   ForgeRepository,
@@ -185,10 +187,10 @@ export const vscodeRepoClient: RepoClient = {
   getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
   getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
     call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
-  getWorkingDiff: (repoPath: string, path: string, staged: boolean) =>
-    call<DiffHunk[]>("get_working_diff", { repoPath, path, staged }),
-  getCommitDiff: (repoPath: string, commitId: string, path: string) =>
-    call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path }),
+  getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions) =>
+    call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts }),
+  getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
+    call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
 
   pickRepoFolder: () => call<string | null>("pick_repo_folder", {}),
   listRecentRepos: () => call<string[]>("list_recent_repos", {}),
@@ -221,12 +223,23 @@ export const vscodeRepoClient: RepoClient = {
     call<string>("get_commit_message", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
-  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    call<void>("stage_hunk", { repoPath, path, oldStart, newStart }),
-  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart }),
-  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number) =>
-    call<void>("discard_hunk", { repoPath, path, oldStart, newStart }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    call<void>("stage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
+    call<void>("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  discardFile: (repoPath: string, path: string) => call<void>("discard_file", { repoPath, path }),
+  discardAllUnstaged: (repoPath: string, paths: string[]) => call<void>("discard_all_unstaged", { repoPath, paths }),
+  ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
+  getDiffSettings: () => call<DiffSettings>("get_diff_settings", {}),
+  setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),
   commit: (repoPath: string, message: string) => call<void>("commit", { repoPath, message }),
   listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>

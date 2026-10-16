@@ -40,10 +40,11 @@ pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use remote::*;
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
-    commit, discard_hunk, get_blame, get_commit_diff, get_commit_files, get_commit_graph,
-    get_commit_message, get_graph_branch_selection, get_graph_remote_branch_selection, get_status,
-    get_working_diff, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
-    stage_hunk, unstage_file, unstage_hunk,
+    commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
+    get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
+    get_graph_branch_selection, get_graph_remote_branch_selection, get_status, get_working_diff,
+    ignore_path, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
+    stage_hunk, stage_lines, unstage_file, unstage_hunk, unstage_lines,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -979,6 +980,62 @@ pub fn list_recent_repos() -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffOptionsDto {
+    pub ignore_whitespace: bool,
+    pub context_lines: u32,
+}
+
+impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
+    fn from(dto: DiffOptionsDto) -> Self {
+        git_core::diff::DiffOptions {
+            ignore_whitespace: dto.ignore_whitespace,
+            context_lines: dto.context_lines,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffSettingsDto {
+    pub ignore_whitespace: bool,
+    pub context_lines: u32,
+    pub syntax_highlight: bool,
+}
+
+impl From<config::DiffSettings> for DiffSettingsDto {
+    fn from(s: config::DiffSettings) -> Self {
+        DiffSettingsDto {
+            ignore_whitespace: s.ignore_whitespace,
+            context_lines: s.context_lines,
+            syntax_highlight: s.syntax_highlight,
+        }
+    }
+}
+
+impl From<DiffSettingsDto> for config::DiffSettings {
+    fn from(d: DiffSettingsDto) -> Self {
+        config::DiffSettings {
+            ignore_whitespace: d.ignore_whitespace,
+            context_lines: d.context_lines,
+            syntax_highlight: d.syntax_highlight,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_diff_settings() -> Result<DiffSettingsDto, String> {
+    config::get_diff_settings()
+        .map(DiffSettingsDto::from)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_diff_settings(settings: DiffSettingsDto) -> Result<(), String> {
+    config::set_diff_settings(&settings.into()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_last_seen_version() -> Result<Option<String>, String> {
     config::get_last_seen_version().map_err(|e| e.to_string())
@@ -1032,10 +1089,42 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
-        OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        ResetModeDto, SubmoduleInfoDto, WorkspaceDto, WorktreeInfoDto,
+        transfer_event_payload, DiffOptionsDto, DiffSettingsDto, ForgeProviderDto, GraphCommitDto,
+        HeadInfoDto, OpenRepoEntryDto, OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto,
+        ReflogEntryDto, RemoteAuthModeDto, ResetModeDto, SubmoduleInfoDto, WorkspaceDto,
+        WorktreeInfoDto,
     };
+
+    #[test]
+    fn diff_options_dto_parses_camel_case() {
+        let dto: DiffOptionsDto = serde_json::from_value(
+            serde_json::json!({"ignoreWhitespace": true, "contextLines": 5}),
+        )
+        .unwrap();
+        assert_eq!(
+            git_core::diff::DiffOptions::from(dto),
+            git_core::diff::DiffOptions {
+                ignore_whitespace: true,
+                context_lines: 5
+            }
+        );
+    }
+
+    #[test]
+    fn diff_settings_dto_round_trips_camel_case() {
+        let dto = DiffSettingsDto::from(config::DiffSettings {
+            ignore_whitespace: false,
+            context_lines: 3,
+            syntax_highlight: true,
+        });
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true})
+        );
+        let back: DiffSettingsDto = serde_json::from_value(json).unwrap();
+        assert_eq!(config::DiffSettings::from(back).context_lines, 3);
+    }
 
     #[test]
     fn workspace_dto_serializes_camel_case_paths() {

@@ -110,6 +110,27 @@ fn dedupe_workspace_name(existing: &[Workspace], name: &str, excluding_id: Optio
     }
 }
 
+/// Global diff display/staging preferences, persisted as the `[diff]` TOML table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiffSettings {
+    pub ignore_whitespace: bool,
+    pub context_lines: u32,
+    pub syntax_highlight: bool,
+}
+
+impl Default for DiffSettings {
+    fn default() -> Self {
+        Self {
+            ignore_whitespace: false,
+            context_lines: 3,
+            syntax_highlight: true,
+        }
+    }
+}
+
+const MAX_CONTEXT_LINES: u32 = 20;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -118,9 +139,13 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
-    // These fields serialize as TOML array-of-tables because their element type is a struct.
-    // TOML requires plain `key = value` lines to precede an array-of-tables section, so they
-    // must remain last.
+    // `diff` serializes as a TOML `[diff]` table. Tables must follow plain `key = value`
+    // lines, so it sits after the plain keys.
+    // The fields after it serialize as TOML array-of-tables because their element type is a
+    // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
+    // section, so they must remain last.
+    #[serde(default)]
+    diff: DiffSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -201,6 +226,31 @@ pub fn get_last_seen_version_at(config_file: &Path) -> Result<Option<String>, Co
 pub fn set_last_seen_version_at(config_file: &Path, version: &str) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config.last_seen_version = Some(version.to_string());
+    write_config(config_file, &config)
+}
+
+pub fn get_diff_settings() -> Result<DiffSettings, ConfigError> {
+    get_diff_settings_at(&config_file_path()?)
+}
+
+pub fn set_diff_settings(settings: &DiffSettings) -> Result<(), ConfigError> {
+    set_diff_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_diff_settings_at(config_file: &Path) -> Result<DiffSettings, ConfigError> {
+    Ok(read_config(config_file)?.diff)
+}
+
+/// Persists `settings`, clamping `context_lines` to 20 on write.
+pub fn set_diff_settings_at(
+    config_file: &Path,
+    settings: &DiffSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.diff = DiffSettings {
+        context_lines: settings.context_lines.min(MAX_CONTEXT_LINES),
+        ..*settings
+    };
     write_config(config_file, &config)
 }
 
