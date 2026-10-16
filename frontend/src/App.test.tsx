@@ -550,4 +550,42 @@ describe("App", () => {
       value: originalInnerWidth,
     });
   });
+
+  it("opens a working-tree file's history in place of the graph and closes it again", async () => {
+    const graphCommit = {
+      id: "c2",
+      shortId: "c2",
+      summary: "edit a",
+      authorName: "A",
+      authorEmail: "a@example.com",
+      timestamp: 1_700_000_000,
+      parentIds: [],
+      branchRefs: [],
+      remoteBranchRefs: [],
+    };
+    const getFileHistory = vi.fn(async () => [{ commit: graphCommit, path: "a.txt", oldPath: null }]);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getFileHistory,
+      getCommitFiles: async () => ["a.txt"],
+      getCommitMessage: async () => "edit a",
+    });
+
+    render(<App client={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: "History of a.txt" }));
+
+    expect(await screen.findByRole("toolbar", { name: "File history" })).toHaveTextContent("History: a.txt");
+    expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
+    expect(getFileHistory).toHaveBeenCalledWith("/repos/a", "a.txt", 300);
+    expect(await screen.findByRole("option", { selected: true })).toHaveTextContent("edit a");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close file history" }));
+    expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+  });
 });

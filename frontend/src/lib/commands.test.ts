@@ -762,10 +762,27 @@ describe("diff option and discard commands", () => {
       currentFile: null as string | null,
       requestDiscardCurrentFile: vi.fn(),
       requestDiscardAllUnstaged: vi.fn(),
+      openCurrentFileHistory: vi.fn(),
       ...extra,
     };
     return { diffCommands, commands: buildCommands(state, undefined, [], undefined, undefined, undefined, undefined, diffCommands) };
   };
+
+  it("offers file history of the current file, even while an operation is running", () => {
+    const state = makeAppState({ pending: true, status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const { commands, diffCommands } = build(state, { currentFile: "a.txt" });
+
+    const command = commands.find((c) => c.id === "file-history-current-file");
+    expect(command?.label).toBe("File history of current file");
+    command!.run();
+    expect(diffCommands.openCurrentFileHistory).toHaveBeenCalled();
+  });
+
+  it("omits file history when there is no current file", () => {
+    const { commands } = build(makeAppState());
+
+    expect(commands.some((c) => c.id === "file-history-current-file")).toBe(false);
+  });
 
   it("adds diff option commands that update settings", () => {
     const { commands, diffCommands } = build(makeAppState());
