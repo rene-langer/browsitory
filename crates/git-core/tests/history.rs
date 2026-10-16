@@ -2,6 +2,7 @@ mod common;
 
 use common::init_repo;
 use git2::{Oid, Repository};
+use git_core::diff::{commit_rename_diff, DiffLineOrigin, DiffOptions};
 use git_core::history::{file_history, FileHistoryEntry, HistoryError};
 
 const REGULAR: u32 = 0o100644;
@@ -348,4 +349,94 @@ fn rejects_paths_outside_the_repository() {
             "{bad:?} should be rejected"
         );
     }
+}
+
+#[test]
+fn rename_diff_shows_only_the_edited_lines() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(&repo, &[("old.txt", FIVE_LINES, REGULAR)], &[], "add");
+    let c2 = commit_tree(
+        &repo,
+        &[("new.txt", FIVE_LINES_EDITED, REGULAR)],
+        &[c1],
+        "rename and edit",
+    );
+
+    let hunks = commit_rename_diff(
+        &repo,
+        &c2.to_string(),
+        "old.txt",
+        "new.txt",
+        &DiffOptions::default(),
+    )
+    .unwrap();
+
+    let changed: Vec<(DiffLineOrigin, &str)> = hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.origin != DiffLineOrigin::Context)
+        .map(|l| (l.origin, l.content.trim_end()))
+        .collect();
+    assert_eq!(
+        changed,
+        vec![
+            (DiffLineOrigin::Remove, "l5"),
+            (DiffLineOrigin::Add, "CHANGED")
+        ]
+    );
+}
+
+#[test]
+fn pure_rename_diff_has_no_hunks() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(&repo, &[("old.txt", FIVE_LINES, REGULAR)], &[], "add");
+    let c2 = commit_tree(&repo, &[("new.txt", FIVE_LINES, REGULAR)], &[c1], "rename");
+
+    let hunks = commit_rename_diff(
+        &repo,
+        &c2.to_string(),
+        "old.txt",
+        "new.txt",
+        &DiffOptions::default(),
+    )
+    .unwrap();
+
+    assert!(hunks.is_empty());
+}
+
+#[test]
+fn rename_diff_matches_glob_characters_literally() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(
+        &repo,
+        &[
+            ("o[1]*.txt", FIVE_LINES, REGULAR),
+            ("o1x.txt", "noise\n", REGULAR),
+        ],
+        &[],
+        "add",
+    );
+    let c2 = commit_tree(
+        &repo,
+        &[("n[1]*.txt", FIVE_LINES_EDITED, REGULAR)],
+        &[c1],
+        "rename",
+    );
+
+    let hunks = commit_rename_diff(
+        &repo,
+        &c2.to_string(),
+        "o[1]*.txt",
+        "n[1]*.txt",
+        &DiffOptions::default(),
+    )
+    .unwrap();
+
+    let all: Vec<&str> = hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|l| l.content.trim_end())
+        .collect();
+    assert!(!all.contains(&"noise"));
+    assert!(all.contains(&"CHANGED"));
 }
