@@ -139,6 +139,44 @@ Drop and Interactive rebase… work for any selection. Selections that include a
 root commit, or commits that aren't on the current branch, can't be rebased. Esc collapses a
 selection back to one commit.
 
+## Rewriting and moving commits
+
+Right-click a commit in the graph:
+
+- **Cherry-pick** applies that commit on top of your current branch (not available on the
+  current HEAD commit). If it conflicts, the status strip shows **Cherry-picking**, conflicts
+  resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes it and
+  keeps unrelated unstaged edits. A pick is refused if it would overwrite unstaged edits or if
+  changes are staged. Picking a commit whose changes are already on the branch reports
+  "Nothing to apply — those changes are already on this branch." Merge commits can't be
+  cherry-picked yet.
+- **Revert** commits the inverse of that commit, with the same conflict flow (**Reverting**,
+  **Abort revert**). Merge commits can't be reverted yet.
+- **Checkout (detached)** checks the commit out without a branch. The sync bar shows
+  **HEAD detached at …** and push and pull are disabled until you check out a branch.
+- **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes
+  staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked files;
+  untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not available
+  on a detached HEAD.
+- **Edit commit message…** appears on the latest commit only and amends its message.
+
+**Amend last commit.** Tick **Amend last commit** under the commit message. The message fills
+with the last commit's, and the **Commit** button becomes **Amend**: anything staged is folded
+into that commit (or just reword it). If that commit is already on the upstream, a warning reads
+"Already pushed — you'll need to force push." Whatever you had half-typed is kept and comes back
+when you untick amend or after a successful amend.
+
+**Force push.** When a push is rejected because the remote has commits you don't, the error
+offers **Force push (with lease)…**. The command palette (Remotes group) has it too; it is hidden
+on a detached HEAD or when the branch has no upstream. It always asks for confirmation. The push
+is refused if the remote branch changed since your last fetch ("⟨remote⟩/⟨branch⟩ changed since
+your last fetch. Fetch and review before force pushing."). Like `git push --force-with-lease`, a
+fetch between reviewing and pushing refreshes the lease, so review the remote branch after your
+last fetch, not before.
+
+The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
+and to amend the last commit.
+
 ## Pull requests
 
 For GitHub and Bitbucket remotes, expand **Pull Requests** to save a

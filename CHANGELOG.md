@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Cherry-pick, revert, reset, amend and force push
+
+- Commit context menu: Cherry-pick, Revert, Checkout (detached) and "Reset ⟨branch⟩ to here…"
+  (soft, mixed or hard; hard asks first). Cherry-pick and revert conflicts use the merge
+  conflict flow, with their own status-strip label and abort button.
+- "Amend last commit" toggle in the commit box, plus "Edit commit message…" on the latest
+  commit; warns when that commit is already pushed.
+- Force push with lease: offered when a push is rejected as non-fast-forward, and from the
+  palette; refused if the remote branch moved since the last fetch.
+- Detached HEAD is shown in the sync bar, with push and pull disabled.
+- Palette commands for all of the above.
+
 ### Multi-select commits for interactive rebase
 
 - Ctrl/Cmd+click commits in the graph to select several, including non-adjacent ones (Shift
