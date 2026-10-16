@@ -69,13 +69,16 @@ selection, or the whole hunk when nothing is selected.
 
 ### Discarding and ignoring files
 
-Open a file's **⋯** menu (or right-click the file header, or press Shift+F10) for **Discard
-changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
+Open a file's **⋯** menu, right-click the file header, or press Shift+F10 (or the Menu key)
+with the file row focused, for **Discard changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
 appears, and discarding cannot be undone. **Discard all…** next to **Stage all** discards
-every unstaged change after confirmation.
+every unstaged change after confirmation. It deletes untracked files and skips conflicted
+ones.
 
-For untracked files the menu also offers **Ignore file**, **Ignore all \*.ext** and **Ignore
-folder**. Each appends a pattern to the repository's `.gitignore` (creating it if needed).
+For untracked files the menu also offers ignore items. Each appends a pattern to the
+repository's `.gitignore` (creating it if needed). **Ignore file** is always offered.
+**Ignore all \*.ext** appears only when the file name has an extension. **Ignore folder
+⟨folder⟩/** appears only when the file is in a subfolder.
 
 ## Browsing history and diffs
 
@@ -97,9 +100,9 @@ based on the last fetch.
 ### Diff options
 
 The diff toolbar has three controls, remembered across sessions: **Ignore whitespace**,
-**Context lines** (0 to 20) and **Syntax highlighting**. While whitespace is ignored, line
-staging is unavailable in the working tree and a hint says so; staging whole files still
-works. Highlighting covers common languages and is skipped for files over 2,000 lines. The
+**Context lines** (0 to 20) and **Syntax highlighting**. While whitespace is ignored, partial
+staging (lines and hunks) is unavailable in the working tree and a hint says so; staging and
+unstaging whole files still works. Highlighting covers common languages and is skipped for files over 2,000 lines. The
 command palette has an entry for each option.
 
 ## Branches and remotes

@@ -24,7 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   untracked files Ignore file / Ignore all *.ext / Ignore folder, which append to `.gitignore`.
   Discard refuses paths outside the repository, including through symlinked folders, and
   ignoring never overwrites a `.gitignore` that can't be read.
-- "Discard all…" next to "Stage all" discards every unstaged change, with confirmation.
+- "Discard all…" next to "Stage all" discards every unstaged change, with confirmation; untracked files are deleted and
+  conflicted files are skipped.
 - Palette commands for each diff option and for discarding.
 
 ### Cherry-pick, revert, reset, amend and force push
@@ -80,7 +81,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Staged files no longer offer a discard action (button or `d`); it could previously revert an
+- Staged files no longer offer a discard action (the hunk and line discard buttons and `d` in a staged file's diff); it could previously revert an
   unrelated hunk of unstaged changes.
 - Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
   loads; empty diffs now read "No text differences (binary file or mode-only change)".
