@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   BranchInfo,
   GraphCommit,
@@ -3033,5 +3033,59 @@ describe("useAppState pull requests", () => {
     // ...and remote B's own stale rows are cleared rather than left looking like a successful list.
     expect(result.current.state.pullRequests["remote-b"]).toBeUndefined();
     expect(result.current.state.error).toContain("the provider rejected the request");
+  });
+});
+
+describe("history actions", () => {
+  it("loads headInfo on refresh", async () => {
+    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null };
+    const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.headInfo).toEqual(info);
+  });
+
+  it("cherryPick calls the client then refreshes", async () => {
+    const cherryPick = vi.fn(async () => ({ kind: "Committed", commitId: "n1" }) as const);
+    const getStatus = vi.fn(async () => []);
+    const { result } = renderHook(() => useAppState(transferClient({ cherryPick, getStatus }), TEST_REPO_PATH));
+    await act(() => result.current.cherryPick("c1"));
+    expect(cherryPick).toHaveBeenCalledWith(TEST_REPO_PATH, "c1");
+    expect(getStatus).toHaveBeenCalled();
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("surfaces a backend refusal as state.error", async () => {
+    const revertCommit = vi.fn(async () => {
+      throw new Error("Cherry-picking or reverting merge commits isn't supported yet.");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ revertCommit }), TEST_REPO_PATH));
+    await act(() => result.current.revertCommit("m1"));
+    expect(result.current.state.error).toContain("merge commits isn't supported");
+  });
+
+  it("resetToCommit and checkoutCommit pass their arguments through", async () => {
+    const resetToCommit = vi.fn(async () => {});
+    const checkoutCommit = vi.fn(async () => {});
+    const { result } = renderHook(() =>
+      useAppState(transferClient({ resetToCommit, checkoutCommit }), TEST_REPO_PATH),
+    );
+    await act(() => result.current.resetToCommit("c1", "hard"));
+    await act(() => result.current.checkoutCommit("c2"));
+    expect(resetToCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "c1", "hard");
+    expect(checkoutCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "c2");
+  });
+
+  it("amendCommit turns amend mode off on success and keeps it on failure", async () => {
+    let fail = true;
+    const amendCommit = vi.fn(async () => {
+      if (fail) throw new Error("boom");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ amendCommit }), TEST_REPO_PATH));
+    act(() => result.current.setAmendMode(true));
+    await act(() => result.current.amendCommit("m"));
+    expect(result.current.state.amendMode).toBe(true);
+    fail = false;
+    await act(() => result.current.amendCommit("m"));
+    expect(result.current.state.amendMode).toBe(false);
   });
 });
