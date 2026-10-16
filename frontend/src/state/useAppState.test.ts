@@ -3156,4 +3156,54 @@ describe("history actions", () => {
     act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null }));
     expect(result.current.state.error).toBe("Push failed");
   });
+
+  describe("force push offer lifecycle", () => {
+    const failed = (operationId: string, operation: TransferProgress["operation"], errorKind: TransferProgress["errorKind"]): TransferProgress => ({
+      operationId, operation, phase: "Failed", errorKind, current: 0, total: 0, receivedBytes: 0, message: null,
+    });
+    async function setup() {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      let n = 0;
+      const client = transferClient({
+        pushCurrentBranch: async () => `push-${++n}`,
+        forcePushCurrentBranch: async () => "force-1",
+        subscribeTransferProgress: (callback) => {
+          listener = callback;
+          return () => {};
+        },
+      });
+      const hook = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => hook.result.current.pushCurrentBranch("origin"));
+      act(() => listener!(failed("push-1", "PushBranch", "NonFastForward")));
+      return { ...hook, emit: (p: TransferProgress) => act(() => listener!(p)) };
+    }
+
+    it("is cleared by dismissing the error", async () => {
+      const { result } = await setup();
+      expect(result.current.state.forcePushOffer).not.toBeNull();
+      act(() => result.current.dismissError());
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is cleared when a new push starts", async () => {
+      const { result } = await setup();
+      await act(() => result.current.pushCurrentBranch("origin"));
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is cleared when a push succeeds", async () => {
+      const { result, emit } = await setup();
+      await act(() => result.current.pushCurrentBranch("origin"));
+      emit({ ...failed("push-2", "PushBranch", null), phase: "Completed" });
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+
+    it("is not set by a force push failing non-fast-forward", async () => {
+      const { result, emit } = await setup();
+      act(() => result.current.dismissError());
+      await act(() => result.current.forcePushCurrentBranch("origin"));
+      emit(failed("force-1", "ForcePushBranch", "NonFastForward"));
+      expect(result.current.state.forcePushOffer).toBeNull();
+    });
+  });
 });

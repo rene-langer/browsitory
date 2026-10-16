@@ -462,7 +462,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
     useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const dismissError = useCallback(() => {
-    setState((prev) => ({ ...prev, error: null }));
+    setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null }));
   }, []);
 
   return {

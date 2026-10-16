@@ -115,6 +115,7 @@ export function useRemoteTransferActions(
 
       if (progress.phase === "Completed") {
         transferRequestPending.current = false;
+        setState((prev) => ({ ...prev, forcePushOffer: null }));
         void refresh().finally(() => {
           if (activeTransferId.current !== progress.operationId) return;
           activeTransferId.current = null;
@@ -226,7 +227,7 @@ export function useRemoteTransferActions(
       try {
         transferRequestPending.current = true;
         activeTransferId.current = null;
-        setState((prev) => ({ ...prev, pending: true, error: null }));
+        setState((prev) => ({ ...prev, pending: true, error: null, forcePushOffer: null }));
         const operationId = await start();
         if (transferRequestPending.current && activeTransferId.current === null) {
           activeTransferId.current = operationId;

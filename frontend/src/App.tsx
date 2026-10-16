@@ -186,7 +186,7 @@ function RepoWorkspace({
       },
     [dismissError],
   );
-  const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? "";
+  const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   const pullOutcome = appState.state.pullOutcome;
   useEffect(() => {
     if (pullOutcome === null) return;
