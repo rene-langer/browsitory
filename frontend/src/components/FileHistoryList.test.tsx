@@ -26,8 +26,8 @@ function state(overrides: Partial<FileHistoryState> = {}): FileHistoryState {
   return { path: "f.txt", entries: [], limit: 300, hasMore: false, loading: false, error: null, ...overrides };
 }
 
-function renderList(history: FileHistoryState, overrides: Partial<React.ComponentProps<typeof FileHistoryList>> = {}) {
-  const props = {
+function baseProps(history: FileHistoryState, overrides: Partial<React.ComponentProps<typeof FileHistoryList>> = {}) {
+  return {
     history,
     selectedRow: "uncommitted" as const,
     onSelectRow: vi.fn(),
@@ -36,6 +36,10 @@ function renderList(history: FileHistoryState, overrides: Partial<React.Componen
     onRetry: vi.fn(),
     ...overrides,
   };
+}
+
+function renderList(history: FileHistoryState, overrides: Partial<React.ComponentProps<typeof FileHistoryList>> = {}) {
+  const props = baseProps(history, overrides);
   render(<FileHistoryList {...props} />);
   return props;
 }
@@ -92,6 +96,41 @@ describe("FileHistoryList", () => {
     renderList(state({ loading: true }));
 
     expect(screen.queryByText(/No committed history/)).toBeNull();
+  });
+
+  it("shows loading feedback only while the first load is in flight", () => {
+    const { unmount } = render(<FileHistoryList {...baseProps(state({ loading: true }))} />);
+    expect(screen.getByText("Loading history…")).toBeInTheDocument();
+    unmount();
+    render(<FileHistoryList {...baseProps(state())} />);
+    expect(screen.queryByText("Loading history…")).toBeNull();
+  });
+
+  it("renders remote branch badges", () => {
+    const e = entry("c1");
+    e.commit.remoteBranchRefs = ["origin/main"];
+    renderList(state({ entries: [e] }));
+
+    expect(screen.getByText("origin/main")).toBeInTheDocument();
+  });
+
+  it("scrolls the newly selected row into view", () => {
+    const spy = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      const history = state({ entries: [entry("c2"), entry("c1")] });
+      const props = baseProps(history, { selectedRow: { commitId: "c2" } });
+      const { rerender } = render(<FileHistoryList {...props} />);
+      spy.mockClear();
+      fireEvent.keyDown(screen.getByRole("listbox", { name: "File history commits" }), { key: "ArrowDown" });
+      rerender(<FileHistoryList {...props} selectedRow={{ commitId: "c1" }} />);
+
+      expect(spy).toHaveBeenCalledWith({ block: "nearest" });
+      expect(spy.mock.contexts.at(-1)).toBe(screen.getAllByRole("option")[1]);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("shows an error with Retry", () => {

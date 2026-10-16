@@ -1502,6 +1502,30 @@ describe("DiffPane diff options contract", () => {
       expect(await screen.findByText("f.txt")).toBeInTheDocument();
     });
 
+    it("offers no History button on the focused file, since its history is already open", async () => {
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt", "g.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { fileHistoryFocus: { path: "g.txt", oldPath: null }, onOpenFileHistory: vi.fn() },
+      );
+
+      expect(await screen.findByText("g.txt")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "History of g.txt" })).toBeNull();
+    });
+
+    it("collapses only the focused file from its toggle, without revealing other files", async () => {
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt", "g.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { fileHistoryFocus: { path: "g.txt", oldPath: null } },
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Collapse g.txt" }));
+
+      expect(screen.getByRole("button", { name: "Expand g.txt" })).toBeInTheDocument();
+      expect(screen.queryByText("f.txt")).toBeNull();
+    });
+
     it("uses the rename diff and labels the old path for a rename entry", async () => {
       const getCommitRenameDiff = vi.fn(async () => []);
       const getCommitDiff = vi.fn(async () => []);

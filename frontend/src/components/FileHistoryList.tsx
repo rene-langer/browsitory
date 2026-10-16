@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { formatShortDate } from "../lib/formatDate";
 import type { SelectedRow } from "../state/useAppState";
@@ -26,6 +27,14 @@ export function FileHistoryList({
 }) {
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = history.entries.findIndex((e) => e.commit.id === selectedId);
+
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Keep the keyboard-driven selection visible in a long history.
+  useEffect(() => {
+    const selected = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
+    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     if (event.key === "Escape") {
@@ -60,7 +69,11 @@ export function FileHistoryList({
           No committed history for <code className={styles.path}>{history.path}</code>.
         </p>
       )}
+      {history.loading && history.entries.length === 0 && history.error === null && (
+        <p className={styles.empty}>Loading history…</p>
+      )}
       <ul
+        ref={listRef}
         className={graphStyles.list}
         role="listbox"
         aria-label="File history commits"
@@ -78,6 +91,11 @@ export function FileHistoryList({
           >
             {entry.commit.branchRefs.map((ref) => (
               <span key={ref} className={graphStyles.branchBadge}>
+                {ref}
+              </span>
+            ))}
+            {entry.commit.remoteBranchRefs.map((ref) => (
+              <span key={ref} className={graphStyles.remoteBranchBadge}>
                 {ref}
               </span>
             ))}

@@ -27,8 +27,9 @@ pub enum HistoryError {
 ///
 /// The tracked path is carried from each commit to its parents (renamed where the parent has
 /// the file under another name), so a rename on one branch doesn't rename the file on another.
-/// A commit is listed when it differs from every parent at its path (git's TREESAME rule): a
-/// merge that took one side's version unchanged is hidden, the side commit is shown instead.
+/// A commit is listed when it differs from every parent at its path, so a merge that took one
+/// side's version unchanged is hidden. The walk follows every parent (like
+/// `git log --full-history`), so a side-branch edit later discarded by a merge is still listed.
 pub fn file_history(
     repo: &Repository,
     path: &str,

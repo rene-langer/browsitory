@@ -7,8 +7,6 @@ import { expect } from "@wdio/globals";
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const OLD_NAME = "history-old.txt";
 const NEW_NAME = "history-new.txt";
-// Spec-unique throwaway file; see blame-viewer.spec.ts for why each spec needs its own.
-const PRIME_FILE = "history-prime.txt";
 const BODY = "l1\nl2\nl3\nl4\nl5\n";
 
 function git(...args: string[]) {
@@ -33,7 +31,6 @@ describe("Browsitory file history", () => {
     git("commit", "-m", "e2e: history rename");
     // Leave the file modified so it shows in the working tree with a History button.
     fs.writeFileSync(path.join(E2E_REPO_PATH, NEW_NAME), "l1\nl2\nl3\nl4\nCHANGED\nl6\n");
-    fs.writeFileSync(path.join(E2E_REPO_PATH, PRIME_FILE), "prime\n");
   });
 
   it("opens a file's history, shows the rename diff, and closes back to the graph", async () => {
@@ -48,8 +45,13 @@ describe("Browsitory file history", () => {
     await browser.execute((el) => (el as HTMLElement).click(), renameRow);
     await (await $(`span=Renamed from ${OLD_NAME}`)).waitForExist({ timeout: 10000 });
 
+    // The rename diff is against the old path, so only the edited line is added.
+    await (await $(".diff-line-add*=CHANGED")).waitForExist({ timeout: 10000 });
+
     const addRow = await $("li*=e2e: history add");
     await addRow.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), addRow);
+    await (await $(".diff-line-add*=l1")).waitForExist({ timeout: 10000 });
 
     await clickViaScript(`button[aria-label="Close file history"]`);
     await (await $(`ul[aria-label="Commit history"]`)).waitForExist({ timeout: 10000 });

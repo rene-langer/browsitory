@@ -1181,6 +1181,7 @@ function CommitDiffPane({
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
+  const [focusCollapsed, setFocusCollapsed] = useState(false);
 
   const loadFiles = () => {
     let ignore = false;
@@ -1258,10 +1259,9 @@ function CommitDiffPane({
               commitId={commitId}
               path={focus.path}
               oldPath={focus.oldPath}
-              collapsed={false}
-              onToggleCollapse={() => setShowAll(true)}
+              collapsed={focusCollapsed}
+              onToggleCollapse={() => setFocusCollapsed((c) => !c)}
               onSelectRow={onSelectRow}
-              onOpenFileHistory={onOpenFileHistory}
             />
           </ul>
           {files.length > 1 && (

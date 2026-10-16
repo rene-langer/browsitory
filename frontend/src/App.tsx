@@ -93,6 +93,11 @@ function RepoWorkspace({
     fileHistory.history !== null && typeof selectedRow === "object"
       ? fileHistory.history.entries.find((e) => e.commit.id === selectedRow.commitId) ?? null
       : null;
+  const historyEntries = fileHistory.history?.entries;
+  const diffPaneCommits = useMemo(
+    () => historyEntries?.map((e) => e.commit) ?? appState.state.commits,
+    [historyEntries, appState.state.commits],
+  );
   const handleCommitDraftChange = useCallback(
     (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
     [onCommitDraftChange, repoPath],
@@ -549,7 +554,7 @@ function RepoWorkspace({
                 repoPath={repoPath}
                 client={client}
                 selectedRow={appState.state.selectedRow}
-                commits={fileHistory.history?.entries.map((e) => e.commit) ?? appState.state.commits}
+                commits={diffPaneCommits}
                 fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
                 onOpenFileHistory={fileHistory.open}
                 status={appState.state.status}
