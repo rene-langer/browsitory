@@ -73,6 +73,16 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     Ok(())
 }
 
+/// Checks out `commit_id` as a detached HEAD. Same refuse-before-move ordering as
+/// `switch_branch`: the tree checkout (safe strategy) runs first, so a refused checkout leaves
+/// HEAD and the working tree untouched.
+pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchError> {
+    let target = repo.find_commit(git2::Oid::from_str(commit_id)?)?;
+    repo.checkout_tree(target.as_object(), None)?;
+    repo.set_head_detached(target.id())?;
+    Ok(())
+}
+
 pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), BranchError> {
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
     branch.rename(new_name, false)?;

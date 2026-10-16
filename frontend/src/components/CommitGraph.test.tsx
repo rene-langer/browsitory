@@ -36,10 +36,22 @@ const commits: GraphCommit[] = [
   },
 ];
 
+const NO_HEAD = { headId: null, detachedAt: null, headPushed: false, operation: null } as const;
+const historyProps = {
+  headInfo: NO_HEAD,
+  currentBranch: "main",
+  onCherryPick: vi.fn(),
+  onRevert: vi.fn(),
+  onCheckoutCommit: vi.fn(),
+  onResetToCommit: vi.fn(),
+  onEditHeadMessage: vi.fn(),
+};
+
 describe("CommitGraph", () => {
   it("exposes the row list as a labeled listbox, matching ListRow's option rows", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -56,6 +68,7 @@ describe("CommitGraph", () => {
   it("renders the Uncommitted Changes row with a change-count badge", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -72,6 +85,7 @@ describe("CommitGraph", () => {
   it("renders each commit's short id and summary", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -92,6 +106,7 @@ describe("CommitGraph", () => {
     const onSelectRow = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -111,6 +126,7 @@ describe("CommitGraph", () => {
     const onSelectRow = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -131,6 +147,7 @@ describe("CommitGraph", () => {
     const onSelectRow = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -151,6 +168,7 @@ describe("CommitGraph", () => {
     const onSelectRow = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow={{ commitId: "bbb222..." }}
@@ -170,6 +188,7 @@ describe("CommitGraph", () => {
   it("right-clicking a commit row shows a 'Branch from here' menu entry", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -189,6 +208,7 @@ describe("CommitGraph", () => {
     const onBranchFromCommit = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -209,6 +229,7 @@ describe("CommitGraph", () => {
   it("right-clicking the Uncommitted Changes row does not show the menu", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -231,6 +252,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithBranch}
         selectedRow="uncommitted"
@@ -251,6 +273,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
@@ -271,6 +294,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
@@ -292,6 +316,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
@@ -313,6 +338,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
@@ -334,6 +360,7 @@ describe("CommitGraph", () => {
     ];
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commitsWithBothBadges}
         selectedRow="uncommitted"
@@ -353,6 +380,7 @@ describe("CommitGraph", () => {
   it("renders a lane graphic for every commit row", () => {
     const { container } = render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -369,6 +397,7 @@ describe("CommitGraph", () => {
   it("still renders each commit's short id and summary as plain text in its own li (hard E2E compatibility constraint)", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -388,6 +417,7 @@ describe("CommitGraph", () => {
   it("still sets aria-selected on the selected commit's li (hard E2E compatibility constraint)", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow={{ commitId: "aaa111..." }}
@@ -407,6 +437,7 @@ describe("CommitGraph", () => {
     const onRebaseFromCommit = vi.fn();
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -464,6 +495,7 @@ describe("CommitGraph", () => {
 
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={forkCommits}
         selectedRow="uncommitted"
@@ -500,6 +532,7 @@ describe("CommitGraph", () => {
     const [selectedRow, setSelectedRow] = useState<SelectedRow>(props.selectedRow);
     return (
       <CommitGraph
+        {...historyProps}
         {...props}
         selectedRow={selectedRow}
         onSelectRow={(next) => {
@@ -514,6 +547,7 @@ describe("CommitGraph", () => {
     const onRebaseSelection = vi.fn();
     render(
       <Host
+        {...historyProps}
         status={status}
         commits={chainCommits}
         selectedRow="uncommitted"
@@ -706,6 +740,7 @@ describe("CommitGraph", () => {
 
   it("an external focus change collapses the selection, and it does not resurface later", () => {
     const props = {
+      ...historyProps,
       status,
       commits: chainCommits,
       pending: false,
@@ -730,6 +765,7 @@ describe("CommitGraph", () => {
 
   it("prunes selected ids that are no longer in the loaded commits", () => {
     const props = {
+      ...historyProps,
       status,
       pending: false,
       onSelectRow: vi.fn(),
@@ -782,6 +818,7 @@ describe("CommitGraph", () => {
   it("disables Rebase onto here while a repository operation is pending", () => {
     render(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={commits}
         selectedRow="uncommitted"
@@ -813,7 +850,7 @@ describe("CommitGraph — keyboard access", () => {
       onRebaseSelection: vi.fn(),
     };
     const utils = render(
-      <CommitGraph status={status} commits={chain} selectedRow={selectedRow} pending={false} {...handlers} />,
+      <CommitGraph {...historyProps} status={status} commits={chain} selectedRow={selectedRow} pending={false} {...handlers} />,
     );
     return { ...utils, ...handlers, list: screen.getByRole("listbox") };
   }
@@ -869,6 +906,7 @@ describe("CommitGraph — keyboard access", () => {
     expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
     rerender(
       <CommitGraph
+        {...historyProps}
         status={status}
         commits={chain}
         selectedRow={{ commitId: "B" }}
@@ -895,6 +933,7 @@ describe("CommitGraph — keyboard access", () => {
 
 describe("CommitGraph history metadata and pagination", () => {
   const baseProps = {
+    ...historyProps,
     status,
     commits,
     selectedRow: "uncommitted" as const,
@@ -942,5 +981,86 @@ describe("CommitGraph history metadata and pagination", () => {
     render(<CommitGraph {...baseProps} />);
 
     expect(screen.getByTestId("working-tree-node")).toBeInTheDocument();
+  });
+});
+
+describe("CommitGraph — history actions", () => {
+  const chain: GraphCommit[] = [
+    { ...commits[0], id: "C", shortId: "C", summary: "C", parentIds: ["B"] },
+    { ...commits[0], id: "M", shortId: "M", summary: "M", parentIds: ["B", "A"] },
+    { ...commits[0], id: "B", shortId: "B", summary: "B", parentIds: ["A"] },
+    { ...commits[0], id: "A", shortId: "A", summary: "A", parentIds: [] },
+  ];
+
+  function setup(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    const handlers = {
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+      onRebaseSelection: vi.fn(),
+      onCherryPick: vi.fn(),
+      onRevert: vi.fn(),
+      onCheckoutCommit: vi.fn(),
+      onResetToCommit: vi.fn(),
+      onEditHeadMessage: vi.fn(),
+    };
+    render(
+      <CommitGraph
+        status={status}
+        commits={chain}
+        selectedRow="uncommitted"
+        pending={false}
+        headInfo={{ ...NO_HEAD, headId: "C" }}
+        currentBranch="main"
+        {...handlers}
+        {...overrides}
+      />,
+    );
+    const openMenu = (summary: string) =>
+      fireEvent.contextMenu(screen.getByText(`${summary} ${summary}`).closest("li")!);
+    return { ...handlers, openMenu };
+  }
+
+  it("offers cherry-pick, revert, checkout and reset on a single commit", () => {
+    const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onResetToCommit } = setup();
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+    expect(onCherryPick).toHaveBeenCalledWith("B");
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
+    expect(onRevert).toHaveBeenCalledWith("B");
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
+    expect(onCheckoutCommit).toHaveBeenCalledWith("B");
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(onResetToCommit).toHaveBeenCalledWith("B", "mixed");
+  });
+
+  it("disables cherry-pick on HEAD, offers Edit commit message there, and blocks merge commits", () => {
+    const { openMenu, onEditHeadMessage } = setup();
+    openMenu("C");
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit message…" }));
+    expect(onEditHeadMessage).toHaveBeenCalled();
+    openMenu("M");
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Revert" })).toBeDisabled();
+    expect(screen.queryByRole("menuitem", { name: "Edit commit message…" })).not.toBeInTheDocument();
+  });
+
+  it("disables the new actions while pending", () => {
+    const { openMenu } = setup({ pending: true });
+    openMenu("B");
+    for (const name of ["Cherry-pick", "Revert", "Checkout (detached)", "Reset main to here…"]) {
+      expect(screen.getByRole("menuitem", { name })).toBeDisabled();
+    }
+  });
+
+  it("disables reset on a detached HEAD", () => {
+    const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "C", detachedAt: "C" }, currentBranch: null });
+    openMenu("B");
+    expect(screen.getByRole("menuitem", { name: "Reset HEAD to here…" })).toBeDisabled();
   });
 });

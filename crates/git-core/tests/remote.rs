@@ -2,8 +2,8 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_tag, fetch_remote, list_remote_branches, list_remotes, list_tags, pull_after_fetch,
-    push_current_branch, push_tags, remote_upstreams, remove_remote,
+    delete_tag, fetch_remote, force_push_current_branch, list_remote_branches, list_remotes,
+    list_tags, pull_after_fetch, push_current_branch, push_tags, remote_upstreams, remove_remote,
     remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
     set_remote_auth_profile, update_remote_urls, CredentialProvider, PullOutcome, RemoteAuthMode,
     RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
@@ -92,6 +92,26 @@ impl RemoteFixture {
     fn local_commit(&self, message: &str) {
         common::write_file(self.local_dir.path(), "local.txt", message);
         common::commit_all(&self.local, message);
+    }
+
+    /// Like `remote_commit`, but does NOT fetch into `local` — the local tracking ref goes stale.
+    fn remote_commit_without_fetch(&self, message: &str) {
+        common::write_file(self.source_dir.path(), "remote.txt", message);
+        common::commit_all(&self.source, message);
+        let branch = self.source.head().unwrap().shorthand().unwrap().to_string();
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+        self.source
+            .find_remote("origin")
+            .unwrap()
+            .push(&[refspec], None)
+            .unwrap();
+    }
+
+    fn bare_tip(&self, branch: &str) -> Option<git2::Oid> {
+        let bare = git2::Repository::open_bare(self.remote_dir.path()).unwrap();
+        bare.find_reference(&format!("refs/heads/{branch}"))
+            .ok()
+            .and_then(|r| r.target())
     }
 
     fn remote_tip(&self) -> git2::Oid {
@@ -992,4 +1012,132 @@ fn current_upstream_reports_ahead_and_behind_counts_against_the_tracking_ref() {
     repo.reference(&head_ref, first, true, "rewind").unwrap();
     let upstream = current_upstream(&repo).unwrap().unwrap();
     assert_eq!((upstream.ahead, upstream.behind), (Some(0), Some(1)));
+}
+
+#[test]
+fn force_push_overwrites_the_remote_when_the_lease_matches() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change"); // fetched: tracking ref up to date
+    fixture.local_commit("local change"); // diverged
+    let mut reporter = VecReporter::default();
+
+    force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    assert_eq!(fixture.bare_tip("main"), Some(local_tip));
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(local_tip)
+    );
+    assert!(reporter
+        .events
+        .iter()
+        .all(|e| e.operation == TransferOperation::ForcePushBranch));
+}
+
+#[test]
+fn force_push_refuses_a_stale_lease_and_leaves_the_remote_untouched() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("someone else's work");
+    fixture.local_commit("local change");
+    let remote_before = fixture.bare_tip("main");
+    let mut reporter = VecReporter::default();
+
+    let result = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::StaleLease)));
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::StaleLease
+    );
+    assert_eq!(fixture.bare_tip("main"), remote_before);
+}
+
+#[test]
+fn force_push_of_a_branch_new_to_the_remote_succeeds() {
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("brand-new", &head, false).unwrap();
+    fixture.local.set_head("refs/heads/brand-new").unwrap();
+    fixture.local_commit("on new branch");
+    let mut reporter = VecReporter::default();
+
+    force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(
+        fixture.bare_tip("brand-new"),
+        Some(fixture.local.head().unwrap().target().unwrap())
+    );
+}
+
+#[test]
+fn force_push_refuses_when_remote_has_the_branch_but_it_was_never_fetched() {
+    let fixture = local_and_bare_remote();
+    // Remote gains `other`; local never fetches it, then creates its own `other`.
+    let src_head = fixture.source.head().unwrap().peel_to_commit().unwrap();
+    fixture.source.branch("other", &src_head, false).unwrap();
+    fixture
+        .source
+        .find_remote("origin")
+        .unwrap()
+        .push(&["refs/heads/other:refs/heads/other"], None)
+        .unwrap();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("other", &head, false).unwrap();
+    fixture.local.set_head("refs/heads/other").unwrap();
+    fixture.local_commit("local other");
+    let mut reporter = VecReporter::default();
+
+    assert!(matches!(
+        force_push_current_branch(
+            &fixture.local,
+            "origin",
+            &mut NoCredentials,
+            &mut reporter,
+            &|| false
+        ),
+        Err(RemoteError::StaleLease)
+    ));
+}
+
+#[test]
+fn force_push_refuses_a_detached_head() {
+    let fixture = local_and_bare_remote();
+    let oid = fixture.local.head().unwrap().target().unwrap();
+    fixture.local.set_head_detached(oid).unwrap();
+    let mut reporter = VecReporter::default();
+    assert!(matches!(
+        force_push_current_branch(
+            &fixture.local,
+            "origin",
+            &mut NoCredentials,
+            &mut reporter,
+            &|| false
+        ),
+        Err(RemoteError::DetachedHead)
+    ));
 }

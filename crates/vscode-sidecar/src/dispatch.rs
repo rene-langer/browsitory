@@ -121,6 +121,13 @@ pub fn dispatch(
         "fetch_remote" => fetch_remote(params, repos, stdout),
         "cancel_transfer" => cancel_transfer(params, repos),
         "push_current_branch" => push_current_branch(params, repos, stdout),
+        "force_push_current_branch" => force_push_current_branch(params, repos, stdout),
+        "get_head_info" => get_head_info(params, repos),
+        "amend_commit" => amend_commit(params, repos),
+        "cherry_pick" => cherry_pick(params, repos),
+        "revert_commit" => revert_commit(params, repos),
+        "reset_to_commit" => reset_to_commit(params, repos),
+        "checkout_commit" => checkout_commit(params, repos),
         "push_tags" => push_tags(params, repos, stdout),
         "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
         "list_stashes" => list_stashes(params, repos),
@@ -1416,6 +1423,148 @@ fn push_current_branch(
     let operation_id = worker_handle(repos, &params.repo_path)?
         .push_current_branch(params.remote_name, event_tx)?;
     Ok(Value::String(operation_id))
+}
+
+fn force_push_current_branch(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: RemoteNameParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?
+        .force_push_current_branch(params.remote_name, event_tx)?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HeadInfoDto {
+    head_id: Option<String>,
+    detached_at: Option<String>,
+    head_pushed: bool,
+    operation: Option<&'static str>,
+}
+
+impl From<git_core::repo::HeadInfo> for HeadInfoDto {
+    fn from(info: git_core::repo::HeadInfo) -> Self {
+        use git_core::repo::OperationKind;
+        Self {
+            head_id: info.head_id,
+            detached_at: info.detached_at,
+            head_pushed: info.head_pushed,
+            operation: info.operation.map(|kind| match kind {
+                OperationKind::Merge => "Merge",
+                OperationKind::CherryPick => "CherryPick",
+                OperationKind::Revert => "Revert",
+            }),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum PickOutcomeDto {
+    Committed {
+        #[serde(rename = "commitId")]
+        commit_id: String,
+    },
+    Conflicted {
+        files: Vec<String>,
+    },
+}
+
+impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
+    fn from(outcome: git_core::pick::PickOutcome) -> Self {
+        match outcome {
+            git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
+            git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ResetModeDto {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+impl From<ResetModeDto> for git_core::reset::ResetMode {
+    fn from(dto: ResetModeDto) -> Self {
+        match dto {
+            ResetModeDto::Soft => Self::Soft,
+            ResetModeDto::Mixed => Self::Mixed,
+            ResetModeDto::Hard => Self::Hard,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitIdParams {
+    repo_path: String,
+    commit_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageParams {
+    repo_path: String,
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetParams {
+    repo_path: String,
+    commit_id: String,
+    mode: ResetModeDto,
+}
+
+fn get_head_info(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let info = worker_handle(repos, &params.repo_path)?.get_head_info()?;
+    serde_json::to_value(HeadInfoDto::from(info)).map_err(|error| error.to_string())
+}
+
+fn amend_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: MessageParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.amend_commit(params.message)?;
+    Ok(Value::Null)
+}
+
+fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CommitIdParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id)?;
+    serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn revert_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CommitIdParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(params.commit_id)?;
+    serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: ResetParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?
+        .reset_to_commit(params.commit_id, params.mode.into())?;
+    Ok(Value::Null)
+}
+
+fn checkout_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CommitIdParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.checkout_commit(params.commit_id)?;
+    Ok(Value::Null)
 }
 
 #[derive(Deserialize)]

@@ -75,6 +75,13 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+    amendCommit: async () => { throw new Error("unimplemented"); },
+    cherryPick: async () => { throw new Error("unimplemented"); },
+    revertCommit: async () => { throw new Error("unimplemented"); },
+    resetToCommit: async () => { throw new Error("unimplemented"); },
+    checkoutCommit: async () => { throw new Error("unimplemented"); },
+    forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
     resolveAddDeleteConflict: unused,
     commitsSince: unused,
     startRebase: unused,
@@ -164,6 +171,20 @@ describe("DiffPane", () => {
       { path: "a.txt", staged: false, kind: "Modified" },
       { path: "b.txt", staged: true, kind: "New" },
     ];
+
+    it("focuses the commit message once the amend prefill is in and reports it", async () => {
+      const onCommitMessageFocused = vi.fn();
+      renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
+        amendMode: true,
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null },
+        focusCommitMessage: true,
+        onCommitMessageFocused,
+      });
+
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
+      expect(screen.getByLabelText("Commit message")).toHaveFocus();
+      expect(onCommitMessageFocused).toHaveBeenCalled();
+    });
 
     it("renders an icon-only Stage control for unstaged entries and Unstage for staged ones", () => {
       renderUncommitted(fakeClient({}), status);

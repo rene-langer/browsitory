@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, HeadInfo, ResetMode, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
   EMPTY_SELECTION,
@@ -17,6 +17,7 @@ import {
 import type { SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
+import { ResetDialog } from "./ResetDialog";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import styles from "./CommitGraph.module.css";
@@ -39,6 +40,13 @@ export function CommitGraph({
   onBranchFromCommit,
   onRebaseFromCommit,
   onRebaseSelection,
+  headInfo,
+  currentBranch,
+  onCherryPick,
+  onRevert,
+  onCheckoutCommit,
+  onResetToCommit,
+  onEditHeadMessage,
   hasMore = false,
   onLoadMore,
   graphRemoteBranchSelection = null,
@@ -57,6 +65,14 @@ export function CommitGraph({
   // `preset` maps commit ids to the action to pre-mark in the planner (every selected
   // id as "Pick" for a plain Interactive rebase…, so the planner still checks they are on the branch).
   onRebaseSelection?: (onto: string, preset: ReadonlyMap<string, PresetAction>) => void;
+  headInfo: HeadInfo;
+  // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
+  currentBranch: string | null;
+  onCherryPick: (commitId: string) => void;
+  onRevert: (commitId: string) => void;
+  onCheckoutCommit: (commitId: string) => void;
+  onResetToCommit: (commitId: string, mode: ResetMode) => void;
+  onEditHeadMessage: () => void;
   // True when the loaded history filled its limit, so older commits probably exist.
   hasMore?: boolean;
   onLoadMore?: () => void;
@@ -70,6 +86,7 @@ export function CommitGraph({
     x: number;
     y: number;
   } | null>(null);
+  const [resetTarget, setResetTarget] = useState<GraphCommit | null>(null);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -106,6 +123,28 @@ export function CommitGraph({
   };
 
   const listRef = useRef<HTMLUListElement>(null);
+
+  function singleCommitItems(commitId: string): ContextMenuItem[] {
+    const commit = commits.find((candidate) => candidate.id === commitId);
+    const isHead = headInfo.headId === commitId;
+    const isMerge = (commit?.parentIds.length ?? 0) > 1;
+    const items: ContextMenuItem[] = [
+      { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) },
+      { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending },
+      { label: "Cherry-pick", onSelect: () => onCherryPick(commitId), disabled: pending || isHead || isMerge },
+      { label: "Revert", onSelect: () => onRevert(commitId), disabled: pending || isMerge },
+      { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
+      {
+        label: `Reset ${currentBranch ?? "HEAD"} to here…`,
+        onSelect: () => setResetTarget(commit ?? null),
+        disabled: pending || currentBranch === null,
+      },
+    ];
+    if (isHead) {
+      items.push({ label: "Edit commit message…", onSelect: onEditHeadMessage, disabled: pending });
+    }
+    return items;
+  }
 
   // Keep the keyboard-driven selection visible in a long history.
   useEffect(() => {
@@ -291,6 +330,7 @@ export function CommitGraph({
         <ListRow
           key={commit.id}
           className="commit-row"
+          data-commit-id={commit.id}
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
@@ -343,21 +383,22 @@ export function CommitGraph({
           items={
             multiSelected && effectiveSelection.ids.has(contextMenu.commitId)
               ? multiSelectItems
-              : ([
-                  {
-                    label: "Branch from here",
-                    onSelect: () => onBranchFromCommit(contextMenu.commitId),
-                  },
-                  {
-                    label: "Rebase onto here",
-                    onSelect: () => onRebaseFromCommit(contextMenu.commitId),
-                    disabled: pending,
-                  },
-                ] satisfies ContextMenuItem[])
+              : singleCommitItems(contextMenu.commitId)
           }
         />
       )}
     </ul>
+    {resetTarget !== null && currentBranch !== null && (
+      <ResetDialog
+        branch={currentBranch}
+        shortId={resetTarget.shortId}
+        onReset={(mode) => {
+          onResetToCommit(resetTarget.id, mode);
+          setResetTarget(null);
+        }}
+        onCancel={() => setResetTarget(null)}
+      />
+    )}
     {multiSelected && (
       <div className={styles.selectionBar} role="toolbar" aria-label="Selected commits">
         <span>{effectiveSelection.ids.size} commits selected</span>

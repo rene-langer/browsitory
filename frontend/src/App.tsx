@@ -21,6 +21,7 @@ import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
+import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -77,6 +78,8 @@ function RepoWorkspace({
     [onCommitDraftChange, repoPath],
   );
   const panelVisibility = useSidebarPanelVisibility();
+  const [focusCommitMessage, setFocusCommitMessage] = useState(false);
+  const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
@@ -153,7 +156,11 @@ function RepoWorkspace({
     : appState.state.transfer !== null
       ? "A transfer is in progress."
       : appState.state.mergeMessage !== null
-        ? "A merge is in progress."
+        ? appState.state.headInfo.operation === "CherryPick"
+          ? "A cherry-pick is in progress."
+          : appState.state.headInfo.operation === "Revert"
+            ? "A revert is in progress."
+            : "A merge is in progress."
         : appState.state.rebaseProgress !== null
           ? "A rebase is in progress."
           : null;
@@ -181,6 +188,7 @@ function RepoWorkspace({
       },
     [dismissError],
   );
+  const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   const pullOutcome = appState.state.pullOutcome;
   useEffect(() => {
     if (pullOutcome === null) return;
@@ -231,6 +239,7 @@ function RepoWorkspace({
     >
       <OperationStatusStrip
         merging={appState.state.mergeMessage !== null}
+        operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={appState.abortMerge}
@@ -240,7 +249,27 @@ function RepoWorkspace({
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+          {appState.state.forcePushOffer !== null && appState.state.forcePushConfirm === null && (
+            <button type="button" onClick={() => appState.requestForcePush(appState.state.forcePushOffer!.remoteName)}>
+              Force push (with lease)…
+            </button>
+          )}
         </div>
+      )}
+      {active && appState.state.forcePushConfirm !== null && (
+        <ConfirmDialog
+          ariaLabel="Confirm force push"
+          message={
+            <p>
+              Overwrites {appState.state.forcePushConfirm.remoteName}/{currentBranchName} with your local branch.
+            </p>
+          }
+          confirmLabel="Force push"
+          onConfirm={() =>
+            void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
+          }
+          onCancel={appState.cancelForcePush}
+        />
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
@@ -430,6 +459,7 @@ function RepoWorkspace({
               <SyncBar
                 remotes={appState.state.remotes}
                 upstream={appState.state.upstream}
+                detachedAt={appState.state.headInfo.detachedAt}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
                 onFetch={appState.fetchRemote}
@@ -447,6 +477,17 @@ function RepoWorkspace({
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onRebaseSelection={appState.openRebaseSelection}
+                headInfo={appState.state.headInfo}
+                currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                onCherryPick={announce("Cherry-picked", appState.cherryPick)}
+                onRevert={announce("Reverted", appState.revertCommit)}
+                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                onResetToCommit={announce("Reset branch", appState.resetToCommit)}
+                onEditHeadMessage={() => {
+                  appState.selectRow("uncommitted");
+                  appState.setAmendMode(true);
+                  setFocusCommitMessage(true);
+                }}
                 graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               />
               </>
@@ -475,6 +516,12 @@ function RepoWorkspace({
                 onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
                 mergeMessage={appState.state.mergeMessage}
                 onAbortMerge={appState.abortMerge}
+                amendMode={appState.state.amendMode}
+                headInfo={appState.state.headInfo}
+                onSetAmendMode={appState.setAmendMode}
+                onAmendCommit={announce("Amended commit", appState.amendCommit)}
+                focusCommitMessage={focusCommitMessage}
+                onCommitMessageFocused={clearFocusCommitMessage}
                 rebaseProgress={appState.state.rebaseProgress}
                 onRebaseContinue={appState.rebaseContinue}
                 onRebaseAbort={appState.abortRebase}

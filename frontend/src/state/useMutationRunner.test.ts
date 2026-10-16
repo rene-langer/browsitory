@@ -38,6 +38,10 @@ const BASE_STATE: AppState = {
   pending: false,
   addRemoteDraftOpen: false,
   refreshGeneration: 0,
+  headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+  forcePushOffer: null,
+  forcePushConfirm: null,
+  amendMode: false,
 };
 
 function setupRunner() {

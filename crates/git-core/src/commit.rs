@@ -4,6 +4,10 @@ use thiserror::Error;
 pub enum CommitError {
     #[error("failed to create commit: {0}")]
     Write(#[from] git2::Error),
+    #[error("There is no commit to amend yet.")]
+    NothingToAmend,
+    #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
+    OperationInProgress,
 }
 
 /// Commits the current index. Author/committer come from `repo.signature()` (reads
@@ -14,6 +18,11 @@ pub enum CommitError {
 /// once conflicts (if any) are resolved and staged. `repo` needs to be `&mut` only because
 /// reading `MERGE_HEAD` via `mergehead_foreach` requires it — no other part of this function
 /// does.
+///
+/// Finishing a paused cherry-pick (`CherryPick`/`CherryPickSequence`) authors the commit as the
+/// picked commit's author (read from `CHERRY_PICK_HEAD`, like `git cherry-pick --continue`) with
+/// the current user as committer. Finishing a paused revert authors it as the current user. Either
+/// way the result is single-parent and the operation state is cleared.
 pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, CommitError> {
     // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
@@ -29,6 +38,18 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
             true
         })?;
     }
+
+    let pick_author = if matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
+    ) {
+        repo.find_reference("CHERRY_PICK_HEAD")
+            .ok()
+            .and_then(|r| r.peel_to_commit().ok())
+            .map(|c| c.author().to_owned())
+    } else {
+        None
+    };
 
     let oid = {
         let mut index = repo.index()?;
@@ -47,7 +68,7 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
 
         repo.commit(
             Some("HEAD"),
-            &signature,
+            pick_author.as_ref().unwrap_or(&signature),
             &signature,
             message,
             &tree,
@@ -55,9 +76,48 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
         )?
     };
 
-    if is_merging {
+    // Cherry-pick/revert leave CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG behind on conflict; the
+    // commit that lands the resolved result is single-parent (HEAD only — they are not merges),
+    // but the state files must still be cleared or `repo.state()` stays non-Clean.
+    let finishes_pick = matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick
+            | git2::RepositoryState::CherryPickSequence
+            | git2::RepositoryState::Revert
+            | git2::RepositoryState::RevertSequence
+    );
+    if is_merging || finishes_pick {
         repo.cleanup_state()?;
     }
 
+    Ok(oid.to_string())
+}
+
+/// Rewrites HEAD's commit with the current index tree and `message`, keeping its parents and
+/// author; committer becomes `repo.signature()`. Works on a branch (the branch ref moves) or a
+/// detached HEAD. Refused while any operation (merge, cherry-pick, revert, rebase) is paused,
+/// since amending then would silently drop that operation's extra state.
+pub fn amend_head(repo: &git2::Repository, message: &str) -> Result<String, CommitError> {
+    if repo.state() != git2::RepositoryState::Clean {
+        return Err(CommitError::OperationInProgress);
+    }
+    let head = match repo.head() {
+        Ok(head) => head.peel_to_commit()?,
+        Err(error) if error.code() == git2::ErrorCode::UnbornBranch => {
+            return Err(CommitError::NothingToAmend)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let tree_id = repo.index()?.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let committer = repo.signature()?;
+    let oid = head.amend(
+        Some("HEAD"),
+        None,
+        Some(&committer),
+        None,
+        Some(message),
+        Some(&tree),
+    )?;
     Ok(oid.to_string())
 }

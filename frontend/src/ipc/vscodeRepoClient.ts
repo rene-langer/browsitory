@@ -28,6 +28,9 @@ import type {
   UpstreamInfo,
   Workspace,
   WorktreeInfo,
+  HeadInfo,
+  PickOutcome,
+  ResetMode,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import {
@@ -320,6 +323,15 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("resolve_conflict", { repoPath, path, resolvedContent }),
   abortMerge: (repoPath: string) => call<void>("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
+  getHeadInfo: (repoPath: string) => call<HeadInfo>("get_head_info", { repoPath }),
+  amendCommit: (repoPath: string, message: string) => call<void>("amend_commit", { repoPath, message }),
+  cherryPick: (repoPath: string, commitId: string) => call<PickOutcome>("cherry_pick", { repoPath, commitId }),
+  revertCommit: (repoPath: string, commitId: string) => call<PickOutcome>("revert_commit", { repoPath, commitId }),
+  resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
+    call<void>("reset_to_commit", { repoPath, commitId, mode }),
+  checkoutCommit: (repoPath: string, commitId: string) => call<void>("checkout_commit", { repoPath, commitId }),
+  forcePushCurrentBranch: (repoPath: string, remoteName: string) =>
+    call<string>("force_push_current_branch", { repoPath, remoteName }),
   resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
     call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>

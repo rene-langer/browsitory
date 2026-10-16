@@ -25,6 +25,7 @@ pub enum TransferOperation {
     Fetch,
     Pull,
     PushBranch,
+    ForcePushBranch,
     PushTags,
 }
 
@@ -38,6 +39,7 @@ pub enum TransferPhase {
 pub enum TransferErrorKind {
     NonFastForward,
     RejectedRemoteRef,
+    StaleLease,
     MissingCredential,
     CredentialStoreFailure,
     SshAgentFailure,
@@ -168,6 +170,8 @@ pub enum RemoteError {
     NonFastForward,
     #[error("the remote rejected a pushed reference")]
     RejectedRemoteRef,
+    #[error("the remote branch changed since the last fetch")]
+    StaleLease,
     #[error("the transfer was cancelled")]
     Cancelled,
 }
@@ -178,6 +182,7 @@ impl RemoteError {
             Self::Cancelled => TransferErrorKind::Cancelled,
             Self::NonFastForward => TransferErrorKind::NonFastForward,
             Self::RejectedRemoteRef => TransferErrorKind::RejectedRemoteRef,
+            Self::StaleLease => TransferErrorKind::StaleLease,
             Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
                 TransferErrorKind::NonFastForward
             }
@@ -358,6 +363,37 @@ pub fn push_current_branch(
         credentials,
         reporter,
         cancel,
+        None,
+    )
+}
+
+/// Force-pushes the current branch, but only if the remote's branch still points where our
+/// `refs/remotes/<remote>/<branch>` says it did at the last fetch (a missing tracking ref means
+/// "must not exist on the remote"). A mismatch is `RemoteError::StaleLease`, remote untouched.
+pub fn force_push_current_branch(
+    repo: &Repository,
+    remote_name: &str,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), RemoteError> {
+    let branch = current_local_branch_name(repo)?;
+    let expected = repo
+        .find_reference(&format!("refs/remotes/{remote_name}/{branch}"))
+        .ok()
+        .and_then(|reference| reference.target())
+        .unwrap_or(git2::Oid::ZERO_SHA1);
+    let dst = format!("refs/heads/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{dst}");
+    push_refs(
+        repo,
+        remote_name,
+        &[refspec],
+        TransferOperation::ForcePushBranch,
+        credentials,
+        reporter,
+        cancel,
+        Some((dst.as_str(), expected)),
     )
 }
 
@@ -398,6 +434,7 @@ pub fn push_tags(
         credentials,
         reporter,
         cancel,
+        None,
     )
 }
 
@@ -676,6 +713,7 @@ fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
     Ok(head.shorthand()?.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_refs(
     repo: &Repository,
     remote_name: &str,
@@ -684,6 +722,7 @@ fn push_refs(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
+    lease: Option<(&str, git2::Oid)>,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
@@ -705,10 +744,26 @@ fn push_refs(
     // update), so a cancel pressed after negotiation is deliberately ignored and the push
     // reports its real outcome.
     let cancelled_at_negotiation = Cell::new(false);
-    callbacks.push_negotiation(|_updates| {
+    let stale_lease = Cell::new(false);
+    callbacks.push_negotiation(|updates| {
         if cancel() {
             cancelled_at_negotiation.set(true);
             return Err(git2::Error::from_str("transfer cancelled"));
+        }
+        // Force-with-lease: `src()` is what the remote advertised for the destination ref
+        // (zero when absent). This runs after advertisement and before any pack data is sent,
+        // so refusing here leaves the remote untouched — the same window
+        // `git push --force-with-lease` has.
+        if let Some((dst, expected)) = lease {
+            let current = updates
+                .iter()
+                .find(|update| update.dst_refname() == Ok(dst))
+                .map(|update| update.src())
+                .unwrap_or(git2::Oid::ZERO_SHA1);
+            if current != expected {
+                stale_lease.set(true);
+                return Err(git2::Error::from_str("stale lease"));
+            }
         }
         Ok(())
     });
@@ -754,7 +809,9 @@ fn push_refs(
     // Only a negotiation-time abort is a cancellation; a genuine failure that happens while
     // Cancel is pressed keeps its real classification.
     if let Err(error) = pushed {
-        return if cancelled_at_negotiation.get() {
+        return if stale_lease.get() {
+            Err(RemoteError::StaleLease)
+        } else if cancelled_at_negotiation.get() {
             Err(RemoteError::Cancelled)
         } else if error.code() == ErrorCode::NotFastForward {
             Err(RemoteError::NonFastForward)
@@ -765,6 +822,8 @@ fn push_refs(
     match rejection.get() {
         Some(TransferErrorKind::NonFastForward) => Err(RemoteError::NonFastForward),
         Some(TransferErrorKind::RejectedRemoteRef) => Err(RemoteError::RejectedRemoteRef),
+        // A lease failure aborts at negotiation, never as a per-ref rejection.
+        Some(TransferErrorKind::StaleLease) => unreachable!(),
         Some(TransferErrorKind::MissingCredential) => unreachable!(),
         Some(TransferErrorKind::CredentialStoreFailure) => unreachable!(),
         Some(TransferErrorKind::SshAgentFailure) => unreachable!(),
