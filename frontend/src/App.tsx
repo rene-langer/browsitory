@@ -153,7 +153,11 @@ function RepoWorkspace({
     : appState.state.transfer !== null
       ? "A transfer is in progress."
       : appState.state.mergeMessage !== null
-        ? "A merge is in progress."
+        ? appState.state.headInfo.operation === "CherryPick"
+          ? "A cherry-pick is in progress."
+          : appState.state.headInfo.operation === "Revert"
+            ? "A revert is in progress."
+            : "A merge is in progress."
         : appState.state.rebaseProgress !== null
           ? "A rebase is in progress."
           : null;
@@ -447,6 +451,13 @@ function RepoWorkspace({
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onRebaseSelection={appState.openRebaseSelection}
+                headInfo={appState.state.headInfo}
+                currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                onCherryPick={announce("Cherry-picked", appState.cherryPick)}
+                onRevert={announce("Reverted", appState.revertCommit)}
+                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                onResetToCommit={announce("Reset branch", appState.resetToCommit)}
+                onEditHeadMessage={() => appState.setAmendMode(true)}
                 graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               />
               </>
