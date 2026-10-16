@@ -2,6 +2,17 @@ use std::path::Path;
 
 use thiserror::Error;
 
+use crate::diff::{working_diff_options, DiffOptions};
+
+fn staging_opts(context_lines: u32) -> DiffOptions {
+    // Partial staging is disabled in the UI while ignore-whitespace is on, so staging always
+    // diffs with whitespace significant.
+    DiffOptions {
+        ignore_whitespace: false,
+        context_lines,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum StageError {
     #[error("failed to update the index: {0}")]
@@ -36,16 +47,12 @@ pub fn stage_hunk(
     path: &str,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
 ) -> Result<(), StageError> {
-    let mut opts = git2::DiffOptions::new();
     // Same options as `diff::working_diff`'s unstaged branch — the hunk identity the caller
     // passed in was read from that exact diff, so this one must be built identically or the
     // `(old_start, new_start)` pair won't line up with what's on screen.
-    opts.pathspec(path)
-        .disable_pathspec_match(true)
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .show_untracked_content(true);
+    let mut opts = working_diff_options(path, false, &staging_opts(context_lines));
     let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
 
     let matched = std::cell::Cell::new(false);
@@ -71,14 +78,10 @@ pub fn discard_hunk(
     path: &str,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
 ) -> Result<(), StageError> {
-    let mut opts = git2::DiffOptions::new();
-    opts.pathspec(path)
-        .disable_pathspec_match(true)
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .show_untracked_content(true)
-        .reverse(true);
+    let mut opts = working_diff_options(path, false, &staging_opts(context_lines));
+    opts.reverse(true);
     let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
 
     let matched = std::cell::Cell::new(false);
@@ -105,12 +108,11 @@ pub fn unstage_hunk(
     path: &str,
     old_start: u32,
     new_start: u32,
+    context_lines: u32,
 ) -> Result<(), StageError> {
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let mut opts = git2::DiffOptions::new();
-    opts.pathspec(path)
-        .disable_pathspec_match(true)
-        .reverse(true);
+    let mut opts = working_diff_options(path, true, &staging_opts(context_lines));
+    opts.reverse(true);
     let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
 
     let matched = std::cell::Cell::new(false);

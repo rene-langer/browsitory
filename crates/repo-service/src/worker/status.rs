@@ -27,8 +27,10 @@ pub(super) fn get_working_diff(
     staged: bool,
     reply: Sender<Result<Vec<DiffHunk>, String>>,
 ) {
-    let _ = reply
-        .send(git_core::diff::working_diff(repo, &path, staged).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::diff::working_diff(repo, &path, staged, &git_core::diff::DiffOptions::default())
+            .map_err(|error| error.to_string()),
+    );
 }
 
 pub(super) fn get_commit_diff(
@@ -38,7 +40,13 @@ pub(super) fn get_commit_diff(
     reply: Sender<Result<Vec<DiffHunk>, String>>,
 ) {
     let _ = reply.send(
-        git_core::diff::commit_diff(repo, &commit_id, &path).map_err(|error| error.to_string()),
+        git_core::diff::commit_diff(
+            repo,
+            &commit_id,
+            &path,
+            &git_core::diff::DiffOptions::default(),
+        )
+        .map_err(|error| error.to_string()),
     );
 }
 
@@ -92,7 +100,7 @@ pub(super) fn stage_hunk(
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::stage_hunk(repo, &path, old_start, new_start)
+        git_core::stage::stage_hunk(repo, &path, old_start, new_start, 3)
             .map_err(|error| error.to_string()),
     );
 }
@@ -105,7 +113,7 @@ pub(super) fn unstage_hunk(
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::unstage_hunk(repo, &path, old_start, new_start)
+        git_core::stage::unstage_hunk(repo, &path, old_start, new_start, 3)
             .map_err(|error| error.to_string()),
     );
 }
@@ -118,7 +126,7 @@ pub(super) fn discard_hunk(
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::discard_hunk(repo, &path, old_start, new_start)
+        git_core::stage::discard_hunk(repo, &path, old_start, new_start, 3)
             .map_err(|error| error.to_string()),
     );
 }

@@ -31,33 +31,75 @@ pub struct DiffHunk {
     pub lines: Vec<DiffLine>,
 }
 
-/// Diff for one path in the working tree. `staged: true` diffs HEAD's tree against the index
-/// (what `git diff --cached -- path` shows); `staged: false` diffs the index against the
-/// working directory (what `git diff -- path` shows, *plus* untracked files — see below).
-pub fn working_diff(
-    repo: &Repository,
+pub const MAX_CONTEXT_LINES: u32 = 20;
+
+/// Display options shared by every diff the UI shows. Staging builds its diff through
+/// `working_diff_options` with the same `context_lines`, so the `(old_start, new_start)` hunk
+/// identity the UI captured always matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffOptions {
+    pub ignore_whitespace: bool,
+    pub context_lines: u32,
+}
+
+impl Default for DiffOptions {
+    fn default() -> Self {
+        Self {
+            ignore_whitespace: false,
+            context_lines: 3,
+        }
+    }
+}
+
+fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
+    git_opts
+        .ignore_whitespace(opts.ignore_whitespace)
+        .context_lines(opts.context_lines.min(MAX_CONTEXT_LINES));
+}
+
+/// Single source of the git2 options for working-tree diffs (display *and* staging).
+pub(crate) fn working_diff_options(
     path: &str,
     staged: bool,
-) -> Result<Vec<DiffHunk>, DiffError> {
-    let mut opts = git2::DiffOptions::new();
+    opts: &DiffOptions,
+) -> git2::DiffOptions {
+    let mut git_opts = git2::DiffOptions::new();
     // `pathspec` is a glob pattern by default, so a real filename containing `*`, `?` or `[`
     // would match unintended files. Callers always pass a literal path from `status()`/
     // `commit_files()`, so match it literally.
-    opts.pathspec(path).disable_pathspec_match(true);
-
-    let diff = if staged {
-        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
-    } else {
+    git_opts.pathspec(path).disable_pathspec_match(true);
+    if !staged {
         // `status()` deliberately reports untracked files (`include_untracked(true)`), so an
         // untracked path shows up in the UI as an unstaged `New` row and gets diffed here.
         // Plain `git diff` emits nothing for such a path; without these options the pane would
         // render an empty "No differences" state for a brand-new file — the single most common
         // first thing a user clicks. Show the whole file as added instead.
-        opts.include_untracked(true)
+        git_opts
+            .include_untracked(true)
             .recurse_untracked_dirs(true)
             .show_untracked_content(true);
-        repo.diff_index_to_workdir(None, Some(&mut opts))?
+    }
+    apply_display_options(&mut git_opts, opts);
+    git_opts
+}
+
+/// Diff for one path in the working tree. `staged: true` diffs HEAD's tree against the index
+/// (what `git diff --cached -- path` shows); `staged: false` diffs the index against the
+/// working directory (what `git diff -- path` shows, *plus* untracked files — see
+/// `working_diff_options`).
+pub fn working_diff(
+    repo: &Repository,
+    path: &str,
+    staged: bool,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let mut git_opts = working_diff_options(path, staged, opts);
+
+    let diff = if staged {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut git_opts))?
+    } else {
+        repo.diff_index_to_workdir(None, Some(&mut git_opts))?
     };
 
     hunks_from_diff(&diff)
@@ -70,12 +112,14 @@ pub fn commit_diff(
     repo: &Repository,
     commit_id: &str,
     path: &str,
+    opts: &DiffOptions,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
-    let mut opts = git2::DiffOptions::new();
-    // Literal path, not a glob — see `working_diff`.
-    opts.pathspec(path).disable_pathspec_match(true);
-    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
+    let mut git_opts = git2::DiffOptions::new();
+    // Literal path, not a glob — see `working_diff_options`.
+    git_opts.pathspec(path).disable_pathspec_match(true);
+    apply_display_options(&mut git_opts, opts);
+    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     hunks_from_diff(&diff)
 }
 
@@ -110,7 +154,7 @@ fn commit_and_parent_trees<'repo>(
     Ok((old_tree, new_tree))
 }
 
-fn hunks_from_diff(diff: &git2::Diff) -> Result<Vec<DiffHunk>, DiffError> {
+pub(crate) fn hunks_from_diff(diff: &git2::Diff) -> Result<Vec<DiffHunk>, DiffError> {
     let hunks: RefCell<Vec<DiffHunk>> = RefCell::new(Vec::new());
 
     diff.foreach(
