@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Component, Path};
 
 use thiserror::Error;
 
@@ -28,6 +28,14 @@ pub enum StageError {
     ContextLineSelected,
     #[error("Couldn't apply just those lines. Try the whole hunk instead.")]
     SelectionNotApplicable,
+    #[error("That path is outside the repository.")]
+    InvalidPath,
+    #[error("Ignore pattern can't be empty or span several lines.")]
+    InvalidPattern,
+    #[error("failed to update the working tree: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to read status: {0}")]
+    Status(String),
 }
 
 impl From<LinePatchError> for StageError {
@@ -50,6 +58,71 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
         index.remove_path(Path::new(path))?;
     }
     index.write()?;
+    Ok(())
+}
+
+fn checked_relative(path: &str) -> Result<&Path, StageError> {
+    let p = Path::new(path);
+    if p.as_os_str().is_empty()
+        || p.is_absolute()
+        || p.components().any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(StageError::InvalidPath);
+    }
+    Ok(p)
+}
+
+/// Throws away the unstaged changes of one file; staged changes are kept. Untracked files are
+/// deleted.
+pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    let rel = checked_relative(path)?;
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    if repo.index()?.get_path(rel, 0).is_some() {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force().path(rel).disable_pathspec_match(true);
+        repo.checkout_index(None, Some(&mut checkout))?;
+    } else {
+        let full = workdir.join(rel);
+        if full.exists() {
+            std::fs::remove_file(full)?;
+        }
+    }
+    Ok(())
+}
+
+/// Discards every unstaged change (conflicted entries are skipped).
+pub fn discard_all_unstaged(repo: &git2::Repository) -> Result<(), StageError> {
+    let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
+    for entry in entries
+        .iter()
+        .filter(|e| !e.staged && e.kind != crate::status::StatusKind::Conflicted)
+    {
+        discard_file(repo, &entry.path)?;
+    }
+    Ok(())
+}
+
+/// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
+pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageError> {
+    let pattern = pattern.trim();
+    if pattern.is_empty() || pattern.contains('\n') || pattern.contains('\r') {
+        return Err(StageError::InvalidPattern);
+    }
+    let file = repo
+        .workdir()
+        .ok_or(StageError::NoWorkdir)?
+        .join(".gitignore");
+    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+    if existing.lines().any(|line| line.trim_end() == pattern) {
+        return Ok(());
+    }
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(pattern);
+    next.push('\n');
+    std::fs::write(&file, next)?;
     Ok(())
 }
 
