@@ -11,6 +11,7 @@ import {
   Minus,
   Pencil,
   Plus,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -32,6 +33,9 @@ import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { discardAllConfirmMessage, discardConfirmMessage, fileMenuItems, isUntracked } from "./FileActionsMenu";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
@@ -94,6 +98,8 @@ function UncommittedFileSection({
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
+  onDiscardFile,
+  onIgnorePath,
   sectionRef,
 }: {
   repoPath: string;
@@ -120,8 +126,14 @@ function UncommittedFileSection({
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
+  onDiscardFile: (path: string) => void;
+  onIgnorePath: (pattern: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  // Discard/ignore apply to unstaged, non-conflicted entries only.
+  const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
@@ -221,6 +233,14 @@ function UncommittedFileSection({
       selected={isCurrent}
       onClick={onSelect}
       className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
+      onContextMenu={
+        hasFileActions
+          ? (event) => {
+              event.preventDefault();
+              setMenu({ x: event.clientX, y: event.clientY });
+            }
+          : undefined
+      }
     >
       <div
         className={styles.fileSectionHeader}
@@ -243,6 +263,21 @@ function UncommittedFileSection({
           >
             Blame
           </button>
+          {hasFileActions && (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`Actions for ${entry.path}`}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                event.stopPropagation();
+                const r = event.currentTarget.getBoundingClientRect();
+                setMenu({ x: r.left, y: r.bottom });
+              }}
+            >
+              <MoreHorizontal size={14} aria-hidden="true" />
+            </button>
+          )}
           {entry.staged ? (
             <button
               type="button"
@@ -318,6 +353,26 @@ function UncommittedFileSection({
           )}
         </div>
       )}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? setConfirmingDiscard(true) : onIgnorePath(a.pattern)))}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {confirmingDiscard && (
+        <ConfirmDialog
+          ariaLabel="Discard changes"
+          message={discardConfirmMessage(entry)}
+          confirmLabel={isUntracked(entry) ? "Delete file" : "Discard changes"}
+          onConfirm={() => {
+            setConfirmingDiscard(false);
+            onDiscardFile(entry.path);
+          }}
+          onCancel={() => setConfirmingDiscard(false)}
+        />
+      )}
     </ListRow>
   );
 }
@@ -340,6 +395,9 @@ export function DiffPane({
   onStageLines,
   onUnstageLines,
   onDiscardLines,
+  onDiscardFile,
+  onDiscardAllUnstaged,
+  onIgnorePath,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -386,6 +444,9 @@ export function DiffPane({
   onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onDiscardFile: (path: string) => void | Promise<void>;
+  onDiscardAllUnstaged: () => void;
+  onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -419,6 +480,9 @@ export function DiffPane({
         onStageLines={onStageLines}
         onUnstageLines={onUnstageLines}
         onDiscardLines={onDiscardLines}
+        onDiscardFile={onDiscardFile}
+        onDiscardAllUnstaged={onDiscardAllUnstaged}
+        onIgnorePath={onIgnorePath}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
         onSelectRow={onSelectRow}
@@ -471,6 +535,9 @@ function UncommittedDiffPane({
   onStageLines,
   onUnstageLines,
   onDiscardLines,
+  onDiscardFile,
+  onDiscardAllUnstaged,
+  onIgnorePath,
   onCommit,
   onSaveStash,
   onSelectRow,
@@ -509,6 +576,9 @@ function UncommittedDiffPane({
   onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
   onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]) => void | Promise<void>;
+  onDiscardFile: (path: string) => void | Promise<void>;
+  onDiscardAllUnstaged: () => void;
+  onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -576,6 +646,10 @@ function UncommittedDiffPane({
         bumpPathVersions(path),
       );
     };
+  const wrapFileAction = (action: (path: string) => void | Promise<void>) => (path: string) => {
+    // Same settle-then-bump contract as `wrapHunkAction`.
+    void Promise.resolve(action(path)).finally(() => bumpPathVersions(path));
+  };
   // One number per section: the path's own version plus the pane-wide refresh generation. Both
   // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
   // both (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when
@@ -669,8 +743,21 @@ function UncommittedDiffPane({
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      // Opens the selected row's actions menu by activating its "⋯" button (conflicted and staged
+      // rows have none, so this is then a no-op).
+      const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
+        '[aria-selected="true"] button[aria-haspopup="menu"]',
+      );
+      if (trigger !== null) {
+        event.preventDefault();
+        trigger.click();
+      }
     }
   };
+
+  const [confirmingDiscardAll, setConfirmingDiscardAll] = useState(false);
+  const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
 
   const handleStageAll = () => {
     onStageAllFiles(stageAllPaths);
@@ -705,6 +792,8 @@ function UncommittedDiffPane({
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
+        onDiscardFile={wrapFileAction(onDiscardFile)}
+        onIgnorePath={onIgnorePath}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -732,6 +821,13 @@ function UncommittedDiffPane({
                 that still costs a full refresh. */}
             <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
               Stage all
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingDiscardAll(true)}
+              disabled={discardableEntries.length === 0}
+            >
+              Discard all…
             </button>
           </div>
           <ul
@@ -765,6 +861,18 @@ function UncommittedDiffPane({
             {stagedEntries.map(renderSection)}
           </ul>
         </div>
+      )}
+      {confirmingDiscardAll && (
+        <ConfirmDialog
+          ariaLabel="Discard all changes"
+          message={discardAllConfirmMessage(discardableEntries)}
+          confirmLabel="Discard all"
+          onConfirm={() => {
+            setConfirmingDiscardAll(false);
+            onDiscardAllUnstaged();
+          }}
+          onCancel={() => setConfirmingDiscardAll(false)}
+        />
       )}
       <div className={styles.commitDock} role="group" aria-label="Commit actions">
         {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's

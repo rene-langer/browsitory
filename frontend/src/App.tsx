@@ -516,6 +516,9 @@ function RepoWorkspace({
                 onStageLines={(p, o, n, c, idx) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx)}
                 onUnstageLines={(p, o, n, c, idx) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx)}
                 onDiscardLines={(p, o, n, c, idx) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx)}
+                onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
+                onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
+                onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
                 onCommit={announce("Committed", appState.commit)}
                 onSaveStash={announce("Changes stashed", appState.saveStash)}
                 onSelectRow={appState.selectRow}

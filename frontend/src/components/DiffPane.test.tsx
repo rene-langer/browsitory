@@ -140,6 +140,9 @@ const noopHandlers = {
   onSelectRow: vi.fn(),
   onResolveConflict: vi.fn(),
   onResolveAddDeleteConflict: vi.fn(),
+  onDiscardFile: vi.fn(),
+  onDiscardAllUnstaged: vi.fn(),
+  onIgnorePath: vi.fn(),
   onAbortMerge: vi.fn(),
   onRebaseContinue: vi.fn(),
   onRebaseAbort: vi.fn(),
@@ -362,6 +365,101 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
 
       expect(onStageFile).toHaveBeenCalledWith("a.txt");
+    });
+
+    describe("file actions", () => {
+      const fileStatus: StatusEntry[] = [
+        { path: "src/a.ts", staged: false, kind: "Modified" },
+        { path: "logs/run.log", staged: false, kind: "New" },
+        { path: "shared.txt", staged: false, kind: "Conflicted" },
+      ];
+      const render = (overrides: Partial<React.ComponentProps<typeof DiffPane>> = {}) =>
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), fileStatus, overrides);
+
+      it("discards a tracked file after confirming from the actions button", () => {
+        const onDiscardFile = vi.fn();
+        render({ onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
+        expect(within(dialog).getByText("Discard changes to src/a.ts? This can't be undone.")).toBeInTheDocument();
+        expect(onDiscardFile).not.toHaveBeenCalled();
+        fireEvent.click(within(dialog).getByText("Discard changes"));
+
+        expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
+      });
+
+      it("does not discard when the dialog is cancelled", () => {
+        const onDiscardFile = vi.fn();
+        render({ onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        fireEvent.click(screen.getByText("Cancel"));
+
+        expect(onDiscardFile).not.toHaveBeenCalled();
+      });
+
+      it("opens the same menu on right-click of the file header", () => {
+        render();
+
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("opens the menu for the selected row with Shift+F10", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "F10", shiftKey: true });
+
+        expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("words the untracked delete dialog and ignores without confirming", () => {
+        const onIgnorePath = vi.fn();
+        const onDiscardFile = vi.fn();
+        render({ onIgnorePath, onDiscardFile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for logs/run.log" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Ignore all *.log" }));
+
+        expect(onIgnorePath).toHaveBeenCalledWith("*.log");
+        expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for logs/run.log" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        expect(screen.getByText("Delete untracked file logs/run.log? This can't be undone.")).toBeInTheDocument();
+        expect(screen.getByText("Delete file")).toBeInTheDocument();
+      });
+
+      it("gives conflicted files no actions button", () => {
+        render();
+
+        expect(screen.queryByRole("button", { name: "Actions for shared.txt" })).not.toBeInTheDocument();
+      });
+
+      it("Discard all confirms then calls onDiscardAllUnstaged", () => {
+        const onDiscardAllUnstaged = vi.fn();
+        render({ onDiscardAllUnstaged });
+
+        fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
+        expect(
+          screen.getByText("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone."),
+        ).toBeInTheDocument();
+        expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText("Discard all"));
+
+        expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
+      });
+
+      it("disables Discard all when every unstaged entry is conflicted", () => {
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), [fileStatus[2]]);
+
+        expect(screen.getByRole("button", { name: "Discard all…" })).toBeDisabled();
+      });
     });
 
     // One bulk call, not one per file: each per-file call is a separate `runMutation` in
