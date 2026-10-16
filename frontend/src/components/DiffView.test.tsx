@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
 import { wordDiff } from "../lib/wordDiff";
@@ -525,4 +525,13 @@ describe("DiffView options toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "More context lines" }));
     expect(update).toHaveBeenCalledWith({ contextLines: 4 });
   });
+});
+
+describe("DiffView syntax highlighting", () => {
+  it("colors tokens when highlighting is on", async () => {
+    const { container } = render(
+      <DiffView hunks={[{ ...lineHunk, lines: [{ origin: "Add", content: "const x = 1;\n" }] }]} path="f.ts" />,
+    );
+    await waitFor(() => expect(container.querySelector('[style*="--shiki-token"]')).not.toBeNull(), { timeout: 15000 });
+  }, 20000);
 });

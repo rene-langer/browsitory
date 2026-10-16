@@ -306,6 +306,7 @@ function UncommittedFileSection({
           ) : (
             <DiffView
               hunks={hunks}
+              path={entry.path}
               onStageHunk={!entry.staged ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onUnstageHunk={entry.staged ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
               onDiscardHunk={!entry.staged ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, settings.contextLines) : undefined}
@@ -926,7 +927,7 @@ function CommitFileSection({
               onRetry={loadDiff}
             />
           ) : (
-            <DiffView hunks={hunks} />
+            <DiffView hunks={hunks} path={path} />
           )}
         </div>
       )}

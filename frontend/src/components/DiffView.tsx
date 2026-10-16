@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { MAX_CONTEXT_LINES, type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
 import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { Toolbar } from "./primitives/Toolbar";
 import { wordDiff, type Segment } from "../lib/wordDiff";
+import { useHunkTokens } from "../lib/highlight";
+import { languageForPath } from "../lib/languageForPath";
+import { logFailure } from "../lib/logger";
+import { DiffLineContent } from "./DiffLineContent";
 import styles from "./DiffView.module.css";
 
 const DISCARD_DISARM_MS = 5000;
@@ -61,13 +65,9 @@ function computeWordSegments(hunks: DiffHunk[] | null): Map<DiffLine, Segment[]>
   return segments;
 }
 
-/** Renders a line's content as plain text, or word-level highlighted segments when paired. */
-function renderContent(line: DiffLine, wordSegments: Map<DiffLine, Segment[]>): ReactNode {
-  const segments = wordSegments.get(line);
-  if (segments === undefined) return line.content;
-  return segments.map((segment, segmentIndex) =>
-    segment.changed ? <mark key={segmentIndex}>{segment.text}</mark> : <span key={segmentIndex}>{segment.text}</span>,
-  );
+// Highlight failures are never user-facing: log and fall back to plain text.
+function logHighlightError(error: unknown): void {
+  logFailure("Syntax highlighting failed", error);
 }
 
 type SplitRow =
@@ -134,6 +134,7 @@ export function DiffView({
   onUnstageLines,
   onDiscardLines,
   partialActionsDisabled = false,
+  path,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
@@ -143,6 +144,7 @@ export function DiffView({
   onUnstageLines?: LineCallback;
   onDiscardLines?: LineCallback;
   partialActionsDisabled?: boolean;
+  path?: string;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
@@ -153,6 +155,7 @@ export function DiffView({
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
   const { settings, update } = useDiffSettingsContext();
+  const tokens = useHunkTokens(hunks, path ? languageForPath(path) : null, settings.syntaxHighlight, logHighlightError);
 
   // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
   // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
@@ -474,7 +477,7 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Context")}
                           </span>
-                          <span className={styles.content}>{row.line.content}</span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                         </div>
                       );
                     }
@@ -496,7 +499,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.oldLine, wordSegments)}</span>
+                            <span className={styles.content}><DiffLineContent line={row.oldLine} tokens={tokens?.get(row.oldLine)} segments={wordSegments.get(row.oldLine)} /></span>
                           </div>
                           <div
                             data-diff-column="new"
@@ -509,7 +512,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Add")}
                             </span>
-                            <span className={styles.content}>{renderContent(row.newLine, wordSegments)}</span>
+                            <span className={styles.content}><DiffLineContent line={row.newLine} tokens={tokens?.get(row.newLine)} segments={wordSegments.get(row.newLine)} /></span>
                           </div>
                         </div>
                       );
@@ -530,7 +533,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}>{row.line.content}</span>
+                            <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                           </div>
                           <div className={styles.splitColumn} aria-hidden="true" />
                         </div>
@@ -552,7 +555,7 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Add")}
                           </span>
-                          <span className={styles.content}>{row.line.content}</span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
                         </div>
                       </div>
                     );
@@ -579,7 +582,7 @@ export function DiffView({
                         <span className={styles.marker} aria-hidden="true">
                           {originPrefix(line.origin)}
                         </span>
-                        <span className={styles.content}>{renderContent(line, wordSegments)}</span>
+                        <span className={styles.content}><DiffLineContent line={line} tokens={tokens?.get(line)} segments={wordSegments.get(line)} /></span>
                       </div>
                     );
                   })}
