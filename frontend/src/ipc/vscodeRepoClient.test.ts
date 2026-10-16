@@ -89,6 +89,19 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.getLastSeenVersion(), "get_last_seen_version", {}, null],
       [() => vscodeRepoClient.setLastSeenVersion("1.2.3"), "set_last_seen_version", { version: "1.2.3" }, null],
       [() => vscodeRepoClient.openExternalUrl("https://example.com/pull/1"), "open_external_url", { url: "https://example.com/pull/1" }, null],
+      [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5 }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5 } }, []],
+      [() => vscodeRepoClient.getCommitDiff("/repo", "abc", "f.txt", { ignoreWhitespace: true, contextLines: 5 }), "get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts: { ignoreWhitespace: true, contextLines: 5 } }, []],
+      [() => vscodeRepoClient.stageHunk("/repo", "f.txt", 1, 2, 5), "stage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
+      [() => vscodeRepoClient.unstageHunk("/repo", "f.txt", 1, 2, 5), "unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
+      [() => vscodeRepoClient.discardHunk("/repo", "f.txt", 1, 2, 5), "discard_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
+      [() => vscodeRepoClient.stageLines("/repo", "f.txt", 1, 2, 5, [3]), "stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3] }, null],
+      [() => vscodeRepoClient.unstageLines("/repo", "f.txt", 1, 2, 5, [3]), "unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3] }, null],
+      [() => vscodeRepoClient.discardLines("/repo", "f.txt", 1, 2, 5, [3]), "discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3] }, null],
+      [() => vscodeRepoClient.discardFile("/repo", "f.txt"), "discard_file", { repoPath: "/repo", path: "f.txt" }, null],
+      [() => vscodeRepoClient.discardAllUnstaged("/repo"), "discard_all_unstaged", { repoPath: "/repo" }, null],
+      [() => vscodeRepoClient.ignorePath("/repo", "*.log"), "ignore_path", { repoPath: "/repo", pattern: "*.log" }, null],
+      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }],
+      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true } }, null],
     ] as const;
 
     for (const [index, [call, method, params, result]] of methods.entries()) {
@@ -352,21 +365,21 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires stageHunk, unstageHunk, and discardHunk", async () => {
-    const stagePromise = vscodeRepoClient.stageHunk("/repo", "a.txt", 1, 1);
+    const stagePromise = vscodeRepoClient.stageHunk("/repo", "a.txt", 1, 1, 3);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "stage_hunk",
-      params: { repoPath: "/repo", path: "a.txt", oldStart: 1, newStart: 1 },
+      params: { repoPath: "/repo", path: "a.txt", oldStart: 1, newStart: 1, contextLines: 3 },
     });
     respond(1, null);
     await expect(stagePromise).resolves.toBeNull();
 
-    const unstagePromise = vscodeRepoClient.unstageHunk("/repo", "a.txt", 1, 1);
+    const unstagePromise = vscodeRepoClient.unstageHunk("/repo", "a.txt", 1, 1, 3);
     respond(2, null);
     await expect(unstagePromise).resolves.toBeNull();
 
-    const discardPromise = vscodeRepoClient.discardHunk("/repo", "a.txt", 1, 1);
+    const discardPromise = vscodeRepoClient.discardHunk("/repo", "a.txt", 1, 1, 3);
     respond(3, null);
     await expect(discardPromise).resolves.toBeNull();
   });

@@ -24,6 +24,7 @@ import type {
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
@@ -150,7 +151,7 @@ function UncommittedFileSection({
   const loadDiff = () => {
     let ignore = false;
     client
-      .getWorkingDiff(repoPath, entry.path, entry.staged)
+      .getWorkingDiff(repoPath, entry.path, entry.staged, DEFAULT_DIFF_OPTIONS)
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -801,7 +802,7 @@ function CommitFileSection({
   const loadDiff = () => {
     let ignore = false;
     client
-      .getCommitDiff(repoPath, commitId, path)
+      .getCommitDiff(repoPath, commitId, path, DEFAULT_DIFF_OPTIONS)
       .then((next) => {
         if (!ignore) {
           setHunks(next);

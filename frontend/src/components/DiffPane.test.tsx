@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { DiffPane } from "./DiffPane";
 import styles from "./DiffPane.module.css";
@@ -107,6 +108,14 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     stageHunk: unused,
     unstageHunk: unused,
     discardHunk: unused,
+    stageLines: unused,
+    unstageLines: unused,
+    discardLines: unused,
+    discardFile: unused,
+    discardAllUnstaged: unused,
+    ignorePath: unused,
+    getDiffSettings: unused,
+    setDiffSettings: unused,
     commit: unused,
     logFrontendError: unused,
     ...overrides,
@@ -201,8 +210,8 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
       expect(await screen.findAllByText(/changed line/)).toHaveLength(2);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
@@ -275,8 +284,8 @@ describe("DiffPane", () => {
       );
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
@@ -309,8 +318,8 @@ describe("DiffPane", () => {
       await act(async () => settle());
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("refetches every open diff when refreshGeneration advances, with no hunk action involved", async () => {
@@ -337,8 +346,8 @@ describe("DiffPane", () => {
       );
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
@@ -621,7 +630,7 @@ describe("DiffPane", () => {
       );
 
       expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
-      await waitFor(() => expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false));
+      await waitFor(() => expect(client.getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "shared.txt", false, DEFAULT_DIFF_OPTIONS));
     });
 
     it("keeps each conflicted file's resolution state independent of the others", async () => {
@@ -899,7 +908,7 @@ describe("DiffPane", () => {
 
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
-      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
+      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs", DEFAULT_DIFF_OPTIONS);
     });
 
     it("no CommitBox or stage/unstage buttons render", async () => {

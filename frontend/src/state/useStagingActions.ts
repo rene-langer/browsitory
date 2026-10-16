@@ -97,17 +97,17 @@ export function useStagingActions(
   );
   const stageHunk = useCallback(
     (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart)),
+      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, 3)),
     [client, runMutation, repoPath],
   );
   const unstageHunk = useCallback(
     (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart)),
+      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, 3)),
     [client, runMutation, repoPath],
   );
   const discardHunk = useCallback(
     (path: string, oldStart: number, newStart: number) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart)),
+      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, 3)),
     [client, runMutation, repoPath],
   );
   const commit = useCallback(

@@ -13,6 +13,19 @@ export interface DiffLine {
   content: string;
 }
 
+export interface DiffOptions {
+  ignoreWhitespace: boolean;
+  contextLines: number;
+}
+
+export interface DiffSettings extends DiffOptions {
+  syntaxHighlight: boolean;
+}
+
+export const DEFAULT_DIFF_SETTINGS: DiffSettings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3 };
+export const MAX_CONTEXT_LINES = 20;
+
 export interface DiffHunk {
   oldStart: number;
   oldLines: number;
@@ -245,16 +258,24 @@ export interface RepoClient {
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
-  getWorkingDiff(repoPath: string, path: string, staged: boolean): Promise<DiffHunk[]>;
-  getCommitDiff(repoPath: string, commitId: string, path: string): Promise<DiffHunk[]>;
+  getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions): Promise<DiffHunk[]>;
+  getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
   // Full raw commit message (subject plus body).
   getCommitMessage(repoPath: string, commitId: string): Promise<string>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
-  stageHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
-  unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
-  discardHunk(repoPath: string, path: string, oldStart: number, newStart: number): Promise<void>;
+  stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  stageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  unstageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
+  discardLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[]): Promise<void>;
+  discardFile(repoPath: string, path: string): Promise<void>;
+  discardAllUnstaged(repoPath: string): Promise<void>;
+  ignorePath(repoPath: string, pattern: string): Promise<void>;
+  getDiffSettings(): Promise<DiffSettings>;
+  setDiffSettings(settings: DiffSettings): Promise<void>;
   commit(repoPath: string, message: string): Promise<void>;
   listBranches(repoPath: string): Promise<BranchInfo[]>;
   createBranch(repoPath: string, name: string, startPoint: string): Promise<void>;

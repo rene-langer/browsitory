@@ -99,6 +99,14 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     stageHunk: async () => unimplemented(),
     unstageHunk: async () => unimplemented(),
     discardHunk: async () => unimplemented(),
+    stageLines: async () => unimplemented(),
+    unstageLines: async () => unimplemented(),
+    discardLines: async () => unimplemented(),
+    discardFile: async () => unimplemented(),
+    discardAllUnstaged: async () => unimplemented(),
+    ignorePath: async () => unimplemented(),
+    getDiffSettings: async () => unimplemented(),
+    setDiffSettings: async () => unimplemented(),
     commit: async () => unimplemented(),
     listBranches: async () => [],
     createBranch: async () => unimplemented(),
@@ -1140,6 +1148,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1208,6 +1224,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1278,6 +1302,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1766,6 +1798,14 @@ describe("useAppState", () => {
       },
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1831,6 +1871,14 @@ describe("useAppState", () => {
         unstageHunkArgs = [path, oldStart, newStart];
       },
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1892,6 +1940,14 @@ describe("useAppState", () => {
       discardHunk: async (_repoPath: string, path: string, oldStart: number, newStart: number) => {
         discardHunkArgs = [path, oldStart, newStart];
       },
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -1951,6 +2007,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2018,6 +2082,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2081,6 +2153,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2263,6 +2343,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2325,6 +2413,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2386,6 +2482,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2445,6 +2549,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2507,6 +2619,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2574,6 +2694,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2639,6 +2767,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2701,6 +2837,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2808,6 +2952,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2870,6 +3022,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
@@ -2934,6 +3094,14 @@ describe("useAppState", () => {
       stageHunk: async () => unimplemented(),
       unstageHunk: async () => unimplemented(),
       discardHunk: async () => unimplemented(),
+      stageLines: async () => unimplemented(),
+      unstageLines: async () => unimplemented(),
+      discardLines: async () => unimplemented(),
+      discardFile: async () => unimplemented(),
+      discardAllUnstaged: async () => unimplemented(),
+      ignorePath: async () => unimplemented(),
+      getDiffSettings: async () => unimplemented(),
+      setDiffSettings: async () => unimplemented(),
       commit: async () => unimplemented(),
     };
 
