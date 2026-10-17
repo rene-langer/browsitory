@@ -246,7 +246,7 @@ fn failed_clone_into_existing_empty_dir_keeps_the_dir_empty() {
 }
 
 #[test]
-fn cancel_aborts_and_removes_the_created_destination() {
+fn cancel_before_start_creates_nothing() {
     let source = source();
     let target = tempfile::TempDir::new().unwrap();
     let dest = target.path().join("clone");
@@ -328,4 +328,49 @@ fn accepts_scp_style_and_ipv6_ssh_urls_at_validation() {
     ] {
         assert!(git_core::clone::validate_clone_url(url).is_ok(), "{url}");
     }
+}
+
+/// Cancel closure that allows the pre-start check, then cancels on every later poll.
+fn cancel_after_start() -> impl Fn() -> bool {
+    let calls = std::cell::Cell::new(0u32);
+    move || {
+        calls.set(calls.get() + 1);
+        calls.get() > 1
+    }
+}
+
+#[test]
+fn cancel_mid_clone_aborts_and_removes_the_created_destination() {
+    let source = source();
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let mut reporter = VecReporter::default();
+
+    let result = clone_repo(
+        &opts(&source.url, dest.clone()),
+        &mut NoCredentials,
+        &mut reporter,
+        &cancel_after_start(),
+    );
+
+    assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    assert!(!dest.exists());
+}
+
+#[test]
+fn cancel_mid_clone_into_existing_empty_dir_keeps_the_dir_empty() {
+    let source = source();
+    let target = tempfile::TempDir::new().unwrap();
+    let mut reporter = VecReporter::default();
+
+    let result = clone_repo(
+        &opts(&source.url, target.path().to_path_buf()),
+        &mut NoCredentials,
+        &mut reporter,
+        &cancel_after_start(),
+    );
+
+    assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    assert!(target.path().is_dir());
+    assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 0);
 }
