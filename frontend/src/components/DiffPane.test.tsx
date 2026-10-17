@@ -201,7 +201,9 @@ describe("DiffPane", () => {
       });
 
       await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
-      expect(screen.getByLabelText("Commit message")).toHaveFocus();
+      // Focus runs in a passive effect after the prefill commit, so under load it can land a tick
+      // after the value is visible.
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveFocus());
       expect(onCommitMessageFocused).toHaveBeenCalled();
     });
 
