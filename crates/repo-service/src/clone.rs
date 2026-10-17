@@ -58,20 +58,34 @@ impl Default for DefaultCloneService {
     }
 }
 
-/// The token the user typed into the clone dialog, offered once from memory. It reaches the
-/// keychain only after the clone succeeds (`persist_https`), so a wrong token is never saved.
+/// The token the user typed into the clone dialog, offered at most once, from memory, and only
+/// over `https://` with a plaintext user/pass credential allowed. libgit2 re-invokes the
+/// callback after every 401, so any later call (a wrong token) or a cleartext/other-scheme URL
+/// gets a missing-credential error instead, which the dialog turns into a re-prompt. The token
+/// reaches the keychain only after the clone succeeds (`persist_https`).
 struct OneShotHttps<'a> {
     input: &'a HttpsCredentialInput,
+    used: bool,
 }
 
 impl CredentialProvider for OneShotHttps<'_> {
     fn credential(
         &mut self,
-        _url: &str,
+        url: &str,
         _username: Option<&str>,
-        _allowed: git2::CredentialType,
+        allowed: git2::CredentialType,
     ) -> Result<git2::Cred, git2::Error> {
-        git2::Cred::userpass_plaintext(&self.input.username, &self.input.token)
+        let first = !std::mem::replace(&mut self.used, true);
+        let is_https = url
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
+        if first && is_https && allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+            git2::Cred::userpass_plaintext(&self.input.username, &self.input.token)
+        } else {
+            Err(git2::Error::from_str(
+                git_core::remote::MISSING_CREDENTIAL_ERROR,
+            ))
+        }
     }
 }
 
@@ -114,6 +128,11 @@ impl<S: CredentialStore> CloneService<S> {
     }
 
     #[cfg(test)]
+    pub(crate) fn is_idle(&self) -> bool {
+        self.running.lock().unwrap().is_empty()
+    }
+
+    #[cfg(test)]
     pub(crate) fn is_cancelled(&self, operation_id: &str) -> bool {
         self.running
             .lock()
@@ -149,7 +168,12 @@ impl<S: CredentialStore> CloneService<S> {
         };
         let service = CredentialService::new((self.new_store)());
         let result = match &https {
-            Some(input) => clone_repo(&opts, &mut OneShotHttps { input }, &mut reporter, &cancel),
+            Some(input) => clone_repo(
+                &opts,
+                &mut OneShotHttps { input, used: false },
+                &mut reporter,
+                &cancel,
+            ),
             None => {
                 let mut provider = RemoteCredentialProvider::new(&service, None);
                 clone_repo(&opts, &mut provider, &mut reporter, &cancel)
@@ -174,9 +198,7 @@ fn persist_https<S: CredentialStore>(
     outcome: &CloneOutcome,
     input: &HttpsCredentialInput,
 ) -> Result<(), String> {
-    service
-        .save_https(url, &input.username, &input.token)
-        .map_err(|error| error.to_string())?;
+    // Profile first: if it fails, no orphan keychain entry is left behind.
     let repo = git2::Repository::open(&outcome.path).map_err(|error| error.to_string())?;
     set_remote_auth_profile(
         &repo,
@@ -185,7 +207,10 @@ fn persist_https<S: CredentialStore>(
             username: input.username.clone(),
         },
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    service
+        .save_https(url, &input.username, &input.token)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -282,6 +307,7 @@ mod tests {
         service
             .clone_repo("clone-1", options(&url, target.path().join("c")), None, tx)
             .unwrap();
+        assert!(service.is_idle());
 
         let events: Vec<TransferEvent> = rx.try_iter().collect();
         assert!(!events.is_empty());
@@ -375,6 +401,7 @@ mod tests {
 
         assert!(result.is_err());
         assert!(store.entries.lock().unwrap().is_empty());
+        assert!(service.is_idle());
     }
 
     #[test]
@@ -427,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_flag_is_registered_while_running_and_removed_after() {
+    fn register_cancel_and_unregister_manage_the_flag() {
         let service = CloneService::with_store_factory(SharedStore::default);
         service.register("clone-9");
         service.cancel("clone-9");
@@ -452,5 +479,65 @@ mod tests {
         );
 
         assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    }
+
+    fn provider_input() -> HttpsCredentialInput {
+        HttpsCredentialInput {
+            username: "alice".into(),
+            token: "tok".into(),
+        }
+    }
+
+    #[test]
+    fn one_shot_offers_the_token_once_over_https_then_reports_missing() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider = super::OneShotHttps {
+            input: &input,
+            used: false,
+        };
+        let allowed = git2::CredentialType::USER_PASS_PLAINTEXT;
+
+        assert!(provider
+            .credential("https://example.test/r.git", None, allowed)
+            .is_ok());
+        let second = provider.credential("https://example.test/r.git", None, allowed);
+        assert_eq!(second.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
+    fn one_shot_refuses_cleartext_http() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider = super::OneShotHttps {
+            input: &input,
+            used: false,
+        };
+
+        let result = provider.credential(
+            "http://example.test/r.git",
+            None,
+            git2::CredentialType::USER_PASS_PLAINTEXT,
+        );
+
+        assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
+    fn one_shot_refuses_when_plaintext_credentials_are_not_allowed() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider = super::OneShotHttps {
+            input: &input,
+            used: false,
+        };
+
+        let result = provider.credential(
+            "https://example.test/r.git",
+            None,
+            git2::CredentialType::SSH_KEY,
+        );
+
+        assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
     }
 }
