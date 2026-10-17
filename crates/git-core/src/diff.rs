@@ -123,6 +123,32 @@ pub fn commit_diff(
     hunks_from_diff(&diff)
 }
 
+/// Diff of a file that `commit_id` renamed from `old_path` to `new_path`, against the first
+/// parent, with rename detection so edits show as edits rather than a whole-file add. A pure
+/// rename yields no hunks.
+pub fn commit_rename_diff(
+    repo: &Repository,
+    commit_id: &str,
+    old_path: &str,
+    new_path: &str,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
+    let mut git_opts = git2::DiffOptions::new();
+    // Literal paths, not globs — see `working_diff_options`.
+    git_opts
+        .pathspec(old_path)
+        .pathspec(new_path)
+        .disable_pathspec_match(true);
+    apply_display_options(&mut git_opts, opts);
+    let mut diff =
+        repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
+    hunks_from_diff(&diff)
+}
+
 /// Paths changed by `commit_id` (vs. its first parent, same rule as `commit_diff`) — used to
 /// build a commit's file list before diffing any individual file.
 pub fn commit_files(repo: &Repository, commit_id: &str) -> Result<Vec<String>, DiffError> {

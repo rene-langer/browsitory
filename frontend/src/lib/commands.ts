@@ -129,6 +129,8 @@ export interface DiffCommands {
   requestDiscardCurrentFile(): void;
   /** Opens the discard-all confirm dialog; never discards directly. */
   requestDiscardAllUnstaged(): void;
+  /** Opens the current file's history in place of the commit graph. */
+  openCurrentFileHistory(): void;
 }
 
 export function buildCommands(
@@ -441,6 +443,14 @@ export function buildCommands(
         run: () => update({ syntaxHighlight: !settings.syntaxHighlight }),
       },
     );
+    if (diffCommands.currentFile !== null) {
+      commands.push({
+        id: "file-history-current-file",
+        label: "File history of current file",
+        keywords: ["history", "log", "file", "follow", "rename"],
+        run: diffCommands.openCurrentFileHistory,
+      });
+    }
     // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
     if (!repositoryOperationDisabled) {
       if (diffCommands.currentFile !== null) {

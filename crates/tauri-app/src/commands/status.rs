@@ -1,6 +1,6 @@
 use super::{
-    worker_handle, AppState, BlameLineDto, DiffHunkDto, DiffOptionsDto, GraphCommitDto,
-    StatusEntryDto,
+    worker_handle, AppState, BlameLineDto, DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto,
+    GraphCommitDto, StatusEntryDto,
 };
 use std::path::Path;
 use tauri::State;
@@ -123,6 +123,36 @@ pub async fn get_blame(
         .get_blame(commit_id, path)?
         .into_iter()
         .map(BlameLineDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_file_history(
+    repo_path: String,
+    path: String,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<FileHistoryEntryDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
+        .get_file_history(path, limit)?
+        .into_iter()
+        .map(FileHistoryEntryDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_commit_rename_diff(
+    repo_path: String,
+    commit_id: String,
+    old_path: String,
+    new_path: String,
+    opts: DiffOptionsDto,
+    state: State<'_, AppState>,
+) -> Result<Vec<DiffHunkDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
+        .get_commit_rename_diff(commit_id, old_path, new_path, opts.into())?
+        .into_iter()
+        .map(DiffHunkDto::from)
         .collect())
 }
 

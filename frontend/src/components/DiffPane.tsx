@@ -101,6 +101,7 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict,
   onRequestDiscardFile,
   onIgnorePath,
+  onOpenFileHistory,
   sectionRef,
 }: {
   repoPath: string;
@@ -129,6 +130,7 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   onRequestDiscardFile: (path: string) => void;
   onIgnorePath: (pattern: string) => void;
+  onOpenFileHistory?: (path: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -278,6 +280,18 @@ function UncommittedFileSection({
           >
             Blame
           </button>
+          {onOpenFileHistory !== undefined && !isUntracked(entry) && (
+            <button
+              type="button"
+              aria-label={`History of ${entry.path}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenFileHistory(entry.path);
+              }}
+            >
+              History
+            </button>
+          )}
           {hasFileActions && (
             <button
               type="button"
@@ -424,7 +438,12 @@ export function DiffPane({
   discardRequest,
   onDiscardRequestChange,
   onCurrentFileChange,
+  fileHistoryFocus,
+  onOpenFileHistory,
 }: {
+  // Set while the graph shows a file's history: the commit view shows only that file.
+  fileHistoryFocus?: FileHistoryFocus | null;
+  onOpenFileHistory?: (path: string) => void;
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -519,6 +538,7 @@ export function DiffPane({
         discardRequest={discardRequest}
         onDiscardRequestChange={onDiscardRequestChange}
         onCurrentFileChange={onCurrentFileChange}
+        onOpenFileHistory={onOpenFileHistory}
       />
     );
   }
@@ -530,12 +550,17 @@ export function DiffPane({
       commitId={selectedRow.commitId}
       commits={commits}
       onSelectRow={onSelectRow}
+      onOpenFileHistory={onOpenFileHistory}
+      focus={fileHistoryFocus ?? null}
     />
   );
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
 export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" };
+
+/** The file whose history the graph is showing, at the selected commit. */
+export type FileHistoryFocus = { path: string; oldPath: string | null };
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -580,7 +605,9 @@ function UncommittedDiffPane({
   onCurrentFileChange,
   initialCommitDraft,
   onCommitDraftChange,
+  onOpenFileHistory,
 }: {
+  onOpenFileHistory?: (path: string) => void;
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
@@ -857,6 +884,7 @@ function UncommittedDiffPane({
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onIgnorePath={onIgnorePath}
+        onOpenFileHistory={onOpenFileHistory}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -1004,17 +1032,21 @@ function CommitFileSection({
   client,
   commitId,
   path,
+  oldPath,
   collapsed,
   onToggleCollapse,
   onSelectRow,
+  onOpenFileHistory,
 }: {
   repoPath: string;
   client: RepoClient;
   commitId: string;
   path: string;
+  oldPath?: string | null;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onSelectRow: (row: SelectedRow) => void;
+  onOpenFileHistory?: (path: string) => void;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
@@ -1025,8 +1057,11 @@ function CommitFileSection({
   const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
   const loadDiff = () => {
     let ignore = false;
-    client
-      .getCommitDiff(repoPath, commitId, path, diffOptions)
+    const request =
+      oldPath != null
+        ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, diffOptions)
+        : client.getCommitDiff(repoPath, commitId, path, diffOptions);
+    request
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -1047,7 +1082,7 @@ function CommitFileSection({
     if (mode !== "diff" || collapsed) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId, path, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
+  }, [repoPath, client, commitId, path, oldPath, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
 
   const loadBlame = () => {
     let ignore = false;
@@ -1080,10 +1115,16 @@ function CommitFileSection({
       <div className={styles.fileSectionHeader}>
         <CollapseToggle collapsed={collapsed} path={path} onToggle={onToggleCollapse} />
         <span className={styles.path}>{path}</span>
+        {oldPath != null && <span className={styles.renamedFrom}>Renamed from {oldPath}</span>}
         <div className={styles.rowActions}>
           <button type="button" onClick={() => setMode("blame")}>
             Blame
           </button>
+          {onOpenFileHistory !== undefined && (
+            <button type="button" aria-label={`History of ${path}`} onClick={() => onOpenFileHistory(path)}>
+              History
+            </button>
+          )}
         </div>
       </div>
       {!collapsed && (
@@ -1124,17 +1165,23 @@ function CommitDiffPane({
   commitId,
   commits,
   onSelectRow,
+  focus,
+  onOpenFileHistory,
 }: {
   repoPath: string;
   client: RepoClient;
   commitId: string;
   commits?: GraphCommit[];
   onSelectRow: (row: SelectedRow) => void;
+  focus: FileHistoryFocus | null;
+  onOpenFileHistory?: (path: string) => void;
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const [files, setFiles] = useState<string[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState(false);
+  const [focusCollapsed, setFocusCollapsed] = useState(false);
 
   const loadFiles = () => {
     let ignore = false;
@@ -1190,6 +1237,8 @@ function CommitDiffPane({
     );
   }
 
+  const focused = focus !== null && !showAll;
+
   return (
     <div>
       <CommitHeader
@@ -1200,25 +1249,51 @@ function CommitDiffPane({
         knownCommitIds={knownCommitIds}
         onSelectRow={onSelectRow}
       />
-      {files.length > 0 && (
-        <div className={styles.groupHeading}>
-          <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
-        </div>
+      {focused ? (
+        <>
+          <ul className={styles.fileList}>
+            <CommitFileSection
+              key={focus.path}
+              repoPath={repoPath}
+              client={client}
+              commitId={commitId}
+              path={focus.path}
+              oldPath={focus.oldPath}
+              collapsed={focusCollapsed}
+              onToggleCollapse={() => setFocusCollapsed((c) => !c)}
+              onSelectRow={onSelectRow}
+            />
+          </ul>
+          {files.length > 1 && (
+            <button type="button" onClick={() => setShowAll(true)}>
+              Show all {files.length} files
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          {files.length > 0 && (
+            <div className={styles.groupHeading}>
+              <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
+            </div>
+          )}
+          <ul className={styles.fileList}>
+            {files.map((path) => (
+              <CommitFileSection
+                key={path}
+                repoPath={repoPath}
+                client={client}
+                commitId={commitId}
+                path={path}
+                collapsed={collapsedPaths.has(path)}
+                onToggleCollapse={() => toggleCollapse(path)}
+                onSelectRow={onSelectRow}
+                onOpenFileHistory={onOpenFileHistory}
+              />
+            ))}
+          </ul>
+        </>
       )}
-      <ul className={styles.fileList}>
-        {files.map((path) => (
-          <CommitFileSection
-            key={path}
-            repoPath={repoPath}
-            client={client}
-            commitId={commitId}
-            path={path}
-            collapsed={collapsedPaths.has(path)}
-            onToggleCollapse={() => toggleCollapse(path)}
-            onSelectRow={onSelectRow}
-          />
-        ))}
-      </ul>
     </div>
   );
 }

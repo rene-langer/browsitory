@@ -100,6 +100,18 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<Vec<BlameLine>, String>>,
     },
+    GetFileHistory {
+        path: String,
+        limit: usize,
+        reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
+    },
+    GetCommitRenameDiff {
+        commit_id: String,
+        old_path: String,
+        new_path: String,
+        opts: git_core::diff::DiffOptions,
+        reply: Sender<Result<Vec<DiffHunk>, String>>,
+    },
     StageFile {
         path: String,
         reply: Sender<Result<(), String>>,
@@ -567,6 +579,18 @@ impl Worker {
                         path,
                         reply,
                     } => status::get_blame(&repo, commit_id, path, reply),
+                    Command::GetFileHistory { path, limit, reply } => {
+                        status::get_file_history(&repo, path, limit, reply)
+                    }
+                    Command::GetCommitRenameDiff {
+                        commit_id,
+                        old_path,
+                        new_path,
+                        opts,
+                        reply,
+                    } => status::get_commit_rename_diff(
+                        &repo, commit_id, old_path, new_path, opts, reply,
+                    ),
                     Command::StageFile { path, reply } => status::stage_file(&repo, path, reply),
                     Command::UnstageFile { path, reply } => {
                         status::unstage_file(&repo, path, reply)
@@ -2157,6 +2181,35 @@ mod tests {
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].content, "hello");
+    }
+
+    #[test]
+    fn get_file_history_and_rename_diff_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "l1\nl2\nl3\nl4\nl5\n");
+        commit_all(&repo, "add file");
+        write_file(dir.path(), "other.txt", "x\n");
+        commit_all(&repo, "unrelated");
+        write_file(dir.path(), "file.txt", "l1\nl2\nl3\nl4\nCHANGED\n");
+        commit_all(&repo, "edit file");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let history = handle.get_file_history("file.txt".into(), 10).unwrap();
+
+        let summaries: Vec<&str> = history.iter().map(|e| e.commit.summary.as_str()).collect();
+        assert_eq!(summaries, vec!["edit file", "add file"]);
+
+        // No rename in this repo: diffing the same path as both sides behaves like commit_diff.
+        let hunks = handle
+            .get_commit_rename_diff(
+                history[0].commit.id.clone(),
+                "file.txt".into(),
+                "file.txt".into(),
+                git_core::diff::DiffOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(hunks.len(), 1);
     }
 
     #[test]

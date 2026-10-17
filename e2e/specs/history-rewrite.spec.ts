@@ -41,18 +41,20 @@ describe("Browsitory history rewrite", () => {
   it("cherry-picks a commit, reverts it, then resets hard back", async () => {
     await openCommitMenu("e2e: commit to cherry-pick");
     await clickMenuItem("Cherry-pick");
-    await browser.waitUntil(() => fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt")), {
+    // Wait on the commit, not the file: checkout writes picked.txt before the commit lands.
+    await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: commit to cherry-pick", {
       timeout: 10000,
     });
-    expect(git("log", "-1", "--format=%s")).toBe("e2e: commit to cherry-pick");
+    expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(true);
 
     // The picked copy is now HEAD on baseBranch; it is the first matching row.
     await openCommitMenu("e2e: commit to cherry-pick");
     await clickMenuItem("Revert");
-    await browser.waitUntil(() => !fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt")), {
-      timeout: 10000,
-    });
-    expect(git("log", "-1", "--format=%s")).toBe('Revert "e2e: commit to cherry-pick"');
+    await browser.waitUntil(
+      () => git("log", "-1", "--format=%s") === 'Revert "e2e: commit to cherry-pick"',
+      { timeout: 10000 },
+    );
+    expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(false);
 
     const startSummary = git("log", "-1", "--format=%s", startTip);
     await openCommitMenu(startSummary);

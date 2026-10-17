@@ -133,6 +133,14 @@ export interface GraphCommit {
   remoteBranchRefs: string[];
 }
 
+/** One commit in a file's history. `path` is the file's name in that commit; `oldPath` is set
+ *  when the commit renamed `oldPath` to `path`. */
+export interface FileHistoryEntry {
+  commit: GraphCommit;
+  path: string;
+  oldPath: string | null;
+}
+
 export interface BlameLine {
   lineNumber: number;
   content: string;
@@ -260,6 +268,8 @@ export interface RepoClient {
   setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
+  getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
+  getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
   // Full raw commit message (subject plus body).
   getCommitMessage(repoPath: string, commitId: string): Promise<string>;

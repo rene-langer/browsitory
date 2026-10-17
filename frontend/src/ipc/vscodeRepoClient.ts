@@ -7,6 +7,7 @@ import type {
   DiffOptions,
   DiffSettings,
   FileConflictChoice,
+  FileHistoryEntry,
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
@@ -191,6 +192,10 @@ export const vscodeRepoClient: RepoClient = {
     call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
+  getFileHistory: (repoPath: string, path: string, limit: number) =>
+    call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+  getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
+    call<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
 
   pickRepoFolder: () => call<string | null>("pick_repo_folder", {}),
   listRecentRepos: () => call<string[]>("list_recent_repos", {}),

@@ -1772,3 +1772,48 @@ fn diff_settings_round_trip_through_the_sidecar() {
         serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false})
     );
 }
+
+#[test]
+fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "l1\nl2\nl3\nl4\nl5\n");
+    commit_all(&repo, "add");
+    std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+    write_file(dir.path(), "new.txt", "l1\nl2\nl3\nl4\nCHANGED\n");
+    {
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new("old.txt")).unwrap();
+        index.write().unwrap();
+    }
+    commit_all(&repo, "rename and edit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let history = sidecar.call(
+        2,
+        "get_file_history",
+        serde_json::json!({"repoPath": repo_path, "path": "new.txt", "limit": 10}),
+    );
+    let entries = history["result"].as_array().expect("history result array");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["commit"]["summary"], "rename and edit");
+    assert_eq!(entries[0]["oldPath"], "old.txt");
+    assert_eq!(entries[1]["path"], "old.txt");
+    assert!(entries[1]["oldPath"].is_null());
+
+    let diff = sidecar.call(
+        3,
+        "get_commit_rename_diff",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "commitId": entries[0]["commit"]["id"],
+            "oldPath": "old.txt",
+            "newPath": "new.txt",
+            "opts": {"ignoreWhitespace": false, "contextLines": 3},
+        }),
+    );
+    let hunks = diff["result"].as_array().expect("rename diff result array");
+    assert_eq!(hunks.len(), 1);
+}
