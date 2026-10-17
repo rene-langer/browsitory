@@ -91,6 +91,11 @@ fn url_for(path: &Path) -> String {
     }
 }
 
+/// Reads a checked-out file with line endings normalised (`core.autocrlf` is on for Windows CI).
+fn read_checked_out(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
 fn opts(url: &str, dest: PathBuf) -> CloneOptions {
     CloneOptions {
         url: url.to_string(),
@@ -124,10 +129,7 @@ fn clones_the_default_branch_with_origin_and_tracking() {
     assert!(outcome.submodule_failures.is_empty());
     let repo = git2::Repository::open(&dest).unwrap();
     assert_eq!(repo.head().unwrap().shorthand(), Ok("main"));
-    assert_eq!(
-        std::fs::read_to_string(dest.join("a.txt")).unwrap(),
-        "main only\n"
-    );
+    assert_eq!(read_checked_out(&dest.join("a.txt")), "main only\n");
     assert_eq!(
         repo.find_remote("origin").unwrap().url(),
         Ok(source.url.as_str())
@@ -153,10 +155,7 @@ fn checks_out_the_requested_branch() {
     result.unwrap();
     let repo = git2::Repository::open(&dest).unwrap();
     assert_eq!(repo.head().unwrap().shorthand(), Ok("feature"));
-    assert_eq!(
-        std::fs::read_to_string(dest.join("a.txt")).unwrap(),
-        "two\n"
-    );
+    assert_eq!(read_checked_out(&dest.join("a.txt")), "two\n");
 }
 
 #[test]
@@ -522,11 +521,12 @@ fn source_with_submodule(child_url_for: impl Fn(&Path) -> String) -> (tempfile::
     submodule.add_to_index(true).unwrap();
     submodule.add_finalize().unwrap();
     drop(submodule);
-    // Rewrite the recorded URL to the one under test (plain path or file:// URL).
-    let gitmodules = parent_path.join(".gitmodules");
-    let text = std::fs::read_to_string(&gitmodules).unwrap();
-    let text = text.replace(child_path.to_str().unwrap(), &child_url_for(&child_path));
-    std::fs::write(&gitmodules, text).unwrap();
+    // Rewrite the recorded URL to the one under test (plain path or file:// URL). Via config,
+    // not string replace: the recorded path's slash form differs per platform.
+    git2::Config::open(&parent_path.join(".gitmodules"))
+        .unwrap()
+        .set_str("submodule.deps/child.url", &child_url_for(&child_path))
+        .unwrap();
     common::commit_all(&parent, "add child submodule");
 
     let bare_path = dir.path().join("parent.git");
@@ -562,7 +562,7 @@ fn initializes_and_checks_out_submodules_when_requested() {
         outcome.submodule_failures
     );
     assert_eq!(
-        std::fs::read_to_string(dest.join("deps/child/child.txt")).unwrap(),
+        read_checked_out(&dest.join("deps/child/child.txt")),
         "child\n"
     );
 }
