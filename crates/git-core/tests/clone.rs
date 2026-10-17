@@ -82,7 +82,13 @@ fn source() -> Source {
 }
 
 fn url_for(path: &Path) -> String {
-    format!("file://{}", path.to_str().unwrap().replace('\\', "/"))
+    let path = path.to_str().unwrap().replace('\\', "/");
+    // Windows paths (`C:/...`) need the extra slash: `file:///C:/...`.
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
 }
 
 fn opts(url: &str, dest: PathBuf) -> CloneOptions {

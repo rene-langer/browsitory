@@ -285,7 +285,13 @@ mod tests {
             .unwrap()
             .set_head(&head)
             .unwrap();
-        let url = format!("file://{}", bare.to_str().unwrap().replace('\\', "/"));
+        let path = bare.to_str().unwrap().replace('\\', "/");
+        // Windows paths (`C:/...`) need the extra slash: `file:///C:/...`.
+        let url = if path.starts_with('/') {
+            format!("file://{path}")
+        } else {
+            format!("file:///{path}")
+        };
         (dir, url)
     }
 
