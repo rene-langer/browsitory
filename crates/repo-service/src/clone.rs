@@ -62,10 +62,11 @@ impl Default for DefaultCloneService {
 /// over `https://` with a plaintext user/pass credential allowed. libgit2 re-invokes the
 /// callback after every 401, so any later call (a wrong token) or a cleartext/other-scheme URL
 /// gets a missing-credential error instead, which the dialog turns into a re-prompt. The token
-/// reaches the keychain only after the clone succeeds (`persist_https`).
+/// reaches the keychain only after the clone succeeds and the token was actually offered
+/// (`offered`; a public repo never asks, so a mistyped token is never saved).
 struct OneShotHttps<'a> {
     input: &'a HttpsCredentialInput,
-    used: bool,
+    offered: bool,
 }
 
 impl CredentialProvider for OneShotHttps<'_> {
@@ -75,11 +76,12 @@ impl CredentialProvider for OneShotHttps<'_> {
         _username: Option<&str>,
         allowed: git2::CredentialType,
     ) -> Result<git2::Cred, git2::Error> {
-        let first = !std::mem::replace(&mut self.used, true);
         let is_https = url
             .get(..8)
             .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
-        if first && is_https && allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+        if !self.offered && is_https && allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
+        {
+            self.offered = true;
             git2::Cred::userpass_plaintext(&self.input.username, &self.input.token)
         } else {
             Err(git2::Error::from_str(
@@ -167,13 +169,17 @@ impl<S: CredentialStore> CloneService<S> {
             operation_id,
         };
         let service = CredentialService::new((self.new_store)());
+        let mut token_offered = false;
         let result = match &https {
-            Some(input) => clone_repo(
-                &opts,
-                &mut OneShotHttps { input, used: false },
-                &mut reporter,
-                &cancel,
-            ),
+            Some(input) => {
+                let mut provider = OneShotHttps {
+                    input,
+                    offered: false,
+                };
+                let result = clone_repo(&opts, &mut provider, &mut reporter, &cancel);
+                token_offered = provider.offered;
+                result
+            }
             None => {
                 let mut provider = RemoteCredentialProvider::new(&service, None);
                 clone_repo(&opts, &mut provider, &mut reporter, &cancel)
@@ -182,8 +188,10 @@ impl<S: CredentialStore> CloneService<S> {
         self.unregister(operation_id);
         let outcome = result?;
         let credential_save_failed = match &https {
-            Some(input) => persist_https(&service, opts.url.trim(), &outcome, input).is_err(),
-            None => false,
+            Some(input) if token_offered => {
+                persist_https(&service, opts.url.trim(), &outcome, input).is_err()
+            }
+            _ => false,
         };
         Ok(ServiceCloneOutcome {
             outcome,
@@ -361,9 +369,11 @@ mod tests {
     }
 
     #[test]
-    fn a_token_for_a_non_https_url_is_reported_unsaved_but_the_clone_succeeds() {
+    fn a_token_that_was_never_offered_is_not_saved_and_not_a_failure() {
+        // The file:// fixture never challenges for credentials, like a public repo.
         let (_src, url) = bare_source();
         let target = tempfile::TempDir::new().unwrap();
+        let dest = target.path().join("c");
         let store = SharedStore::default();
         let shared = store.clone();
         let service = CloneService::with_store_factory(move || shared.clone());
@@ -371,14 +381,19 @@ mod tests {
         let outcome = service
             .clone_repo(
                 "clone-1",
-                options(&url, target.path().join("c")),
+                options(&url, dest.clone()),
                 https(),
                 mpsc::channel().0,
             )
             .unwrap();
 
-        assert!(outcome.credential_save_failed);
+        assert!(!outcome.credential_save_failed);
         assert!(store.entries.lock().unwrap().is_empty());
+        let repo = git2::Repository::open(&dest).unwrap();
+        assert_eq!(
+            git_core::remote::remote_auth_profile(&repo, "origin").unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -494,7 +509,7 @@ mod tests {
         let input = provider_input();
         let mut provider = super::OneShotHttps {
             input: &input,
-            used: false,
+            offered: false,
         };
         let allowed = git2::CredentialType::USER_PASS_PLAINTEXT;
 
@@ -506,12 +521,34 @@ mod tests {
     }
 
     #[test]
+    fn one_shot_refusal_does_not_consume_the_offer() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider = super::OneShotHttps {
+            input: &input,
+            offered: false,
+        };
+        let url = "https://example.test/r.git";
+
+        let refused = provider.credential(url, None, git2::CredentialType::SSH_KEY);
+        assert_eq!(refused.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+        assert!(!provider.offered);
+
+        assert!(provider
+            .credential(url, None, git2::CredentialType::USER_PASS_PLAINTEXT)
+            .is_ok());
+        assert!(provider.offered);
+        let again = provider.credential(url, None, git2::CredentialType::USER_PASS_PLAINTEXT);
+        assert_eq!(again.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
     fn one_shot_refuses_cleartext_http() {
         use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
         let input = provider_input();
         let mut provider = super::OneShotHttps {
             input: &input,
-            used: false,
+            offered: false,
         };
 
         let result = provider.credential(
@@ -529,7 +566,7 @@ mod tests {
         let input = provider_input();
         let mut provider = super::OneShotHttps {
             input: &input,
-            used: false,
+            offered: false,
         };
 
         let result = provider.credential(

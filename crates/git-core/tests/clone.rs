@@ -375,6 +375,120 @@ fn cancel_mid_clone_into_existing_empty_dir_keeps_the_dir_empty() {
     assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 0);
 }
 
+/// Reporter that raises `flag` on an `Updating` event (the last one when `last_only`), i.e. once
+/// the transfer is complete and only checkout / submodule work remains.
+struct FlagOnUpdating<'a> {
+    flag: &'a std::cell::Cell<bool>,
+    last_only: bool,
+}
+
+impl TransferReporter for FlagOnUpdating<'_> {
+    fn report(&mut self, event: TransferProgress) {
+        if event.phase == TransferPhase::Updating
+            && (!self.last_only || event.current >= event.total)
+        {
+            self.flag.set(true);
+        }
+    }
+}
+
+#[test]
+fn cancel_raised_during_checkout_cancels_and_removes_the_destination() {
+    let source = source();
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let flag = std::cell::Cell::new(false);
+    let mut reporter = FlagOnUpdating {
+        flag: &flag,
+        last_only: false,
+    };
+
+    let result = clone_repo(
+        &opts(&source.url, dest.clone()),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| flag.get(),
+    );
+
+    assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    assert!(!dest.exists());
+}
+
+#[test]
+fn cancel_raised_once_checkout_finished_still_cancels() {
+    let source = source();
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let flag = std::cell::Cell::new(false);
+    let mut reporter = FlagOnUpdating {
+        flag: &flag,
+        last_only: true,
+    };
+
+    let result = clone_repo(
+        &opts(&source.url, dest.clone()),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| flag.get(),
+    );
+
+    assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    assert!(!dest.exists());
+}
+
+#[test]
+fn cancel_raised_before_the_submodule_phase_cancels() {
+    let (_dir, url) = source_with_submodule(|p| p.to_str().unwrap().to_string());
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let flag = std::cell::Cell::new(false);
+    let mut reporter = FlagOnUpdating {
+        flag: &flag,
+        last_only: true,
+    };
+    let mut options = opts(&url, dest.clone());
+    options.recurse_submodules = true;
+
+    let result = clone_repo(&options, &mut NoCredentials, &mut reporter, &|| flag.get());
+
+    assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    assert!(!dest.exists());
+}
+
+#[test]
+fn a_relative_destination_is_refused_and_nothing_is_created() {
+    let source = source();
+    let name = format!("relative-clone-dest-{}", std::process::id());
+    let dest = PathBuf::from(&name);
+
+    let (result, _) = run(&opts(&source.url, dest.clone()));
+
+    match result {
+        Err(CloneError::Io(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert_eq!(error.to_string(), "Destination must be an absolute path.");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!dest.exists());
+}
+
+#[test]
+fn a_missing_local_source_with_a_branch_is_not_branch_not_found() {
+    let target = tempfile::TempDir::new().unwrap();
+    let missing = target.path().join("no-such-repo");
+    let mut options = opts(missing.to_str().unwrap(), target.path().join("clone"));
+    options.branch = Some("main".into());
+
+    let (result, _) = run(&options);
+
+    assert!(result.is_err());
+    assert!(
+        !matches!(result, Err(CloneError::BranchNotFound)),
+        "{result:?}"
+    );
+}
+
 /// Bare parent repo whose `deps/child` submodule points at `child_url`.
 fn source_with_submodule(child_url_for: impl Fn(&Path) -> String) -> (tempfile::TempDir, String) {
     let dir = tempfile::TempDir::new().unwrap();

@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use git2::build::{CheckoutBuilder, RepoBuilder};
-use git2::{ErrorCode, FetchOptions, RemoteCallbacks};
+use git2::{CheckoutNotificationType, ErrorClass, ErrorCode, FetchOptions, RemoteCallbacks};
 use thiserror::Error;
 use url::Url;
 
@@ -125,6 +125,12 @@ pub fn clone_repo(
     cancel: &dyn Fn() -> bool,
 ) -> Result<CloneOutcome, CloneError> {
     validate_clone_url(&opts.url)?;
+    if !opts.dest.is_absolute() {
+        return Err(CloneError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Destination must be an absolute path.",
+        )));
+    }
     let url = opts.url.trim();
     let branch = opts
         .branch
@@ -162,6 +168,9 @@ pub fn clone_repo(
         fetch.remote_callbacks(callbacks);
 
         let mut checkout = CheckoutBuilder::new();
+        // Every written file is an `UPDATED` notification; returning false aborts the checkout.
+        checkout.notify_on(CheckoutNotificationType::UPDATED);
+        checkout.notify(|_kind, _path, _baseline, _target, _workdir| !cancel());
         checkout.progress(|_path, current, total| {
             reporter.borrow_mut().report(TransferProgress {
                 operation_id: String::new(),
@@ -190,10 +199,17 @@ pub fn clone_repo(
         }
     };
 
-    let submodule_failures = if opts.recurse_submodules {
-        update_all_submodules(&repo)
+    let submodule_failures = if cancel() {
+        None
+    } else if opts.recurse_submodules {
+        update_all_submodules(&repo, cancel)
     } else {
-        Vec::new()
+        Some(Vec::new())
+    };
+    let Some(submodule_failures) = submodule_failures else {
+        drop(repo);
+        cleanup(&opts.dest, state);
+        return Err(CloneError::Cancelled);
     };
     Ok(CloneOutcome {
         path: opts.dest.clone(),
@@ -205,7 +221,10 @@ fn classify(error: git2::Error, branch_requested: bool, cancel: &dyn Fn() -> boo
     if cancel() {
         return CloneError::Cancelled;
     }
-    if branch_requested && error.code() == ErrorCode::NotFound {
+    if branch_requested
+        && error.code() == ErrorCode::NotFound
+        && error.class() == ErrorClass::Reference
+    {
         return CloneError::BranchNotFound;
     }
     let message = error.message().to_string();
@@ -214,19 +233,27 @@ fn classify(error: git2::Error, branch_requested: bool, cancel: &dyn Fn() -> boo
 }
 
 /// Best-effort: a submodule that can't be fetched (private URL, refused scheme) must not undo
-/// an otherwise good clone. Failures are reported by path.
-fn update_all_submodules(repo: &git2::Repository) -> Vec<String> {
+/// an otherwise good clone. Failures are reported by path. `None` means the user cancelled
+/// between submodules.
+fn update_all_submodules(
+    repo: &git2::Repository,
+    cancel: &dyn Fn() -> bool,
+) -> Option<Vec<String>> {
     let submodules = match list_submodules(repo) {
         Ok(submodules) => submodules,
-        Err(_) => return vec![".gitmodules".to_string()],
+        Err(_) => return Some(vec![".gitmodules".to_string()]),
     };
-    submodules
-        .into_iter()
-        .filter(|submodule| {
-            init_submodule(repo, &submodule.path)
-                .and_then(|()| update_submodule(repo, &submodule.path, true))
-                .is_err()
-        })
-        .map(|submodule| submodule.path)
-        .collect()
+    let mut failures = Vec::new();
+    for submodule in submodules {
+        if cancel() {
+            return None;
+        }
+        if init_submodule(repo, &submodule.path)
+            .and_then(|()| update_submodule(repo, &submodule.path, true))
+            .is_err()
+        {
+            failures.push(submodule.path);
+        }
+    }
+    Some(failures)
 }

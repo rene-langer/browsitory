@@ -21,6 +21,12 @@ pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
 /// Creates an empty repository at `path` (and any missing parents). The initial branch honours
 /// the user's global `init.defaultBranch`, else `main`.
 pub fn init_repo(path: &Path) -> Result<(), RepoError> {
+    if !path.is_absolute() {
+        return Err(RepoError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Destination must be an absolute path.",
+        )));
+    }
     if path.join(".git").exists() {
         return Err(RepoError::AlreadyRepository);
     }

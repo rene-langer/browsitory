@@ -55,6 +55,23 @@ fn init_creates_a_repository_with_missing_parents() {
 }
 
 #[test]
+fn init_refuses_a_relative_path_and_creates_nothing() {
+    let name = format!("relative-init-dest-{}", std::process::id());
+    let path = std::path::PathBuf::from(&name);
+
+    let result = git_core::repo::init_repo(&path);
+
+    match result {
+        Err(git_core::repo::RepoError::Io(error)) => {
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert_eq!(error.to_string(), "Destination must be an absolute path.");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!path.exists());
+}
+
+#[test]
 fn init_uses_an_existing_empty_directory() {
     let dir = tempfile::TempDir::new().unwrap();
 
