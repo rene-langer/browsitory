@@ -208,6 +208,10 @@ export const vscodeRepoClient: RepoClient = {
   persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
     call<void>("persist_open_repos", { entries, activePath }),
   scanReposInRoot: (root: string) => call<string[]>("scan_repos_in_root", { root }),
+  supportsCloneAndInit: false,
+  cloneRepo: () => Promise.reject(new Error("Not supported in the VSCode extension")),
+  cancelClone: () => Promise.reject(new Error("Not supported in the VSCode extension")),
+  initRepo: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   listWorkspaces: () => call<Workspace[]>("list_workspaces", {}),
   saveWorkspace: (name: string, root: string, members: string[]) =>
     call<string>("save_workspace", { name, root, members }),

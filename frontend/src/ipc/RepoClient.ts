@@ -91,9 +91,54 @@ export interface HeadInfo { headId: string | null; detachedAt: string | null; he
 export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
 export type ResetMode = "soft" | "mixed" | "hard";
 
-export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags" | "ForcePushBranch";
+export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags" | "ForcePushBranch" | "Clone";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease";
+
+export interface CloneRequest {
+  url: string;
+  dest: string;
+  branch: string | null;
+  recurseSubmodules: boolean;
+  https: { username: string; token: string } | null;
+}
+
+export interface CloneOutcome {
+  path: string;
+  submoduleFailures: string[];
+  credentialSaveFailed: boolean;
+}
+
+export type CloneErrorKind =
+  | "InvalidUrl"
+  | "CredentialBearingUrl"
+  | "DestNotEmpty"
+  | "BranchNotFound"
+  | "Cancelled"
+  | "AlreadyRepository"
+  | "Io"
+  | "InitFailed"
+  | TransferErrorKind;
+
+/** Clone/init failure; the backend sends `{ kind, message }` so callers can branch on `kind`. */
+export class CloneError extends Error {
+  readonly kind: CloneErrorKind;
+  constructor(kind: CloneErrorKind, message: string) {
+    super(message);
+    this.name = "CloneError";
+    this.kind = kind;
+  }
+}
+
+export function toCloneError(raw: unknown): CloneError {
+  if (typeof raw === "object" && raw !== null && "kind" in raw && "message" in raw) {
+    const { kind, message } = raw as { kind: unknown; message: unknown };
+    if (typeof kind === "string" && typeof message === "string") {
+      return new CloneError(kind as CloneErrorKind, message);
+    }
+  }
+  return new CloneError("TransferFailed", String(raw));
+}
 
 export interface TransferProgress {
   operationId: string;
@@ -256,6 +301,17 @@ export interface RepoClient {
   listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;
   persistOpenRepos(entries: OpenRepoEntry[], activePath: string | null): Promise<void>;
   scanReposInRoot(root: string): Promise<string[]>;
+  /** False in the VSCode extension, where VSCode's own Git: Clone / Initialize cover this. */
+  readonly supportsCloneAndInit: boolean;
+  /**
+   * Clones and resolves when done. `operationId` is chosen by the caller so it can
+   * `cancelClone` before this resolves; progress arrives on `subscribeTransferProgress` with
+   * `operation: "Clone"` (Progress phases only, no Starting/Completed). Rejects with `CloneError`.
+   */
+  cloneRepo(operationId: string, request: CloneRequest): Promise<CloneOutcome>;
+  cancelClone(operationId: string): Promise<void>;
+  /** Rejects with `CloneError` (`AlreadyRepository` when `path/.git` exists). */
+  initRepo(path: string): Promise<void>;
   listWorkspaces(): Promise<Workspace[]>;
   saveWorkspace(name: string, root: string, members: string[]): Promise<string>;
   updateWorkspace(id: string, name: string, members: string[]): Promise<void>;
