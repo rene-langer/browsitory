@@ -3,6 +3,11 @@ import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
 
+export interface AppCommands {
+  onCloneRepository: () => void;
+  onNewRepository: () => void;
+}
+
 export interface Command {
   id: string;
   label: string;
@@ -145,6 +150,7 @@ export function buildCommands(
   // VSCode webview may hand to the workbench before the page ever sees it.
   onCloseActiveRepoTab?: () => void,
   diffCommands?: DiffCommands,
+  appCommands?: AppCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -156,6 +162,23 @@ export function buildCommands(
       keywords: ["keyboard", "shortcuts", "help", "keys"],
       run: onShowShortcuts,
     });
+  }
+
+  if (appCommands !== undefined) {
+    commands.push(
+      {
+        id: "clone-repository",
+        label: "Clone repository…",
+        keywords: ["clone", "repository", "url", "remote"],
+        run: appCommands.onCloneRepository,
+      },
+      {
+        id: "new-repository",
+        label: "New repository…",
+        keywords: ["new", "init", "create", "repository"],
+        run: appCommands.onNewRepository,
+      },
+    );
   }
 
   // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every

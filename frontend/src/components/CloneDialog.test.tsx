@@ -163,4 +163,14 @@ describe("CloneDialog", () => {
     await waitFor(() => expect(screen.getByLabelText("Repository URL")).toBeEnabled());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("reports running state to its host", async () => {
+    const onRunningChange = vi.fn();
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} onRunningChange={onRunningChange} />);
+    fill("https://github.com/org/repo.git");
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    expect(onRunningChange).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(onRunningChange).toHaveBeenLastCalledWith(false));
+  });
 });

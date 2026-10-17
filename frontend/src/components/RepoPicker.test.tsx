@@ -352,3 +352,48 @@ describe("RepoPicker workspaces", () => {
     expect(screen.queryByText("New Workspace")).not.toBeInTheDocument();
   });
 });
+
+describe("clone and new repository entry points", () => {
+  it("shows Clone… and New repository… when handlers are given", () => {
+    const onClone = vi.fn();
+    const onNew = vi.fn();
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        workspaces={[]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+        onCloneRepository={onClone}
+        onNewRepository={onNew}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clone…" }));
+    fireEvent.click(screen.getByRole("button", { name: "New repository…" }));
+    expect(onClone).toHaveBeenCalled();
+    expect(onNew).toHaveBeenCalled();
+  });
+
+  it("hides them without handlers", () => {
+    render(
+      <RepoPicker
+        client={fakeClient({ listRecentRepos: async () => [] })}
+        onOpenRepo={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        workspaces={[]}
+        workspacesLoading={false}
+        workspacesError={null}
+        onDismissWorkspacesError={vi.fn()}
+        onCreateWorkspace={vi.fn()}
+        onEditWorkspace={vi.fn()}
+        onDeleteWorkspace={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Clone…" })).not.toBeInTheDocument();
+  });
+});

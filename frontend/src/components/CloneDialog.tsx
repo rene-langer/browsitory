@@ -37,10 +37,13 @@ export function CloneDialog({
   client,
   onCloned,
   onCancel,
+  onRunningChange,
 }: {
   client: RepoClient;
   onCloned: (outcome: CloneOutcome, name: string) => void;
   onCancel: () => void;
+  /** Lets the host refuse to dismiss the dialog while a clone is in flight. */
+  onRunningChange?: (running: boolean) => void;
 }) {
   const [url, setUrl] = useState("");
   const [parent, setParent] = useState("");
@@ -84,6 +87,7 @@ export function CloneDialog({
     const id = crypto.randomUUID();
     operationId.current = id;
     setRunning(true);
+    onRunningChange?.(true);
     setProgress(null);
     setError(null);
     const trimmedBranch = branch.trim();
@@ -99,6 +103,7 @@ export function CloneDialog({
       .finally(() => {
         operationId.current = null;
         setRunning(false);
+        onRunningChange?.(false);
         setProgress(null);
       });
   };
