@@ -374,3 +374,102 @@ fn cancel_mid_clone_into_existing_empty_dir_keeps_the_dir_empty() {
     assert!(target.path().is_dir());
     assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 0);
 }
+
+/// Bare parent repo whose `deps/child` submodule points at `child_url`.
+fn source_with_submodule(child_url_for: impl Fn(&Path) -> String) -> (tempfile::TempDir, String) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let child_path = dir.path().join("child");
+    let child = git2::Repository::init(&child_path).unwrap();
+    {
+        let mut config = child.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    common::write_file(&child_path, "child.txt", "child\n");
+    common::commit_all(&child, "child commit");
+
+    let parent_path = dir.path().join("parent");
+    let parent = git2::Repository::init(&parent_path).unwrap();
+    {
+        let mut config = parent.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    let mut submodule = parent
+        .submodule(child_path.to_str().unwrap(), Path::new("deps/child"), true)
+        .unwrap();
+    submodule.clone(None).unwrap();
+    submodule.add_to_index(true).unwrap();
+    submodule.add_finalize().unwrap();
+    drop(submodule);
+    // Rewrite the recorded URL to the one under test (plain path or file:// URL).
+    let gitmodules = parent_path.join(".gitmodules");
+    let text = std::fs::read_to_string(&gitmodules).unwrap();
+    let text = text.replace(child_path.to_str().unwrap(), &child_url_for(&child_path));
+    std::fs::write(&gitmodules, text).unwrap();
+    common::commit_all(&parent, "add child submodule");
+
+    let bare_path = dir.path().join("parent.git");
+    git2::Repository::init_bare(&bare_path).unwrap();
+    let head = parent.head().unwrap().name().unwrap().to_string();
+    parent
+        .remote("origin", bare_path.to_str().unwrap())
+        .unwrap()
+        .push(&[format!("{head}:{head}")], None)
+        .unwrap();
+    git2::Repository::open_bare(&bare_path)
+        .unwrap()
+        .set_head(&head)
+        .unwrap();
+    let url = url_for(&bare_path);
+    (dir, url)
+}
+
+#[test]
+fn initializes_and_checks_out_submodules_when_requested() {
+    let (_dir, url) = source_with_submodule(|p| p.to_str().unwrap().to_string());
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let mut options = opts(&url, dest.clone());
+    options.recurse_submodules = true;
+
+    let (result, _) = run(&options);
+
+    let outcome = result.unwrap();
+    assert!(
+        outcome.submodule_failures.is_empty(),
+        "{:?}",
+        outcome.submodule_failures
+    );
+    assert_eq!(
+        std::fs::read_to_string(dest.join("deps/child/child.txt")).unwrap(),
+        "child\n"
+    );
+}
+
+#[test]
+fn leaves_submodules_alone_when_not_requested() {
+    let (_dir, url) = source_with_submodule(|p| p.to_str().unwrap().to_string());
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+
+    let (result, _) = run(&opts(&url, dest.clone()));
+
+    result.unwrap();
+    assert!(!dest.join("deps/child/child.txt").exists());
+}
+
+#[test]
+fn a_failing_submodule_is_reported_and_the_clone_still_succeeds() {
+    let (_dir, url) = source_with_submodule(url_for); // file:// is refused for submodules
+    let target = tempfile::TempDir::new().unwrap();
+    let dest = target.path().join("clone");
+    let mut options = opts(&url, dest.clone());
+    options.recurse_submodules = true;
+
+    let (result, _) = run(&options);
+
+    let outcome = result.unwrap();
+    assert_eq!(outcome.submodule_failures, vec!["deps/child".to_string()]);
+    assert!(git2::Repository::open(&dest).is_ok());
+}

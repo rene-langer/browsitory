@@ -14,6 +14,7 @@ use crate::remote::{
     CredentialProvider, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
     TransferProgress, TransferReporter,
 };
+use crate::submodule::{init_submodule, list_submodules, update_submodule};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloneOptions {
@@ -212,6 +213,20 @@ fn classify(error: git2::Error, branch_requested: bool, cancel: &dyn Fn() -> boo
     CloneError::Transfer { kind, message }
 }
 
-fn update_all_submodules(_repo: &git2::Repository) -> Vec<String> {
-    Vec::new() // Task 2
+/// Best-effort: a submodule that can't be fetched (private URL, refused scheme) must not undo
+/// an otherwise good clone. Failures are reported by path.
+fn update_all_submodules(repo: &git2::Repository) -> Vec<String> {
+    let submodules = match list_submodules(repo) {
+        Ok(submodules) => submodules,
+        Err(_) => return vec![".gitmodules".to_string()],
+    };
+    submodules
+        .into_iter()
+        .filter(|submodule| {
+            init_submodule(repo, &submodule.path)
+                .and_then(|()| update_submodule(repo, &submodule.path, true))
+                .is_err()
+        })
+        .map(|submodule| submodule.path)
+        .collect()
 }
