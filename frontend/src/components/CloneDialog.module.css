@@ -1,0 +1,33 @@
+.form {
+  min-width: min(480px, 90vw);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.grow {
+  flex: 1;
+}
+
+.check {
+  flex-direction: row !important;
+  align-items: center;
+}
+
+.dest,
+.hint,
+.progress {
+  margin: 0;
+  font-size: var(--text-sm);
+  opacity: 0.8;
+  word-break: break-all;
+}
+
+.https {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

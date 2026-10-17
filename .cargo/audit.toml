@@ -1,0 +1,13 @@
+# cargo-audit configuration (read by `cargo audit` and rustsec/audit-check in CI).
+
+[advisories]
+# zip 4.6.1, pulled in only by tauri-plugin-updater 2.10.1 (latest stable; the fix needs
+# zip >= 9). The updater extracts a zip only on Windows, and only after verifying the
+# update's minisign signature against our public key, so the archive is never
+# attacker-controlled. All three advisories are Unix symlink / permission-bit issues.
+# Drop these once tauri-plugin-updater ships with zip >= 9.
+ignore = [
+    "RUSTSEC-2026-0367", # SUID/SGID bits preserved on extract
+    "RUSTSEC-2026-0368", # symlink targets outside the destination
+    "RUSTSEC-2026-0369", # permissions applied through symlinks
+]

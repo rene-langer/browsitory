@@ -2,9 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
+import { toCloneError } from "./RepoClient";
 import type {
   BlameLine,
   BranchInfo,
+  CloneOutcome,
+  CloneRequest,
   ConflictSegment,
   CreatePullRequest,
   DiffHunk,
@@ -77,6 +80,18 @@ export const tauriRepoClient: RepoClient = {
   persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
     loggedInvoke("persist_open_repos", { entries, activePath }),
   scanReposInRoot: (root: string) => loggedInvoke<string[]>("scan_repos_in_root", { root }),
+  supportsCloneAndInit: true,
+  // `loggedInvoke` logs only the command name and the rejection payload (`{ kind, message }`),
+  // never the arguments, so the `request.https.token` is not logged.
+  cloneRepo: (operationId: string, request: CloneRequest) =>
+    loggedInvoke<CloneOutcome>("clone_repo", { operationId, request }).catch((error: unknown) => {
+      throw toCloneError(error);
+    }),
+  cancelClone: (operationId: string) => loggedInvoke<void>("cancel_clone", { operationId }),
+  initRepo: (path: string) =>
+    loggedInvoke<void>("init_repo", { path }).catch((error: unknown) => {
+      throw toCloneError(error);
+    }),
   listWorkspaces: () => loggedInvoke<Workspace[]>("list_workspaces"),
   saveWorkspace: (name: string, root: string, members: string[]) =>
     loggedInvoke<string>("save_workspace", { name, root, members }),

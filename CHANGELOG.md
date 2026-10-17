@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Clone and new repository
+
+- **Clone…** in the repository picker and a "Clone repository…" palette command (desktop app):
+  clone from HTTPS, SSH or a local path with progress and cancel, an optional branch, and
+  submodules. An HTTPS token entered in the dialog is saved to the keychain only after a
+  successful clone.
+- **New repository…** creates an empty repository in a folder you pick and opens it.
+
 ### File history
 
 - **History** button on every tracked file (working tree and commit view) and a "File history

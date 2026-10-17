@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
+import { repoNameOf } from "../lib/repoName";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
@@ -13,11 +14,6 @@ function isApplePlatform(): boolean {
   return /mac|iphone|ipad/i.test(`${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`);
 }
 
-function repoNameOf(path: string): string {
-  const parts = path.split(/[\\/]/).filter((part) => part !== "");
-  return parts[parts.length - 1] ?? path;
-}
-
 export function RepoPicker({
   client,
   onOpenRepo,
@@ -29,6 +25,8 @@ export function RepoPicker({
   onCreateWorkspace,
   onEditWorkspace,
   onDeleteWorkspace,
+  onCloneRepository,
+  onNewRepository,
 }: {
   client: RepoClient;
   onOpenRepo: (path: string) => void;
@@ -40,6 +38,8 @@ export function RepoPicker({
   onCreateWorkspace: (name: string, root: string, members: string[]) => Promise<string>;
   onEditWorkspace: (id: string, name: string, members: string[]) => Promise<void>;
   onDeleteWorkspace: (id: string) => Promise<void>;
+  onCloneRepository?: () => void;
+  onNewRepository?: () => void;
 }) {
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +98,8 @@ export function RepoPicker({
       <Panel title="Open a repository">
         <Toolbar>
           <button onClick={handleOpenFolder}>Open folder</button>
+          {onCloneRepository !== undefined && <button onClick={onCloneRepository}>Clone…</button>}
+          {onNewRepository !== undefined && <button onClick={onNewRepository}>New repository…</button>}
           <button onClick={() => setCreatingWorkspace(true)}>Open workspace root</button>
         </Toolbar>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
