@@ -6,10 +6,34 @@ use thiserror::Error;
 pub enum RepoError {
     #[error("failed to open repository: {0}")]
     Open(#[from] git2::Error),
+    #[error("This folder is already a Git repository.")]
+    AlreadyRepository,
+    #[error("failed to create repository: {0}")]
+    Init(git2::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)
+}
+
+/// Creates an empty repository at `path` (and any missing parents). The initial branch honours
+/// the user's global `init.defaultBranch`, else `main`.
+pub fn init_repo(path: &Path) -> Result<(), RepoError> {
+    if path.join(".git").exists() {
+        return Err(RepoError::AlreadyRepository);
+    }
+    std::fs::create_dir_all(path)?;
+    let branch = git2::Config::open_default()
+        .ok()
+        .and_then(|config| config.get_string("init.defaultBranch").ok())
+        .filter(|branch| !branch.is_empty())
+        .unwrap_or_else(|| "main".to_string());
+    let mut options = git2::RepositoryInitOptions::new();
+    options.initial_head(&branch);
+    git2::Repository::init_opts(path, &options).map_err(RepoError::Init)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
