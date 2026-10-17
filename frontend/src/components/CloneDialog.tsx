@@ -12,7 +12,10 @@ type Progress = { phase: "Receiving"; current: number; total: number } | { phase
 // https only: the backend refuses to send a token over plain http.
 const isHttpsUrl = (url: string) => /^https:\/\//i.test(url.trim());
 
-function messageFor(error: CloneError, dest: string, branch: string): string | null {
+// `/…`, `\\…` (UNC) or a drive root like `C:\` / `C:/`; `~` and relative paths are not.
+const isAbsolutePath = (path: string) => /^([/\\]|[A-Za-z]:[/\\])/.test(path);
+
+function messageFor(error: CloneError, dest: string, branch: string, https: boolean): string | null {
   switch (error.kind) {
     case "Cancelled":
       return null;
@@ -25,7 +28,7 @@ function messageFor(error: CloneError, dest: string, branch: string): string | n
     case "CredentialBearingUrl":
       return "Remove the password or token from the URL and put it in the token field.";
     case "MissingCredential":
-      return "This repository needs a username and token.";
+      return https ? "This repository needs a username and token." : "Use an https:// URL to sign in with a token.";
     case "SshAgentFailure":
       return "SSH agent unavailable or has no matching key.";
     default:
@@ -59,7 +62,9 @@ export function CloneDialog({
   const [error, setError] = useState<string | null>(null);
   const operationId = useRef<string | null>(null);
 
-  const dest = parent.trim() !== "" && name.trim() !== "" ? joinPath(parent.trim(), name.trim()) : "";
+  const parentTrimmed = parent.trim();
+  const parentRelative = parentTrimmed !== "" && !isAbsolutePath(parentTrimmed);
+  const dest = parentTrimmed !== "" && !parentRelative && name.trim() !== "" ? joinPath(parent.trim(), name.trim()) : "";
   const showHttps = isHttpsUrl(url);
 
   useEffect(
@@ -98,7 +103,7 @@ export function CloneDialog({
       .catch((raw: unknown) => {
         const failure = raw instanceof CloneError ? raw : new CloneError("TransferFailed", String(raw));
         if (failure.kind === "MissingCredential" || failure.kind === "CredentialBearingUrl") setHttpsOpen(true);
-        setError(messageFor(failure, dest, trimmedBranch));
+        setError(messageFor(failure, dest, trimmedBranch, showHttps));
       })
       .finally(() => {
         operationId.current = null;
@@ -130,6 +135,7 @@ export function CloneDialog({
             Browse…
           </button>
         </div>
+        {parentRelative && <p className={styles.hint}>Use an absolute folder path, or Browse…</p>}
         <label>
           Folder name
           <input

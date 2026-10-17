@@ -15,7 +15,8 @@ Desktop app only — in VSCode, use VSCode's own **Git: Clone** and **Git: Initi
 
 - **URL** — `https://…`, `ssh://…`, `git@host:org/repo.git`, or a local path / `file://` URL.
 - **Parent folder** and **Folder name** — the clone goes into *parent/name*. The name follows
-  the URL until you edit it. The folder must not exist yet, or be empty.
+  the URL until you edit it. The parent must be an absolute path (use **Browse…** if unsure). The
+  folder must not exist yet, or be empty.
 - **Branch** — optional; defaults to the remote's default branch.
 - **Include submodules** — on by default. A submodule that can't be fetched doesn't stop the
   clone; the toast says how many failed and the Submodules panel shows them.

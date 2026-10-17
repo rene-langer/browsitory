@@ -20,6 +20,9 @@ export async function createNewRepository(client: RepoClient): Promise<NewReposi
 
 export function cloneToastMessage(outcome: CloneOutcome, name: string): string {
   if (outcome.submoduleFailures.length > 0) {
+    if (outcome.credentialSaveFailed) {
+      return `Cloned ${name} — ${outcome.submoduleFailures.length} submodules failed to update; the token couldn't be saved.`;
+    }
     return `Cloned ${name} — ${outcome.submoduleFailures.length} submodules failed to update`;
   }
   if (outcome.credentialSaveFailed) return `Cloned ${name}, but the token couldn't be saved.`;

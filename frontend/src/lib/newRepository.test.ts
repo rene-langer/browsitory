@@ -37,6 +37,10 @@ describe("cloneToastMessage", () => {
   it("names the repository", () => expect(cloneToastMessage(ok, "repo")).toBe("Cloned repo"));
   it("counts failed submodules", () =>
     expect(cloneToastMessage({ ...ok, submoduleFailures: ["a", "b"] }, "repo")).toBe("Cloned repo — 2 submodules failed to update"));
+  it("reports both failed submodules and an unsaved token", () =>
+    expect(cloneToastMessage({ ...ok, submoduleFailures: ["a", "b"], credentialSaveFailed: true }, "repo")).toBe(
+      "Cloned repo — 2 submodules failed to update; the token couldn't be saved.",
+    ));
   it("mentions an unsaved token", () =>
     expect(cloneToastMessage({ ...ok, credentialSaveFailed: true }, "repo")).toBe("Cloned repo, but the token couldn't be saved."));
 });

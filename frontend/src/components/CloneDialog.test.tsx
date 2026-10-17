@@ -57,6 +57,34 @@ describe("CloneDialog", () => {
     expect(screen.getByRole("button", { name: "Clone" })).toBeEnabled();
   });
 
+  it.each(["~/src", "src", "./src"])("refuses the relative parent folder %s with a hint", (parent) => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://github.com/org/repo.git", parent);
+    expect(screen.getByRole("button", { name: "Clone" })).toBeDisabled();
+    expect(screen.getByText("Use an absolute folder path, or Browse…")).toBeInTheDocument();
+  });
+
+  it.each(["/home/me", "C:\\Users\\me", "C:/Users/me", "\\\\server\\share"])("accepts the absolute parent folder %s", (parent) => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://github.com/org/repo.git", parent);
+    expect(screen.getByRole("button", { name: "Clone" })).toBeEnabled();
+    expect(screen.queryByText("Use an absolute folder path, or Browse…")).not.toBeInTheDocument();
+  });
+
+  it("points an http:// URL at https when it needs a token", async () => {
+    const { client } = fakeClient({
+      cloneRepo: vi.fn(async () => {
+        throw new CloneError("MissingCredential", "x");
+      }),
+    });
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("http://example.test/org/repo.git");
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    expect(await screen.findByText("Use an https:// URL to sign in with a token.")).toBeInTheDocument();
+  });
+
   it("fills the parent folder from Browse", async () => {
     const { client } = fakeClient();
     render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
