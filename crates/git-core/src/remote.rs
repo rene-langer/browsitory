@@ -27,6 +27,7 @@ pub enum TransferOperation {
     PushBranch,
     ForcePushBranch,
     PushTags,
+    Clone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

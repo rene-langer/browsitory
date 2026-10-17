@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 use repo_service::worker::{TransferEvent, Worker};
 
 mod branch;
+mod clone;
 mod forge;
 mod history;
 mod merge;
@@ -24,6 +25,7 @@ mod tag;
 mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
+pub use clone::{cancel_clone, clone_repo, init_repo, CloneState};
 pub use forge::{
     create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
     save_forge_token,

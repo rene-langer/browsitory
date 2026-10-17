@@ -21,7 +21,7 @@ fn forge_provider_slug(provider: ForgeProvider) -> &'static str {
         ForgeProvider::Bitbucket => "bitbucket",
     }
 }
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub service: String,
     pub account: String,

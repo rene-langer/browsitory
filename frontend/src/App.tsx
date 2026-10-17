@@ -23,6 +23,7 @@ import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
+import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SplitView } from "./components/primitives/SplitView";
@@ -34,7 +35,9 @@ import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
-import { buildCommands } from "./lib/commands";
+import { buildCommands, type AppCommands } from "./lib/commands";
+import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
+import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
@@ -63,6 +66,8 @@ function RepoWorkspace({
   onCloseRepoTab,
   getCommitDraft,
   onCommitDraftChange,
+  appCommands,
+  pushToast,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -79,6 +84,9 @@ function RepoWorkspace({
   // whenever its tab isn't active, so `CommitBox`'s own state can't outlive a tab switch.
   getCommitDraft: (repoPath: string) => CommitDraft | undefined;
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
+  appCommands?: AppCommands;
+  // The single app-level toast stack (`App` owns the one `ToastRegion`).
+  pushToast: (message: string) => void;
 }) {
   const appState = useAppState(client, repoPath);
   const fileHistory = useFileHistory(
@@ -197,10 +205,8 @@ function RepoWorkspace({
   // Positive feedback (AUD-2026-09-20-FB-003). The mutation runner swallows failures into
   // `state.error`, so success is detected as "pending fell back to false with no error" after a
   // labelled action; `announce` clears any stale error first so that check is unambiguous.
-  const toasts = useToasts();
   const pendingLabel = useRef<string | null>(null);
   const { pending: statePending, error: stateError } = appState.state;
-  const { push: pushToast } = toasts;
   useEffect(() => {
     if (statePending || pendingLabel.current === null) return;
     const label = pendingLabel.current;
@@ -274,7 +280,6 @@ function RepoWorkspace({
         onAbortMerge={appState.abortMerge}
         onAbortRebase={appState.abortRebase}
       />
-      {active && <ToastRegion toasts={toasts.toasts} onDismiss={toasts.dismiss} />}
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
@@ -347,6 +352,7 @@ function RepoWorkspace({
                   setDiscardRequest({ kind: "all" });
                 },
               },
+              appCommands,
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -692,6 +698,34 @@ function AppContent({
     [openRepo],
   );
 
+  const appToasts = useToasts();
+  const [cloning, setCloning] = useState(false);
+  const cloneRunning = useRef(false);
+  const [existingRepoPrompt, setExistingRepoPrompt] = useState<string | null>(null);
+  const { push: pushAppToast } = appToasts;
+  const startClone = useCallback(() => {
+    setPickingRepo(false);
+    setCloning(true);
+  }, []);
+  const startNewRepository = useCallback(() => {
+    setPickingRepo(false);
+    createNewRepository(client).then(
+      (result) => {
+        if (result.kind === "created") {
+          void openRepoTab(result.path);
+          pushAppToast(`Created repository ${repoNameOf(result.path)}`);
+        } else if (result.kind === "exists") {
+          setExistingRepoPrompt(result.path);
+        }
+      },
+      (error: unknown) => setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
+    );
+  }, [client, openRepoTab, pushAppToast]);
+  const appCommands = useMemo(
+    () => (client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : undefined),
+    [client.supportsCloneAndInit, startClone, startNewRepository],
+  );
+
   const [releaseNotesView, setReleaseNotesView] = useState<
     { mode: "auto" | "all"; entries: ReleaseNotesEntry[] } | null
   >(null);
@@ -862,8 +896,8 @@ function AppContent({
           {openError !== null && (
             <InlineError
               message={openError.message}
-              hint="Check that the folder exists and is a Git repository."
-              onRetry={() => void openRepoTab(openError.path)}
+              hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
+              onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
               onDismiss={() => setOpenError(null)}
             />
           )}
@@ -891,9 +925,44 @@ function AppContent({
             onCreateWorkspace={workspaces.createWorkspace}
             onEditWorkspace={workspaces.editWorkspace}
             onDeleteWorkspace={workspaces.deleteWorkspace}
+            onCloneRepository={appCommands?.onCloneRepository}
+            onNewRepository={appCommands?.onNewRepository}
           />
         </Overlay>
       )}
+      {cloning && (
+        // FormDialog already blocks Escape while running; this guard is belt-and-braces for the
+        // backdrop path so a running clone is never dismissed invisibly.
+        <Overlay
+          onClose={() => {
+            if (!cloneRunning.current) setCloning(false);
+          }}
+        >
+          <CloneDialog
+            client={client}
+            onCancel={() => setCloning(false)}
+            onRunningChange={(running) => (cloneRunning.current = running)}
+            onCloned={(outcome, name) => {
+              setCloning(false);
+              void openRepoTab(outcome.path);
+              pushAppToast(cloneToastMessage(outcome, name));
+            }}
+          />
+        </Overlay>
+      )}
+      {existingRepoPrompt !== null && (
+        <ConfirmDialog
+          ariaLabel="Repository already exists"
+          message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
+          confirmLabel="Open"
+          onConfirm={() => {
+            void openRepoTab(existingRepoPrompt);
+            setExistingRepoPrompt(null);
+          }}
+          onCancel={() => setExistingRepoPrompt(null)}
+        />
+      )}
+      <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} />
       {openRepos.openRepos.length === 0 ? (
         <RepoPicker
           client={client}
@@ -906,6 +975,8 @@ function AppContent({
           onCreateWorkspace={workspaces.createWorkspace}
           onEditWorkspace={workspaces.editWorkspace}
           onDeleteWorkspace={workspaces.deleteWorkspace}
+          onCloneRepository={appCommands?.onCloneRepository}
+          onNewRepository={appCommands?.onNewRepository}
         />
       ) : (
         // PERF-001: only the active tab's workspace is mounted — an inactive one renders nothing
@@ -929,6 +1000,8 @@ function AppContent({
               onCloseRepoTab={openRepos.closeRepo}
               getCommitDraft={getCommitDraft}
               onCommitDraftChange={onCommitDraftChange}
+              appCommands={appCommands}
+              pushToast={pushAppToast}
             />
           ))
       )}

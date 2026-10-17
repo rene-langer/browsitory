@@ -182,6 +182,24 @@ describe("buildCommands", () => {
     expect(commands.some((c) => c.id === "close-tab")).toBe(false);
   });
 
+  it("adds clone and new-repository commands when app commands are given", () => {
+    const onCloneRepository = vi.fn();
+    const onNewRepository = vi.fn();
+    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+      onCloneRepository,
+      onNewRepository,
+    });
+    commands.find((c) => c.label === "Clone repository…")!.run();
+    commands.find((c) => c.label === "New repository…")!.run();
+    expect(onCloneRepository).toHaveBeenCalled();
+    expect(onNewRepository).toHaveBeenCalled();
+  });
+
+  it("omits clone and new-repository commands without app commands", () => {
+    const labels = buildCommands(makeAppState()).map((c) => c.label);
+    expect(labels).not.toContain("Clone repository…");
+  });
+
   it("includes one switch-branch command per non-current branch", () => {
     const appState = makeAppState();
     const commands = buildCommands(appState);

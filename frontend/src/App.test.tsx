@@ -21,6 +21,10 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listOpenRepos: async () => ({ entries: [], activePath: null }),
     persistOpenRepos: async () => unused(),
     scanReposInRoot: async () => [],
+    supportsCloneAndInit: false,
+    cloneRepo: async () => unused(),
+    cancelClone: async () => unused(),
+    initRepo: async () => unused(),
     listWorkspaces: async () => [],
     saveWorkspace: async () => "workspace-id",
     updateWorkspace: async () => {},
@@ -185,6 +189,21 @@ describe("App", () => {
     // the banner over the workspace instead of pushing it down (FB-004) — asserting the class
     // instead of computed layout, since jsdom doesn't run layout.
     expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
+  });
+
+  it("renders a single Notifications region with a repository open", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getAllByRole("status", { name: "Notifications" })).toHaveLength(1);
   });
 
   it("closes the active tab on Ctrl/Cmd+W", async () => {
