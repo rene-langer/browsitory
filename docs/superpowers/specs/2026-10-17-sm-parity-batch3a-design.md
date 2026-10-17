@@ -71,6 +71,8 @@ pub struct CloneOutcome {
 pub enum CloneError {
     #[error("Unsupported URL.")]
     InvalidUrl,
+    #[error("The URL contains a password or token.")]
+    CredentialBearingUrl,
     #[error("Destination already exists and isn't empty.")]
     DestNotEmpty,
     #[error("Branch not found on remote.")]
@@ -94,7 +96,8 @@ pub fn clone_repo(
 Flow:
 
 1. Validate URL: trimmed non-empty; reject `<transport>::<address>` (a `::` before any `/`) ⇒
-   `InvalidUrl`.
+   `InvalidUrl`; a URL with an embedded password ⇒ `CredentialBearingUrl` (it would otherwise
+   be persisted in `.git/config`). A blank branch is treated as none.
 2. Destination: absent ⇒ create it (remember `created = true`). Exists and is an empty directory
    ⇒ use it. Exists otherwise (file, or non-empty dir) ⇒ `DestNotEmpty`, nothing touched.
 3. `git2::build::RepoBuilder` with `FetchOptions` + `RemoteCallbacks`:
@@ -140,7 +143,12 @@ pub fn init_repo(path: &Path) -> Result<(), RepoError>
   token)` and `set_remote_auth_profile(origin, HttpsToken { username })`. A keychain failure here
   doesn't fail the clone; it's reported as `credential_save_failed: true` in the DTO so the UI
   can say "Cloned, but the token couldn't be saved."
-- `init_repo(path)`: thin pass-through.
+- Clone emits `TransferEvent::Progress` only — never `Started`/`Completed`, which an open
+  repo tab's pending fetch/push (`useRemoteTransferActions`) would adopt as its own transfer.
+  Completion is the `clone_repo` call returning.
+- `cancel(id)` before the clone registers still takes effect (flag created on cancel).
+- `init_repo` needs no service state; the Tauri command calls `git_core::repo::init_repo`
+  directly.
 
 ## IPC (Tauri)
 
@@ -153,7 +161,7 @@ Commands:
 - `init_repo(path)` (`async`, per the file's inline-command note).
 
 Errors cross the boundary as `{ kind, message }` with `kind` one of `InvalidUrl`,
-`DestNotEmpty`, `BranchNotFound`, `Cancelled`, `AlreadyRepository`, or a `TransferErrorKind`.
+`CredentialBearingUrl`, `DestNotEmpty`, `BranchNotFound`, `Cancelled`, `AlreadyRepository`, or a `TransferErrorKind`.
 The token is never logged or included in any error string.
 
 `RepoClient` additions:
