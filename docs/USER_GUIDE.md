@@ -23,6 +23,9 @@ Desktop app only — in VSCode, use VSCode's own **Git: Clone** and **Git: Initi
   username and access token. The token is saved to your system keychain, and the remote set to
   use it, **only after the clone succeeds**. SSH URLs use your SSH agent. Don't put the token in
   the URL — Browsitory refuses URLs that contain a password.
+  If the keychain write fails, the clone still succeeds and a toast says "Cloned *name*, but the
+  token couldn't be saved." — enter the token again later from the remote's **Manage
+  credentials** action (right-click the remote in the Branches sidebar).
 
 Progress shows while cloning; **Cancel clone** stops it and removes what was downloaded.
 
