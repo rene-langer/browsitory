@@ -103,6 +103,8 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     setGraphRemoteBranchSelection: unused,
     getWorkingDiff: async () => [],
     getCommitDiff: async () => [],
+    getFileHistory: unused,
+    getCommitRenameDiff: unused,
     getCommitFiles: unused,
     getCommitMessage: unused,
     stageFile: unused,
@@ -199,7 +201,9 @@ describe("DiffPane", () => {
       });
 
       await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
-      expect(screen.getByLabelText("Commit message")).toHaveFocus();
+      // Focus runs in a passive effect after the prefill commit, so under load it can land a tick
+      // after the value is visible.
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveFocus());
       expect(onCommitMessageFocused).toHaveBeenCalled();
     });
 
@@ -1456,5 +1460,93 @@ describe("DiffPane diff options contract", () => {
     await act(async () => pending.resolve([lineHunk]));
     expect(await screen.findByText("Turn off Ignore whitespace to stage partially.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+  });
+
+  describe("file history", () => {
+    it("offers History on tracked working-tree files only", () => {
+      const onOpenFileHistory = vi.fn();
+      renderUncommitted(
+        fakeClient({}),
+        [
+          { path: "a.txt", staged: false, kind: "Modified" },
+          { path: "new.txt", staged: false, kind: "New" },
+        ],
+        { onOpenFileHistory },
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "History of a.txt" }));
+      expect(onOpenFileHistory).toHaveBeenCalledWith("a.txt");
+      expect(screen.queryByRole("button", { name: "History of new.txt" })).toBeNull();
+    });
+
+    it("offers History on commit files", async () => {
+      const onOpenFileHistory = vi.fn();
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { onOpenFileHistory },
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "History of f.txt" }));
+      expect(onOpenFileHistory).toHaveBeenCalledWith("f.txt");
+    });
+
+    it("shows only the history file in focus mode, with a way to show all files", async () => {
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt", "g.txt", "h.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { fileHistoryFocus: { path: "g.txt", oldPath: null } },
+      );
+
+      expect(await screen.findByText("g.txt")).toBeInTheDocument();
+      expect(screen.queryByText("f.txt")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Show all 3 files" }));
+      expect(await screen.findByText("f.txt")).toBeInTheDocument();
+    });
+
+    it("offers no History button on the focused file, since its history is already open", async () => {
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt", "g.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { fileHistoryFocus: { path: "g.txt", oldPath: null }, onOpenFileHistory: vi.fn() },
+      );
+
+      expect(await screen.findByText("g.txt")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "History of g.txt" })).toBeNull();
+    });
+
+    it("collapses only the focused file from its toggle, without revealing other files", async () => {
+      renderCommit(
+        fakeClient({ getCommitFiles: async () => ["f.txt", "g.txt"], getCommitMessage: async () => "" }),
+        "abc123",
+        { fileHistoryFocus: { path: "g.txt", oldPath: null } },
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Collapse g.txt" }));
+
+      expect(screen.getByRole("button", { name: "Expand g.txt" })).toBeInTheDocument();
+      expect(screen.queryByText("f.txt")).toBeNull();
+    });
+
+    it("uses the rename diff and labels the old path for a rename entry", async () => {
+      const getCommitRenameDiff = vi.fn(async () => []);
+      const getCommitDiff = vi.fn(async () => []);
+      renderCommit(
+        fakeClient({
+          getCommitFiles: async () => ["old.txt", "new.txt"],
+          getCommitMessage: async () => "",
+          getCommitRenameDiff,
+          getCommitDiff,
+        }),
+        "abc123",
+        { fileHistoryFocus: { path: "new.txt", oldPath: "old.txt" } },
+      );
+
+      expect(await screen.findByText("Renamed from old.txt")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(getCommitRenameDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "old.txt", "new.txt", expect.anything()),
+      );
+      expect(getCommitDiff).not.toHaveBeenCalled();
+    });
   });
 });

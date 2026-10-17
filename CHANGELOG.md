@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### File history
+
+- **History** button on every tracked file (working tree and commit view) and a "File history
+  of current file" palette command: the commit list shows only the commits that changed the
+  file, following renames, with that file's diff for the selected commit.
+- Rename commits show the edited lines instead of a whole-file add.
+
 ### Line staging, diff options, syntax highlighting, discard and ignore
 
 - Select individual lines in a diff (click, Shift+click, Ctrl/Cmd+click, drag, or ↑/↓ with

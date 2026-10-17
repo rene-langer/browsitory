@@ -8,6 +8,7 @@ import { ShortcutSheet } from "./components/ShortcutSheet";
 
 const NARROW_BREAKPOINT = 900;
 import { CommitGraph } from "./components/CommitGraph";
+import { FileHistoryList } from "./components/FileHistoryList";
 import { SyncBar } from "./components/SyncBar";
 import { DiffPane } from "./components/DiffPane";
 import { LaneBraid } from "./components/LaneBraid";
@@ -36,6 +37,7 @@ import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands } from "./lib/commands";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
+import { useFileHistory } from "./state/useFileHistory";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -79,6 +81,23 @@ function RepoWorkspace({
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
 }) {
   const appState = useAppState(client, repoPath);
+  const fileHistory = useFileHistory(
+    client,
+    repoPath,
+    appState.state.refreshGeneration,
+    appState.state.selectedRow,
+    appState.selectRow,
+  );
+  const selectedRow = appState.state.selectedRow;
+  const historyEntry =
+    fileHistory.history !== null && typeof selectedRow === "object"
+      ? fileHistory.history.entries.find((e) => e.commit.id === selectedRow.commitId) ?? null
+      : null;
+  const historyEntries = fileHistory.history?.entries;
+  const diffPaneCommits = useMemo(
+    () => historyEntries?.map((e) => e.commit) ?? appState.state.commits,
+    [historyEntries, appState.state.commits],
+  );
   const handleCommitDraftChange = useCallback(
     (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
     [onCommitDraftChange, repoPath],
@@ -315,6 +334,9 @@ function RepoWorkspace({
                 settings: diffSettings.settings,
                 update: diffSettings.update,
                 currentFile,
+                openCurrentFileHistory: () => {
+                  if (currentFile !== null) fileHistory.open(currentFile);
+                },
                 requestDiscardCurrentFile: () => {
                   if (currentFile === null) return;
                   appState.selectRow("uncommitted");
@@ -490,30 +512,41 @@ function RepoWorkspace({
                 onPull={appState.pullCurrentUpstream}
                 onPush={appState.pushCurrentBranch}
               />
-              <CommitGraph
-                hasMore={appState.state.hasMoreHistory}
-                onLoadMore={() => void appState.loadMoreHistory()}
-                status={appState.state.status}
-                commits={appState.state.commits}
-                selectedRow={appState.state.selectedRow}
-                pending={repositoryOperationDisabled}
-                onSelectRow={appState.selectRow}
-                onBranchFromCommit={appState.openCreateBranchDraft}
-                onRebaseFromCommit={appState.openRebasePlanner}
-                onRebaseSelection={appState.openRebaseSelection}
-                headInfo={appState.state.headInfo}
-                currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
-                onCherryPick={announce("Cherry-picked", appState.cherryPick)}
-                onRevert={announce("Reverted", appState.revertCommit)}
-                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
-                onResetToCommit={announce("Reset branch", appState.resetToCommit)}
-                onEditHeadMessage={() => {
-                  appState.selectRow("uncommitted");
-                  appState.setAmendMode(true);
-                  setFocusCommitMessage(true);
-                }}
-                graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
-              />
+              {fileHistory.history !== null ? (
+                <FileHistoryList
+                  history={fileHistory.history}
+                  selectedRow={appState.state.selectedRow}
+                  onSelectRow={appState.selectRow}
+                  onClose={fileHistory.close}
+                  onLoadMore={fileHistory.loadMore}
+                  onRetry={fileHistory.retry}
+                />
+              ) : (
+                <CommitGraph
+                  hasMore={appState.state.hasMoreHistory}
+                  onLoadMore={() => void appState.loadMoreHistory()}
+                  status={appState.state.status}
+                  commits={appState.state.commits}
+                  selectedRow={appState.state.selectedRow}
+                  pending={repositoryOperationDisabled}
+                  onSelectRow={appState.selectRow}
+                  onBranchFromCommit={appState.openCreateBranchDraft}
+                  onRebaseFromCommit={appState.openRebasePlanner}
+                  onRebaseSelection={appState.openRebaseSelection}
+                  headInfo={appState.state.headInfo}
+                  currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                  onCherryPick={announce("Cherry-picked", appState.cherryPick)}
+                  onRevert={announce("Reverted", appState.revertCommit)}
+                  onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                  onResetToCommit={announce("Reset branch", appState.resetToCommit)}
+                  onEditHeadMessage={() => {
+                    appState.selectRow("uncommitted");
+                    appState.setAmendMode(true);
+                    setFocusCommitMessage(true);
+                  }}
+                  graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
+                />
+              )}
               </>
             }
             right={
@@ -521,7 +554,9 @@ function RepoWorkspace({
                 repoPath={repoPath}
                 client={client}
                 selectedRow={appState.state.selectedRow}
-                commits={appState.state.commits}
+                commits={diffPaneCommits}
+                fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
+                onOpenFileHistory={fileHistory.open}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}
                 discardRequest={discardRequest}

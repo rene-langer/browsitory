@@ -42,9 +42,10 @@ pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
     get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
-    get_graph_branch_selection, get_graph_remote_branch_selection, get_status, get_working_diff,
-    ignore_path, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
-    stage_hunk, stage_lines, unstage_file, unstage_hunk, unstage_lines,
+    get_commit_rename_diff, get_file_history, get_graph_branch_selection,
+    get_graph_remote_branch_selection, get_status, get_working_diff, ignore_path,
+    set_graph_branch_selection, set_graph_remote_branch_selection, stage_file, stage_hunk,
+    stage_lines, unstage_file, unstage_hunk, unstage_lines,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -461,6 +462,25 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileHistoryEntryDto {
+    pub commit: GraphCommitDto,
+    pub path: String,
+    // Serialized as `null` (not omitted) — the TS type is `string | null`.
+    pub old_path: Option<String>,
+}
+
+impl From<git_core::history::FileHistoryEntry> for FileHistoryEntryDto {
+    fn from(e: git_core::history::FileHistoryEntry) -> Self {
+        FileHistoryEntryDto {
+            commit: GraphCommitDto::from(e.commit),
+            path: e.path,
+            old_path: e.old_path,
         }
     }
 }
@@ -1089,10 +1109,10 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, DiffOptionsDto, DiffSettingsDto, ForgeProviderDto, GraphCommitDto,
-        HeadInfoDto, OpenRepoEntryDto, OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto,
-        ReflogEntryDto, RemoteAuthModeDto, ResetModeDto, SubmoduleInfoDto, WorkspaceDto,
-        WorktreeInfoDto,
+        transfer_event_payload, DiffOptionsDto, DiffSettingsDto, FileHistoryEntryDto,
+        ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto, OpenRepoEntryInput,
+        PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, ResetModeDto,
+        SubmoduleInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1205,6 +1225,38 @@ mod tests {
                 "remoteBranchRefs": ["origin/main"],
             })
         );
+    }
+
+    #[test]
+    fn file_history_entry_dto_serializes_camel_case_and_null_old_path() {
+        let commit = GraphCommit {
+            id: "abc123".into(),
+            short_id: "abc123".into(),
+            summary: "Edit".into(),
+            author_name: "Rene".into(),
+            author_email: "rene@example.com".into(),
+            timestamp: 1_700_000_000,
+            parent_ids: vec![],
+            branch_refs: vec![],
+            remote_branch_refs: vec![],
+        };
+        let plain = FileHistoryEntryDto::from(git_core::history::FileHistoryEntry {
+            commit: commit.clone(),
+            path: "new.txt".into(),
+            old_path: None,
+        });
+        let renamed = FileHistoryEntryDto::from(git_core::history::FileHistoryEntry {
+            commit,
+            path: "new.txt".into(),
+            old_path: Some("old.txt".into()),
+        });
+
+        let plain = serde_json::to_value(plain).unwrap();
+        assert_eq!(plain["path"], "new.txt");
+        assert_eq!(plain["oldPath"], serde_json::Value::Null);
+        assert!(plain.as_object().unwrap().contains_key("oldPath"));
+        assert_eq!(plain["commit"]["shortId"], "abc123");
+        assert_eq!(serde_json::to_value(renamed).unwrap()["oldPath"], "old.txt");
     }
 
     #[test]
