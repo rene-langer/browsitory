@@ -1,0 +1,14 @@
+# cargo-audit config, read by `cargo audit` and the CI `rustsec/audit-check` step.
+
+[advisories]
+ignore = [
+    # zip 4.6.1 extraction issues (symlink targets outside the destination, permissions applied
+    # through symlinks, SUID/SGID bits kept). Fixed in zip >= 9.
+    # Only path in: tauri-plugin-updater 2.10.1 (latest stable; 3.0 alphas still require zip ^4),
+    # which extracts Windows `.msi.zip`/`.exe.zip` updates after verifying their minisign
+    # signature against the pubkey in tauri.conf.json — a malicious archive needs our signing key.
+    # Remove once a tauri-plugin-updater release depends on zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
