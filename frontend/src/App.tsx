@@ -67,6 +67,7 @@ function RepoWorkspace({
   getCommitDraft,
   onCommitDraftChange,
   appCommands,
+  pushToast,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -84,6 +85,8 @@ function RepoWorkspace({
   getCommitDraft: (repoPath: string) => CommitDraft | undefined;
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
   appCommands?: AppCommands;
+  // The single app-level toast stack (`App` owns the one `ToastRegion`).
+  pushToast: (message: string) => void;
 }) {
   const appState = useAppState(client, repoPath);
   const fileHistory = useFileHistory(
@@ -202,10 +205,8 @@ function RepoWorkspace({
   // Positive feedback (AUD-2026-09-20-FB-003). The mutation runner swallows failures into
   // `state.error`, so success is detected as "pending fell back to false with no error" after a
   // labelled action; `announce` clears any stale error first so that check is unambiguous.
-  const toasts = useToasts();
   const pendingLabel = useRef<string | null>(null);
   const { pending: statePending, error: stateError } = appState.state;
-  const { push: pushToast } = toasts;
   useEffect(() => {
     if (statePending || pendingLabel.current === null) return;
     const label = pendingLabel.current;
@@ -279,7 +280,6 @@ function RepoWorkspace({
         onAbortMerge={appState.abortMerge}
         onAbortRebase={appState.abortRebase}
       />
-      {active && <ToastRegion toasts={toasts.toasts} onDismiss={toasts.dismiss} />}
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
@@ -896,7 +896,7 @@ function AppContent({
           {openError !== null && (
             <InlineError
               message={openError.message}
-              hint="Check that the folder exists and is a Git repository."
+              hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
               onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
               onDismiss={() => setOpenError(null)}
             />
@@ -931,6 +931,8 @@ function AppContent({
         </Overlay>
       )}
       {cloning && (
+        // FormDialog already blocks Escape while running; this guard is belt-and-braces for the
+        // backdrop path so a running clone is never dismissed invisibly.
         <Overlay
           onClose={() => {
             if (!cloneRunning.current) setCloning(false);
@@ -999,6 +1001,7 @@ function AppContent({
               getCommitDraft={getCommitDraft}
               onCommitDraftChange={onCommitDraftChange}
               appCommands={appCommands}
+              pushToast={pushAppToast}
             />
           ))
       )}

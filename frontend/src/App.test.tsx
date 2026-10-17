@@ -191,6 +191,21 @@ describe("App", () => {
     expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
   });
 
+  it("renders a single Notifications region with a repository open", async () => {
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.getAllByRole("status", { name: "Notifications" })).toHaveLength(1);
+  });
+
   it("closes the active tab on Ctrl/Cmd+W", async () => {
     const closeRepo = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient({
