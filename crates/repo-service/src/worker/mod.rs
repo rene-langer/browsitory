@@ -39,6 +39,7 @@ mod status;
 mod submodule;
 mod tag;
 mod undo;
+mod undo_store;
 mod worktree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
