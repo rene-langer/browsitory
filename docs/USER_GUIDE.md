@@ -103,7 +103,8 @@ file's mode change (such as the executable bit); stage the whole file for that.
 
 Open a file's **⋯** menu, right-click the file header, or press Shift+F10 (or the Menu key)
 with the file row focused, for **Discard changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
-appears, and discarding cannot be undone. **Discard all…** next to **Stage all** discards
+appears. A discard can be reverted with **Undo** (see [Undo and redo](#undo-and-redo)) unless the
+file is changed again afterwards. **Discard all…** next to **Stage all** discards
 the unstaged changes of exactly the files its confirmation lists. It deletes untracked files
 and skips conflicted ones. Folders, such as an untracked nested repository, are never deleted;
 any file that couldn't be discarded is named in an error after the rest are done. Discarding
@@ -275,7 +276,8 @@ will act on. Undo covers staging, commits, amend, reset, branch and tag changes,
 cherry-pick, revert, merge, rebase, pull and every discard, so discarded changes are
 recoverable. Up to 50 steps are kept, across restarts.
 
-Undo refuses, instead of overwriting, when the repository changed since the operation; the
+Undo refuses, instead of overwriting, when the repository changed since the operation, or
+when it would delete, move or switch to a branch that is checked out in another worktree; the
 reflog stays available for those cases.
 
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
