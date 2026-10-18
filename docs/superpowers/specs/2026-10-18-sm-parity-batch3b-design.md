@@ -44,13 +44,14 @@ Batch 3 is split: 3a clone + init (shipped, #80), 3b undo stack (this spec), 3c 
 ### New `undo.rs`
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeadState {
     Branch(String),   // full ref name, e.g. "refs/heads/main" (may be unborn)
     Detached(String), // commit oid
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// git-core stays serde-free; repo-service persists a mirror type (`StoredSnapshot`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSnapshot {
     pub head: HeadState,
     pub refs: BTreeMap<String, String>,  // refs/heads/* and refs/tags/* -> oid
@@ -95,20 +96,22 @@ pub fn restore(
   filters) with the on-disk mode (regular, executable, symlink), then `write_tree_to`. Deleted
   paths are removed from the overlay index.
 
-`restore(expected, target)`, in order, all-or-nothing up to step 2:
+`restore(expected, target)` only looks at the **components that differ** between `expected`
+and `target` (HEAD if different, each ref whose value differs, the index if its tree differs, and
+the worktree paths that differ between the two worktree trees). Unrelated changes elsewhere in
+the repo (another branch moved, an untouched file edited) never block an undo. In order:
 1. Refuse with `OperationInProgress` if `repo.state()` is not `Clean`.
-2. **Verify** the repo equals `expected`: HEAD, every ref present in either snapshot's map (a ref
-   that must be absent must be absent), the current index tree, and — when both snapshots have a
-   worktree tree — the raw on-disk content and mode of every path that differs between
-   `expected.worktree_tree` and `target.worktree_tree`. Any mismatch: `RepositoryChanged`,
-   nothing written.
-3. **Refs**: create/update/delete each ref whose value differs, with `reflog_message`.
-4. **HEAD**: `set_head` (symbolic) or `set_head_detached`.
-5. **Index**: `read_tree(target.index_tree)` and `write`.
-6. **Worktree** (both trees present): for each differing path, write the target blob raw with
-   its mode (symlinks via `std::os::unix::fs::symlink` / as a plain file when
-   `core.symlinks=false` or on Windows without symlink support), or delete the file when the
-   target has no entry; remove directories left empty by deletions.
+2. **Verify** each differing component currently equals `expected` (a ref or file that must be
+   absent must be absent; files compared by raw content hash, symlink-ness and — with
+   `core.filemode` on — the executable bit). Any mismatch: `RepositoryChanged`, nothing written.
+3. **Worktree** (both trees present): delete paths absent in `target` (removing directories left
+   empty), then write each remaining differing path raw with its mode (symlinks as symlinks on
+   Unix with `core.symlinks` on, else a plain file containing the link target).
+4. **Index**: `read_tree(target.index_tree)` and `write`.
+5. **Refs**: create/update/delete each differing ref, with `reflog_message`.
+6. **HEAD**: `set_head` (symbolic) or `set_head_detached`.
+Worktree goes first because it is the step most likely to fail (permissions, locked files); a
+failure there leaves refs and HEAD untouched.
 
 Undo calls `restore(after, before, "browsitory: undo <label>")`; redo calls
 `restore(before, after, "browsitory: redo <label>")`.
@@ -142,7 +145,14 @@ impl UndoRecorder {
   `finalize_pending` (records `{label, before, after}` under the original label, e.g.
   "Merge feature into main"). `AbortMerge` / `AbortRebase` call `drop_pending`. Pending is
   in-memory only; an app restart mid-merge loses it (the merge itself is still abortable).
-- `begin` capture failure (e.g. `ConflictedIndex`): log a warning, the command runs unrecorded.
+- `begin` capture failure (e.g. `ConflictedIndex`): log a warning (`eprintln!`, as nothing in
+  repo-service logs otherwise), the command runs unrecorded.
+- `begin` is a no-op while an operation is in progress (pending exists, or a merge/rebase was
+  already running when the command arrived). "In progress" = `repo.state() != Clean` or the
+  worker's `rebase_state.is_some()` (browsitory's rebase leaves `repo.state()` clean).
+- Pending finalization is generic: after any command, if pending exists and nothing is in
+  progress any more, capture `after`; `after == before` (aborted) drops it, otherwise it is
+  recorded.
 - `undo`/`redo` reload `undo.json` first if its mtime changed (another process — Tauri app and
   VSCode on the same repo), then call `git_core::undo::restore`, then move the entry between
   stacks and persist. Errors leave both stacks unchanged.
@@ -199,22 +209,37 @@ anchor. Lightweight tags need nothing (their commit is an anchor parent).
 ### Worker API
 
 `WorkerHandle::get_undo_state() -> Result<UndoState, String>`,
-`undo() -> Result<String, UndoServiceError>`, `redo() -> Result<String, UndoServiceError>`
-(returns the label). `UndoServiceError { kind: Nothing | RepositoryChanged |
-OperationInProgress | Failed, message }`; `Failed` messages never include file contents.
+`undo() -> Result<UndoOutcome, String>`, `redo() -> Result<UndoOutcome, String>`.
+
+```rust
+pub enum UndoOutcome {
+    Done { label: String },
+    Nothing,
+    RepositoryChanged { label: String },
+    OperationInProgress,
+}
+```
+
+Refusals are ordinary outcomes, not errors, so they cross both transports unchanged (the VSCode
+JSON-RPC error channel only carries a message string). `Err` is reserved for real failures (I/O,
+libgit2); its message never includes file contents.
 
 ## IPC
 
-- Tauri commands `get_undo_state`, `undo`, `redo`; errors serialized as `{ kind, message }`.
-- `vscode-sidecar` methods `getUndoState`, `undo`, `redo` with the same payloads.
-- `RepoClient`: `getUndoState(): Promise<UndoState>`, `undo(): Promise<string>`,
-  `redo(): Promise<string>`; rejections are `UndoError` with `.kind` (same pattern as 3a's
-  `CloneError`).
+- Tauri commands `get_undo_state`, `undo_last`, `redo_last` (`undo`/`redo` avoided as command
+  names to keep them greppable); `vscode-sidecar` methods with the same names and payloads.
+- `UndoOutcomeDto` serializes as `{ "kind": "Done", "label": … }` / `{ "kind": "Nothing" }` /
+  `{ "kind": "RepositoryChanged", "label": … }` / `{ "kind": "OperationInProgress" }`.
+- `RepoClient`: `getUndoState(repoPath): Promise<UndoState>`,
+  `undo(repoPath): Promise<UndoOutcome>`, `redo(repoPath): Promise<UndoOutcome>`;
+  `UndoState = { undo: string | null; redo: string | null }`.
 
 ## Frontend
 
-- `useUndo(repoPath)` hook: holds `UndoState`, refreshes after every mutation (same place status
-  refresh runs) and on window focus.
+- `AppState.undoState` is fetched in `useAppState`'s `refresh()` alongside status (so it updates
+  after every mutation) and re-fetched alone on window `focus` (external changes).
+- `useUndoActions` (composed into `useAppState` like the other action hooks) exposes
+  `undo()` / `redo()` returning the outcome; `RepoWorkspace` turns `Done` into a toast.
 - Shortcuts in `lib/shortcuts.ts`: `Mod+Z` undo, `Mod+Shift+Z` redo, plus `Ctrl+Y` redo on
   Windows/Linux. Ignored when focus is in `input`, `textarea` or a contenteditable element, so
   text fields keep native undo.
@@ -230,10 +255,19 @@ Copy (exact):
 |---|---|
 | Undo ok | "Undid ⟨label⟩" with action **Redo** |
 | Redo ok | "Redid ⟨label⟩" with action **Undo** |
+| `Nothing` | no toast |
+
+Refusals and failures use the existing error banner (`state.error`), not a toast — toasts are
+success-styled:
+
+| Event | Error banner |
+|---|---|
 | `RepositoryChanged` | "Can't undo ⟨label⟩: the repository changed since. Use the reflog to recover." (redo: "Can't redo ⟨label⟩: …") |
 | `OperationInProgress` | "Finish or abort the merge or rebase first." |
-| `Failed` | "Undo failed: ⟨message⟩" / "Redo failed: ⟨message⟩" |
-| `Nothing` | no toast |
+| rejection | "Undo failed: ⟨message⟩" / "Redo failed: ⟨message⟩" |
+
+Toasts gain an optional action button (`Toast.action?: { label, run }`); clicking it runs the
+action and dismisses the toast.
 
 ## Edge cases
 
@@ -246,6 +280,10 @@ Copy (exact):
 - **Modes / symlinks**: executable bit and symlinks preserved; `core.symlinks=false` restores the
   link as a plain file containing the target (git's behaviour).
 - **Unborn HEAD**: HEAD tree is empty; undoing the first commit returns HEAD to unborn.
+- **`git log --all` / gitk** show the anchor commit ("browsitory undo anchor") because it sits
+  under `refs/browsitory/`. Accepted; documented in the user guide.
+- **VSCode webview Ctrl/Cmd+Z**: the workbench may claim the key before the webview sees it. The
+  toolbar buttons and palette are the host-independent paths (same stance as Ctrl/Cmd+W).
 - **Two processes on one repo** (Tauri + VSCode): mtime reload before undo/redo; last writer
   wins on the file; the strict check protects repo state.
 
@@ -269,7 +307,7 @@ Copy (exact):
 
 ## Docs
 
-- `CHANGELOG.md` entry.
+- `CHANGELOG.md` entry; `docs/USER_GUIDE.md` "Undo and redo" section.
 - `docs/ARCHITECTURE.md`: "Undo stack" section (snapshot model, storage, GC anchor, strict check,
   known cost).
 
