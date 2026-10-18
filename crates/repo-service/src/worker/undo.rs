@@ -230,6 +230,7 @@ impl UndoRecorder {
         if after == before {
             return;
         }
+        let (before, after) = changed_refs_only(before, after);
         self.store.reload_if_changed(&mut self.stacks);
         self.stacks.undo.push(UndoEntry {
             label,
@@ -310,6 +311,26 @@ impl UndoRecorder {
             eprintln!("browsitory: could not save undo history: {error}");
         }
     }
+}
+
+/// `restore` only checks and writes refs whose values differ between the two snapshots, so the
+/// rest is dropped: otherwise every entry would store (and the anchor pin) every branch and tag.
+/// A moved HEAD branch differs, so its commits stay in the entry and pinned.
+fn changed_refs_only(
+    mut before: RepoSnapshot,
+    mut after: RepoSnapshot,
+) -> (RepoSnapshot, RepoSnapshot) {
+    let unchanged: Vec<String> = before
+        .refs
+        .iter()
+        .filter(|(name, oid)| after.refs.get(*name) == Some(*oid))
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in &unchanged {
+        before.refs.remove(name);
+        after.refs.remove(name);
+    }
+    (before, after)
 }
 
 #[derive(Clone, Copy)]
@@ -446,6 +467,62 @@ mod tests {
         std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
         recorder.finish(&repo, false, false);
         assert_eq!(recorder.state().undo, Some("Add b.txt".into()));
+    }
+
+    #[test]
+    fn entries_store_only_the_refs_they_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        let head = repo.find_commit(head).unwrap();
+        repo.branch("other", &head, false).unwrap();
+        repo.tag_lightweight("v1", head.as_object(), false).unwrap();
+        let plan = |label: &str| UndoPlan {
+            label: label.into(),
+            scope: SnapshotScope::RefsAndIndex,
+        };
+
+        let mut recorder = UndoRecorder::open(&repo);
+        recorder.begin(&repo, plan("Stage a.txt"), false);
+        std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        recorder.finish(&repo, false, false);
+        let staged = recorder.stacks.undo.last().unwrap();
+        assert!(staged.before.refs.is_empty() && staged.after.refs.is_empty());
+
+        recorder.begin(&repo, plan("Create branch x"), false);
+        repo.branch("x", &head, false).unwrap();
+        recorder.finish(&repo, false, false);
+        let created = recorder.stacks.undo.last().unwrap();
+        assert!(created.before.refs.is_empty());
+        assert_eq!(
+            created.after.refs.keys().collect::<Vec<_>>(),
+            vec!["refs/heads/x"]
+        );
+
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, recorder.stacks.undo);
+        let json = std::fs::read_to_string(repo.path().join("browsitory/undo.json")).unwrap();
+        assert!(!json.contains("refs/heads/other") && !json.contains("refs/tags/v1"));
+
+        let mut reopened = UndoRecorder::open(&repo);
+        assert_eq!(
+            reopened.undo(&repo, false),
+            Ok(UndoOutcome::Done {
+                label: "Create branch x".into()
+            })
+        );
+        assert!(repo.find_branch("x", git2::BranchType::Local).is_err());
+        assert!(repo.find_branch("other", git2::BranchType::Local).is_ok());
     }
 
     #[test]
