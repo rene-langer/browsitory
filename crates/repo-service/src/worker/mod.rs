@@ -38,6 +38,7 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod undo;
 mod worktree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
