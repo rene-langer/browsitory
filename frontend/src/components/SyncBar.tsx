@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SyncBar.module.css";
@@ -16,6 +17,7 @@ export function SyncBar({
   onFetch,
   onPull,
   onPush,
+  leading,
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
@@ -25,6 +27,7 @@ export function SyncBar({
   onFetch: (remoteName: string) => void | Promise<void>;
   onPull: () => void | Promise<void>;
   onPush: (remoteName: string) => void | Promise<void>;
+  leading?: ReactNode;
 }) {
   const fetchRemote = upstream?.remoteName ?? remotes[0]?.name ?? null;
   const busyTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
@@ -37,6 +40,7 @@ export function SyncBar({
 
   return (
     <div className={styles.bar}>
+      {leading}
       <Toolbar aria-label="Sync">
         <button
           type="button"

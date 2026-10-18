@@ -848,3 +848,30 @@ describe("diff option and discard commands", () => {
     expect(commandGroup("discard-all-unstaged")).toBe("Diff");
   });
 });
+
+describe("undo commands", () => {
+  it("lists undo and redo with their labels when available", () => {
+    const onUndo = vi.fn();
+    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, undefined, {
+      undoLabel: "Stage a.txt",
+      redoLabel: null,
+      onUndo,
+      onRedo: vi.fn(),
+    });
+    const undo = commands.find((c) => c.id === "undo");
+    expect(undo?.label).toBe("Undo Stage a.txt");
+    expect(commands.find((c) => c.id === "redo")).toBeUndefined();
+    undo?.run();
+    expect(onUndo).toHaveBeenCalledOnce();
+  });
+
+  it("omits undo while a repository operation is running", () => {
+    const commands = buildCommands(makeAppState({ pending: true }), undefined, [], undefined, undefined, undefined, undefined, undefined, undefined, {
+      undoLabel: "Stage a.txt",
+      redoLabel: "x",
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+    });
+    expect(commands.find((c) => c.id === "undo")).toBeUndefined();
+  });
+});
