@@ -193,8 +193,11 @@ commit summaries truncated with "…".
 - `<gitdir>/browsitory/undo.json` (`repo.path()`, so each linked worktree has its own):
   `{ "version": 1, "undo": [UndoEntry…], "redo": [UndoEntry…] }`, oldest first. Written
   atomically (temp file + rename). Missing: empty stacks. Unparseable or unknown version: empty
-  stacks, warning logged, file overwritten on next write.
-- **GC protection**: ref `refs/browsitory/undo/<worktree-name>` (`main` for the main worktree)
+  stacks, warning logged; an unparseable file is overwritten on next write, an unknown version
+  is never overwritten (saves fail). Save order: anchor and keep refs, then the JSON (temp file
+  `undo.json.<pid>.tmp`, fsync, rename), then stale keep refs.
+- **GC protection**: ref `refs/browsitory/undo/main` (main worktree) or `refs/browsitory/undo/wt/<name>` (linked
+  worktree, `<name>` = its gitdir name under `.git/worktrees`)
   points at an anchor commit rewritten on every persist. Its tree has one subtree per snapshot
   tree (`<n>-before-index`, `<n>-before-worktree`, …); its parents are every distinct commit oid
   referenced by any snapshot's HEAD or refs (deleted branches stay reachable). Annotated tag
@@ -203,7 +206,7 @@ commit summaries truncated with "…".
 
 **Decision note — annotated tags:** a commit cannot reference a tag object, so a deleted
 annotated tag's object would be unprotected. Store it instead as a ref
-`refs/browsitory/undo/<worktree-name>-tags/<n>` per referenced tag object, rewritten with the
+`refs/browsitory/undo-keep/main/<n>` (or `refs/browsitory/undo-keep/wt/<name>/<n>`) per referenced tag object, rewritten with the
 anchor. Lightweight tags need nothing (their commit is an anchor parent).
 
 ### Worker API
