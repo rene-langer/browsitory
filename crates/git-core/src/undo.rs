@@ -278,6 +278,7 @@ pub fn restore(
             return Err(UndoError::RepositoryChanged);
         }
     }
+    verify_checked_out_branches(repo, head_differs, &changed_refs, target)?;
     if index_differs {
         let mut index = repo.index()?;
         index.read(false)?;
@@ -317,6 +318,79 @@ pub fn restore(
         }
     }
     Ok(())
+}
+
+/// A branch that is some worktree's HEAD must not be deleted or moved under it, and no two
+/// worktrees may end up on the same branch.
+fn verify_checked_out_branches(
+    repo: &Repository,
+    head_differs: bool,
+    changed_refs: &[&String],
+    target: &RepoSnapshot,
+) -> Result<(), UndoError> {
+    let target_branch = match &target.head {
+        HeadState::Branch(name) if head_differs => Some(name),
+        _ => None,
+    };
+    let branches: Vec<&String> = changed_refs
+        .iter()
+        .copied()
+        .filter(|name| name.starts_with("refs/heads/"))
+        .collect();
+    if branches.is_empty() && target_branch.is_none() {
+        return Ok(());
+    }
+    let elsewhere = branches_checked_out_elsewhere(repo)?;
+    if target_branch.is_some_and(|name| elsewhere.contains(name))
+        || branches.iter().any(|name| elsewhere.contains(*name))
+    {
+        return Err(UndoError::RepositoryChanged);
+    }
+    // Deleting this worktree's HEAD branch is only fine when HEAD moves off it, or when the
+    // target itself has HEAD on that (then unborn) branch, e.g. undoing the first commit.
+    if !head_differs {
+        if let HeadState::Branch(current) = head_state(repo)? {
+            let deleted = branches
+                .iter()
+                .any(|name| **name == current && !target.refs.contains_key(*name));
+            if deleted && target.head != HeadState::Branch(current) {
+                return Err(UndoError::RepositoryChanged);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// HEAD branches of every other worktree of this repository (main and linked; prunable or
+/// unopenable ones skipped).
+fn branches_checked_out_elsewhere(repo: &Repository) -> Result<BTreeSet<String>, UndoError> {
+    let this = fs::canonicalize(repo.path())?;
+    let main = Repository::open(repo.commondir())?;
+    let mut others = Vec::new();
+    for name in main.worktrees()?.iter().flatten().flatten() {
+        let Ok(worktree) = main.find_worktree(name) else {
+            continue;
+        };
+        if worktree.is_prunable(None).unwrap_or(true) {
+            continue;
+        }
+        if let Ok(linked) = Repository::open_from_worktree(&worktree) {
+            others.push(linked);
+        }
+    }
+    if !main.is_bare() {
+        others.push(main);
+    }
+    let mut branches = BTreeSet::new();
+    for other in others {
+        if fs::canonicalize(other.path()).is_ok_and(|path| path == this) {
+            continue;
+        }
+        if let Ok(HeadState::Branch(name)) = head_state(&other) {
+            branches.insert(name);
+        }
+    }
+    Ok(branches)
 }
 
 type TreeFiles = BTreeMap<String, (Oid, u32)>;

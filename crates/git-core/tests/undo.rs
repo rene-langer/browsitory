@@ -600,3 +600,109 @@ fn undoes_a_reset_that_swaps_a_file_for_a_directory() {
     });
     assert_eq!(read(&repo, "d").as_deref(), Some("a file\n"));
 }
+
+/// Adds a linked worktree (under `parent`) with `branch` checked out.
+fn add_worktree(repo: &Repository, parent: &TempDir, name: &str, branch: &str) -> Repository {
+    let reference = repo.find_reference(branch).unwrap();
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&reference));
+    let path = parent.path().join(name);
+    repo.worktree(name, &path, Some(&options)).unwrap();
+    Repository::open(&path).unwrap()
+}
+
+fn head_branch(snapshot: &RepoSnapshot) -> String {
+    match &snapshot.head {
+        HeadState::Branch(name) => name.clone(),
+        HeadState::Detached(_) => unreachable!(),
+    }
+}
+
+#[test]
+fn refuses_to_delete_a_branch_checked_out_in_another_worktree() {
+    let (_dir, repo) = seeded();
+    let worktrees = TempDir::new().unwrap();
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &head, false).unwrap();
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    let _linked = add_worktree(&repo, &worktrees, "wt", "refs/heads/x");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert!(repo.find_reference("refs/heads/x").is_ok());
+}
+
+#[test]
+fn refuses_to_delete_the_branch_this_worktree_switched_to_since() {
+    let (_dir, repo) = seeded();
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &head, false).unwrap();
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    repo.set_head("refs/heads/x").unwrap(); // switched outside the app
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert!(repo.find_reference("refs/heads/x").is_ok());
+    assert_eq!(repo.head().unwrap().name(), Ok("refs/heads/x"));
+}
+
+#[test]
+fn refuses_to_move_a_branch_checked_out_in_another_worktree() {
+    let (_dir, repo) = seeded();
+    let worktrees = TempDir::new().unwrap();
+    let main_branch = head_branch(&capture(&repo, SnapshotScope::RefsAndIndex).unwrap());
+    let first = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &first, false).unwrap();
+    repo.set_head("refs/heads/x").unwrap();
+    write(&repo, "a.txt", "two\n");
+    stage(&repo, "a.txt");
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    commit(&repo, "second on x");
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    // Undoing the commit would move x, which a linked worktree now has checked out.
+    repo.set_head(&main_branch).unwrap();
+    let _linked = add_worktree(&repo, &worktrees, "wt", "refs/heads/x");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn refuses_to_switch_back_to_a_branch_checked_out_in_another_worktree() {
+    let (_dir, repo) = seeded();
+    let worktrees = TempDir::new().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &head, false).unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    repo.set_head("refs/heads/x").unwrap();
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    let _linked = add_worktree(&repo, &worktrees, "wt", &head_branch(&before));
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert_eq!(repo.head().unwrap().name(), Ok("refs/heads/x"));
+}
+
+#[test]
+fn undoes_a_commit_inside_a_linked_worktree() {
+    let (_dir, repo) = seeded();
+    let worktrees = TempDir::new().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &head, false).unwrap();
+    let linked = add_worktree(&repo, &worktrees, "wt", "refs/heads/x");
+    write(&linked, "a.txt", "two\n");
+    stage(&linked, "a.txt");
+    assert_round_trip(&linked, SnapshotScope::RefsAndIndex, |linked| {
+        commit(linked, "second on x");
+    });
+}
