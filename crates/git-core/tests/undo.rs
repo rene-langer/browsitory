@@ -706,3 +706,38 @@ fn undoes_a_commit_inside_a_linked_worktree() {
         commit(linked, "second on x");
     });
 }
+
+#[test]
+fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
+    let (_dir, repo) = seeded();
+    write(&repo, "b.txt", "b\n");
+    stage(&repo, "b.txt");
+    commit(&repo, "add b");
+    let skip = git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    let flagged = |repo: &Repository| {
+        let mut index = repo.index().unwrap();
+        index.read(true).unwrap();
+        index
+            .get_path(Path::new("b.txt"), 0)
+            .unwrap()
+            .flags_extended
+            & skip
+            != 0
+    };
+    write(&repo, "a.txt", "two\n");
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    stage(&repo, "a.txt");
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    let mut index = repo.index().unwrap();
+    let mut entry = index.get_path(Path::new("b.txt"), 0).unwrap();
+    entry.flags_extended |= skip;
+    index.add(&entry).unwrap();
+    index.write().unwrap();
+    assert!(flagged(&repo), "test setup: flag not set");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert!(flagged(&repo));
+}

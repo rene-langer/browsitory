@@ -7,8 +7,8 @@ use std::io;
 use std::path::Path;
 
 use git2::{
-    ErrorCode, Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, RepositoryState, Status,
-    StatusOptions, TreeWalkMode, TreeWalkResult,
+    ErrorCode, Index, IndexEntry, IndexEntryExtendedFlag, IndexTime, ObjectType, Oid, Repository,
+    RepositoryState, Status, StatusOptions, TreeWalkMode, TreeWalkResult,
 };
 use thiserror::Error;
 
@@ -283,6 +283,12 @@ pub fn restore(
         let mut index = repo.index()?;
         index.read(false)?;
         if index.has_conflicts() || index.write_tree()?.to_string() != expected.index_tree {
+            return Err(UndoError::RepositoryChanged);
+        }
+        // Rewriting the index from a tree would silently drop these per-entry flags.
+        let flags =
+            (IndexEntryExtendedFlag::SKIP_WORKTREE | IndexEntryExtendedFlag::INTENT_TO_ADD).bits();
+        if index.iter().any(|entry| entry.flags_extended & flags != 0) {
             return Err(UndoError::RepositoryChanged);
         }
     }
