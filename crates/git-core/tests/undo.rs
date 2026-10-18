@@ -580,3 +580,23 @@ fn refuses_before_writing_when_a_replaced_directory_holds_an_untracked_file() {
     assert_eq!(read(&repo, ".gitignore"), None);
     assert_eq!(read(&repo, "d/x.o").as_deref(), Some("object\n"));
 }
+
+#[test]
+fn undoes_a_reset_that_swaps_a_file_for_a_directory() {
+    let (_dir, repo) = seeded();
+    write(&repo, "d", "a file\n");
+    stage(&repo, "d");
+    let file_commit = commit(&repo, "d is a file");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("d")).unwrap();
+    index.write().unwrap();
+    fs::remove_file(repo.workdir().unwrap().join("d")).unwrap();
+    write(&repo, "d/a", "inside\n");
+    stage(&repo, "d/a");
+    commit(&repo, "d is a directory");
+    assert_round_trip(&repo, SnapshotScope::Full, |repo| {
+        let target = repo.find_object(file_commit, None).unwrap();
+        repo.reset(&target, git2::ResetType::Hard, None).unwrap();
+    });
+    assert_eq!(read(&repo, "d").as_deref(), Some("a file\n"));
+}

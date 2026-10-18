@@ -162,7 +162,7 @@ fn read_worktree_file(
 ) -> io::Result<Option<(Vec<u8>, u32)>> {
     let meta = match fs::symlink_metadata(full) {
         Ok(meta) => meta,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if is_absent(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
     if meta.file_type().is_symlink() {
@@ -186,6 +186,14 @@ fn read_worktree_file(
         MODE_FILE
     };
     Ok(Some((bytes, mode)))
+}
+
+/// Missing, or a parent is a file (`d/a` while `d` is a file, as in a file <-> dir swap).
+fn is_absent(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
 }
 
 #[cfg(unix)]
@@ -476,7 +484,7 @@ fn remove_existing(full: &Path) -> io::Result<()> {
     match fs::symlink_metadata(full) {
         Ok(meta) if meta.is_dir() => fs::remove_dir(full),
         Ok(_) => fs::remove_file(full),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) if is_absent(&error) => Ok(()),
         Err(error) => Err(error),
     }
 }
