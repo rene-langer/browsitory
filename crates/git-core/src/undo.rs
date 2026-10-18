@@ -7,7 +7,7 @@ use std::io;
 use std::path::Path;
 
 use git2::{
-    Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, RepositoryState, Status,
+    ErrorCode, Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, RepositoryState, Status,
     StatusOptions, TreeWalkMode, TreeWalkResult,
 };
 use thiserror::Error;
@@ -259,11 +259,11 @@ pub fn restore(
         return Err(UndoError::RepositoryChanged);
     }
     for name in &changed_refs {
-        let current = repo
-            .find_reference(name)
-            .ok()
-            .and_then(|reference| reference.target())
-            .map(|oid| oid.to_string());
+        let current = match repo.find_reference(name) {
+            Ok(reference) => reference.target().map(|oid| oid.to_string()),
+            Err(error) if error.code() == ErrorCode::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
         if current.as_ref() != expected.refs.get(*name) {
             return Err(UndoError::RepositoryChanged);
         }
@@ -298,8 +298,12 @@ pub fn restore(
     }
     if head_differs {
         match &target.head {
-            HeadState::Branch(name) => repo.set_head(name)?,
-            HeadState::Detached(oid) => repo.set_head_detached(Oid::from_str(oid)?)?,
+            HeadState::Branch(name) => {
+                repo.reference_symbolic("HEAD", name, true, reflog_message)?;
+            }
+            HeadState::Detached(oid) => {
+                repo.reference("HEAD", Oid::from_str(oid)?, true, reflog_message)?;
+            }
         }
     }
     Ok(())
@@ -334,12 +338,58 @@ impl WorktreeChange {
         for path in &self.paths {
             let expected = self.from.get(path).copied();
             let previous_mode = expected.map(|(_, mode)| mode);
-            let current = read_worktree_file(&workdir.join(path), &config, previous_mode)?
+            let full = workdir.join(path);
+            let disk = read_worktree_file(&full, &config, previous_mode)?;
+            let current = disk
+                .as_ref()
                 .map(|(bytes, mode)| {
-                    Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, &bytes)?, mode))
+                    Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
                 })
                 .transpose()?;
             if current != expected {
+                // Ignored files are not snapshotted: absent from the tree but present on disk
+                // is fine as long as the file is ignored and the target would not change it.
+                let ignored_untouched = expected.is_none()
+                    && disk.is_some()
+                    && repo.is_path_ignored(path)?
+                    && match (self.to.get(path), &disk) {
+                        (Some((id, _)), Some((bytes, _))) => {
+                            Oid::hash_object(ObjectType::Blob, bytes)? == *id
+                        }
+                        _ => true,
+                    };
+                if !ignored_untouched {
+                    return Err(UndoError::RepositoryChanged);
+                }
+            }
+            // A directory about to be replaced by a file must hold only files apply deletes.
+            if self.to.contains_key(path) && fs::symlink_metadata(&full).is_ok_and(|m| m.is_dir()) {
+                self.verify_directory_is_removable(workdir, &full)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_directory_is_removable(&self, workdir: &Path, dir: &Path) -> Result<(), UndoError> {
+        let mut entries = fs::read_dir(dir)?.peekable();
+        if entries.peek().is_none() {
+            return Err(UndoError::RepositoryChanged);
+        }
+        for entry in entries {
+            let entry = entry?;
+            let full = entry.path();
+            if entry.file_type()?.is_dir() {
+                self.verify_directory_is_removable(workdir, &full)?;
+                continue;
+            }
+            let relative = full
+                .strip_prefix(workdir)
+                .ok()
+                .and_then(|p| p.to_str())
+                .map(|p| p.replace('\\', "/"));
+            let deleted =
+                relative.is_some_and(|p| self.paths.contains(&p) && !self.to.contains_key(&p));
+            if !deleted {
                 return Err(UndoError::RepositoryChanged);
             }
         }
@@ -349,17 +399,30 @@ impl WorktreeChange {
     fn apply(&self, repo: &Repository) -> Result<(), UndoError> {
         let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         let config = worktree_config(repo)?;
-        // Deletions first, so a file can replace a directory that only held deleted files.
-        for path in self
-            .paths
-            .iter()
-            .filter(|path| !self.to.contains_key(*path))
-        {
+        let is_ignore_file = |path: &&String| path.rsplit('/').next() == Some(".gitignore");
+        // Ignore files first, so the target's ignore rules are on disk before deciding which
+        // other deletions would hit a now-ignored (unsnapshotted) file.
+        for path in self.paths.iter().filter(is_ignore_file) {
             let full = workdir.join(path);
+            match self.to.get(path) {
+                Some((id, mode)) => write_worktree_file(repo, &full, *id, *mode, &config)?,
+                None => {
+                    remove_existing(&full)?;
+                    prune_empty_parents(workdir, &full);
+                }
+            }
+        }
+        let others = || self.paths.iter().filter(|path| !is_ignore_file(path));
+        // Deletions before writes, so a file can replace a directory that only held deleted files.
+        for path in others().filter(|path| !self.to.contains_key(*path)) {
+            let full = workdir.join(path);
+            if repo.is_path_ignored(path)? && fs::symlink_metadata(&full).is_ok() {
+                continue;
+            }
             remove_existing(&full)?;
             prune_empty_parents(workdir, &full);
         }
-        for path in &self.paths {
+        for path in others() {
             if let Some((id, mode)) = self.to.get(path) {
                 write_worktree_file(repo, &workdir.join(path), *id, *mode, &config)?;
             }

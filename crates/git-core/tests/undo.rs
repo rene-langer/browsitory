@@ -474,3 +474,69 @@ fn restores_executable_bit_and_symlinks() {
         0
     );
 }
+
+#[test]
+fn ignoring_an_untracked_file_undoes_and_redoes_without_touching_it() {
+    let (_dir, repo) = seeded();
+    write(&repo, "x", "mine\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, ".gitignore", "x\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    assert_ne!(before, after);
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "x").as_deref(), Some("mine\n"));
+    assert_eq!(read(&repo, ".gitignore"), None);
+    restore(&repo, &before, &after, "browsitory: redo test").unwrap();
+    assert_eq!(read(&repo, "x").as_deref(), Some("mine\n"));
+    assert_eq!(read(&repo, ".gitignore").as_deref(), Some("x\n"));
+}
+
+#[test]
+fn refuses_when_an_ignored_file_would_be_overwritten_with_other_bytes() {
+    let (_dir, repo) = seeded();
+    write(&repo, "x", "orig\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, ".gitignore", "x\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "x", "changed since\n");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "x").as_deref(), Some("changed since\n"));
+    assert_eq!(read(&repo, ".gitignore").as_deref(), Some("x\n"));
+}
+
+#[test]
+fn refuses_before_writing_when_a_replaced_directory_holds_ignored_files() {
+    let (_dir, repo) = seeded();
+    write(&repo, ".gitignore", "junk\n");
+    stage(&repo, ".gitignore");
+    commit(&repo, "ignore junk");
+    write(&repo, "d/a", "tracked-ish\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(repo.workdir().unwrap().join("d")).unwrap();
+    write(&repo, "d", "now a file\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    // Undo (after -> before) replaces file d by directory d: fine. Redo is the risky direction.
+    fs::remove_file(repo.workdir().unwrap().join("d")).unwrap();
+    write(&repo, "d/a", "tracked-ish\n");
+    write(&repo, "d/junk", "build output\n");
+    let result = restore(&repo, &before, &after, "browsitory: redo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "d/a").as_deref(), Some("tracked-ish\n"));
+    assert_eq!(read(&repo, "d/junk").as_deref(), Some("build output\n"));
+}
+
+#[test]
+fn writes_head_reflog_message_too() {
+    let (_dir, repo) = seeded();
+    let first = repo.head().unwrap().target().unwrap();
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    repo.set_head_detached(first).unwrap();
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    restore(&repo, &after, &before, "browsitory: undo checkout").unwrap();
+    let reflog = repo.reflog("HEAD").unwrap();
+    assert_eq!(
+        reflog.get(0).unwrap().message().unwrap(),
+        Some("browsitory: undo checkout")
+    );
+}
