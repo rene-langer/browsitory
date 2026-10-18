@@ -42,6 +42,7 @@ const BASE_STATE: AppState = {
   forcePushOffer: null,
   forcePushConfirm: null,
   amendMode: false,
+  undoState: { undo: null, redo: null },
 };
 
 function setupRunner() {

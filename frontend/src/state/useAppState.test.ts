@@ -218,6 +218,13 @@ describe("useAppState", () => {
     );
   });
 
+  it("loads the undo state on refresh", async () => {
+    const client = transferClient({ getUndoState: async () => ({ undo: "Stage a.txt", redo: null }) });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.undoState).toEqual({ undo: "Stage a.txt", redo: null });
+  });
+
   it("advances refreshGeneration on every refresh, successful or not", async () => {
     let fail = false;
     const client = transferClient({

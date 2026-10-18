@@ -69,6 +69,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       pending: false,
       addRemoteDraftOpen: false,
       refreshGeneration: 0,
+      undoState: { undo: null, redo: null },
       ...overrides,
     },
     selectRow: vi.fn(),
@@ -149,6 +150,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     setGraphRemoteBranchSelection: vi.fn(),
     loadMoreHistory: vi.fn(),
     refresh: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
+    refreshUndoState: vi.fn(),
     dismissError: vi.fn(),
   };
 }

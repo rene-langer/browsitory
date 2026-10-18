@@ -20,7 +20,7 @@ import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
-import { useToasts } from "./state/useToasts";
+import { useToasts, type ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
@@ -86,7 +86,7 @@ function RepoWorkspace({
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
   appCommands?: AppCommands;
   // The single app-level toast stack (`App` owns the one `ToastRegion`).
-  pushToast: (message: string) => void;
+  pushToast: (message: string, action?: ToastAction) => void;
 }) {
   const appState = useAppState(client, repoPath);
   const fileHistory = useFileHistory(
