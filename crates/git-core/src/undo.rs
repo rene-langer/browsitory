@@ -1,12 +1,15 @@
 //! Repository snapshots for the undo stack: capture the state an operation changes, and restore
 //! one snapshot over another after checking nothing else touched the same state. See
 //! `docs/superpowers/specs/2026-10-18-sm-parity-batch3b-design.md`.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::Path;
 
-use git2::{Index, IndexEntry, IndexTime, Oid, Repository, Status, StatusOptions};
+use git2::{
+    Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, RepositoryState, Status,
+    StatusOptions, TreeWalkMode, TreeWalkResult,
+};
 use thiserror::Error;
 
 const MODE_FILE: u32 = 0o100644;
@@ -222,4 +225,231 @@ fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
         flags_extended: 0,
         path: path.as_bytes().to_vec(),
     }
+}
+
+pub fn restore(
+    repo: &Repository,
+    expected: &RepoSnapshot,
+    target: &RepoSnapshot,
+    reflog_message: &str,
+) -> Result<(), UndoError> {
+    if repo.state() != RepositoryState::Clean {
+        return Err(UndoError::OperationInProgress);
+    }
+
+    // Only the components that differ between the two snapshots are checked and written, so
+    // unrelated changes elsewhere never block an undo.
+    let head_differs = expected.head != target.head;
+    let changed_refs: Vec<&String> = expected
+        .refs
+        .keys()
+        .chain(target.refs.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|name| expected.refs.get(*name) != target.refs.get(*name))
+        .collect();
+    let index_differs = expected.index_tree != target.index_tree;
+    let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
+        (Some(from), Some(to)) if from != to => Some(WorktreeChange::new(repo, from, to)?),
+        _ => None,
+    };
+
+    // 1. Verify, writing nothing.
+    if head_differs && head_state(repo)? != expected.head {
+        return Err(UndoError::RepositoryChanged);
+    }
+    for name in &changed_refs {
+        let current = repo
+            .find_reference(name)
+            .ok()
+            .and_then(|reference| reference.target())
+            .map(|oid| oid.to_string());
+        if current.as_ref() != expected.refs.get(*name) {
+            return Err(UndoError::RepositoryChanged);
+        }
+    }
+    if index_differs {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        if index.has_conflicts() || index.write_tree()?.to_string() != expected.index_tree {
+            return Err(UndoError::RepositoryChanged);
+        }
+    }
+    if let Some(change) = &worktree {
+        change.verify(repo)?;
+    }
+
+    // 2. Write: worktree first (most likely to fail), then index, refs, HEAD.
+    if let Some(change) = &worktree {
+        change.apply(repo)?;
+    }
+    if index_differs {
+        let mut index = repo.index()?;
+        index.read_tree(&repo.find_tree(Oid::from_str(&target.index_tree)?)?)?;
+        index.write()?;
+    }
+    for name in &changed_refs {
+        match target.refs.get(*name) {
+            Some(oid) => {
+                repo.reference(name, Oid::from_str(oid)?, true, reflog_message)?;
+            }
+            None => repo.find_reference(name)?.delete()?,
+        }
+    }
+    if head_differs {
+        match &target.head {
+            HeadState::Branch(name) => repo.set_head(name)?,
+            HeadState::Detached(oid) => repo.set_head_detached(Oid::from_str(oid)?)?,
+        }
+    }
+    Ok(())
+}
+
+type TreeFiles = BTreeMap<String, (Oid, u32)>;
+
+struct WorktreeChange {
+    from: TreeFiles,
+    to: TreeFiles,
+    paths: Vec<String>,
+}
+
+impl WorktreeChange {
+    fn new(repo: &Repository, from: &str, to: &str) -> Result<Self, UndoError> {
+        let from = flatten_tree(repo, from)?;
+        let to = flatten_tree(repo, to)?;
+        let paths = from
+            .keys()
+            .chain(to.keys())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter(|path| from.get(*path) != to.get(*path))
+            .cloned()
+            .collect();
+        Ok(Self { from, to, paths })
+    }
+
+    fn verify(&self, repo: &Repository) -> Result<(), UndoError> {
+        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
+        let config = worktree_config(repo)?;
+        for path in &self.paths {
+            let expected = self.from.get(path).copied();
+            let previous_mode = expected.map(|(_, mode)| mode);
+            let current = read_worktree_file(&workdir.join(path), &config, previous_mode)?
+                .map(|(bytes, mode)| {
+                    Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, &bytes)?, mode))
+                })
+                .transpose()?;
+            if current != expected {
+                return Err(UndoError::RepositoryChanged);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply(&self, repo: &Repository) -> Result<(), UndoError> {
+        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
+        let config = worktree_config(repo)?;
+        // Deletions first, so a file can replace a directory that only held deleted files.
+        for path in self
+            .paths
+            .iter()
+            .filter(|path| !self.to.contains_key(*path))
+        {
+            let full = workdir.join(path);
+            remove_existing(&full)?;
+            prune_empty_parents(workdir, &full);
+        }
+        for path in &self.paths {
+            if let Some((id, mode)) = self.to.get(path) {
+                write_worktree_file(repo, &workdir.join(path), *id, *mode, &config)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn flatten_tree(repo: &Repository, id: &str) -> Result<TreeFiles, UndoError> {
+    let tree = repo.find_tree(Oid::from_str(id)?)?;
+    let mut files = TreeFiles::new();
+    tree.walk(TreeWalkMode::PreOrder, |root, entry| {
+        if entry.kind() == Some(ObjectType::Blob) {
+            if let Ok(name) = entry.name() {
+                files.insert(
+                    format!("{root}{name}"),
+                    (entry.id(), entry.filemode() as u32),
+                );
+            }
+        }
+        TreeWalkResult::Ok
+    })?;
+    Ok(files)
+}
+
+fn remove_existing(full: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(full) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir(full),
+        Ok(_) => fs::remove_file(full),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn prune_empty_parents(workdir: &Path, full: &Path) {
+    let mut dir = full.parent();
+    while let Some(current) = dir {
+        if current == workdir || !current.starts_with(workdir) || fs::remove_dir(current).is_err() {
+            break;
+        }
+        dir = current.parent();
+    }
+}
+
+fn write_worktree_file(
+    repo: &Repository,
+    full: &Path,
+    id: Oid,
+    mode: u32,
+    config: &WorktreeConfig,
+) -> Result<(), UndoError> {
+    let blob = repo.find_blob(id)?;
+    remove_existing(full)?;
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if mode == MODE_LINK && config.symlinks {
+        create_symlink(blob.content(), full)?;
+        return Ok(());
+    }
+    fs::write(full, blob.content())?;
+    set_executable(full, mode == MODE_EXEC)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &[u8], full: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), full)
+}
+
+#[cfg(not(unix))]
+fn create_symlink(target: &[u8], full: &Path) -> io::Result<()> {
+    fs::write(full, target)
+}
+
+#[cfg(unix)]
+fn set_executable(full: &Path, executable: bool) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(full)?.permissions();
+    let mode = permissions.mode();
+    permissions.set_mode(if executable {
+        mode | 0o111
+    } else {
+        mode & !0o111
+    });
+    fs::set_permissions(full, permissions)
+}
+
+#[cfg(not(unix))]
+fn set_executable(_full: &Path, _executable: bool) -> io::Result<()> {
+    Ok(())
 }
