@@ -85,8 +85,9 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
     Some(UndoPlan { label, scope })
 }
 
-fn short(oid: &str) -> &str {
-    &oid[..oid.len().min(7)]
+/// Char-based: an id that isn't a real hex oid (any user/IPC string) must not panic.
+fn short(oid: &str) -> String {
+    oid.chars().take(7).collect()
 }
 
 fn fit(label: String) -> String {
@@ -521,6 +522,19 @@ mod tests {
         .unwrap();
         assert_eq!(text.chars().count(), 80);
         assert!(text.ends_with("…”"));
+    }
+
+    #[test]
+    fn non_ascii_commit_ids_are_shortened_by_chars() {
+        let (tx, _rx) = channel();
+        assert_eq!(
+            label(Command::CheckoutCommit {
+                commit_id: "äöüäöüäöü".into(),
+                reply: tx
+            })
+            .map(|(l, _)| l),
+            Some("Check out äöüäöüä".into())
+        );
     }
 
     #[test]
