@@ -33,6 +33,8 @@ import type {
   WorktreeInfo,
   HeadInfo,
   PickOutcome,
+  UndoOutcome,
+  UndoState,
   ResetMode,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
@@ -347,6 +349,9 @@ export const vscodeRepoClient: RepoClient = {
   getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => call<HeadInfo>("get_head_info", { repoPath }),
   amendCommit: (repoPath: string, message: string) => call<void>("amend_commit", { repoPath, message }),
+  getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
+  undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
+  redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),
   cherryPick: (repoPath: string, commitId: string) => call<PickOutcome>("cherry_pick", { repoPath, commitId }),
   revertCommit: (repoPath: string, commitId: string) => call<PickOutcome>("revert_commit", { repoPath, commitId }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>

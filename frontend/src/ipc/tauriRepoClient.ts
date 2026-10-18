@@ -40,6 +40,8 @@ import type {
   WorktreeInfo,
   HeadInfo,
   PickOutcome,
+  UndoOutcome,
+  UndoState,
   ResetMode,
 } from "./RepoClient";
 
@@ -250,6 +252,9 @@ export const tauriRepoClient: RepoClient = {
   getMergeMessage: (repoPath: string) => loggedInvoke<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => loggedInvoke<HeadInfo>("get_head_info", { repoPath }),
   amendCommit: (repoPath: string, message: string) => loggedInvoke<void>("amend_commit", { repoPath, message }),
+  getUndoState: (repoPath: string) => loggedInvoke<UndoState>("get_undo_state", { repoPath }),
+  undo: (repoPath: string) => loggedInvoke<UndoOutcome>("undo_last", { repoPath }),
+  redo: (repoPath: string) => loggedInvoke<UndoOutcome>("redo_last", { repoPath }),
   cherryPick: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("cherry_pick", { repoPath, commitId }),
   revertCommit: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("revert_commit", { repoPath, commitId }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
