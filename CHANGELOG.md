@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Undo and redo
+
+- **Ctrl/Cmd+Z** undoes the last Git operation in the active repository and **Ctrl/Cmd+Shift+Z**
+  (or Ctrl+Y) redoes it, also from the undo/redo buttons next to Fetch/Pull/Push, the command
+  palette, and the toast's Undo/Redo button. Covers staging, commits, amend, reset, branch and
+  tag changes, checkout, cherry-pick, revert, merge, rebase, pull and every discard (discarded
+  changes are now recoverable). Up to 50 steps, kept across restarts.
+- Undo refuses, instead of overwriting, when the repository changed since the operation; the
+  reflog stays available for those cases.
+
 ### Clone and new repository
 
 - **Clone…** in the repository picker and a "Clone repository…" palette command (desktop app):
