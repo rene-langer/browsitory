@@ -540,3 +540,43 @@ fn writes_head_reflog_message_too() {
         Some("browsitory: undo checkout")
     );
 }
+
+#[test]
+fn tracked_files_matching_an_ignore_pattern_are_still_deleted_and_restored() {
+    let (_dir, repo) = seeded();
+    write(&repo, ".gitignore", "*.log\n");
+    write(&repo, "build.log", "tracked anyway\n");
+    stage(&repo, ".gitignore");
+    stage(&repo, "build.log");
+    commit(&repo, "track a log");
+    assert_round_trip(&repo, SnapshotScope::Full, |repo| {
+        fs::remove_file(repo.workdir().unwrap().join("build.log")).unwrap();
+    });
+    assert_eq!(
+        read(&repo, "build.log"),
+        None,
+        "redo deleted the tracked file"
+    );
+}
+
+#[test]
+fn refuses_before_writing_when_a_replaced_directory_holds_an_untracked_file() {
+    let (_dir, repo) = seeded();
+    write(&repo, "d/x.o", "object\n");
+    let from = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(repo.workdir().unwrap().join("d")).unwrap();
+    write(&repo, "d", "now a file\n");
+    write(&repo, ".gitignore", "*.o\n");
+    let to = capture(&repo, SnapshotScope::Full).unwrap();
+    // Back to the `from` state, then redo toward `to`.
+    fs::remove_file(repo.workdir().unwrap().join("d")).unwrap();
+    fs::remove_file(repo.workdir().unwrap().join(".gitignore")).unwrap();
+    write(&repo, "d/x.o", "object\n");
+    let result = restore(&repo, &from, &to, "browsitory: redo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert_eq!(read(&repo, ".gitignore"), None);
+    assert_eq!(read(&repo, "d/x.o").as_deref(), Some("object\n"));
+}

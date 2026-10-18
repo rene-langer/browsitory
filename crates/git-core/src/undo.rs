@@ -250,7 +250,9 @@ pub fn restore(
         .collect();
     let index_differs = expected.index_tree != target.index_tree;
     let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
-        (Some(from), Some(to)) if from != to => Some(WorktreeChange::new(repo, from, to)?),
+        (Some(from), Some(to)) if from != to => {
+            Some(WorktreeChange::new(repo, expected, target, from, to)?)
+        }
         _ => None,
     };
 
@@ -315,10 +317,22 @@ struct WorktreeChange {
     from: TreeFiles,
     to: TreeFiles,
     paths: Vec<String>,
+    /// Paths in either snapshot's index tree; these are never treated as ignored/unsnapshotted.
+    tracked: BTreeSet<String>,
 }
 
 impl WorktreeChange {
-    fn new(repo: &Repository, from: &str, to: &str) -> Result<Self, UndoError> {
+    fn new(
+        repo: &Repository,
+        expected: &RepoSnapshot,
+        target: &RepoSnapshot,
+        from: &str,
+        to: &str,
+    ) -> Result<Self, UndoError> {
+        let tracked = flatten_tree(repo, &expected.index_tree)?
+            .into_keys()
+            .chain(flatten_tree(repo, &target.index_tree)?.into_keys())
+            .collect();
         let from = flatten_tree(repo, from)?;
         let to = flatten_tree(repo, to)?;
         let paths = from
@@ -329,7 +343,12 @@ impl WorktreeChange {
             .filter(|path| from.get(*path) != to.get(*path))
             .cloned()
             .collect();
-        Ok(Self { from, to, paths })
+        Ok(Self {
+            from,
+            to,
+            paths,
+            tracked,
+        })
     }
 
     fn verify(&self, repo: &Repository) -> Result<(), UndoError> {
@@ -387,8 +406,10 @@ impl WorktreeChange {
                 .ok()
                 .and_then(|p| p.to_str())
                 .map(|p| p.replace('\\', "/"));
-            let deleted =
-                relative.is_some_and(|p| self.paths.contains(&p) && !self.to.contains_key(&p));
+            // Untracked deletions might turn out ignored under the target's rules (unknown yet).
+            let deleted = relative.is_some_and(|p| {
+                self.paths.contains(&p) && !self.to.contains_key(&p) && self.tracked.contains(&p)
+            });
             if !deleted {
                 return Err(UndoError::RepositoryChanged);
             }
@@ -416,7 +437,10 @@ impl WorktreeChange {
         // Deletions before writes, so a file can replace a directory that only held deleted files.
         for path in others().filter(|path| !self.to.contains_key(*path)) {
             let full = workdir.join(path);
-            if repo.is_path_ignored(path)? && fs::symlink_metadata(&full).is_ok() {
+            if !self.tracked.contains(path)
+                && repo.is_path_ignored(path)?
+                && fs::symlink_metadata(&full).is_ok()
+            {
                 continue;
             }
             remove_existing(&full)?;
