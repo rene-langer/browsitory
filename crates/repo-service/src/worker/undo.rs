@@ -342,8 +342,13 @@ impl HeldReplies {
     }
 }
 
-/// Swaps the reply of every command that can change what the recorder snapshots — everything
-/// `plan_for` records, plus `RebaseContinue`, which can end a pending rebase.
+/// Swaps the reply of every command that can change what the recorder snapshots: everything
+/// `plan_for` records, plus the commands that can end a pending operation (`RebaseContinue`,
+/// `AbortMerge`, `AbortRebase`). Guarded by `every_recordable_command_has_its_reply_held`.
+///
+/// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
+/// whose reply isn't `Sender<Result<(), String>>` (`Commit` replies with the new oid,
+/// `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
 pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
     match command {
         Command::StageFile { reply, .. }
@@ -522,6 +527,123 @@ mod tests {
         .unwrap();
         assert_eq!(text.chars().count(), 80);
         assert!(text.ends_with("…”"));
+    }
+
+    /// Builds the command with a fresh reply channel, then checks it is recordable and that
+    /// `hold_reply` moved the original sender into `HeldReplies`: with the command (and its
+    /// proxy sender) dropped, the original receiver stays connected but empty until release.
+    macro_rules! assert_held {
+        ($variant:ident { $($field:ident: $value:expr),* $(,)? }) => {{
+            let (reply, rx) = channel();
+            let mut command = Command::$variant { $($field: $value,)* reply };
+            assert!(plan_for(&command).is_some(), "{} is not recordable", stringify!($variant));
+            let mut held = HeldReplies::default();
+            hold_reply(&mut command, &mut held);
+            drop(command);
+            assert_eq!(
+                rx.try_recv().map(|_| ()),
+                Err(std::sync::mpsc::TryRecvError::Empty),
+                "{} reply was not held",
+                stringify!($variant)
+            );
+            held.release();
+            assert_eq!(
+                rx.try_recv().map(|_| ()),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)
+            );
+        }};
+    }
+
+    #[test]
+    fn every_recordable_command_has_its_reply_held() {
+        let s = || String::from("x");
+        assert_held!(StageFile { path: s() });
+        assert_held!(UnstageFile { path: s() });
+        assert_held!(StageHunk {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3
+        });
+        assert_held!(UnstageHunk {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3
+        });
+        assert_held!(StageLines {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3,
+            line_indices: vec![],
+            expected_lines: vec![],
+        });
+        assert_held!(UnstageLines {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3,
+            line_indices: vec![],
+            expected_lines: vec![],
+        });
+        assert_held!(Commit { message: s() });
+        assert_held!(AmendCommit { message: s() });
+        assert_held!(CreateBranch {
+            name: s(),
+            start_point: s()
+        });
+        assert_held!(DeleteBranch {
+            name: s(),
+            force: false
+        });
+        assert_held!(RenameBranch {
+            old_name: s(),
+            new_name: s()
+        });
+        assert_held!(CreateTag {
+            name: s(),
+            message: None
+        });
+        assert_held!(DeleteTag { name: s() });
+        assert_held!(DiscardHunk {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3
+        });
+        assert_held!(DiscardLines {
+            path: s(),
+            old_start: 1,
+            new_start: 1,
+            context_lines: 3,
+            line_indices: vec![],
+            expected_lines: vec![],
+        });
+        assert_held!(DiscardFile { path: s() });
+        assert_held!(DiscardAllUnstaged { paths: vec![] });
+        assert_held!(IgnorePath { pattern: s() });
+        assert_held!(SwitchBranch { name: s() });
+        assert_held!(CheckoutCommit { commit_id: s() });
+        assert_held!(ResetToCommit {
+            commit_id: s(),
+            mode: ResetMode::Hard
+        });
+        assert_held!(CherryPick { commit_id: s() });
+        assert_held!(RevertCommit { commit_id: s() });
+        assert_held!(StartMerge { branch_name: s() });
+        assert_held!(StartRebase {
+            onto: s(),
+            plan: vec![]
+        });
+        assert_held!(PullCurrentUpstream {
+            operation_id: s(),
+            events: channel().0
+        });
+        assert_held!(RestoreReflogEntry {
+            reference: s(),
+            new_id: s()
+        });
     }
 
     #[test]
