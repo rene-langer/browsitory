@@ -662,6 +662,35 @@ describe("App", () => {
       expect(undo).not.toHaveBeenCalled();
     });
 
+    it("a toast's Redo does nothing once its repo tab was switched away", async () => {
+      const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      const redo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      render(
+        <App
+          client={undoClient({
+            listOpenRepos: async () => ({
+              entries: [
+                { path: "/repos/a", workspaceId: null },
+                { path: "/repos/b", workspaceId: null },
+              ],
+              activePath: "/repos/a",
+            }),
+            getUndoState: async () => ({ undo: "Stage a.txt", redo: null }),
+            undo,
+            redo,
+          })}
+        />,
+      );
+      await screen.findByRole("button", { name: "Undo Stage a.txt" });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+      const toastRedo = await screen.findByRole("button", { name: "Redo" });
+      fireEvent.click(screen.getByRole("tab", { name: "b" }));
+      await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+      fireEvent.click(toastRedo);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(redo).not.toHaveBeenCalled();
+    });
+
     it("re-reads the undo state when the window regains focus", async () => {
       const getUndoState = vi.fn(async () => ({ undo: null, redo: null }));
       render(<App client={undoClient({ getUndoState })} />);
