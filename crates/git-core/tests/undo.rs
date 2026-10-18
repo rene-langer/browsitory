@@ -741,3 +741,136 @@ fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
     );
     assert!(flagged(&repo));
 }
+
+/// `core.autocrlf=true` (the Git for Windows default): blobs hold LF, the worktree CRLF.
+fn crlf_seeded() -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    write(&repo, "a.txt", "one\ntwo\n");
+    stage(&repo, "a.txt");
+    commit(&repo, "initial");
+    fs::remove_file(repo.workdir().unwrap().join("a.txt")).unwrap();
+    checkout_path(&repo, "a.txt");
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\r\ntwo\r\n"));
+    assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
+    (dir, repo)
+}
+
+fn checkout_path(repo: &Repository, path: &str) {
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().path(path);
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+}
+
+fn status_of(repo: &Repository, path: &str) -> git2::Status {
+    repo.status_file(Path::new(path)).unwrap()
+}
+
+#[test]
+fn undoes_a_discard_with_autocrlf() {
+    let (_dir, repo) = crlf_seeded();
+    let full = repo.workdir().unwrap().join("a.txt");
+    fs::write(&full, b"edited\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"edited\r\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
+    restore(&repo, &before, &after, "browsitory: redo test").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
+
+#[test]
+fn undoes_a_branch_switch_with_autocrlf() {
+    let (_dir, repo) = crlf_seeded();
+    let main_branch = head_branch(&capture(&repo, SnapshotScope::RefsAndIndex).unwrap());
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("x", &head, false).unwrap();
+    repo.set_head("refs/heads/x").unwrap();
+    write(&repo, "a.txt", "on x\r\n");
+    stage(&repo, "a.txt");
+    commit(&repo, "x");
+    fs::remove_file(repo.workdir().unwrap().join("a.txt")).unwrap();
+    checkout_path(&repo, "a.txt");
+    assert_round_trip(&repo, SnapshotScope::Full, |repo| {
+        let tree = repo.revparse_single(&main_branch).unwrap();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.safe();
+        repo.checkout_tree(&tree, Some(&mut checkout)).unwrap();
+        repo.set_head(&main_branch).unwrap();
+    });
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\r\ntwo\r\n"));
+    assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
+}
+
+#[cfg(unix)]
+#[test]
+fn keeps_the_recorded_exec_bit_with_filemode_off() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, repo) = seeded();
+    let full = repo.workdir().unwrap().join("a.txt");
+    fs::set_permissions(&full, fs::Permissions::from_mode(0o755)).unwrap();
+    stage(&repo, "a.txt");
+    commit(&repo, "make a.txt executable");
+    repo.config()
+        .unwrap()
+        .set_bool("core.filemode", false)
+        .unwrap();
+    // A filesystem without exec bits: git keeps the recorded 0755 regardless.
+    fs::set_permissions(&full, fs::Permissions::from_mode(0o644)).unwrap();
+    write(&repo, "a.txt", "edited\n");
+    let (before, _) = assert_round_trip(&repo, SnapshotScope::Full, |repo| {
+        checkout_path(repo, "a.txt");
+    });
+    let tree = repo
+        .find_tree(git2::Oid::from_str(before.worktree_tree.as_ref().unwrap()).unwrap())
+        .unwrap();
+    assert_eq!(tree.get_name("a.txt").unwrap().filemode(), 0o100755);
+}
+
+#[test]
+fn keeps_the_recorded_symlink_mode_with_symlinks_off() {
+    let (_dir, repo) = seeded();
+    repo.config()
+        .unwrap()
+        .set_bool("core.symlinks", false)
+        .unwrap();
+    // As checked out without symlink support: a plain file holding the link target.
+    let id = repo.blob(b"a.txt").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add(&git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o120000,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id,
+            flags: "link".len() as u16,
+            flags_extended: 0,
+            path: b"link".to_vec(),
+        })
+        .unwrap();
+    index.write().unwrap();
+    commit(&repo, "add link");
+    checkout_path(&repo, "link");
+    write(&repo, "link", "elsewhere.txt");
+    let (before, _) = assert_round_trip(&repo, SnapshotScope::Full, |repo| {
+        checkout_path(repo, "link");
+    });
+    let tree = repo
+        .find_tree(git2::Oid::from_str(before.worktree_tree.as_ref().unwrap()).unwrap())
+        .unwrap();
+    assert_eq!(tree.get_name("link").unwrap().filemode(), 0o120000);
+    let meta = fs::symlink_metadata(repo.workdir().unwrap().join("link")).unwrap();
+    assert!(meta.is_file());
+}

@@ -305,6 +305,9 @@ pub fn restore(
         index.read_tree(&repo.find_tree(Oid::from_str(&target.index_tree)?)?)?;
         index.write()?;
     }
+    if let Some(change) = &worktree {
+        change.checkout_from_index(repo)?;
+    }
     for name in &changed_refs {
         match target.refs.get(*name) {
             Some(oid) => {
@@ -407,6 +410,9 @@ struct WorktreeChange {
     paths: Vec<String>,
     /// Paths in either snapshot's index tree; these are never treated as ignored/unsnapshotted.
     tracked: BTreeSet<String>,
+    /// Target files equal to their index entry once the index is written: checked out from the
+    /// index (so smudge filters and `core.autocrlf` apply) rather than written as raw bytes.
+    from_index: BTreeSet<String>,
 }
 
 impl WorktreeChange {
@@ -417,13 +423,14 @@ impl WorktreeChange {
         from: &str,
         to: &str,
     ) -> Result<Self, UndoError> {
+        let target_index = flatten_tree(repo, &target.index_tree)?;
         let tracked = flatten_tree(repo, &expected.index_tree)?
             .into_keys()
-            .chain(flatten_tree(repo, &target.index_tree)?.into_keys())
+            .chain(target_index.keys().cloned())
             .collect();
         let from = flatten_tree(repo, from)?;
         let to = flatten_tree(repo, to)?;
-        let paths = from
+        let paths: Vec<String> = from
             .keys()
             .chain(to.keys())
             .collect::<BTreeSet<_>>()
@@ -431,17 +438,37 @@ impl WorktreeChange {
             .filter(|path| from.get(*path) != to.get(*path))
             .cloned()
             .collect();
+        // Ignore files stay raw writes: apply needs them on disk before the index is written.
+        // When the index isn't rewritten, the entry checked out is the current one, which may
+        // have been restaged since; only matching entries qualify.
+        let index_differs = expected.index_tree != target.index_tree;
+        let mut index = repo.index()?;
+        index.read(false)?;
+        let from_index = paths
+            .iter()
+            .filter(|path| !is_ignore_file(path))
+            .filter(|path| {
+                let wanted = to.get(*path);
+                wanted.is_some()
+                    && target_index.get(*path) == wanted
+                    && (index_differs || index_entry_of(&index, path) == wanted.copied())
+            })
+            .cloned()
+            .collect();
         Ok(Self {
             from,
             to,
             paths,
             tracked,
+            from_index,
         })
     }
 
     fn verify(&self, repo: &Repository) -> Result<(), UndoError> {
         let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         let config = worktree_config(repo)?;
+        let mut index = repo.index()?;
+        index.read(false)?;
         for path in &self.paths {
             let expected = self.from.get(path).copied();
             let previous_mode = expected.map(|(_, mode)| mode);
@@ -453,7 +480,7 @@ impl WorktreeChange {
                     Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
                 })
                 .transpose()?;
-            if current != expected {
+            if current != expected && !clean_against_index(repo, &index, path, expected) {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.
                 let ignored_untouched = expected.is_none()
@@ -508,10 +535,9 @@ impl WorktreeChange {
     fn apply(&self, repo: &Repository) -> Result<(), UndoError> {
         let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         let config = worktree_config(repo)?;
-        let is_ignore_file = |path: &&String| path.rsplit('/').next() == Some(".gitignore");
         // Ignore files first, so the target's ignore rules are on disk before deciding which
         // other deletions would hit a now-ignored (unsnapshotted) file.
-        for path in self.paths.iter().filter(is_ignore_file) {
+        for path in self.paths.iter().filter(|path| is_ignore_file(path)) {
             let full = workdir.join(path);
             match self.to.get(path) {
                 Some((id, mode)) => write_worktree_file(repo, &full, *id, *mode, &config)?,
@@ -534,13 +560,72 @@ impl WorktreeChange {
             remove_existing(&full)?;
             prune_empty_parents(workdir, &full);
         }
-        for path in others() {
+        for path in others().filter(|path| !self.from_index.contains(*path)) {
             if let Some((id, mode)) = self.to.get(path) {
                 write_worktree_file(repo, &workdir.join(path), *id, *mode, &config)?;
             }
         }
         Ok(())
     }
+
+    /// Runs after the index is written: materialises `from_index` paths through git's checkout.
+    fn checkout_from_index(&self, repo: &Repository) -> Result<(), UndoError> {
+        if self.from_index.is_empty() {
+            return Ok(());
+        }
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force().disable_pathspec_match(true);
+        for path in &self.from_index {
+            checkout.path(path);
+        }
+        repo.checkout_index(None, Some(&mut checkout))?;
+        // libgit2 skips a file whose HEAD (its checkout baseline) still has a directory there,
+        // as in a dir -> file swap; fall back to the raw blob for anything still missing.
+        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
+        let config = worktree_config(repo)?;
+        for path in &self.from_index {
+            let full = workdir.join(path);
+            if fs::symlink_metadata(&full).is_err() {
+                if let Some((id, mode)) = self.to.get(path) {
+                    write_worktree_file(repo, &full, *id, *mode, &config)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_ignore_file(path: &str) -> bool {
+    path.rsplit('/').next() == Some(".gitignore")
+}
+
+fn index_entry_of(index: &Index, path: &str) -> Option<(Oid, u32)> {
+    index
+        .get_path(Path::new(path), 0)
+        .map(|entry| (entry.id, entry.mode))
+}
+
+/// A path whose expected content is the index's and that git reports unmodified in the
+/// worktree: its raw bytes may still differ (`core.autocrlf`, smudge filters), but they are
+/// what git itself would check out, so nothing of the user's is lost by overwriting them.
+fn clean_against_index(
+    repo: &Repository,
+    index: &Index,
+    path: &str,
+    expected: Option<(Oid, u32)>,
+) -> bool {
+    expected.is_some()
+        && index_entry_of(index, path) == expected
+        && repo.status_file(Path::new(path)).is_ok_and(|status| {
+            !status.intersects(
+                Status::WT_NEW
+                    | Status::WT_MODIFIED
+                    | Status::WT_DELETED
+                    | Status::WT_TYPECHANGE
+                    | Status::WT_RENAMED
+                    | Status::WT_UNREADABLE,
+            )
+        })
 }
 
 fn flatten_tree(repo: &Repository, id: &str) -> Result<TreeFiles, UndoError> {
