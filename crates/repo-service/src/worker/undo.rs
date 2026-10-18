@@ -1,20 +1,22 @@
 //! Undo stack: which worker commands are recorded, under which label, and the recorder that
 //! snapshots around them. See `docs/superpowers/specs/2026-10-18-sm-parity-batch3b-design.md`.
-use git_core::reset::ResetMode;
-use git_core::undo::SnapshotScope;
+use std::sync::mpsc::Sender;
 
-use super::Command;
+use git2::Repository;
+use git_core::reset::ResetMode;
+use git_core::undo::{capture, restore, RepoSnapshot, SnapshotScope, UndoError};
+
+use super::undo_store::{UndoEntry, UndoStacks, UndoStore, UNDO_LIMIT};
+use super::{Command, WorkerHandle};
 
 pub(super) const MAX_LABEL_CHARS: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct UndoPlan {
     pub label: String,
     pub scope: SnapshotScope,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
     use SnapshotScope::{Full, RefsAndIndex};
     let (label, scope) = match command {
@@ -124,6 +126,292 @@ fn ellipsize_middle(text: &str, max_chars: usize) -> String {
     format!("{start}…{end}")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoState {
+    pub undo: Option<String>,
+    pub redo: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UndoOutcome {
+    Done { label: String },
+    Nothing,
+    RepositoryChanged { label: String },
+    OperationInProgress,
+}
+
+pub(super) struct UndoRecorder {
+    store: UndoStore,
+    stacks: UndoStacks,
+    active: Option<(UndoPlan, RepoSnapshot)>,
+    /// An operation that stopped mid-way (conflicted merge/cherry-pick/revert, paused rebase):
+    /// its label and pre-operation snapshot, recorded once nothing is in progress any more.
+    pending: Option<(String, RepoSnapshot)>,
+}
+
+impl UndoRecorder {
+    pub fn open(repo: &Repository) -> Self {
+        let (store, stacks) = UndoStore::open(repo);
+        Self {
+            store,
+            stacks,
+            active: None,
+            pending: None,
+        }
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Runs before every command. A pending operation that is no longer in progress ended
+    /// outside the worker (e.g. `git merge --abort` in a terminal): whether it was finished or
+    /// abandoned is unknowable, so it's dropped rather than recorded with whatever comes next.
+    pub fn settle(&mut self, in_progress: bool) {
+        if !in_progress {
+            self.pending = None;
+        }
+    }
+
+    /// Snapshots before a recordable command. Skipped while an operation is paused: whatever
+    /// runs then (staging, resolving, the final commit) belongs to that operation's entry.
+    pub fn begin(&mut self, repo: &Repository, plan: UndoPlan, in_progress: bool) {
+        if self.pending.is_some() || in_progress {
+            return;
+        }
+        match capture(repo, plan.scope) {
+            Ok(before) => self.active = Some((plan, before)),
+            Err(error) => {
+                eprintln!(
+                    "browsitory: not recording \"{}\" for undo: {error}",
+                    plan.label
+                )
+            }
+        }
+    }
+
+    /// Runs after every recordable command and every command issued while one is pending.
+    /// `aborted` is true when the command was an abort (merge or rebase): a pending operation
+    /// it ends is dropped rather than recorded — the user backed out of it.
+    pub fn finish(&mut self, repo: &Repository, in_progress: bool, aborted: bool) {
+        if let Some((plan, before)) = self.active.take() {
+            if in_progress {
+                self.pending = Some((plan.label, before));
+                return;
+            }
+            self.record(repo, plan.label, plan.scope, before);
+            return;
+        }
+        if in_progress {
+            return;
+        }
+        if let Some((label, before)) = self.pending.take() {
+            if !aborted {
+                self.record(repo, label, SnapshotScope::Full, before);
+            }
+        }
+    }
+
+    fn record(
+        &mut self,
+        repo: &Repository,
+        label: String,
+        scope: SnapshotScope,
+        before: RepoSnapshot,
+    ) {
+        let after = match capture(repo, scope) {
+            Ok(after) => after,
+            Err(error) => {
+                eprintln!("browsitory: not recording \"{label}\" for undo: {error}");
+                return;
+            }
+        };
+        if after == before {
+            return;
+        }
+        self.store.reload_if_changed(&mut self.stacks);
+        self.stacks.undo.push(UndoEntry {
+            label,
+            before,
+            after,
+        });
+        self.stacks.redo.clear();
+        let overflow = self.stacks.undo.len().saturating_sub(UNDO_LIMIT);
+        self.stacks.undo.drain(..overflow);
+        self.persist(repo);
+    }
+
+    pub fn state(&mut self) -> UndoState {
+        self.store.reload_if_changed(&mut self.stacks);
+        UndoState {
+            undo: self.stacks.undo.last().map(|entry| entry.label.clone()),
+            redo: self.stacks.redo.last().map(|entry| entry.label.clone()),
+        }
+    }
+
+    pub fn undo(&mut self, repo: &Repository, in_progress: bool) -> Result<UndoOutcome, String> {
+        self.step(repo, in_progress, Direction::Undo)
+    }
+
+    pub fn redo(&mut self, repo: &Repository, in_progress: bool) -> Result<UndoOutcome, String> {
+        self.step(repo, in_progress, Direction::Redo)
+    }
+
+    fn step(
+        &mut self,
+        repo: &Repository,
+        in_progress: bool,
+        direction: Direction,
+    ) -> Result<UndoOutcome, String> {
+        self.store.reload_if_changed(&mut self.stacks);
+        if in_progress || self.pending.is_some() {
+            return Ok(UndoOutcome::OperationInProgress);
+        }
+        let (source, verb) = match direction {
+            Direction::Undo => (&self.stacks.undo, "undo"),
+            Direction::Redo => (&self.stacks.redo, "redo"),
+        };
+        let Some(entry) = source.last() else {
+            return Ok(UndoOutcome::Nothing);
+        };
+        let (expected, target) = match direction {
+            Direction::Undo => (&entry.after, &entry.before),
+            Direction::Redo => (&entry.before, &entry.after),
+        };
+        let label = entry.label.clone();
+        match restore(
+            repo,
+            expected,
+            target,
+            &format!("browsitory: {verb} {label}"),
+        ) {
+            Ok(()) => {}
+            Err(UndoError::RepositoryChanged) => {
+                return Ok(UndoOutcome::RepositoryChanged { label })
+            }
+            Err(UndoError::OperationInProgress) => return Ok(UndoOutcome::OperationInProgress),
+            Err(error) => return Err(error.to_string()),
+        }
+        let (from, to) = match direction {
+            Direction::Undo => (&mut self.stacks.undo, &mut self.stacks.redo),
+            Direction::Redo => (&mut self.stacks.redo, &mut self.stacks.undo),
+        };
+        let entry = from.pop().expect("entry checked above");
+        to.push(entry);
+        self.persist(repo);
+        Ok(UndoOutcome::Done { label })
+    }
+
+    /// A failed save (e.g. the history file was written by a newer version) never fails the
+    /// user's command: the in-memory stacks stay authoritative for this session.
+    fn persist(&mut self, repo: &Repository) {
+        if let Err(error) = self.store.save(repo, &self.stacks) {
+            eprintln!("browsitory: could not save undo history: {error}");
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    Undo,
+    Redo,
+}
+
+/// Replies held back until the recorder has taken its "after" snapshot. Without this a caller
+/// could act on the reply — or the user edit a file — before the snapshot, and that later change
+/// would be folded into the entry (and silently reverted by its undo).
+#[derive(Default)]
+pub(super) struct HeldReplies(Vec<Box<dyn FnOnce()>>);
+
+impl HeldReplies {
+    fn hold<T: 'static>(&mut self, reply: &mut Sender<T>) {
+        let (proxy, rx) = std::sync::mpsc::channel();
+        let original = std::mem::replace(reply, proxy);
+        self.0.push(Box::new(move || {
+            if let Ok(value) = rx.try_recv() {
+                let _ = original.send(value);
+            }
+        }));
+    }
+
+    pub fn release(self) {
+        for forward in self.0 {
+            forward();
+        }
+    }
+}
+
+/// Swaps the reply of every command that can change what the recorder snapshots — everything
+/// `plan_for` records, plus `RebaseContinue`, which can end a pending rebase.
+pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
+    match command {
+        Command::StageFile { reply, .. }
+        | Command::UnstageFile { reply, .. }
+        | Command::StageHunk { reply, .. }
+        | Command::UnstageHunk { reply, .. }
+        | Command::StageLines { reply, .. }
+        | Command::UnstageLines { reply, .. }
+        | Command::AmendCommit { reply, .. }
+        | Command::CreateBranch { reply, .. }
+        | Command::DeleteBranch { reply, .. }
+        | Command::RenameBranch { reply, .. }
+        | Command::CreateTag { reply, .. }
+        | Command::DeleteTag { reply, .. }
+        | Command::DiscardHunk { reply, .. }
+        | Command::DiscardLines { reply, .. }
+        | Command::DiscardFile { reply, .. }
+        | Command::DiscardAllUnstaged { reply, .. }
+        | Command::IgnorePath { reply, .. }
+        | Command::SwitchBranch { reply, .. }
+        | Command::CheckoutCommit { reply, .. }
+        | Command::ResetToCommit { reply, .. }
+        | Command::RestoreReflogEntry { reply, .. }
+        | Command::AbortMerge { reply, .. }
+        | Command::AbortRebase { reply, .. } => held.hold(reply),
+        Command::Commit { reply, .. } => held.hold(reply),
+        Command::StartMerge { reply, .. } => held.hold(reply),
+        Command::StartRebase { reply, .. } | Command::RebaseContinue { reply, .. } => {
+            held.hold(reply)
+        }
+        Command::PullCurrentUpstream { reply, .. } => held.hold(reply),
+        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => held.hold(reply),
+        _ => {}
+    }
+}
+
+pub(super) fn get_state(recorder: &mut UndoRecorder, reply: Sender<Result<UndoState, String>>) {
+    let _ = reply.send(Ok(recorder.state()));
+}
+
+impl WorkerHandle {
+    pub fn get_undo_state(&self) -> Result<UndoState, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetUndoState { reply })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn undo(&self) -> Result<UndoOutcome, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::Undo { reply })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn redo(&self) -> Result<UndoOutcome, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::Redo { reply })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +419,27 @@ mod tests {
 
     fn label(command: Command) -> Option<(String, SnapshotScope)> {
         plan_for(&command).map(|plan| (plan.label, plan.scope))
+    }
+
+    #[test]
+    fn a_pending_operation_ended_outside_the_worker_is_dropped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let mut recorder = UndoRecorder::open(&repo);
+        let plan = |label: &str| UndoPlan {
+            label: label.into(),
+            scope: SnapshotScope::Full,
+        };
+        // A merge stops on conflicts...
+        recorder.begin(&repo, plan("Merge feature"), false);
+        recorder.finish(&repo, true, false);
+        assert!(recorder.has_pending());
+        // ...and is aborted in a terminal. The next command sees nothing in progress.
+        recorder.settle(false);
+        recorder.begin(&repo, plan("Add b.txt"), false);
+        std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
+        recorder.finish(&repo, false, false);
+        assert_eq!(recorder.state().undo, Some("Add b.txt".into()));
     }
 
     #[test]

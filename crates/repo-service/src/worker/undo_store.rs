@@ -1,7 +1,5 @@
 //! Persists the undo/redo stacks to `<gitdir>/browsitory/undo.json` and keeps every object they
 //! reference reachable from `refs/browsitory/undo/<worktree-key>` so `git gc` can't prune them.
-// Unused until the UndoRecorder (next task) wires the store in.
-#![cfg_attr(not(test), allow(dead_code))]
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
@@ -12,7 +10,6 @@ use git2::{ObjectType, Oid, Repository, Signature};
 use git_core::undo::{HeadState, RepoSnapshot};
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)]
 pub(super) const UNDO_LIMIT: usize = 50;
 const FORMAT_VERSION: u32 = 1;
 
