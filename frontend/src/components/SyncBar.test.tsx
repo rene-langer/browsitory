@@ -86,3 +86,10 @@ describe("SyncBar", () => {
     expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
   });
 });
+
+describe("SyncBar leading slot", () => {
+  it("renders the leading node", () => {
+    renderBar({ leading: <span>lead</span> });
+    expect(screen.getByText("lead")).toBeInTheDocument();
+  });
+});

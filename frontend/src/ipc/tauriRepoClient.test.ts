@@ -304,6 +304,12 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("checkout_commit", { repoPath: "/repo", commitId: "abc" });
     await tauriRepoClient.amendCommit("/repo", "msg");
     expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg" });
+    await tauriRepoClient.getUndoState("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_undo_state", { repoPath: "/repo" });
+    await tauriRepoClient.undo("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("undo_last", { repoPath: "/repo" });
+    await tauriRepoClient.redo("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("redo_last", { repoPath: "/repo" });
     await tauriRepoClient.getHeadInfo("/repo");
     expect(invoke).toHaveBeenLastCalledWith("get_head_info", { repoPath: "/repo" });
     await tauriRepoClient.forcePushCurrentBranch("/repo", "origin");

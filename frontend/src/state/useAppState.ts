@@ -20,6 +20,8 @@ import type {
   SubmoduleInfo,
   TagInfo,
   TransferProgress,
+  UndoOutcome,
+  UndoState,
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
@@ -27,6 +29,7 @@ import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
 import { useHistoryActions } from "./useHistoryActions";
+import { useUndoActions } from "./useUndoActions";
 import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useRemoteTransferActions } from "./useRemoteTransferActions";
@@ -105,6 +108,7 @@ export interface AppState {
   // trailing refresh, the palette's Refresh, a stash apply, a pull — refetches the diffs on
   // screen, even when the new `status` looks identical (hunk-level edits don't change it).
   refreshGeneration: number;
+  undoState: UndoState;
 }
 
 export interface UseAppStateResult {
@@ -213,6 +217,9 @@ export interface UseAppStateResult {
   // Fetches the next page of history (grows the graph limit by one page and reloads).
   loadMoreHistory(): Promise<void>;
   refresh(): Promise<void>;
+  undo(): Promise<UndoOutcome | null>;
+  redo(): Promise<UndoOutcome | null>;
+  refreshUndoState(): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
   // global banner's dismiss control (issue #30/UX-002). See `App.tsx`'s `RepoWorkspace`.
   dismissError(): void;
@@ -257,6 +264,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     error: null,
     pending: false,
     refreshGeneration: 0,
+    undoState: { undo: null, redo: null },
   });
 
   const graphLimit = useRef(GRAPH_PAGE_SIZE);
@@ -270,7 +278,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
       const limit = graphLimit.current;
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories, headInfo] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
           client.getCommitGraph(repoPath, limit, graphBranchSelection),
@@ -286,6 +294,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           client.getRebaseProgress(repoPath),
           client.detectForgeRepository(repoPath),
           client.getHeadInfo(repoPath),
+          client.getUndoState(repoPath),
         ]);
       const remoteUpstreams = Object.fromEntries(
         await Promise.all(
@@ -323,6 +332,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         headInfo,
         rebaseProgress,
         forgeRepositories,
+        undoState,
         error: null,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
@@ -340,6 +350,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         error: credentialFailureMessage(err),
         refreshGeneration: prev.refreshGeneration + 1,
       }));
+    }
+  }, [client, repoPath]);
+
+  // Cheap focus-time re-check: another process (CLI, the other frontend) may have changed what
+  // undo would do. Errors are ignored — the next full refresh reports them.
+  const refreshUndoState = useCallback(async () => {
+    try {
+      const undoState = await client.getUndoState(repoPath);
+      setState((prev) => ({ ...prev, undoState }));
+    } catch {
+      // ignored, see above
     }
   }, [client, repoPath]);
 
@@ -471,6 +492,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const { cherryPick, revertCommit, resetToCommit, checkoutCommit, amendCommit, setAmendMode } =
     useHistoryActions(client, repoPath, runMutation, setState);
 
+  const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
+
   const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
     useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const dismissError = useCallback(() => {
@@ -557,6 +580,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setGraphRemoteBranchSelection,
     loadMoreHistory,
     refresh,
+    undo,
+    redo,
+    refreshUndoState,
     dismissError,
   };
 }

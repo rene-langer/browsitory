@@ -9,6 +9,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: "Global",
     shortcuts: [
       { keys: "Ctrl/Cmd+K", description: "Open the command palette" },
+      { keys: "Ctrl/Cmd+Z", description: "Undo the last Git operation" },
+      { keys: "Ctrl/Cmd+Shift+Z / Ctrl+Y", description: "Redo" },
       { keys: "Ctrl/Cmd+W", description: "Close the active tab (where the host doesn't claim it)" },
       { keys: "?", description: "Show keyboard shortcuts" },
     ],

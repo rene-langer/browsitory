@@ -22,6 +22,7 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod undo;
 mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
@@ -51,6 +52,7 @@ pub use status::{
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
+pub use undo::{get_undo_state, redo_last, undo_last};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 
 #[derive(Clone, Serialize)]
@@ -529,6 +531,42 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
         match outcome {
             git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
             git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct UndoStateDto {
+    undo: Option<String>,
+    redo: Option<String>,
+}
+
+impl From<repo_service::worker::UndoState> for UndoStateDto {
+    fn from(state: repo_service::worker::UndoState) -> Self {
+        Self {
+            undo: state.undo,
+            redo: state.redo,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum UndoOutcomeDto {
+    Done { label: String },
+    Nothing,
+    RepositoryChanged { label: String },
+    OperationInProgress,
+}
+
+impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
+    fn from(outcome: repo_service::worker::UndoOutcome) -> Self {
+        use repo_service::worker::UndoOutcome;
+        match outcome {
+            UndoOutcome::Done { label } => Self::Done { label },
+            UndoOutcome::Nothing => Self::Nothing,
+            UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
+            UndoOutcome::OperationInProgress => Self::OperationInProgress,
         }
     }
 }
@@ -1114,7 +1152,7 @@ mod tests {
         transfer_event_payload, DiffOptionsDto, DiffSettingsDto, FileHistoryEntryDto,
         ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto, OpenRepoEntryInput,
         PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, ResetModeDto,
-        SubmoduleInfoDto, WorkspaceDto, WorktreeInfoDto,
+        SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1533,6 +1571,45 @@ mod tests {
             .unwrap(),
             serde_json::json!({"kind": "Conflicted", "files": ["a"]})
         );
+    }
+
+    #[test]
+    fn undo_dtos_serialize_for_the_frontend() {
+        use repo_service::worker::{UndoOutcome, UndoState};
+        let state = UndoStateDto::from(UndoState {
+            undo: Some("Stage a.txt".into()),
+            redo: None,
+        });
+        assert_eq!(
+            serde_json::to_value(state).unwrap(),
+            serde_json::json!({ "undo": "Stage a.txt", "redo": null })
+        );
+        let cases = [
+            (
+                UndoOutcome::Done {
+                    label: "Stage a.txt".into(),
+                },
+                serde_json::json!({ "kind": "Done", "label": "Stage a.txt" }),
+            ),
+            (
+                UndoOutcome::Nothing,
+                serde_json::json!({ "kind": "Nothing" }),
+            ),
+            (
+                UndoOutcome::RepositoryChanged { label: "x".into() },
+                serde_json::json!({ "kind": "RepositoryChanged", "label": "x" }),
+            ),
+            (
+                UndoOutcome::OperationInProgress,
+                serde_json::json!({ "kind": "OperationInProgress" }),
+            ),
+        ];
+        for (outcome, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(UndoOutcomeDto::from(outcome)).unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

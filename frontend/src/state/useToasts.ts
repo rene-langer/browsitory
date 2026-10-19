@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   message: string;
+  action?: ToastAction;
 }
 
 const TOAST_DURATION_MS = 5000;
@@ -21,9 +27,9 @@ export function useToasts() {
   }, []);
 
   const push = useCallback(
-    (message: string) => {
+    (message: string, action?: ToastAction) => {
       const id = nextId.current++;
-      setToasts((prev) => [...prev.slice(-2), { id, message }]);
+      setToasts((prev) => [...prev.slice(-2), { id, message, action }]);
       timers.current.set(
         id,
         setTimeout(() => dismiss(id), TOAST_DURATION_MS),

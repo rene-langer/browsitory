@@ -12,6 +12,18 @@ export function ToastRegion({ toasts, onDismiss }: { toasts: Toast[]; onDismiss:
       {toasts.map((toast) => (
         <div key={toast.id} className={styles.toast}>
           <span>{toast.message}</span>
+          {toast.action !== undefined && (
+            <button
+              type="button"
+              className={styles.action}
+              onClick={() => {
+                toast.action?.run();
+                onDismiss(toast.id);
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button type="button" aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)}>
             ×
           </button>

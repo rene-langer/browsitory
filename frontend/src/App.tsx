@@ -10,6 +10,7 @@ const NARROW_BREAKPOINT = 900;
 import { CommitGraph } from "./components/CommitGraph";
 import { FileHistoryList } from "./components/FileHistoryList";
 import { SyncBar } from "./components/SyncBar";
+import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import { DiffPane } from "./components/DiffPane";
 import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
@@ -20,7 +21,7 @@ import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
-import { useToasts } from "./state/useToasts";
+import { useToasts, type ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
@@ -86,7 +87,7 @@ function RepoWorkspace({
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
   appCommands?: AppCommands;
   // The single app-level toast stack (`App` owns the one `ToastRegion`).
-  pushToast: (message: string) => void;
+  pushToast: (message: string, action?: ToastAction) => void;
 }) {
   const appState = useAppState(client, repoPath);
   const fileHistory = useFileHistory(
@@ -146,6 +147,48 @@ function RepoWorkspace({
     appState.state.mergeMessage !== null ||
     appState.state.rebaseProgress !== null;
 
+  const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
+  const { pending, transfer } = appState.state;
+  // The toast stack is app-level and outlives this workspace (tab switch unmounts it), so a
+  // toast action checks it's still mounted and idle, read through refs at click time.
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    busy.current = pending || transfer !== null;
+  }, [pending, transfer]);
+  // Each success toast offers the opposite step.
+  const runUndoStep = useCallback(
+    function run(kind: "undo" | "redo") {
+      const step = kind === "undo" ? undoStep : redoStep;
+      void step().then((outcome) => {
+        if (outcome?.kind !== "Done") return;
+        const other = kind === "undo" ? "redo" : "undo";
+        pushToast(`${kind === "undo" ? "Undid" : "Redid"} ${outcome.label}`, {
+          label: kind === "undo" ? "Redo" : "Undo",
+          run: () => {
+            if (mounted.current && !busy.current) run(other);
+          },
+        });
+      });
+    },
+    [undoStep, redoStep, pushToast],
+  );
+  const handleUndo = useCallback(() => runUndoStep("undo"), [runUndoStep]);
+  const handleRedo = useCallback(() => runUndoStep("redo"), [runUndoStep]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onFocus = () => void refreshUndoState();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [active, refreshUndoState]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!active) return;
@@ -160,6 +203,21 @@ function RepoWorkspace({
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
         event.preventDefault();
         setShortcutsOpen(true);
+        return;
+      }
+      const mod = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      const isUndo = mod && !event.altKey && key === "z" && !event.shiftKey;
+      const isRedo = mod && !event.altKey && ((key === "z" && event.shiftKey) || (event.ctrlKey && !event.metaKey && key === "y"));
+      if (isUndo || isRedo) {
+        const target = event.target as HTMLElement | null;
+        const tag = target?.tagName;
+        // Text fields keep their native undo (commit message, branch-name inputs, …).
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+        if (pending || transfer !== null) return;
+        event.preventDefault();
+        if (isUndo) handleUndo();
+        else handleRedo();
         return;
       }
       // A11Y-003: keyboard equivalent for the per-tab close button, which is mouse-only
@@ -178,7 +236,7 @@ function RepoWorkspace({
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath]);
+  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath, handleUndo, handleRedo, pending, transfer]);
 
   // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
   // — threaded into the sidebar mutation panels (`BranchTree`, `WorktreePanel`, `TagPanel`,
@@ -353,6 +411,12 @@ function RepoWorkspace({
                 },
               },
               appCommands,
+              {
+                undoLabel: appState.state.undoState.undo,
+                redoLabel: appState.state.undoState.redo,
+                onUndo: handleUndo,
+                onRedo: handleRedo,
+              },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -517,6 +581,16 @@ function RepoWorkspace({
                 onFetch={appState.fetchRemote}
                 onPull={appState.pullCurrentUpstream}
                 onPush={appState.pushCurrentBranch}
+                leading={
+                  <UndoRedoButtons
+                    undoLabel={appState.state.undoState.undo}
+                    redoLabel={appState.state.undoState.redo}
+                    disabled={pending || transfer !== null}
+                    disabledReason={operationDisabledReason}
+                    onUndo={handleUndo}
+                    onRedo={handleRedo}
+                  />
+                }
               />
               {fileHistory.history !== null ? (
                 <FileHistoryList

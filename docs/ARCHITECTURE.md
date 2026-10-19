@@ -127,6 +127,25 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 `async fn`. Note that an `async fn` command taking a borrowed argument (e.g.
 `state: State<'_, AppState>`) must return a `Result`, which is why they all do.
 
+## Undo stack
+
+- **Snapshots** (`git-core::undo`): HEAD, `refs/heads/*` + `refs/tags/*`, the index as a tree,
+  and, for commands that touch the working tree, a "worktree tree" (HEAD tree with every
+  modified/deleted/untracked file overlaid, raw bytes, no filters). Undo restores `before` over
+  `after`, redo the reverse, touching only components that differ and only after verifying each
+  still equals the expected side (strict: any drift refuses).
+- **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
+  recordable command; failed/no-op commands record nothing; operations that stop on conflicts
+  stay pending until completed (one entry) or aborted (none).
+- **Storage**: `<gitdir>/browsitory/undo.json` per worktree (50 entries); objects pinned by
+  `refs/browsitory/undo/main` (main worktree) or `refs/browsitory/undo/wt/<name>` (linked
+  worktree), an anchor commit visible in `git log --all`, plus
+  `refs/browsitory/undo-keep/main/<n>` / `refs/browsitory/undo-keep/wt/<name>/<n>` refs for
+  non-commit objects such as tag objects.
+- **Known cost**: commands that touch the working tree hash every dirty/untracked file into the
+  object database, so very large untracked files make those commands slower and grow `.git`
+  until gc after the entry ages out.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
