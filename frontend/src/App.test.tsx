@@ -104,6 +104,9 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     getMergeMessage: async () => null,
     getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
+    getUndoState: async () => ({ undo: null, redo: null }),
+    undo: async () => ({ kind: "Nothing" as const }),
+    redo: async () => ({ kind: "Nothing" as const }),
     cherryPick: async () => { throw new Error("unimplemented"); },
     revertCommit: async () => { throw new Error("unimplemented"); },
     resetToCommit: async () => { throw new Error("unimplemented"); },
@@ -606,5 +609,95 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close file history" }));
     expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+  });
+
+  describe("undo/redo", () => {
+    function undoClient(overrides: Partial<RepoClient> = {}) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repo", workspaceId: null }], activePath: "/repo" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => [],
+        listBranches: async () => [],
+        listStashes: async () => [],
+        ...overrides,
+      });
+    }
+
+    it("undoes with Mod+Z and offers Redo in the toast", async () => {
+      const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      const redo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      render(<App client={undoClient({ getUndoState: async () => ({ undo: "Stage a.txt", redo: null }), undo, redo })} />);
+      await screen.findByRole("button", { name: "Undo Stage a.txt" });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+      await waitFor(() => expect(undo).toHaveBeenCalled());
+      expect(undo).toHaveBeenCalledWith("/repo");
+      fireEvent.click(await screen.findByRole("button", { name: "Redo" }));
+      expect(redo).toHaveBeenCalledWith("/repo");
+      expect(await screen.findByText("Redid Stage a.txt")).toBeInTheDocument();
+    });
+
+    it("redoes with Mod+Shift+Z and Ctrl+Y", async () => {
+      const redo = vi.fn(async () => ({ kind: "Nothing" as const }));
+      render(<App client={undoClient({ getUndoState: async () => ({ undo: null, redo: "Stage a.txt" }), redo })} />);
+      await screen.findByRole("button", { name: "Redo Stage a.txt" });
+      fireEvent.keyDown(window, { key: "Z", ctrlKey: true, shiftKey: true });
+      await waitFor(() => expect(redo).toHaveBeenCalledTimes(1));
+      // A second press while the first is still settling is ignored (pending), so wait it out.
+      await waitFor(() => {
+        fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+        expect(redo).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it("ignores Mod+Z while typing in the commit message", async () => {
+      const undo = vi.fn(async () => ({ kind: "Nothing" as const }));
+      render(<App client={undoClient({ getUndoState: async () => ({ undo: "Stage a.txt", redo: null }), undo })} />);
+      await screen.findByRole("button", { name: "Undo Stage a.txt" });
+      const message = await screen.findByRole("textbox", { name: /commit message/i });
+      message.focus();
+      expect(message).toHaveFocus();
+      fireEvent.keyDown(message, { key: "z", ctrlKey: true });
+      expect(undo).not.toHaveBeenCalled();
+    });
+
+    it("a toast's Redo does nothing once its repo tab was switched away", async () => {
+      const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      const redo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
+      render(
+        <App
+          client={undoClient({
+            listOpenRepos: async () => ({
+              entries: [
+                { path: "/repos/a", workspaceId: null },
+                { path: "/repos/b", workspaceId: null },
+              ],
+              activePath: "/repos/a",
+            }),
+            getUndoState: async () => ({ undo: "Stage a.txt", redo: null }),
+            undo,
+            redo,
+          })}
+        />,
+      );
+      await screen.findByRole("button", { name: "Undo Stage a.txt" });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+      const toastRedo = await screen.findByRole("button", { name: "Redo" });
+      fireEvent.click(screen.getByRole("tab", { name: "b" }));
+      await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+      fireEvent.click(toastRedo);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(redo).not.toHaveBeenCalled();
+    });
+
+    it("re-reads the undo state when the window regains focus", async () => {
+      const getUndoState = vi.fn(async () => ({ undo: null, redo: null }));
+      render(<App client={undoClient({ getUndoState })} />);
+      await screen.findByRole("button", { name: "Nothing to undo" });
+      const calls = getUndoState.mock.calls.length;
+      window.dispatchEvent(new Event("focus"));
+      await waitFor(() => expect(getUndoState.mock.calls.length).toBe(calls + 1));
+    });
   });
 });

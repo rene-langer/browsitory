@@ -8,6 +8,13 @@ export interface AppCommands {
   onNewRepository: () => void;
 }
 
+export interface UndoCommands {
+  undoLabel: string | null;
+  redoLabel: string | null;
+  onUndo: () => void;
+  onRedo: () => void;
+}
+
 export interface Command {
   id: string;
   label: string;
@@ -151,6 +158,7 @@ export function buildCommands(
   onCloseActiveRepoTab?: () => void,
   diffCommands?: DiffCommands,
   appCommands?: AppCommands,
+  undoCommands?: UndoCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -190,6 +198,25 @@ export function buildCommands(
     state.transfer !== null ||
     state.mergeMessage !== null ||
     state.rebaseProgress !== null;
+
+  if (!repositoryOperationDisabled && undoCommands !== undefined) {
+    if (undoCommands.undoLabel !== null) {
+      commands.push({
+        id: "undo",
+        label: `Undo ${undoCommands.undoLabel}`,
+        keywords: ["undo", "revert", "back"],
+        run: undoCommands.onUndo,
+      });
+    }
+    if (undoCommands.redoLabel !== null) {
+      commands.push({
+        id: "redo",
+        label: `Redo ${undoCommands.redoLabel}`,
+        keywords: ["redo", "again"],
+        run: undoCommands.onRedo,
+      });
+    }
+  }
 
   if (!repositoryOperationDisabled && state.upstream !== null) {
     commands.push({

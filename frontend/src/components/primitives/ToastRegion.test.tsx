@@ -15,4 +15,15 @@ describe("ToastRegion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(onDismiss).toHaveBeenCalledWith(7);
   });
+
+  it("renders an action button that runs the action and dismisses the toast", () => {
+    const run = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <ToastRegion toasts={[{ id: 1, message: "Undid Stage a.txt", action: { label: "Redo", run } }]} onDismiss={onDismiss} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(run).toHaveBeenCalledOnce();
+    expect(onDismiss).toHaveBeenCalledWith(1);
+  });
 });

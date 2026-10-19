@@ -1036,4 +1036,19 @@ describe("vscodeRepoClient", () => {
     respond(7, null);
     await p7;
   });
+
+  it("wires the undo commands", async () => {
+    const methods = [
+      ["getUndoState", "get_undo_state"],
+      ["undo", "undo_last"],
+      ["redo", "redo_last"],
+    ] as const;
+    for (const [index, [name, method]] of methods.entries()) {
+      const id = index + 1;
+      const promise = vscodeRepoClient[name]("/repo");
+      expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id, method, params: { repoPath: "/repo" } });
+      respond(id, null);
+      await promise;
+    }
+  });
 });

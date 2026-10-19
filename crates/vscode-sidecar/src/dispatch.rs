@@ -134,6 +134,9 @@ pub fn dispatch(
         "force_push_current_branch" => force_push_current_branch(params, repos, stdout),
         "get_head_info" => get_head_info(params, repos),
         "amend_commit" => amend_commit(params, repos),
+        "get_undo_state" => get_undo_state(params, repos),
+        "undo_last" => undo_last(params, repos),
+        "redo_last" => redo_last(params, repos),
         "cherry_pick" => cherry_pick(params, repos),
         "revert_commit" => revert_commit(params, repos),
         "reset_to_commit" => reset_to_commit(params, repos),
@@ -1708,6 +1711,42 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
     }
 }
 
+#[derive(Serialize)]
+struct UndoStateDto {
+    undo: Option<String>,
+    redo: Option<String>,
+}
+
+impl From<repo_service::worker::UndoState> for UndoStateDto {
+    fn from(state: repo_service::worker::UndoState) -> Self {
+        Self {
+            undo: state.undo,
+            redo: state.redo,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum UndoOutcomeDto {
+    Done { label: String },
+    Nothing,
+    RepositoryChanged { label: String },
+    OperationInProgress,
+}
+
+impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
+    fn from(outcome: repo_service::worker::UndoOutcome) -> Self {
+        use repo_service::worker::UndoOutcome;
+        match outcome {
+            UndoOutcome::Done { label } => Self::Done { label },
+            UndoOutcome::Nothing => Self::Nothing,
+            UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
+            UndoOutcome::OperationInProgress => Self::OperationInProgress,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum ResetModeDto {
@@ -1753,6 +1792,27 @@ fn get_head_info(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let info = worker_handle(repos, &params.repo_path)?.get_head_info()?;
     serde_json::to_value(HeadInfoDto::from(info)).map_err(|error| error.to_string())
+}
+
+fn get_undo_state(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let result = worker_handle(repos, &params.repo_path)?.get_undo_state()?;
+    serde_json::to_value(UndoStateDto::from(result)).map_err(|error| error.to_string())
+}
+
+fn undo_last(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let result = worker_handle(repos, &params.repo_path)?.undo()?;
+    serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
+}
+
+fn redo_last(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let result = worker_handle(repos, &params.repo_path)?.redo()?;
+    serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
 }
 
 fn amend_commit(params: Value, repos: &Repos) -> Result<Value, String> {

@@ -88,6 +88,15 @@ export interface UpstreamInfo {
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
 export interface HeadInfo { headId: string | null; detachedAt: string | null; headPushed: boolean; operation: OperationKind | null; }
+export interface UndoState {
+  undo: string | null;
+  redo: string | null;
+}
+export type UndoOutcome =
+  | { kind: "Done"; label: string }
+  | { kind: "Nothing" }
+  | { kind: "RepositoryChanged"; label: string }
+  | { kind: "OperationInProgress" };
 export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
 export type ResetMode = "soft" | "mixed" | "hard";
 
@@ -399,6 +408,11 @@ export interface RepoClient {
   getMergeMessage(repoPath: string): Promise<string | null>;
   getHeadInfo(repoPath: string): Promise<HeadInfo>;
   amendCommit(repoPath: string, message: string): Promise<void>;
+  /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
+  getUndoState(repoPath: string): Promise<UndoState>;
+  /** Refusals (`Nothing`, `RepositoryChanged`, `OperationInProgress`) resolve; only real failures reject. */
+  undo(repoPath: string): Promise<UndoOutcome>;
+  redo(repoPath: string): Promise<UndoOutcome>;
   cherryPick(repoPath: string, commitId: string): Promise<PickOutcome>;
   revertCommit(repoPath: string, commitId: string): Promise<PickOutcome>;
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;

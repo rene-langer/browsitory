@@ -38,7 +38,11 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod undo;
+mod undo_store;
 mod worktree;
+
+pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferEvent {
@@ -467,6 +471,15 @@ pub(crate) enum Command {
         create: CreatePullRequest,
         reply: Sender<Result<PullRequest, String>>,
     },
+    GetUndoState {
+        reply: Sender<Result<UndoState, String>>,
+    },
+    Undo {
+        reply: Sender<Result<UndoOutcome, String>>,
+    },
+    Redo {
+        reply: Sender<Result<UndoOutcome, String>>,
+    },
 }
 
 /// Operation IDs whose transfer the user asked to stop.
@@ -541,7 +554,27 @@ impl Worker {
             let mut rebase_state: Option<RebaseState> = None;
             let credential_service = CredentialService::new(credential_store);
             let pull_request_service = PullRequestService::new(forge_api);
-            for command in rx {
+            let mut undo_recorder = undo::UndoRecorder::open(&repo);
+            // Browsitory's own rebase leaves `repo.state()` clean, so its paused state lives in
+            // `rebase_state` instead.
+            let in_progress = |repo: &git2::Repository, rebase_state: &Option<RebaseState>| {
+                repo.state() != git2::RepositoryState::Clean || rebase_state.is_some()
+            };
+            for mut command in rx {
+                undo_recorder.settle(in_progress(&repo, &rebase_state));
+                let plan = undo::plan_for(&command);
+                let track = plan.is_some() || undo_recorder.has_pending();
+                let aborts = matches!(
+                    command,
+                    Command::AbortMerge { .. } | Command::AbortRebase { .. }
+                );
+                let mut held = undo::HeldReplies::default();
+                if track {
+                    undo::hold_reply(&mut command, &mut held);
+                }
+                if let Some(plan) = plan {
+                    undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_state));
+                }
                 match command {
                     Command::Ping { reply } => {
                         let _ = reply.send(());
@@ -987,7 +1020,20 @@ impl Worker {
                         create,
                         reply,
                     ),
+                    Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
+                    Command::Undo { reply } => {
+                        let _ = reply
+                            .send(undo_recorder.undo(&repo, in_progress(&repo, &rebase_state)));
+                    }
+                    Command::Redo { reply } => {
+                        let _ = reply
+                            .send(undo_recorder.redo(&repo, in_progress(&repo, &rebase_state)));
+                    }
                 }
+                if track {
+                    undo_recorder.finish(&repo, in_progress(&repo, &rebase_state), aborts);
+                }
+                held.release();
             }
         });
 
@@ -1104,10 +1150,11 @@ mod tests {
 
     use git2::Repository;
     use git_core::forge::ForgeProvider;
+    use git_core::merge::MergeOutcome;
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
-    use super::{ensure_worker, Command, TransferEvent, Worker};
+    use super::{ensure_worker, Command, TransferEvent, UndoOutcome, UndoState, Worker};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
@@ -1201,6 +1248,7 @@ mod tests {
             let mut config = repo.config().expect("repo config");
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
+            config.set_bool("core.autocrlf", false).unwrap();
         }
         (dir, repo)
     }
@@ -2669,5 +2717,245 @@ mod tests {
                 error: None,
             }) if id == &operation_id
         ));
+    }
+
+    #[test]
+    fn undo_and_redo_a_discard_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        write_file(dir.path(), "a.txt", "precious\n");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle.discard_file("a.txt".into()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: Some("Discard changes to a.txt".into()),
+                redo: None
+            }
+        );
+
+        assert_eq!(
+            handle.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Discard changes to a.txt".into()
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "precious\n"
+        );
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: None,
+                redo: Some("Discard changes to a.txt".into())
+            }
+        );
+
+        assert_eq!(
+            handle.redo().unwrap(),
+            UndoOutcome::Done {
+                label: "Discard changes to a.txt".into()
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    #[test]
+    fn failed_and_no_op_commands_record_nothing() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(handle.delete_branch("missing".into(), false).is_err());
+        handle.stage_file("a.txt".into()).unwrap(); // already clean: no change
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: None,
+                redo: None
+            }
+        );
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::Nothing);
+    }
+
+    #[test]
+    fn a_new_command_clears_redo() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        write_file(dir.path(), "a.txt", "two\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        handle.undo().unwrap();
+        handle.stage_file("b.txt".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: Some("Stage b.txt".into()),
+                redo: None
+            }
+        );
+    }
+
+    #[test]
+    fn external_change_refuses_undo_and_keeps_the_entry() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        write_file(dir.path(), "a.txt", "precious\n");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.discard_file("a.txt".into()).unwrap();
+        write_file(dir.path(), "a.txt", "typed later\n");
+        assert_eq!(
+            handle.undo().unwrap(),
+            UndoOutcome::RepositoryChanged {
+                label: "Discard changes to a.txt".into()
+            }
+        );
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Discard changes to a.txt".into())
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "typed later\n"
+        );
+    }
+
+    /// `base` → `feature` and `main` both rewrite `a.txt`, so merging `feature` conflicts.
+    fn conflicting_branches() -> (TempDir, Repository) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &head, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        write_file(dir.path(), "a.txt", "feature\n");
+        commit_all(&repo, "feature change");
+        repo.set_head(&format!("refs/heads/{base_branch}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "a.txt", "main\n");
+        commit_all(&repo, "main change");
+        (dir, repo)
+    }
+
+    #[test]
+    fn stage_during_a_conflicted_merge_is_not_recorded_and_abort_drops_pending() {
+        let (dir, _repo) = conflicting_branches();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let outcome = handle.start_merge("feature".into()).unwrap();
+        assert!(matches!(outcome, MergeOutcome::Conflicted { .. }));
+        // A recordable command while the merge is paused must not become its own entry.
+        write_file(dir.path(), "b.txt", "unrelated\n");
+        handle.stage_file("b.txt".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: None,
+                redo: None
+            }
+        );
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+        assert_eq!(handle.redo().unwrap(), UndoOutcome::OperationInProgress);
+        // An untracked file written mid-merge survives the abort, so the repo afterwards differs
+        // from before the merge: only an explicit drop — not a "nothing changed" check — keeps
+        // the aborted merge off the stack.
+        write_file(dir.path(), "notes.txt", "kept\n");
+        handle.abort_merge().unwrap();
+        assert!(dir.path().join("notes.txt").exists());
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: None,
+                redo: None
+            }
+        );
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::Nothing);
+        // And the recorder is idle again: the next command records normally.
+        handle.create_branch("after".into(), "HEAD".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Create branch after".into())
+        );
+    }
+
+    #[test]
+    fn a_conflicted_merge_finished_by_commit_is_one_entry() {
+        let (dir, repo) = conflicting_branches();
+        let main_tip = repo.head().unwrap().target().unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.start_merge("feature".into()).unwrap();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle.commit("Merge feature".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: Some("Merge feature".into()),
+                redo: None
+            }
+        );
+        assert_eq!(
+            handle.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Merge feature".into()
+            }
+        );
+        let reopened = git2::Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().target().unwrap(), main_tip);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "main\n"
+        );
+    }
+
+    #[test]
+    fn history_survives_a_worker_restart_and_is_capped() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            let handle = worker.handle();
+            for n in 0..55 {
+                handle
+                    .create_branch(format!("b{n}"), "HEAD".into())
+                    .unwrap();
+            }
+        }
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Create branch b54".into())
+        );
+        let mut undone = 0;
+        while let UndoOutcome::Done { .. } = handle.undo().unwrap() {
+            undone += 1;
+        }
+        assert_eq!(undone, 50);
     }
 }

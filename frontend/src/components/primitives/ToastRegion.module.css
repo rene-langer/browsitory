@@ -31,3 +31,9 @@
   font-size: var(--text-lg);
   line-height: 1;
 }
+
+.toast button.action {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: underline;
+}
