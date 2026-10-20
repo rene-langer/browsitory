@@ -19,7 +19,11 @@ fn gpg_home() -> Option<&'static std::path::Path> {
             return None;
         }
         let home = tempfile::Builder::new().prefix("bgpg").tempdir().unwrap();
-        std::env::set_var("GNUPGHOME", home.path());
+        // Git-for-Windows' gpg is an MSYS binary and reads `C:\...` as a relative path.
+        std::env::set_var(
+            "GNUPGHOME",
+            home.path().to_string_lossy().replace('\\', "/"),
+        );
         let status = std::process::Command::new("gpg")
             .args([
                 "--batch",
