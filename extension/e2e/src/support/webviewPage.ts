@@ -150,6 +150,8 @@ export interface WebviewSession {
   click(selector: string): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
   clickByText(tag: string, text: string): Promise<void>;
+  /** Like `clickByText`, but matches elements whose text merely contains `text`. */
+  clickByTextContaining(tag: string, text: string): Promise<void>;
   /** Clicks the `index`-th match (negative counts from the end) of `selector`. */
   clickBySelector(selector: string, index?: number): Promise<void>;
   contextMenuByText(tag: string, text: string): Promise<void>;
@@ -230,6 +232,19 @@ class CdpWebviewSession implements WebviewSession {
           return candidate.textContent && candidate.textContent.trim() === ${JSON.stringify(text)};
         });
         if (!el) throw new Error(${JSON.stringify(`no <${tag}> with text ${text}`)});
+        el.click();
+      })()
+    `);
+  }
+
+  async clickByTextContaining(tag: string, text: string): Promise<void> {
+    await this.evaluate(`
+      (function () {
+        var els = Array.from(document.querySelectorAll(${JSON.stringify(tag)}));
+        var el = els.find(function (candidate) {
+          return candidate.textContent && candidate.textContent.indexOf(${JSON.stringify(text)}) !== -1;
+        });
+        if (!el) throw new Error(${JSON.stringify(`no <${tag}> containing ${text}`)});
         el.click();
       })()
     `);
