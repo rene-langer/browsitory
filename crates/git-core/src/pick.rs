@@ -65,6 +65,13 @@ fn apply(repo: &Repository, commit_id: &str, kind: Kind) -> Result<PickOutcome, 
         return Err(PickError::DirtyIndex);
     }
 
+    // Validate the signing configuration before libgit2 stages anything, so a config error
+    // (unsupported gpg.format, missing SSH key) leaves the repository completely untouched.
+    // A signer *program* failure can only surface at commit time, after the pick is staged;
+    // that leaves the pick in progress (CHERRY_PICK_HEAD/REVERT_HEAD, like git) so the user can
+    // commit again or abort. HEAD and refs never move on failure.
+    crate::signing::signing_config(repo)?;
+
     // libgit2's default checkout strategy here is SAFE: it errors rather than overwrite a
     // modified working-tree file the pick needs to change. libgit2 may already have written
     // CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG by then; state was Clean on entry (checked above),

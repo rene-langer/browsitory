@@ -127,10 +127,15 @@ its own:
 - `user.signingKey` picks the key. For gpg it defaults to your committer identity. For SSH it is
   required: either a key file path or a literal public key (`key::ssh-ed25519 …`) whose private
   key is in your ssh-agent.
-- `gpg.program`, `gpg.openpgp.program` and `gpg.ssh.program` override the programs.
+- Program overrides: for OpenPGP, `gpg.openpgp.program` wins over `gpg.program`; `gpg.program`
+  applies to OpenPGP only. For SSH use `gpg.ssh.program`.
+
+If you see "Signing program 'gpg' was not found", Browsitory may not have inherited your shell's
+`PATH` (for example when launched from the macOS Dock, or with Git for Windows' gpg). Set
+`gpg.program` to an absolute path.
 
 Passphrases come from gpg-agent's pinentry or from ssh-agent. Browsitory cannot prompt in a
-terminal. If signing fails, nothing is committed and the signer's error is shown.
+terminal. If signing fails, no commit is created and the signer's error is shown.
 
 Selecting a signed commit shows a **Signature** row in the commit details:
 

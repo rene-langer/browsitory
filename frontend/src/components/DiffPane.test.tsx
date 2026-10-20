@@ -1557,4 +1557,41 @@ describe("DiffPane diff options contract", () => {
       expect(getCommitDiff).not.toHaveBeenCalled();
     });
   });
+  describe("commit header signature state", () => {
+    it("resets to checking on commit switch and drops a late result for the old commit", async () => {
+      const sig = (status: "good" | "bad") => ({ status, format: "ssh" as const, signer: null, key: null, detail: null });
+      let resolveA: (value: ReturnType<typeof sig>) => void = () => {};
+      const client = fakeClient({
+        getCommitFiles: async () => [],
+        getCommitMessage: async () => "",
+        getCommitSignature: (_repo: string, id: string) =>
+          id === "aaa111" ? new Promise((resolve) => (resolveA = resolve)) : id === "bbb222" ? Promise.resolve(sig("good")) : new Promise(() => {}),
+      });
+      const element = (commitId: string) => (
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow={{ commitId }}
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      );
+      const view = rtlRender(element("aaa111"));
+      expect(await screen.findByText("Checking signature…")).toBeInTheDocument();
+
+      view.rerender(element("bbb222"));
+      expect(await screen.findByText("Good signature")).toBeInTheDocument();
+
+      view.rerender(element("ccc333"));
+      // Synchronously after the switch: the previous commit's status must already be gone.
+      expect(screen.queryByText("Good signature")).not.toBeInTheDocument();
+      expect(screen.getByText("Checking signature…")).toBeInTheDocument();
+
+      await act(async () => resolveA(sig("bad")));
+      expect(screen.queryByText("Bad signature")).not.toBeInTheDocument();
+      expect(screen.getByText("Checking signature…")).toBeInTheDocument();
+    });
+  });
 });

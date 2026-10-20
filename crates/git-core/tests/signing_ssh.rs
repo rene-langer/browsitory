@@ -520,3 +520,163 @@ fn bad_commit_id_is_an_err() {
     let (_dir, repo) = init_repo();
     assert!(verify_commit(&repo, "not-a-sha").is_err());
 }
+
+#[cfg(unix)]
+fn write_script(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, body).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A `gpg.ssh.program` that behaves like ssh-keygen except that its `fail_on`-th invocation
+/// exits 1 with an unrelated message.
+#[cfg(unix)]
+fn flaky_ssh_program(dir: &std::path::Path, fail_on: u32) -> std::path::PathBuf {
+    let counter = dir.join("calls");
+    let script = dir.join("flaky-ssh-keygen");
+    write_script(
+        &script,
+        &format!(
+            "#!/bin/sh\nn=$(cat '{c}' 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > '{c}'\n\
+             if [ \"$n\" -eq {fail_on} ]; then echo 'boom: signer unavailable' >&2; exit 1; fi\n\
+             exec ssh-keygen \"$@\"\n",
+            c = counter.display()
+        ),
+    );
+    script
+}
+
+#[cfg(unix)]
+#[test]
+fn rebase_continue_can_be_retried_after_the_squash_collapse_fails_to_sign() {
+    let Some((dir, keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let onto = head_oid(&repo).to_string();
+    let mut ids = Vec::new();
+    for name in ["a", "b"] {
+        write_file(dir.path(), &format!("{name}.txt"), "x\n");
+        stage(&repo, &format!("{name}.txt"));
+        ids.push(git_core::commit::commit(&mut repo, &format!("add {name}")).unwrap());
+    }
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: ids[0].clone(),
+            action: RebaseAction::Edit,
+            combined_message: None,
+        },
+        RebasePlanEntry {
+            commit_id: ids[1].clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+    // Signer calls on continue: 1 = step a, 2 = step b, 3 = the collapse commit (fails), 4 = retry.
+    let program = flaky_ssh_program(keys.path(), 3);
+    repo.config()
+        .unwrap()
+        .set_str("gpg.ssh.program", program.to_str().unwrap())
+        .unwrap();
+
+    let err = git_core::rebase::rebase_continue(&repo, &mut state).unwrap_err();
+    assert!(err.to_string().starts_with("Signing failed: "), "{err}");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    assert!(is_ssh_signed(&repo, tip.id()));
+    assert_eq!(tip.summary().ok().flatten(), Some("add a"));
+}
+
+#[cfg(unix)]
+#[test]
+fn ssh_verifier_failure_that_is_not_a_forgery_is_error_not_bad() {
+    let Some((dir, keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let id = signed_head(dir.path(), &mut repo);
+    let program = keys.path().join("broken-ssh-keygen");
+    write_script(
+        &program,
+        "#!/bin/sh\necho 'unknown option -- Y' >&2\nexit 1\n",
+    );
+    repo.config()
+        .unwrap()
+        .set_str("gpg.ssh.program", program.to_str().unwrap())
+        .unwrap();
+
+    let result = verify_commit(&repo, &id).unwrap();
+
+    assert_eq!(result.status, SignatureStatus::Error);
+    assert!(result.detail.as_deref().unwrap().contains("unknown option"));
+}
+
+#[test]
+fn cherry_pick_with_unsupported_signing_config_touches_nothing() {
+    let Some((dir, _keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let base = head_oid(&repo);
+    write_file(dir.path(), "a.txt", "a\n");
+    stage(&repo, "a.txt");
+    let picked = git_core::commit::commit(&mut repo, "add a").unwrap();
+    repo.set_head_detached(base).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    repo.config()
+        .unwrap()
+        .set_str("gpg.format", "x509")
+        .unwrap();
+
+    let err = git_core::pick::cherry_pick(&repo, &picked).unwrap_err();
+
+    assert!(err.to_string().contains("gpg.format=x509"), "{err}");
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(head_oid(&repo), base);
+    assert!(!dir.path().join("a.txt").exists());
+}
+
+#[test]
+fn cherry_pick_signer_failure_leaves_a_pick_in_progress_that_can_be_committed() {
+    let Some((dir, keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let base = head_oid(&repo);
+    write_file(dir.path(), "a.txt", "a\n");
+    stage(&repo, "a.txt");
+    let picked = git_core::commit::commit(&mut repo, "add a").unwrap();
+    repo.set_head_detached(base).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let good_key = repo
+        .config()
+        .unwrap()
+        .get_string("user.signingKey")
+        .unwrap();
+    repo.config()
+        .unwrap()
+        .set_str(
+            "user.signingKey",
+            keys.path().join("missing").to_str().unwrap(),
+        )
+        .unwrap();
+
+    let err = git_core::pick::cherry_pick(&repo, &picked).unwrap_err();
+
+    assert!(err.to_string().starts_with("Signing failed: "), "{err}");
+    assert_eq!(head_oid(&repo), base);
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+
+    repo.config()
+        .unwrap()
+        .set_str("user.signingKey", &good_key)
+        .unwrap();
+    let committed = git_core::commit::commit(&mut repo, "add a").unwrap();
+    assert!(is_ssh_signed(
+        &repo,
+        git2::Oid::from_str(&committed).unwrap()
+    ));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}

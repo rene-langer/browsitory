@@ -350,6 +350,10 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
         &tree,
         &[&parent],
     )?;
+    // Re-baseline the drift check right away: the collapse below can fail (e.g. the signer is
+    // cancelled), and a retried Continue must see the HEAD this step just landed, not a stale
+    // one that would read as `HeadMoved`.
+    state.expected_head = repo.head()?.peel_to_commit()?.id();
 
     if ends_a_group(&state.plan, state.cursor) {
         // Walk backward to the nearest preceding entry that's neither `Squash`/`Fixup` (a group

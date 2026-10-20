@@ -1242,6 +1242,7 @@ function CommitDiffPane({
   return (
     <div>
       <CommitHeader
+        key={commitId}
         repoPath={repoPath}
         client={client}
         commitId={commitId}

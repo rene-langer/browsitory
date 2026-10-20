@@ -155,8 +155,13 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   - It then moves HEAD with `reference_matching` against the expected current target, writing
     libgit2's own reflog message (`commit: …`, `commit (initial): …`, `commit (merge): …`,
     `commit (amend): …`).
-  - The signer runs before any ref moves, so a failure leaves the repo untouched. The undo
-    anchor commit deliberately bypasses it.
+  - The signer runs before any ref moves, so on failure HEAD and refs never move. Config errors
+    (unsupported `gpg.format`, missing SSH key) are checked first and touch nothing, including for
+    cherry-pick/revert, which validate before staging. A signer-program failure during
+    cherry-pick/revert leaves the pick in progress (`CHERRY_PICK_HEAD`/`REVERT_HEAD`, staged
+    result) to commit again or abort, as git does. A rebase retry after a failed squash collapse
+    re-baselines the drift check first, so Continue can be retried. The undo anchor commit
+    deliberately bypasses signing.
 - Signers are external programs run exactly as git runs them: `gpg --status-fd=2 -bsau <key>`
   and `ssh-keygen -Y sign -n git -f <key>` (`-U` for a literal key), with the buffer on stdin,
   no TTY, and no console window on Windows. They block the repo's worker thread while pinentry

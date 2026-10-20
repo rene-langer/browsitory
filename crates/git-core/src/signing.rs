@@ -448,6 +448,16 @@ fn ssh_fingerprint(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// A non-zero ssh-keygen exit is `Bad` only when it says the signature itself is wrong; any other
+/// failure (old ssh-keygen without `-Y`, unreadable files, restricted entries) is `Error`.
+fn ssh_failure(output: &str, stderr: &str, format: Option<SignatureFormat>) -> CommitSignature {
+    if output.contains("Signature verification failed") || output.contains("incorrect signature") {
+        CommitSignature::new(SignatureStatus::Bad, format)
+    } else {
+        CommitSignature::error(format, stderr_tail(stderr))
+    }
+}
+
 fn verify_ssh(
     program: &str,
     sig_path: &str,
@@ -476,14 +486,11 @@ fn verify_ssh(
                 data,
             )?;
             let text = format!("{}\n{}", verified.stdout, verified.stderr);
-            let mut result = CommitSignature::new(
-                if verified.status_success {
-                    SignatureStatus::Good
-                } else {
-                    SignatureStatus::Bad
-                },
-                format,
-            );
+            let mut result = if verified.status_success {
+                CommitSignature::new(SignatureStatus::Good, format)
+            } else {
+                ssh_failure(&text, &verified.stderr, format)
+            };
             result.signer = Some(principal.to_string());
             result.key = ssh_fingerprint(&text);
             return Ok(result);
@@ -501,7 +508,7 @@ fn verify_ssh(
             ..CommitSignature::new(SignatureStatus::GoodUntrusted, format)
         }
     } else {
-        CommitSignature::new(SignatureStatus::Bad, format)
+        ssh_failure(&text, &checked.stderr, format)
     };
     result.key = ssh_fingerprint(&text);
     Ok(result)
