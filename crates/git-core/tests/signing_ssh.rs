@@ -160,6 +160,8 @@ fn missing_signer_program_is_reported_by_name() {
     );
 }
 
+// ssh-agent listens on a Unix socket here; Windows OpenSSH uses a named pipe.
+#[cfg(unix)]
 #[test]
 fn signs_with_a_literal_ssh_public_key_through_the_agent() {
     require!("ssh-keygen");
