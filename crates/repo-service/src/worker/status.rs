@@ -55,6 +55,16 @@ pub(super) fn get_commit_files(
         .send(git_core::diff::commit_files(repo, &commit_id).map_err(|error| error.to_string()));
 }
 
+pub(super) fn get_commit_signature(
+    repo: &git2::Repository,
+    commit_id: String,
+    reply: Sender<Result<git_core::signing::CommitSignature, String>>,
+) {
+    let _ = reply.send(
+        git_core::signing::verify_commit(repo, &commit_id).map_err(|error| error.to_string()),
+    );
+}
+
 pub(super) fn get_commit_message(
     repo: &git2::Repository,
     commit_id: String,
@@ -350,6 +360,21 @@ impl WorkerHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::GetCommitMessage {
+                commit_id,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_commit_signature(
+        &self,
+        commit_id: String,
+    ) -> Result<git_core::signing::CommitSignature, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetCommitSignature {
                 commit_id,
                 reply: tx,
             })
