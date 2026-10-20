@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import type { GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitSignature, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+import { shortKey, signatureLabel } from "../lib/signatureStatus";
 import styles from "./CommitHeader.module.css";
 
 /**
  * Metadata block at the top of a selected commit's diff pane: subject, body, author, date, full
  * SHA (copyable) and parents. Author/date/parents come from the already-loaded `GraphCommit`;
- * only the full message body needs a `RepoClient` round trip.
+ * only the full message body and the signature status need a `RepoClient` round trip.
  */
 export function CommitHeader({
   repoPath,
@@ -27,6 +28,8 @@ export function CommitHeader({
   onSelectRow: (row: SelectedRow) => void;
 }) {
   const [message, setMessage] = useState<string | null>(null);
+  // undefined = still checking, null = unsigned or the check failed (row hidden).
+  const [signature, setSignature] = useState<CommitSignature | null | undefined>(undefined);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -39,6 +42,19 @@ export function CommitHeader({
       .catch(() => {
         // The subject from the graph row is still shown; the body is a nicety.
       });
+    Promise.resolve()
+      .then(() => {
+        // Reset inside the chain (not synchronously in the effect) so a commit switch shows "checking".
+        if (!ignore) setSignature(undefined);
+        return client.getCommitSignature(repoPath, commitId);
+      })
+      .then((next) => {
+        if (!ignore) setSignature(next.status === "unsigned" ? null : next);
+      })
+      .catch(() => {
+        // Like the body: the header is complete without it.
+        if (!ignore) setSignature(null);
+      });
     return () => {
       ignore = true;
     };
@@ -46,6 +62,9 @@ export function CommitHeader({
 
   const subject = commit?.summary ?? message?.split("\n")[0] ?? "";
   const body = message === null ? "" : message.split("\n").slice(1).join("\n").trim();
+
+  const label =
+    signature != null && signature.status !== "unsigned" ? signatureLabel(signature.status) : null;
 
   const copySha = () => {
     void navigator.clipboard
@@ -74,6 +93,29 @@ export function CommitHeader({
                 {formatAbsoluteDate(commit.timestamp)}
               </time>{" "}
               <span className={styles.relative}>({formatRelativeDate(commit.timestamp)})</span>
+            </dd>
+          </>
+        )}
+        {signature === undefined && (
+          <>
+            <dt>Signature</dt>
+            <dd className={styles.relative}>Checking signature…</dd>
+          </>
+        )}
+        {signature != null && label !== null && (
+          <>
+            <dt>Signature</dt>
+            <dd>
+              <span className={styles.signature} data-tone={label.tone} title={signature.detail ?? undefined}>
+                <span aria-hidden="true" className={styles.signatureIcon} />
+                {label.text}
+              </span>
+              {signature.signer !== null && <span>{signature.signer}</span>}
+              {signature.key !== null && (
+                <code className={styles.sha} title={signature.key}>
+                  {shortKey(signature.key)}
+                </code>
+              )}
             </dd>
           </>
         )}
