@@ -85,6 +85,7 @@ pub fn dispatch(
         "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
         "get_commit_message" => get_commit_message(params, repos),
+        "get_commit_signature" => get_commit_signature(params, repos),
         "stage_file" => stage_file(params, repos),
         "unstage_file" => unstage_file(params, repos),
         "stage_hunk" => stage_hunk(params, repos),
@@ -650,6 +651,14 @@ fn get_commit_message(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let message = worker_handle(repos, &params.repo_path)?.get_commit_message(params.commit_id)?;
     serde_json::to_value(message).map_err(|error| error.to_string())
+}
+
+fn get_commit_signature(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetCommitFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let signature =
+        worker_handle(repos, &params.repo_path)?.get_commit_signature(params.commit_id)?;
+    serde_json::to_value(CommitSignatureDto::from(signature)).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
@@ -1722,6 +1731,62 @@ impl From<repo_service::worker::UndoState> for UndoStateDto {
         Self {
             undo: state.undo,
             redo: state.redo,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SignatureStatusDto {
+    Unsigned,
+    Good,
+    GoodUntrusted,
+    Bad,
+    UnknownKey,
+    Expired,
+    ExpiredKey,
+    RevokedKey,
+    Error,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum SignatureFormatDto {
+    Openpgp,
+    Ssh,
+}
+
+#[derive(Serialize)]
+struct CommitSignatureDto {
+    status: SignatureStatusDto,
+    format: Option<SignatureFormatDto>,
+    signer: Option<String>,
+    key: Option<String>,
+    detail: Option<String>,
+}
+
+impl From<git_core::signing::CommitSignature> for CommitSignatureDto {
+    fn from(signature: git_core::signing::CommitSignature) -> Self {
+        use git_core::signing::{SignatureFormat, SignatureStatus};
+        Self {
+            status: match signature.status {
+                SignatureStatus::Unsigned => SignatureStatusDto::Unsigned,
+                SignatureStatus::Good => SignatureStatusDto::Good,
+                SignatureStatus::GoodUntrusted => SignatureStatusDto::GoodUntrusted,
+                SignatureStatus::Bad => SignatureStatusDto::Bad,
+                SignatureStatus::UnknownKey => SignatureStatusDto::UnknownKey,
+                SignatureStatus::Expired => SignatureStatusDto::Expired,
+                SignatureStatus::ExpiredKey => SignatureStatusDto::ExpiredKey,
+                SignatureStatus::RevokedKey => SignatureStatusDto::RevokedKey,
+                SignatureStatus::Error => SignatureStatusDto::Error,
+            },
+            format: signature.format.map(|format| match format {
+                SignatureFormat::OpenPgp => SignatureFormatDto::Openpgp,
+                SignatureFormat::Ssh => SignatureFormatDto::Ssh,
+            }),
+            signer: signature.signer,
+            key: signature.key,
+            detail: signature.detail,
         }
     }
 }
