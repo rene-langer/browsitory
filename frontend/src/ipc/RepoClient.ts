@@ -237,6 +237,25 @@ export type RebaseAction =
   | { kind: "Fixup" }
   | { kind: "Drop" };
 
+export type SignatureStatus =
+  | "unsigned"
+  | "good"
+  | "goodUntrusted"
+  | "bad"
+  | "unknownKey"
+  | "expired"
+  | "expiredKey"
+  | "revokedKey"
+  | "error";
+
+export interface CommitSignature {
+  status: SignatureStatus;
+  format: "openpgp" | "ssh" | null;
+  signer: string | null;
+  key: string | null;
+  detail: string | null;
+}
+
 export interface RebasePlanEntry {
   commitId: string;
   action: RebaseAction;
@@ -338,6 +357,7 @@ export interface RepoClient {
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
   // Full raw commit message (subject plus body).
   getCommitMessage(repoPath: string, commitId: string): Promise<string>;
+  getCommitSignature(repoPath: string, commitId: string): Promise<CommitSignature>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
   stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;

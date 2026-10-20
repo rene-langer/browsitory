@@ -1,4 +1,5 @@
 import type {
+  CommitSignature,
   BlameLine,
   BranchInfo,
   ConflictSegment,
@@ -232,6 +233,8 @@ export const vscodeRepoClient: RepoClient = {
     call<string[]>("get_commit_files", { repoPath, commitId }),
   getCommitMessage: (repoPath: string, commitId: string) =>
     call<string>("get_commit_message", { repoPath, commitId }),
+  getCommitSignature: (repoPath: string, commitId: string) =>
+    call<CommitSignature>("get_commit_signature", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
   stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>

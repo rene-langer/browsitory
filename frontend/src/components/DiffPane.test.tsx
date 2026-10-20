@@ -85,6 +85,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
+    getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
     undo: async () => ({ kind: "Nothing" as const }),
     redo: async () => ({ kind: "Nothing" as const }),
     cherryPick: async () => { throw new Error("unimplemented"); },
