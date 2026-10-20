@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Commit signing
+
+- Commit signing: when `commit.gpgSign` is set, commits, amends, merges, cherry-picks, reverts and
+  rebased commits are signed with gpg (`gpg.format=openpgp`) or SSH (`gpg.format=ssh`), using
+  your existing gpg-agent / ssh-agent. If signing fails, no commit is made.
+- The commit details pane shows the signature status of signed commits (good, untrusted, unknown
+  key, expired, bad, revoked).
+
 ### Undo and redo
 
 - **Ctrl/Cmd+Z** undoes the last Git operation in the active repository and **Ctrl/Cmd+Shift+Z**

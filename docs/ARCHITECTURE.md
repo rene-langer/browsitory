@@ -146,6 +146,29 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   object database, so very large untracked files make those commands slower and grow `.git`
   until gc after the entry ages out.
 
+## Commit signing
+
+- `git-core::signing::create_commit` is the only way `git-core` creates a user-facing commit
+  (commit, amend, cherry-pick, revert, rebase step and squash collapse).
+  - It writes the object with `repo.commit(None, …)`, or when `commit.gpgSign` is set, with
+    `commit_create_buffer` → signer → `commit_signed`.
+  - It then moves HEAD with `reference_matching` against the expected current target, writing
+    libgit2's own reflog message (`commit: …`, `commit (initial): …`, `commit (merge): …`,
+    `commit (amend): …`).
+  - The signer runs before any ref moves, so a failure leaves the repo untouched. The undo
+    anchor commit deliberately bypasses it.
+- Signers are external programs run exactly as git runs them: `gpg --status-fd=2 -bsau <key>`
+  and `ssh-keygen -Y sign -n git -f <key>` (`-U` for a literal key), with the buffer on stdin,
+  no TTY, and no console window on Windows. They block the repo's worker thread while pinentry
+  waits.
+- `verify_commit` picks the format from the signature armor, not from config:
+  - gpg: `--status-fd` lines map to `SignatureStatus`.
+  - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
+    `check-novalidate` (→ `GoodUntrusted`).
+  - Unsigned commits never spawn a process; there is no cache.
+- Tests use real `gpg`/`ssh-keygen` with throwaway keys and skip when they are missing.
+  `tests/signing_gpg.rs` is its own binary because it sets `GNUPGHOME` once per process.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

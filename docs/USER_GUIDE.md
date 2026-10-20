@@ -116,6 +116,33 @@ alone and reported). **Ignore file** is always offered.
 **Ignore all \*.ext** appears only when the file name has an extension. **Ignore folder
 ⟨folder⟩/** appears only when the file is in a subfolder.
 
+### Signing commits
+
+Browsitory signs commits the way `git commit` does, from your git config. It has no setting of
+its own:
+
+- `commit.gpgSign = true` turns signing on.
+- `gpg.format` picks `openpgp` (default, uses `gpg`) or `ssh` (uses `ssh-keygen`). `x509` is not
+  supported.
+- `user.signingKey` picks the key. For gpg it defaults to your committer identity. For SSH it is
+  required: either a key file path or a literal public key (`key::ssh-ed25519 …`) whose private
+  key is in your ssh-agent.
+- `gpg.program`, `gpg.openpgp.program` and `gpg.ssh.program` override the programs.
+
+Passphrases come from gpg-agent's pinentry or from ssh-agent. Browsitory cannot prompt in a
+terminal. If signing fails, nothing is committed and the signer's error is shown.
+
+Selecting a signed commit shows a **Signature** row in the commit details:
+
+- **Good signature**: valid, from a trusted key (gpg) or a signer listed in
+  `gpg.ssh.allowedSignersFile` (SSH).
+- **Valid signature, signer not trusted**: cryptographically valid, but the key is not trusted
+  or not listed.
+- **Signed with an unknown key**: the public key is not in your keyring.
+- **Signature expired** / **Signed with an expired key** / **Signed with a revoked key**.
+- **Bad signature**: the commit does not match its signature.
+- **Signature could not be checked**: for example gpg is not installed.
+
 ## Browsing history and diffs
 
 Click any commit in the graph to see the files it touched; click a file to
