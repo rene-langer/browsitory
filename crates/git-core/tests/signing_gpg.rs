@@ -15,15 +15,13 @@ const UID: &str = "Test User <test@example.com>";
 fn gpg_home() -> Option<&'static std::path::Path> {
     static HOME: OnceLock<Option<tempfile::TempDir>> = OnceLock::new();
     HOME.get_or_init(|| {
-        if !program_available("gpg") {
+        // Git-for-Windows' gpg is an MSYS binary: it reads `C:\...` as a relative path and
+        // cannot start gpg-agent in CI, so these tests run on Unix only.
+        if cfg!(windows) || !program_available("gpg") {
             return None;
         }
         let home = tempfile::Builder::new().prefix("bgpg").tempdir().unwrap();
-        // Git-for-Windows' gpg is an MSYS binary and reads `C:\...` as a relative path.
-        std::env::set_var(
-            "GNUPGHOME",
-            home.path().to_string_lossy().replace('\\', "/"),
-        );
+        std::env::set_var("GNUPGHOME", home.path());
         let status = std::process::Command::new("gpg")
             .args([
                 "--batch",
