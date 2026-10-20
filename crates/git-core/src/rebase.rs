@@ -15,6 +15,8 @@ pub enum RebaseError {
          and start over"
     )]
     HeadMoved { expected: String, actual: String },
+    #[error("{0}")]
+    Sign(#[from] crate::signing::SignError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -336,8 +338,12 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
     let committer = repo.signature()?;
-    repo.commit(
-        Some("HEAD"),
+    crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(parent.id()),
+            reflog_operation: "commit",
+        }),
         &original_commit.author(),
         &committer,
         &message,
@@ -389,12 +395,13 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
                     .to_string(),
             )
         })?)?;
-        // Not `update_ref: Some("HEAD")` here: libgit2 rejects a ref-updating commit() whose
+        // No `HeadUpdate` here: libgit2 rejects a ref-updating commit() whose
         // first parent isn't the ref's *current* target, and the current target is the last
         // intermediate commit in the group's chain, not `group_parent` — that's the whole point
         // of the collapse (reparenting past that chain). Create the commit untethered, then move
         // HEAD to it directly.
-        let final_oid = repo.commit(
+        let final_oid = crate::signing::create_commit(
+            repo,
             None,
             &leader_commit.author(),
             &committer,

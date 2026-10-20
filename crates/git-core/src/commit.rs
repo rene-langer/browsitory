@@ -8,6 +8,8 @@ pub enum CommitError {
     NothingToAmend,
     #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
     OperationInProgress,
+    #[error("{0}")]
+    Sign(#[from] crate::signing::SignError),
 }
 
 /// Commits the current index. Author/committer come from `repo.signature()` (reads
@@ -66,8 +68,12 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
         let mut parents: Vec<&git2::Commit> = head_parent.iter().collect();
         parents.extend(merge_parents.iter());
 
-        repo.commit(
-            Some("HEAD"),
+        crate::signing::create_commit(
+            repo,
+            Some(crate::signing::HeadUpdate {
+                expected: head_parent.as_ref().map(|commit| commit.id()),
+                reflog_operation: "commit",
+            }),
             pick_author.as_ref().unwrap_or(&signature),
             &signature,
             message,
@@ -96,7 +102,8 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
 /// Rewrites HEAD's commit with the current index tree and `message`, keeping its parents and
 /// author; committer becomes `repo.signature()`. Works on a branch (the branch ref moves) or a
 /// detached HEAD. Refused while any operation (merge, cherry-pick, revert, rebase) is paused,
-/// since amending then would silently drop that operation's extra state.
+/// since amending then would silently drop that operation's extra state. Goes through `signing::create_commit`, so it is signed when `commit.gpgSign`
+/// asks for it.
 pub fn amend_head(repo: &git2::Repository, message: &str) -> Result<String, CommitError> {
     if repo.state() != git2::RepositoryState::Clean {
         return Err(CommitError::OperationInProgress);
@@ -111,13 +118,19 @@ pub fn amend_head(repo: &git2::Repository, message: &str) -> Result<String, Comm
     let tree_id = repo.index()?.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let committer = repo.signature()?;
-    let oid = head.amend(
-        Some("HEAD"),
-        None,
-        Some(&committer),
-        None,
-        Some(message),
-        Some(&tree),
+    let parents: Vec<git2::Commit> = head.parents().collect();
+    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+    let oid = crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(head.id()),
+            reflog_operation: "commit (amend)",
+        }),
+        &head.author(),
+        &committer,
+        message,
+        &tree,
+        &parent_refs,
     )?;
     Ok(oid.to_string())
 }

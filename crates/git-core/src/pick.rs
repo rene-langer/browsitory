@@ -21,6 +21,8 @@ pub enum PickError {
     UnbornHead,
     #[error("Nothing to apply — those changes are already on this branch.")]
     EmptyResult,
+    #[error("{0}")]
+    Sign(#[from] crate::signing::SignError),
 }
 
 #[derive(Clone, Copy)]
@@ -103,7 +105,18 @@ fn apply(repo: &Repository, commit_id: &str, kind: Kind) -> Result<PickOutcome, 
         ),
         Kind::Revert => (committer.clone(), revert_message(&target)),
     };
-    let oid = repo.commit(Some("HEAD"), &author, &committer, &message, &tree, &[&head])?;
+    let oid = crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(head.id()),
+            reflog_operation: "commit",
+        }),
+        &author,
+        &committer,
+        &message,
+        &tree,
+        &[&head],
+    )?;
     repo.cleanup_state()?;
     Ok(PickOutcome::Committed {
         commit_id: oid.to_string(),
