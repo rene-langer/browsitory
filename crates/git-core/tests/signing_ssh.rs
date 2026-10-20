@@ -412,3 +412,111 @@ fn signing_off_by_default_keeps_commits_unsigned() {
         .extract_signature(&git2::Oid::from_str(&oid).unwrap(), None)
         .is_err());
 }
+
+use git_core::signing::{verify_commit, SignatureFormat, SignatureStatus};
+
+fn signed_head(dir: &std::path::Path, repo: &mut git2::Repository) -> String {
+    write_file(dir, "v.txt", "v\n");
+    stage(repo, "v.txt");
+    git_core::commit::commit(repo, "verify me").unwrap()
+}
+
+#[test]
+fn verifies_ssh_signature_as_good_with_allowed_signers() {
+    let Some((dir, keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let id = signed_head(dir.path(), &mut repo);
+    repo.config()
+        .unwrap()
+        .set_str(
+            "gpg.ssh.allowedSignersFile",
+            keys.path().join("allowed_signers").to_str().unwrap(),
+        )
+        .unwrap();
+
+    let result = verify_commit(&repo, &id).unwrap();
+
+    assert_eq!(result.status, SignatureStatus::Good);
+    assert_eq!(result.format, Some(SignatureFormat::Ssh));
+    assert_eq!(result.signer.as_deref(), Some("test@example.com"));
+    assert!(result.key.as_deref().unwrap().starts_with("SHA256:"));
+}
+
+#[test]
+fn verifies_ssh_signature_without_any_signing_config() {
+    let Some((dir, _keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let id = signed_head(dir.path(), &mut repo);
+    {
+        let mut config = repo.config().unwrap();
+        config.set_bool("commit.gpgSign", false).unwrap();
+        config.set_str("gpg.format", "openpgp").unwrap();
+    }
+
+    let result = verify_commit(&repo, &id).unwrap();
+
+    assert_eq!(result.status, SignatureStatus::GoodUntrusted);
+    assert_eq!(result.format, Some(SignatureFormat::Ssh));
+    assert_eq!(
+        result.detail.as_deref(),
+        Some("signer is not in gpg.ssh.allowedSignersFile")
+    );
+    assert!(result.key.as_deref().unwrap().starts_with("SHA256:"));
+}
+
+#[test]
+fn unlisted_ssh_signer_is_good_untrusted() {
+    let Some((dir, keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let id = signed_head(dir.path(), &mut repo);
+    let other = keys.path().join("other_signers");
+    std::fs::write(&other, "someone@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq2pQ0lYkTzUuWQnqf8NYvU0bS7u9a8m2g5Yb2G8b9h\n").unwrap();
+    repo.config()
+        .unwrap()
+        .set_str("gpg.ssh.allowedSignersFile", other.to_str().unwrap())
+        .unwrap();
+
+    let result = verify_commit(&repo, &id).unwrap();
+
+    assert_eq!(result.status, SignatureStatus::GoodUntrusted);
+}
+
+#[test]
+fn tampered_ssh_signed_commit_is_bad() {
+    let Some((dir, _keys, mut repo)) = signing_repo() else {
+        return;
+    };
+    let id = signed_head(dir.path(), &mut repo);
+    let oid = git2::Oid::from_str(&id).unwrap();
+    let (signature, data) = repo.extract_signature(&oid, None).unwrap();
+    let tampered = std::str::from_utf8(&data)
+        .unwrap()
+        .replace("verify me", "verify m3");
+    let forged = repo
+        .commit_signed(&tampered, std::str::from_utf8(&signature).unwrap(), None)
+        .unwrap();
+
+    let result = verify_commit(&repo, &forged.to_string()).unwrap();
+
+    assert_eq!(result.status, SignatureStatus::Bad);
+}
+
+#[test]
+fn unsigned_commit_reports_unsigned() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    stage(&repo, "a.txt");
+    let id = git_core::commit::commit(&mut repo, "plain").unwrap();
+    let result = verify_commit(&repo, &id).unwrap();
+    assert_eq!(result.status, SignatureStatus::Unsigned);
+    assert_eq!(result.format, None);
+}
+
+#[test]
+fn bad_commit_id_is_an_err() {
+    let (_dir, repo) = init_repo();
+    assert!(verify_commit(&repo, "not-a-sha").is_err());
+}

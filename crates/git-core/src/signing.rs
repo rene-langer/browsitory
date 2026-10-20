@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use git2::{Commit, Oid, Repository, Signature, Tree};
+use git2::{Commit, ErrorCode, Oid, Repository, Signature, Tree};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,4 +282,268 @@ pub fn create_commit(
         move_head(repo, oid, &update)?;
     }
     Ok(oid)
+}
+
+fn is_not_found(error: &git2::Error) -> bool {
+    error.code() == ErrorCode::NotFound
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureStatus {
+    Unsigned,
+    Good,
+    GoodUntrusted,
+    Bad,
+    UnknownKey,
+    Expired,
+    ExpiredKey,
+    RevokedKey,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitSignature {
+    pub status: SignatureStatus,
+    pub format: Option<SignatureFormat>,
+    pub signer: Option<String>,
+    pub key: Option<String>,
+    pub detail: Option<String>,
+}
+
+impl CommitSignature {
+    fn new(status: SignatureStatus, format: Option<SignatureFormat>) -> Self {
+        Self {
+            status,
+            format,
+            signer: None,
+            key: None,
+            detail: None,
+        }
+    }
+
+    fn error(format: Option<SignatureFormat>, detail: impl Into<String>) -> Self {
+        Self {
+            detail: Some(detail.into()),
+            ..Self::new(SignatureStatus::Error, format)
+        }
+    }
+}
+
+/// Signature status of `commit_id`. Only repository-level failures (bad id, unreadable object)
+/// are `Err`; a missing or failing verifier program is an `Error` status.
+pub fn verify_commit(repo: &Repository, commit_id: &str) -> Result<CommitSignature, SignError> {
+    let oid = Oid::from_str(commit_id)?;
+    repo.find_commit(oid)?;
+    let (signature, data) = match repo.extract_signature(&oid, None) {
+        Ok(pair) => pair,
+        Err(error) if is_not_found(&error) => {
+            return Ok(CommitSignature::new(SignatureStatus::Unsigned, None))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let signature = String::from_utf8_lossy(&signature).into_owned();
+    let config = repo.config()?;
+    let format = if signature.starts_with("-----BEGIN PGP SIGNATURE-----") {
+        SignatureFormat::OpenPgp
+    } else if signature.starts_with("-----BEGIN SSH SIGNATURE-----") {
+        SignatureFormat::Ssh
+    } else {
+        return Ok(CommitSignature::error(None, "unsupported signature type"));
+    };
+    let program = program_for(&config, format);
+    let mut sig_file = tempfile::NamedTempFile::new()?;
+    sig_file.write_all(signature.as_bytes())?;
+    sig_file.flush()?;
+    let sig_path = sig_file.path().to_string_lossy().into_owned();
+    let result = match format {
+        SignatureFormat::OpenPgp => verify_gpg(&program, &sig_path, &data),
+        SignatureFormat::Ssh => {
+            let allowed = config_string(&config, "gpg.ssh.allowedSignersFile")
+                .map(|path| expand_tilde(&path).to_string_lossy().into_owned());
+            verify_ssh(&program, &sig_path, allowed.as_deref(), &data)
+        }
+    };
+    match result {
+        Ok(signature) => Ok(signature),
+        Err(SignError::SignerNotFound(program)) => Ok(CommitSignature::error(
+            Some(format),
+            format!("{program} was not found"),
+        )),
+        Err(SignError::Io(error)) => Ok(CommitSignature::error(Some(format), error.to_string())),
+        Err(other) => Err(other),
+    }
+}
+
+fn verify_gpg(program: &str, sig_path: &str, data: &[u8]) -> Result<CommitSignature, SignError> {
+    let output = run_program(program, &["--status-fd=1", "--verify", sig_path, "-"], data)?;
+    Ok(parse_gpg_status(&output.stdout, &output.stderr))
+}
+
+/// Maps gpg `--status-fd` lines to a status, like git's `parse_gpg_output`.
+pub(crate) fn parse_gpg_status(status: &str, stderr: &str) -> CommitSignature {
+    let mut result = CommitSignature::new(SignatureStatus::Error, Some(SignatureFormat::OpenPgp));
+    let mut trusted = false;
+    let mut decided = false;
+    for line in status.lines() {
+        let Some(rest) = line.strip_prefix("[GNUPG:] ") else {
+            continue;
+        };
+        let mut parts = rest.splitn(3, ' ');
+        let keyword = parts.next().unwrap_or_default();
+        let first = parts.next().map(str::to_string);
+        let remainder = parts.next().map(str::to_string);
+        let set = |result: &mut CommitSignature, status: SignatureStatus| {
+            result.status = status;
+            result.key = result.key.clone().or(first.clone());
+            result.signer = remainder.clone();
+        };
+        match keyword {
+            "GOODSIG" => {
+                set(&mut result, SignatureStatus::Good);
+                decided = true;
+            }
+            "BADSIG" => {
+                set(&mut result, SignatureStatus::Bad);
+                decided = true;
+            }
+            "EXPSIG" => {
+                set(&mut result, SignatureStatus::Expired);
+                decided = true;
+            }
+            "EXPKEYSIG" => {
+                set(&mut result, SignatureStatus::ExpiredKey);
+                decided = true;
+            }
+            "REVKEYSIG" => {
+                set(&mut result, SignatureStatus::RevokedKey);
+                decided = true;
+            }
+            "ERRSIG" if !decided => {
+                result.key = first.clone();
+            }
+            "NO_PUBKEY" if !decided => {
+                result.status = SignatureStatus::UnknownKey;
+                result.key = result.key.clone().or(first.clone());
+                decided = true;
+            }
+            // VALIDSIG <fingerprint> …: the full fingerprint beats GOODSIG's long key id.
+            "VALIDSIG" => result.key = first.clone(),
+            "TRUST_FULLY" | "TRUST_ULTIMATE" => trusted = true,
+            _ => {}
+        }
+    }
+    if result.status == SignatureStatus::Good && !trusted {
+        result.status = SignatureStatus::GoodUntrusted;
+        result.detail = Some("the signing key is not trusted in your keyring".to_string());
+    }
+    if !decided {
+        result.detail = Some(stderr_tail(stderr));
+    }
+    result
+}
+
+fn ssh_fingerprint(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|word| word.starts_with("SHA256:"))
+        .map(str::to_string)
+}
+
+fn verify_ssh(
+    program: &str,
+    sig_path: &str,
+    allowed: Option<&str>,
+    data: &[u8],
+) -> Result<CommitSignature, SignError> {
+    let format = Some(SignatureFormat::Ssh);
+    if let Some(allowed) = allowed {
+        let found = run_program(
+            program,
+            &["-Y", "find-principals", "-f", allowed, "-s", sig_path],
+            &[],
+        )?;
+        let principal = found
+            .stdout
+            .lines()
+            .next()
+            .map(str::trim)
+            .unwrap_or_default();
+        if found.status_success && !principal.is_empty() {
+            let verified = run_program(
+                program,
+                &[
+                    "-Y", "verify", "-n", "git", "-f", allowed, "-I", principal, "-s", sig_path,
+                ],
+                data,
+            )?;
+            let text = format!("{}\n{}", verified.stdout, verified.stderr);
+            let mut result = CommitSignature::new(
+                if verified.status_success {
+                    SignatureStatus::Good
+                } else {
+                    SignatureStatus::Bad
+                },
+                format,
+            );
+            result.signer = Some(principal.to_string());
+            result.key = ssh_fingerprint(&text);
+            return Ok(result);
+        }
+    }
+    let checked = run_program(
+        program,
+        &["-Y", "check-novalidate", "-n", "git", "-s", sig_path],
+        data,
+    )?;
+    let text = format!("{}\n{}", checked.stdout, checked.stderr);
+    let mut result = if checked.status_success {
+        CommitSignature {
+            detail: Some("signer is not in gpg.ssh.allowedSignersFile".to_string()),
+            ..CommitSignature::new(SignatureStatus::GoodUntrusted, format)
+        }
+    } else {
+        CommitSignature::new(SignatureStatus::Bad, format)
+    };
+    result.key = ssh_fingerprint(&text);
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpg_status_mapping() {
+        let good = "[GNUPG:] GOODSIG AAAA Test User <t@e>\n[GNUPG:] VALIDSIG FPR123 2026-10-20\n[GNUPG:] TRUST_ULTIMATE 0 pgp\n";
+        let parsed = parse_gpg_status(good, "");
+        assert_eq!(parsed.status, SignatureStatus::Good);
+        assert_eq!(parsed.signer.as_deref(), Some("Test User <t@e>"));
+        assert_eq!(parsed.key.as_deref(), Some("FPR123"));
+
+        let untrusted = "[GNUPG:] GOODSIG AAAA U <u@e>\n[GNUPG:] TRUST_UNDEFINED 0 pgp\n";
+        assert_eq!(
+            parse_gpg_status(untrusted, "").status,
+            SignatureStatus::GoodUntrusted
+        );
+
+        let unknown = "[GNUPG:] ERRSIG BBBB 22 10 00 1700000000 9 -\n[GNUPG:] NO_PUBKEY BBBB\n";
+        let parsed = parse_gpg_status(unknown, "");
+        assert_eq!(parsed.status, SignatureStatus::UnknownKey);
+        assert_eq!(parsed.key.as_deref(), Some("BBBB"));
+
+        for (line, status) in [
+            ("[GNUPG:] BADSIG A U <u@e>", SignatureStatus::Bad),
+            ("[GNUPG:] EXPSIG A U <u@e>", SignatureStatus::Expired),
+            ("[GNUPG:] EXPKEYSIG A U <u@e>", SignatureStatus::ExpiredKey),
+            ("[GNUPG:] REVKEYSIG A U <u@e>", SignatureStatus::RevokedKey),
+        ] {
+            assert_eq!(parse_gpg_status(line, "").status, status, "{line}");
+        }
+
+        let nothing = parse_gpg_status("", "gpg: no valid OpenPGP data found.\n");
+        assert_eq!(nothing.status, SignatureStatus::Error);
+        assert_eq!(
+            nothing.detail.as_deref(),
+            Some("gpg: no valid OpenPGP data found.")
+        );
+    }
 }
