@@ -33,10 +33,13 @@ fn gpg_home() -> Option<&'static std::path::Path> {
                 "sign",
                 "never",
             ])
-            .stderr(std::process::Stdio::null())
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success(), "gpg --quick-gen-key failed");
+        assert!(
+            status.status.success(),
+            "gpg --quick-gen-key failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
         Some(home)
     })
     .as_ref()
