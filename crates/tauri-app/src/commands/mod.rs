@@ -45,7 +45,7 @@ pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
     get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
-    get_commit_rename_diff, get_file_history, get_graph_branch_selection,
+    get_commit_rename_diff, get_commit_signature, get_file_history, get_graph_branch_selection,
     get_graph_remote_branch_selection, get_status, get_working_diff, ignore_path,
     set_graph_branch_selection, set_graph_remote_branch_selection, stage_file, stage_hunk,
     stage_lines, unstage_file, unstage_hunk, unstage_lines,
@@ -546,6 +546,62 @@ impl From<repo_service::worker::UndoState> for UndoStateDto {
         Self {
             undo: state.undo,
             redo: state.redo,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignatureStatusDto {
+    Unsigned,
+    Good,
+    GoodUntrusted,
+    Bad,
+    UnknownKey,
+    Expired,
+    ExpiredKey,
+    RevokedKey,
+    Error,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignatureFormatDto {
+    Openpgp,
+    Ssh,
+}
+
+#[derive(Serialize)]
+pub struct CommitSignatureDto {
+    status: SignatureStatusDto,
+    format: Option<SignatureFormatDto>,
+    signer: Option<String>,
+    key: Option<String>,
+    detail: Option<String>,
+}
+
+impl From<git_core::signing::CommitSignature> for CommitSignatureDto {
+    fn from(signature: git_core::signing::CommitSignature) -> Self {
+        use git_core::signing::{SignatureFormat, SignatureStatus};
+        Self {
+            status: match signature.status {
+                SignatureStatus::Unsigned => SignatureStatusDto::Unsigned,
+                SignatureStatus::Good => SignatureStatusDto::Good,
+                SignatureStatus::GoodUntrusted => SignatureStatusDto::GoodUntrusted,
+                SignatureStatus::Bad => SignatureStatusDto::Bad,
+                SignatureStatus::UnknownKey => SignatureStatusDto::UnknownKey,
+                SignatureStatus::Expired => SignatureStatusDto::Expired,
+                SignatureStatus::ExpiredKey => SignatureStatusDto::ExpiredKey,
+                SignatureStatus::RevokedKey => SignatureStatusDto::RevokedKey,
+                SignatureStatus::Error => SignatureStatusDto::Error,
+            },
+            format: signature.format.map(|format| match format {
+                SignatureFormat::OpenPgp => SignatureFormatDto::Openpgp,
+                SignatureFormat::Ssh => SignatureFormatDto::Ssh,
+            }),
+            signer: signature.signer,
+            key: signature.key,
+            detail: signature.detail,
         }
     }
 }
@@ -1149,10 +1205,11 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, DiffOptionsDto, DiffSettingsDto, FileHistoryEntryDto,
-        ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto, OpenRepoEntryInput,
-        PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto, ResetModeDto,
-        SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto, WorktreeInfoDto,
+        transfer_event_payload, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
+        FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
+        OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
+        ResetModeDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
+        WorktreeInfoDto,
     };
 
     #[test]
@@ -1571,6 +1628,56 @@ mod tests {
             .unwrap(),
             serde_json::json!({"kind": "Conflicted", "files": ["a"]})
         );
+    }
+
+    #[test]
+    fn commit_signature_dto_serializes_for_the_frontend() {
+        use git_core::signing::{CommitSignature, SignatureFormat, SignatureStatus};
+        let dto = CommitSignatureDto::from(CommitSignature {
+            status: SignatureStatus::GoodUntrusted,
+            format: Some(SignatureFormat::OpenPgp),
+            signer: Some("Jane <j@e>".into()),
+            key: Some("ABCD".into()),
+            detail: None,
+        });
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({
+                "status": "goodUntrusted", "format": "openpgp",
+                "signer": "Jane <j@e>", "key": "ABCD", "detail": null
+            })
+        );
+        let unsigned = CommitSignatureDto::from(CommitSignature {
+            status: SignatureStatus::Unsigned,
+            format: None,
+            signer: None,
+            key: None,
+            detail: None,
+        });
+        assert_eq!(
+            serde_json::to_value(unsigned).unwrap()["status"],
+            "unsigned"
+        );
+        for (status, wire) in [
+            (SignatureStatus::Good, "good"),
+            (SignatureStatus::Bad, "bad"),
+            (SignatureStatus::UnknownKey, "unknownKey"),
+            (SignatureStatus::Expired, "expired"),
+            (SignatureStatus::ExpiredKey, "expiredKey"),
+            (SignatureStatus::RevokedKey, "revokedKey"),
+            (SignatureStatus::Error, "error"),
+        ] {
+            let dto = CommitSignatureDto::from(CommitSignature {
+                status,
+                format: Some(SignatureFormat::Ssh),
+                signer: None,
+                key: None,
+                detail: None,
+            });
+            let value = serde_json::to_value(dto).unwrap();
+            assert_eq!(value["status"], wire);
+            assert_eq!(value["format"], "ssh");
+        }
     }
 
     #[test]

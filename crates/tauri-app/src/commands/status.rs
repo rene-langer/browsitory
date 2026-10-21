@@ -1,6 +1,6 @@
 use super::{
-    worker_handle, AppState, BlameLineDto, DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto,
-    GraphCommitDto, StatusEntryDto,
+    worker_handle, AppState, BlameLineDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
+    FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
 };
 use std::path::Path;
 use tauri::State;
@@ -110,6 +110,17 @@ pub async fn get_commit_message(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     worker_handle(&state, &repo_path)?.get_commit_message(commit_id)
+}
+
+#[tauri::command]
+pub async fn get_commit_signature(
+    repo_path: String,
+    commit_id: String,
+    state: State<'_, AppState>,
+) -> Result<CommitSignatureDto, String> {
+    Ok(CommitSignatureDto::from(
+        worker_handle(&state, &repo_path)?.get_commit_signature(commit_id)?,
+    ))
 }
 
 #[tauri::command]

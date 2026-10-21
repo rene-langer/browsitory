@@ -99,6 +99,10 @@ pub(crate) enum Command {
         commit_id: String,
         reply: Sender<Result<String, String>>,
     },
+    GetCommitSignature {
+        commit_id: String,
+        reply: Sender<Result<git_core::signing::CommitSignature, String>>,
+    },
     GetBlame {
         commit_id: String,
         path: String,
@@ -606,6 +610,9 @@ impl Worker {
                     }
                     Command::GetCommitMessage { commit_id, reply } => {
                         status::get_commit_message(&repo, commit_id, reply)
+                    }
+                    Command::GetCommitSignature { commit_id, reply } => {
+                        status::get_commit_signature(&repo, commit_id, reply)
                     }
                     Command::GetBlame {
                         commit_id,
@@ -1249,6 +1256,7 @@ mod tests {
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
             config.set_bool("core.autocrlf", false).unwrap();
+            config.set_bool("commit.gpgSign", false).unwrap();
         }
         (dir, repo)
     }
@@ -1361,6 +1369,49 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_commit_signature_reports_unsigned_for_a_plain_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "plain");
+        let id = repo.head().unwrap().target().unwrap().to_string();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let signature = worker.handle().get_commit_signature(id).unwrap();
+
+        assert_eq!(
+            signature.status,
+            git_core::signing::SignatureStatus::Unsigned
+        );
+    }
+
+    #[test]
+    fn failed_signing_replies_err_and_records_no_undo_entry() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "base");
+        {
+            let mut config = repo.config().unwrap();
+            config.set_bool("commit.gpgSign", true).unwrap();
+            config
+                .set_str("gpg.program", "browsitory-no-such-gpg")
+                .unwrap();
+        }
+        write_file(dir.path(), "b.txt", "b");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("b.txt".into()).unwrap();
+        let undo_before = handle.get_undo_state().unwrap().undo;
+        let result = handle.commit("signed?".into());
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Signing program 'browsitory-no-such-gpg' was not found."
+        );
+        assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
     }
 
     #[test]

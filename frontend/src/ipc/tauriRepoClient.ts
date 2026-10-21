@@ -4,6 +4,7 @@ import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import { toCloneError } from "./RepoClient";
 import type {
+  CommitSignature,
   BlameLine,
   BranchInfo,
   CloneOutcome,
@@ -123,6 +124,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<string[]>("get_commit_files", { repoPath, commitId }),
   getCommitMessage: (repoPath: string, commitId: string) =>
     loggedInvoke<string>("get_commit_message", { repoPath, commitId }),
+  getCommitSignature: (repoPath: string, commitId: string) =>
+    loggedInvoke<CommitSignature>("get_commit_signature", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => loggedInvoke("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => loggedInvoke("unstage_file", { repoPath, path }),
   stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
