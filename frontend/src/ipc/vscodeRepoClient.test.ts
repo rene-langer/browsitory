@@ -1051,4 +1051,17 @@ describe("vscodeRepoClient", () => {
       await promise;
     }
   });
+
+  it("wires getCommitSignature", async () => {
+    const promise = vscodeRepoClient.getCommitSignature("/repo", "abc");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_signature",
+      params: { repoPath: "/repo", commitId: "abc" },
+    });
+    const result = { status: "good", format: "ssh", signer: "me", key: "SHA256:x", detail: null };
+    respond(1, result);
+    await expect(promise).resolves.toEqual(result);
+  });
 });

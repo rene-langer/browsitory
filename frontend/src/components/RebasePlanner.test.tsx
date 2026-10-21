@@ -101,6 +101,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getHeadInfo: unused,
     amendCommit: unused,
     getUndoState: unused,
+    getCommitSignature: unused,
     undo: unused,
     redo: unused,
     cherryPick: unused,

@@ -21,6 +21,8 @@ pub enum PickError {
     UnbornHead,
     #[error("Nothing to apply — those changes are already on this branch.")]
     EmptyResult,
+    #[error("{0}")]
+    Sign(#[from] crate::signing::SignError),
 }
 
 #[derive(Clone, Copy)]
@@ -63,6 +65,13 @@ fn apply(repo: &Repository, commit_id: &str, kind: Kind) -> Result<PickOutcome, 
         return Err(PickError::DirtyIndex);
     }
 
+    // Validate the signing configuration before libgit2 stages anything, so a config error
+    // (unsupported gpg.format, missing SSH key) leaves the repository completely untouched.
+    // A signer *program* failure can only surface at commit time, after the pick is staged;
+    // that leaves the pick in progress (CHERRY_PICK_HEAD/REVERT_HEAD, like git) so the user can
+    // commit again or abort. HEAD and refs never move on failure.
+    crate::signing::signing_config(repo)?;
+
     // libgit2's default checkout strategy here is SAFE: it errors rather than overwrite a
     // modified working-tree file the pick needs to change. libgit2 may already have written
     // CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG by then; state was Clean on entry (checked above),
@@ -103,7 +112,18 @@ fn apply(repo: &Repository, commit_id: &str, kind: Kind) -> Result<PickOutcome, 
         ),
         Kind::Revert => (committer.clone(), revert_message(&target)),
     };
-    let oid = repo.commit(Some("HEAD"), &author, &committer, &message, &tree, &[&head])?;
+    let oid = crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(head.id()),
+            reflog_operation: "commit",
+        }),
+        &author,
+        &committer,
+        &message,
+        &tree,
+        &[&head],
+    )?;
     repo.cleanup_state()?;
     Ok(PickOutcome::Committed {
         commit_id: oid.to_string(),

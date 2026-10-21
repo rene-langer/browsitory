@@ -108,6 +108,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getCommitRenameDiff: async () => unimplemented(),
     getCommitFiles: async () => unimplemented(),
     getCommitMessage: async () => unimplemented(),
+    getCommitSignature: async () => unimplemented(),
     stageFile: async () => unimplemented(),
     unstageFile: async () => unimplemented(),
     stageHunk: async () => unimplemented(),

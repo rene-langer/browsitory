@@ -118,6 +118,7 @@ fn init_repo() -> (tempfile::TempDir, git2::Repository) {
     let mut config = repo.config().expect("repo config");
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();
+    config.set_bool("commit.gpgSign", false).unwrap();
     (dir, repo)
 }
 
@@ -515,6 +516,18 @@ fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "commitId": commit_id}),
     );
     assert_eq!(message["result"], serde_json::json!("add new.txt"));
+
+    let signature = sidecar.call(
+        7,
+        "get_commit_signature",
+        serde_json::json!({"repoPath": repo_path, "commitId": commit_id}),
+    );
+    assert_eq!(
+        signature["result"],
+        serde_json::json!({
+            "status": "unsigned", "format": null, "signer": null, "key": null, "detail": null
+        })
+    );
 
     let unstaged = sidecar.call(
         5,

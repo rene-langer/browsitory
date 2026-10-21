@@ -58,3 +58,46 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+.signature {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+.signature[data-tone="success"] {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.signature[data-tone="warning"] {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.signature[data-tone="danger"] {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+/* Shape carries the tone too, so colour is never the only signal. */
+.signatureIcon::before {
+  content: "?";
+}
+
+.signature[data-tone="success"] .signatureIcon::before {
+  content: "✓";
+}
+
+.signature[data-tone="warning"] .signatureIcon::before {
+  content: "!";
+}
+
+.signature[data-tone="danger"] .signatureIcon::before {
+  content: "✗";
+}
