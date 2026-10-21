@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
 ### Commit signing
 
 - Commit signing: when `commit.gpgSign` is set, commits, amends, merges, cherry-picks, reverts and
