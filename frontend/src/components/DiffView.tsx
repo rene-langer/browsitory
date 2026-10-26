@@ -189,6 +189,7 @@ export function DiffView({
   }, []);
 
   const toolbar = (
+    <div className={styles.viewOptions}>
     <Toolbar aria-label="Diff view options">
       <button type="button" onClick={() => setSplit((prev) => !prev)}>
         {split ? "Unified view" : "Split view"}
@@ -227,6 +228,7 @@ export function DiffView({
         Syntax highlighting
       </button>
     </Toolbar>
+    </div>
   );
 
   if (hunks === null) {

@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Interface refresh
+
+- Calmer, editor-like look: a new charcoal dark palette and warm-neutral light palette with a
+  single amber accent, flat borderless controls, hairline pane dividers and thin scrollbars.
+- Slim title bar with editor-style tabs that sit flush on the workspace; a tab's close button
+  only shows on the active or hovered tab. The multicolor strip under the header is gone.
+- Sidebar section headings are small uppercase labels; secondary actions (Fetch/Pull/Push, Blame,
+  History, diff view options, hunk actions, Stage all) are quiet text buttons that fill on hover.
+- The selected changed file is marked by an accent edge instead of a tinted block; Commit is the
+  one accent-filled button. Commit summaries use the UI font; branch labels are flat chips.
+- The command palette and other overlays open near the top of the window.
+
 ## [0.3.0] - 2026-10-21
 
 ### Commit signing

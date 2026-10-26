@@ -52,14 +52,15 @@
   border: none;
   background: transparent;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-text-muted);
   text-align: left;
   cursor: pointer;
 }
 
-.folderHeader:hover {
-  background: var(--color-selected-bg);
+.folderHeader:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-text);
 }
 
 .chevron {
@@ -96,7 +97,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-1);
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--color-control);
+  color: var(--color-text);
 }
 
 .helperText {
@@ -172,7 +180,8 @@ li.treeRow {
 }
 
 .currentName {
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--color-accent);
 }
 
 .currentMarker {
@@ -195,13 +204,14 @@ li.treeRow {
 .upstreamBlock {
   margin-top: var(--space-3);
   padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
 }
 
 .upstreamHeading {
   margin: 0 0 var(--space-1);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--color-text-muted);
 }
 

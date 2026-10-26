@@ -5,8 +5,12 @@
   box-shadow: var(--shadow-md);
   color: var(--color-text);
   padding: 0;
-  max-width: 640px;
+  max-width: 600px;
   width: 90vw;
+  /* Anchored near the top, like a quick-open panel, rather than dead centre. */
+  margin-top: 12vh;
+  max-height: 76vh;
+  overflow: auto;
 }
 
 .overlay::backdrop {

@@ -16,8 +16,20 @@ body,
 
 body {
   font-family: var(--font-sans);
+  font-size: var(--text-sm);
   color: var(--color-text);
   background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars that only darken when touched. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-control-hover) transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 main {
@@ -27,27 +39,33 @@ main {
 }
 
 h1 {
-  font-size: 20px;
+  font-size: var(--text-lg);
   margin: 0;
 }
 
-/* Base form controls */
+/* Base form controls: flat, borderless fills — shape comes from the fill, not an outline. */
 button {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
+  line-height: 1.4;
   color: var(--color-text);
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
+  background: var(--color-control);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: var(--space-1) var(--space-3);
+  padding: 3px var(--space-3);
   cursor: pointer;
   transition:
     background-color var(--motion-duration-fast) var(--motion-easing-standard),
-    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 button:hover:not(:disabled) {
-  background: var(--color-border);
+  background: var(--color-control-hover);
+}
+
+button[aria-pressed="true"] {
+  color: var(--color-accent);
 }
 
 button:focus-visible {
@@ -56,7 +74,7 @@ button:focus-visible {
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -69,7 +87,7 @@ textarea {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   color: var(--color-text);
-  background: var(--color-bg);
+  background: var(--color-bg-subtle);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2);
@@ -82,9 +100,14 @@ textarea:focus-visible,
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: none;
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.8;
 }
 
 input:disabled,
@@ -103,6 +126,15 @@ dialog {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   padding: var(--space-4);
+}
+
+dialog::backdrop {
+  background: var(--color-scrim);
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 

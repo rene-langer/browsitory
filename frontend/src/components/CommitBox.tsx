@@ -180,6 +180,7 @@ export function CommitBox({
       )}
       <Toolbar>
         <button
+          className={styles.commitButton}
           onClick={commitIfReady}
           disabled={amendOn ? message.trim() === "" : disabled || message.trim() === ""}
           aria-describedby={

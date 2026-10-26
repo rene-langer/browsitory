@@ -5,7 +5,7 @@
   margin-bottom: var(--space-2);
   padding: var(--space-2);
   font-family: var(--font-sans);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg);
@@ -17,6 +17,17 @@
   margin: 0;
   color: var(--color-warning-text);
   font-size: var(--text-sm);
+}
+
+/* The one primary action in the workspace. */
+.commitButton:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+.commitButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-text));
 }
 
 .amendToggle {

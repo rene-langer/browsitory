@@ -12,17 +12,48 @@
   outline-offset: 1px;
 }
 
+/* Per-file view options: quiet text buttons that only fill on hover, so a long list of
+   changed files doesn't become a wall of controls. */
+.viewOptions {
+  display: flex;
+  margin-bottom: var(--space-1);
+}
+
+.viewOptions button,
+.hunkHeader button {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.viewOptions button:hover:not(:disabled),
+.hunkHeader button:hover:not(:disabled) {
+  background: var(--color-control);
+  color: var(--color-text);
+}
+
+.viewOptions button[aria-pressed="true"] {
+  color: var(--color-accent);
+}
+
 .activeHunk .hunkHeader {
+  color: var(--color-text);
+}
+
+/* The keyboard cursor's hunk marker only appears while the diff has focus. */
+.diff:focus-within .activeHunk .hunkHeader {
   box-shadow: inset 2px 0 0 var(--color-accent, currentColor);
 }
 
 .hunkHeader {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   background: var(--color-bg-subtle);
   color: var(--color-text-muted);
-  padding: var(--space-1) var(--space-2);
+  padding: 2px var(--space-2);
   margin-top: var(--space-2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -39,10 +70,10 @@
   white-space: nowrap;
 }
 
+.hunkHeader button.armedDiscard,
 .armedDiscard {
-  background: var(--color-danger, #c62828);
-  border-color: var(--color-danger, #c62828);
-  color: #fff;
+  background: var(--color-danger-text);
+  color: var(--color-bg);
 }
 
 .lines {
@@ -53,8 +84,8 @@
 .line {
   display: flex;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-dense);
+  font-size: 12.5px;
+  line-height: var(--leading-normal);
   padding-right: var(--space-2);
 }
 
@@ -65,7 +96,7 @@
   text-align: right;
   color: var(--color-text-muted);
   user-select: none;
-  opacity: 0.8;
+  opacity: 0.6;
 }
 
 .marker {

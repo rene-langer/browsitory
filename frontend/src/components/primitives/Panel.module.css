@@ -2,7 +2,6 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
 }
 
 .header {
@@ -10,14 +9,13 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-5) 0;
 }
 
 .title {
   margin: 0;
   font-size: var(--text-lg);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .actions {
@@ -26,5 +24,5 @@
 }
 
 .body {
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-5) var(--space-5);
 }
