@@ -6,15 +6,21 @@
   font-size: var(--text-sm);
 }
 
-.input {
+/* Element-qualified to outrank index.css's base `input:not(...)` rule. */
+.palette input.input {
   border: none;
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
   padding: var(--space-3) var(--space-4);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+  background: transparent;
 }
 
-.input:focus-visible {
+.palette input.input:focus {
+  box-shadow: none;
+}
+
+.palette input.input:focus-visible {
   outline: none;
 }
 

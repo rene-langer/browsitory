@@ -14,7 +14,7 @@
 }
 
 .interactive:hover {
-  background: var(--color-bg-subtle);
+  background: color-mix(in srgb, var(--color-selected-bg) 55%, transparent);
 }
 
 .interactive:focus-visible {

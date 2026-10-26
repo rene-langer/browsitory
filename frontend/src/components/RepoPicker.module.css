@@ -1,20 +1,17 @@
 .picker {
-  width: min(640px, 100%);
+  width: min(600px, 100% - 2 * var(--space-4));
   margin-inline: auto;
-  margin-block: var(--space-4);
+  margin-block: 10vh var(--space-4);
 }
 
 .list {
   list-style: none;
-  margin: var(--space-2) 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
 }
 
-.list > li + li {
-  border-top: 1px solid var(--color-border);
+.list > li {
+  border-radius: var(--radius-sm);
 }
 
 .repoRow {
@@ -44,7 +41,11 @@
 
 .workspacesTitle {
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
 }
 
 .empty {

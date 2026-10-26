@@ -1,9 +1,12 @@
+/* A slim chrome bar: wordmark, tabs that sit flush on the workspace below, quiet icons. */
 .headerRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  height: 38px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+  background: var(--color-chrome);
   border-bottom: 1px solid var(--color-border);
   flex: 0 0 auto;
 }
@@ -13,6 +16,10 @@
    fixed-size icon, which shrinks to a clipped sliver rather than pushing back. */
 .headerRow > h1 {
   flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
 }
 
 .headerSpacer {
@@ -30,17 +37,19 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  padding: var(--space-1);
-  border: 1px solid var(--color-border);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
   border-radius: var(--radius-sm);
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: transparent;
+  color: var(--color-text-muted);
   cursor: pointer;
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-.iconButton:hover {
-  background: var(--color-bg-subtle);
+.iconButton:hover:not(:disabled) {
+  background: var(--color-control);
+  color: var(--color-text);
 }
 
 /* Global error banners float over the workspace instead of pushing it down (no layout shift). */

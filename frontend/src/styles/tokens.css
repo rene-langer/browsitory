@@ -6,31 +6,34 @@
      override, so the in-app theme toggle moves native surfaces too. */
   color-scheme: light;
 
-  /* Color */
-  --color-bg: #ffffff;
-  --color-bg-subtle: #f6f8fa;
+  /* Color — a quiet, warm-neutral light palette; one warm accent carries all emphasis. */
+  --color-bg: #fbfbf9;
+  --color-bg-subtle: #f2f2ef;
   --color-surface: #ffffff;
-  --color-border: #d0d7de;
-  --color-text: #1f2328;
-  --color-text-muted: #57606a;
-  --color-selected-bg: #ede6ff;
-  --color-accent: #7c3aed;
+  --color-chrome: #ecece8;
+  --color-control: #e6e6e2;
+  --color-control-hover: #dbdbd6;
+  --color-border: #e1e1dc;
+  --color-text: #2b2f36;
+  --color-text-muted: #6f747d;
+  --color-selected-bg: #e4e6ea;
+  --color-accent: #d97a1e;
   --color-accent-text: #ffffff;
-  --color-diff-add-bg: #e6ffed;
-  --color-diff-add-text: #1a7f37;
-  --color-diff-remove-bg: #ffeef0;
-  --color-diff-remove-text: #b31d28;
-  --color-danger: #ffeef0;
-  --color-danger-text: #b31d28;
+  --color-diff-add-bg: #e8f5e4;
+  --color-diff-add-text: #2f7a1f;
+  --color-diff-remove-bg: #fbe9e7;
+  --color-diff-remove-text: #b3362b;
+  --color-danger: #fbe9e7;
+  --color-danger-text: #b3362b;
   --color-danger-bg: var(--color-danger);
-  --color-success-bg: #dafbe1;
-  --color-success-text: #116329;
-  --color-warning-bg: #fff8c5;
-  --color-warning-text: #7d4e00;
-  --color-info-bg: #ddf4ff;
-  --color-info-text: #0550ae;
+  --color-success-bg: #e8f5e4;
+  --color-success-text: #2f7a1f;
+  --color-warning-bg: #fbf1d9;
+  --color-warning-text: #8a5a00;
+  --color-info-bg: #e6eff8;
+  --color-info-text: #2f5f8f;
   --color-diff-context-text: var(--color-text);
-  --color-scrim: rgba(0, 0, 0, 0.4);
+  --color-scrim: rgba(20, 20, 18, 0.28);
 
   /* Spacing */
   --space-1: 4px;
@@ -43,17 +46,17 @@
   --size-target-min: 24px;
 
   /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
+  --radius-sm: 3px;
+  --radius-md: 6px;
   --radius-pill: 999px;
 
   /* Elevation */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
 
   /* Typography */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
   --text-xs: 11px;
   --text-sm: 13px;
   --text-md: 14px;
@@ -64,15 +67,15 @@
 
   /* Syntax highlighting (Shiki css-variables theme) */
   --shiki-foreground: inherit;
-  --shiki-token-constant: #005cc5;
-  --shiki-token-string: #032f62;
-  --shiki-token-comment: #6a737d;
-  --shiki-token-keyword: #d73a49;
-  --shiki-token-parameter: #24292e;
-  --shiki-token-function: #6f42c1;
-  --shiki-token-string-expression: #22863a;
-  --shiki-token-punctuation: #24292e;
-  --shiki-token-link: #032f62;
+  --shiki-token-constant: #c76b1a;
+  --shiki-token-string: #4f8a3c;
+  --shiki-token-comment: #8e959e;
+  --shiki-token-keyword: #9a5ba8;
+  --shiki-token-parameter: #2b2f36;
+  --shiki-token-function: #3b6ea8;
+  --shiki-token-string-expression: #4f8a3c;
+  --shiki-token-punctuation: #5b616b;
+  --shiki-token-link: #2f8a8a;
 
   /* Motion */
   --motion-duration-fast: 100ms;
@@ -83,77 +86,83 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --color-bg: #14131a;
-    --color-bg-subtle: #1d1c26;
-    --color-surface: #1a1922;
-    --color-border: #33323f;
-    --color-text: #eceaf5;
-    --color-text-muted: #a6a3b8;
-    --color-selected-bg: #352a5c;
-    --color-accent: #a370ff;
-    --color-accent-text: #14131a;
-    --color-diff-add-bg: #0f2b1a;
-    --color-diff-add-text: #4ade80;
-    --color-diff-remove-bg: #2b1013;
-    --color-diff-remove-text: #f87171;
-    --color-danger: #2b1013;
-    --color-danger-text: #f87171;
+    --color-bg: #23262c;
+    --color-bg-subtle: #1e2126;
+    --color-surface: #2a2e35;
+    --color-chrome: #1b1d22;
+    --color-control: #31353d;
+    --color-control-hover: #3b404a;
+    --color-border: #2f333a;
+    --color-text: #d9dce1;
+    --color-text-muted: #8b919b;
+    --color-selected-bg: #343944;
+    --color-accent: #f2a23c;
+    --color-accent-text: #1b1d22;
+    --color-diff-add-bg: #233325;
+    --color-diff-add-text: #9fd38a;
+    --color-diff-remove-bg: #3a2427;
+    --color-diff-remove-text: #f09389;
+    --color-danger: #3a2427;
+    --color-danger-text: #f09389;
     --color-danger-bg: var(--color-danger);
-    --color-success-bg: #0f2b1a;
-    --color-success-text: #4ade80;
-    --color-warning-bg: #33290a;
-    --color-warning-text: #fbbf24;
-    --color-info-bg: #0d2438;
-    --color-info-text: #7cc4fa;
-    --color-scrim: rgba(0, 0, 0, 0.4);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-    --shiki-token-constant: #79b8ff;
-    --shiki-token-string: #9ecbff;
-    --shiki-token-comment: #959da5;
-    --shiki-token-keyword: #f97583;
-    --shiki-token-parameter: #e1e4e8;
-    --shiki-token-function: #b392f0;
-    --shiki-token-string-expression: #85e89d;
-    --shiki-token-punctuation: #e1e4e8;
-    --shiki-token-link: #9ecbff;
+    --color-success-bg: #233325;
+    --color-success-text: #9fd38a;
+    --color-warning-bg: #3a3122;
+    --color-warning-text: #f2c66d;
+    --color-info-bg: #22303e;
+    --color-info-text: #8cc0ea;
+    --color-scrim: rgba(0, 0, 0, 0.45);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --shiki-token-constant: #f9ae58;
+    --shiki-token-string: #99c794;
+    --shiki-token-comment: #7c8591;
+    --shiki-token-keyword: #c594c5;
+    --shiki-token-parameter: #d9dce1;
+    --shiki-token-function: #6699cc;
+    --shiki-token-string-expression: #99c794;
+    --shiki-token-punctuation: #a8afba;
+    --shiki-token-link: #5fb3b3;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-bg: #14131a;
-  --color-bg-subtle: #1d1c26;
-  --color-surface: #1a1922;
-  --color-border: #33323f;
-  --color-text: #eceaf5;
-  --color-text-muted: #a6a3b8;
-  --color-selected-bg: #352a5c;
-  --color-accent: #a370ff;
-  --color-accent-text: #14131a;
-  --color-diff-add-bg: #0f2b1a;
-  --color-diff-add-text: #4ade80;
-  --color-diff-remove-bg: #2b1013;
-  --color-diff-remove-text: #f87171;
-  --color-danger: #2b1013;
-  --color-danger-text: #f87171;
+  --color-bg: #23262c;
+  --color-bg-subtle: #1e2126;
+  --color-surface: #2a2e35;
+  --color-chrome: #1b1d22;
+  --color-control: #31353d;
+  --color-control-hover: #3b404a;
+  --color-border: #2f333a;
+  --color-text: #d9dce1;
+  --color-text-muted: #8b919b;
+  --color-selected-bg: #343944;
+  --color-accent: #f2a23c;
+  --color-accent-text: #1b1d22;
+  --color-diff-add-bg: #233325;
+  --color-diff-add-text: #9fd38a;
+  --color-diff-remove-bg: #3a2427;
+  --color-diff-remove-text: #f09389;
+  --color-danger: #3a2427;
+  --color-danger-text: #f09389;
   --color-danger-bg: var(--color-danger);
-  --color-success-bg: #0f2b1a;
-  --color-success-text: #4ade80;
-  --color-warning-bg: #33290a;
-  --color-warning-text: #fbbf24;
-  --color-info-bg: #0d2438;
-  --color-info-text: #7cc4fa;
-  --color-scrim: rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shiki-token-constant: #79b8ff;
-  --shiki-token-string: #9ecbff;
-  --shiki-token-comment: #959da5;
-  --shiki-token-keyword: #f97583;
-  --shiki-token-parameter: #e1e4e8;
-  --shiki-token-function: #b392f0;
-  --shiki-token-string-expression: #85e89d;
-  --shiki-token-punctuation: #e1e4e8;
-  --shiki-token-link: #9ecbff;
+  --color-success-bg: #233325;
+  --color-success-text: #9fd38a;
+  --color-warning-bg: #3a3122;
+  --color-warning-text: #f2c66d;
+  --color-info-bg: #22303e;
+  --color-info-text: #8cc0ea;
+  --color-scrim: rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shiki-token-constant: #f9ae58;
+  --shiki-token-string: #99c794;
+  --shiki-token-comment: #7c8591;
+  --shiki-token-keyword: #c594c5;
+  --shiki-token-parameter: #d9dce1;
+  --shiki-token-function: #6699cc;
+  --shiki-token-string-expression: #99c794;
+  --shiki-token-punctuation: #a8afba;
+  --shiki-token-link: #5fb3b3;
 }

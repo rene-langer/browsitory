@@ -1,7 +1,6 @@
-// Shared by CommitLaneGraphic.tsx (branch-lane graphic) and LaneBraid.tsx (header
-// signature strip) — the header deliberately foreshadows the branch graph using the
-// same six hues in the same order.
-export const LANE_COLORS = ["#e36209", "#1a7f37", "#0969da", "#8250df", "#cf222e", "#bf8700"];
+// Used by CommitLaneGraphic.tsx (branch-lane graphic) and BranchTree's swatches. Mid-tone,
+// slightly muted hues so the graph reads on both the light and dark palettes without shouting.
+export const LANE_COLORS = ["#e8833a", "#6aa84f", "#4f86c6", "#a66bb5", "#d9534f", "#3a9e9e"];
 
 // A branch's actual lane in CommitGraph is assigned dynamically by the graph layout algorithm
 // and shifts as history changes, so BranchTree — which has no access to that layout — instead

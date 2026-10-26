@@ -12,7 +12,6 @@ import { FileHistoryList } from "./components/FileHistoryList";
 import { SyncBar } from "./components/SyncBar";
 import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import { DiffPane } from "./components/DiffPane";
-import { LaneBraid } from "./components/LaneBraid";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { RepoPicker } from "./components/RepoPicker";
@@ -952,7 +951,6 @@ function AppContent({
           <Sparkles size={16} aria-hidden="true" />
         </button>
       </header>
-      <LaneBraid />
       {openRepos.restoreError !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
