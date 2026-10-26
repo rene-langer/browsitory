@@ -17,6 +17,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The selected changed file is marked by an accent edge instead of a tinted block; Commit is the
   one accent-filled button. Commit summaries use the UI font; branch labels are flat chips.
 - The command palette and other overlays open near the top of the window.
+- Denser branch tree: folders and branches share one even 22px row height with no gaps between
+  folders, a tighter indent, and each branch's "…" menu shows on hover or focus.
 
 ## [0.3.0] - 2026-10-21
 
