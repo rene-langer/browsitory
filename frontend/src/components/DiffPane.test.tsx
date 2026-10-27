@@ -1664,3 +1664,117 @@ describe("DiffPane diff options contract", () => {
     });
   });
 });
+
+describe("DiffPane stash view", () => {
+  const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+  const stashActions = (overrides: Partial<NonNullable<React.ComponentProps<typeof DiffPane>["stashActions"]>> = {}) => ({
+    onApply: vi.fn(),
+    onPop: vi.fn(),
+    onDrop: vi.fn(),
+    restoreIndex: true,
+    onSetRestoreIndex: vi.fn(),
+    disabledReason: null,
+    ...overrides,
+  });
+
+  function renderStash(
+    files: { tracked: string[]; untracked: string[]; untrackedCommitId: string | null },
+    actions = stashActions(),
+  ) {
+    const getCommitDiff = vi.fn(async () => []);
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => files),
+      getCommitDiff,
+      getBlame: async () => [],
+    });
+    renderCommit(client, "s0", { stashes: [stash], stashActions: actions });
+    return { getCommitDiff, client, actions };
+  }
+
+  it("shows the stash's changes and untracked files, each diffed against its own commit", async () => {
+    const { getCommitDiff, client } = renderStash({ tracked: ["a.txt"], untracked: ["new.txt"], untrackedCommitId: "u1" });
+
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    expect(within(section).getByRole("heading", { name: "On main: wip" })).toBeInTheDocument();
+    expect(section).toHaveTextContent("stash@{0}");
+    expect(await within(section).findByText("Changes (1)")).toBeInTheDocument();
+    expect(within(section).getByText("Untracked (1)")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "s0", "a.txt", expect.anything());
+      expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "u1", "new.txt", expect.anything());
+    });
+    expect(client.getStashFiles).toHaveBeenCalledWith(TEST_REPO_PATH, "s0");
+    expect(within(section).queryByRole("button", { name: /History of/ })).toBeNull();
+  });
+
+  it("hides the Untracked group when the stash has none", async () => {
+    renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
+
+    expect(await screen.findByText("Changes (1)")).toBeInTheDocument();
+    expect(screen.queryByText(/Untracked \(/)).toBeNull();
+  });
+
+  it("says when a stash has no file changes", async () => {
+    renderStash({ tracked: [], untracked: [], untrackedCommitId: null });
+
+    expect(await screen.findByText("This stash has no file changes.")).toBeInTheDocument();
+  });
+
+  it("applies, pops and drops (after confirming) from the toolbar", async () => {
+    const { actions } = renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
+    const section = await screen.findByRole("region", { name: "Stash details" });
+
+    fireEvent.click(within(section).getByRole("button", { name: "Apply" }));
+    expect(actions.onApply).toHaveBeenCalledWith(0);
+    fireEvent.click(within(section).getByRole("button", { name: "Pop" }));
+    expect(actions.onPop).toHaveBeenCalledWith(0);
+
+    fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
+    expect(actions.onDrop).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Drop stash On main: wip", hidden: true });
+    expect(dialog).toHaveTextContent('Drop "On main: wip"? This cannot be undone.');
+    fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash", hidden: true }));
+    expect(actions.onDrop).toHaveBeenCalledWith(0);
+  });
+
+  it("reflects and toggles Restore staged changes", async () => {
+    const { actions } = renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
+    const checkbox = await screen.findByRole("checkbox", { name: "Restore staged changes" });
+
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+
+    expect(actions.onSetRestoreIndex).toHaveBeenCalledWith(false);
+  });
+
+  it("disables Apply and Pop with the reason, keeping Drop", async () => {
+    renderStash(
+      { tracked: ["a.txt"], untracked: [], untrackedCommitId: null },
+      stashActions({ disabledReason: "Unstage or commit staged changes first." }),
+    );
+    const section = await screen.findByRole("region", { name: "Stash details" });
+
+    for (const name of ["Apply", "Pop"]) {
+      expect(within(section).getByRole("button", { name })).toBeDisabled();
+      expect(within(section).getByRole("button", { name })).toHaveAttribute("title", "Unstage or commit staged changes first.");
+    }
+    expect(within(section).getByRole("button", { name: "Drop…" })).toBeEnabled();
+  });
+
+  it("shows a load failure with Retry", async () => {
+    let fail = true;
+    const client = fakeClient({
+      getStashFiles: async () => {
+        if (fail) throw new Error("No stash with id s0.");
+        return { tracked: ["a.txt"], untracked: [], untrackedCommitId: null };
+      },
+      getCommitDiff: async () => [],
+    });
+    renderCommit(client, "s0", { stashes: [stash], stashActions: stashActions() });
+
+    expect(await screen.findByText(/No stash with id s0\./)).toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    expect(await screen.findByText("Changes (1)")).toBeInTheDocument();
+  });
+});

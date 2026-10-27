@@ -712,6 +712,55 @@ describe("App", () => {
       });
     }
 
+    it.each([
+      ["Pop", { kind: "Applied" as const }, "Stash popped"],
+      ["Apply", { kind: "Applied" as const }, "Stash applied"],
+      ["Pop", { kind: "Conflicted" as const, files: ["a.txt"] }, "Stash applied with conflicts; the stash was kept. Resolve the files, then drop it."],
+      ["Apply", { kind: "Conflicted" as const, files: ["a.txt"] }, "Stash applied with conflicts. Resolve the files."],
+    ])("%s from the Stashes panel shows its outcome toast (%o)", async (button, outcome, toast) => {
+      localStorage.clear();
+      const popStash = vi.fn(async () => outcome);
+      const applyStash = vi.fn(async () => outcome);
+      render(
+        <App
+          client={stashClient({
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+            popStash,
+            applyStash,
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
+      const row = (await screen.findByText("On main: wip")).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: button }));
+
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+      expect(button === "Pop" ? popStash : applyStash).toHaveBeenCalledWith("/repos/a", 0, true);
+      localStorage.clear();
+    });
+
+    it("disables stash Apply and Pop while something is staged", async () => {
+      localStorage.clear();
+      render(
+        <App
+          client={stashClient({
+            getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
+      const row = (await screen.findByText("On main: wip")).closest("li")!;
+      await waitFor(() => expect(within(row).getByRole("button", { name: "Pop" })).toBeDisabled());
+      expect(within(row).getByRole("button", { name: "Apply" })).toHaveAttribute(
+        "title",
+        "Unstage or commit staged changes first.",
+      );
+      localStorage.clear();
+    });
+
     it("stashes everything from the Stash button", async () => {
       const saveStash = vi.fn(async () => {});
       render(<App client={stashClient({ saveStash })} />);

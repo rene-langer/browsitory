@@ -287,6 +287,15 @@ function RepoWorkspace({
         : appState.state.rebaseProgress !== null
           ? "A rebase is in progress."
           : null;
+  // Stash Apply/Pop: libgit2 refuses while the index differs from HEAD or has conflicts, so say
+  // what to do instead of letting the backend error.
+  const stashApplyDisabledReason: string | null = appState.state.status.some((entry) => entry.kind === "Conflicted")
+    ? "Resolve conflicts first."
+    : appState.state.status.some((entry) => entry.staged)
+      ? "Unstage or commit staged changes first."
+      : repositoryOperationDisabled
+        ? operationDisabledReason
+        : null;
 
   // Positive feedback (AUD-2026-09-20-FB-003). The mutation runner swallows failures into
   // `state.error`, so success is detected as "pending fell back to false with no error" after a
@@ -331,6 +340,18 @@ function RepoWorkspace({
     else if (outcome.kind === "Squashed") pushToast(`Squashed ${branchName}. Review and commit.`);
   }, [mergeOutcome, pushToast]);
   const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
+  const stashOutcome = appState.state.stashOutcome;
+  useEffect(() => {
+    if (stashOutcome === null) return;
+    const { action, outcome } = stashOutcome;
+    if (outcome.kind === "Applied") pushToast(action === "pop" ? "Stash popped" : "Stash applied");
+    else
+      pushToast(
+        action === "pop"
+          ? "Stash applied with conflicts; the stash was kept. Resolve the files, then drop it."
+          : "Stash applied with conflicts. Resolve the files.",
+      );
+  }, [stashOutcome, pushToast]);
 
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
@@ -588,7 +609,11 @@ function RepoWorkspace({
                 stashes={appState.state.stashes}
                 onSelectRow={appState.selectRow}
                 onApplyStash={appState.applyStash}
+                onPopStash={appState.popStash}
                 onDropStash={appState.dropStash}
+                restoreIndex={appState.state.stashRestoreIndex}
+                onSetRestoreIndex={appState.setStashRestoreIndex}
+                applyDisabledReason={stashApplyDisabledReason}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />
@@ -757,6 +782,15 @@ function RepoWorkspace({
                 selectedRow={appState.state.selectedRow}
                 commits={diffPaneCommits}
                 fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
+                stashes={appState.state.stashes}
+                stashActions={{
+                  onApply: appState.applyStash,
+                  onPop: appState.popStash,
+                  onDrop: appState.dropStash,
+                  restoreIndex: appState.state.stashRestoreIndex,
+                  onSetRestoreIndex: appState.setStashRestoreIndex,
+                  disabledReason: stashApplyDisabledReason,
+                }}
                 onOpenFileHistory={fileHistory.open}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}

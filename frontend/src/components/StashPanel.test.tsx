@@ -16,7 +16,11 @@ function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) 
       stashes={stashes}
       onSelectRow={vi.fn()}
       onApplyStash={vi.fn()}
+      onPopStash={vi.fn()}
       onDropStash={vi.fn()}
+      restoreIndex={true}
+      onSetRestoreIndex={vi.fn()}
+      applyDisabledReason={null}
       operationDisabled={false}
       operationDisabledReason={null}
       {...overrides}
@@ -108,5 +112,48 @@ describe("StashPanel", () => {
     for (const button of screen.getAllByText("Drop")) {
       expect(button).toHaveAttribute("title", "A transfer is in progress.");
     }
+  });
+});
+
+describe("StashPanel pop and restore staged changes", () => {
+  it("pops a stash with its index, not selecting it", () => {
+    const onPopStash = vi.fn();
+    const onSelectRow = vi.fn();
+    renderPanel({ onPopStash, onSelectRow });
+
+    const row = screen.getByText(/stash1fix/).closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Pop" }));
+
+    expect(onPopStash).toHaveBeenCalledWith(1);
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
+  it("orders the row actions Apply, Pop, Drop", () => {
+    renderPanel();
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Apply", "Pop", "Drop"]);
+  });
+
+  it("shows and toggles Restore staged changes", () => {
+    const onSetRestoreIndex = vi.fn();
+    renderPanel({ restoreIndex: true, onSetRestoreIndex });
+
+    const checkbox = screen.getByRole("checkbox", { name: "Restore staged changes" });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+
+    expect(onSetRestoreIndex).toHaveBeenCalledWith(false);
+  });
+
+  it("disables Apply and Pop, not Drop, with the apply-disabled reason", () => {
+    renderPanel({ applyDisabledReason: "Unstage or commit staged changes first." });
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    for (const name of ["Apply", "Pop"]) {
+      const button = within(row).getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Unstage or commit staged changes first.");
+    }
+    expect(within(row).getByRole("button", { name: "Drop" })).toBeEnabled();
   });
 });
