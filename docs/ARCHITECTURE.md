@@ -109,7 +109,13 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   which may be another file with unsaved edits or a file outside the repository. Likewise any
   path below a symlinked directory. `save_path_limited_stash` refuses a path with a symlinked
   ancestor ("'d/f' is beyond a symbolic link.") before writing anything, and removes a selected
-  symlink before its checkout (the link is in the stash; Pop restores it).
+  symlink before its checkout (the link is in the stash; Pop restores it). The revert removes
+  untracked files *before* checking out tracked paths (a checkout can turn a directory back into
+  HEAD's symlink, after which `l/f` resolves into the link's target), and every removal re-checks
+  for a symlinked ancestor at that moment and skips rather than follows.
+- libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
+  file whose directory is a symlink in HEAD; `apply_stash` maps it to
+  `StashError::SymlinkReplacedByDirectory` (nothing is written, the stash is kept).
 - `Repository::stash_pop` drops the stash even when the apply left conflicts; Browsitory applies
   and drops itself. `stash_apply` refuses whenever the index differs from HEAD
   (`ErrorCode::Uncommitted`); `stash::apply_stash` maps that and the other refusals to

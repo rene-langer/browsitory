@@ -456,6 +456,12 @@ pub fn apply_stash(
             (ErrorCode::Uncommitted, _) => StashError::StagedChanges,
             (ErrorCode::Conflict, ErrorClass::Checkout) => StashError::WouldOverwrite,
             (ErrorCode::Conflict, _) => StashError::IndexConflict,
+            // libgit2's stash apply trips over a stashed file whose directory is a symlink in
+            // HEAD (the directory had replaced a tracked symlink when the file was stashed) and
+            // looks up a null blob id. Nothing has been written at that point.
+            (ErrorCode::NotFound, ErrorClass::Odb) if error.message().contains("null OID") => {
+                StashError::SymlinkReplacedByDirectory
+            }
             _ => StashError::Git(error),
         })?;
     let mut files = Vec::new();

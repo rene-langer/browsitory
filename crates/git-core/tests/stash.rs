@@ -954,3 +954,36 @@ fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_i
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn popping_a_file_stashed_from_a_directory_that_replaced_a_symlink_is_a_clear_error() {
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("f"), "outside\n").unwrap();
+    let (dir, mut repo) = symlink_replaced_by_directory(outside.path());
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l/f".into()])).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("f")).unwrap(),
+        "outside\n"
+    );
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::SymlinkReplacedByDirectory),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal."
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("f")).unwrap(),
+        "outside\n"
+    );
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert!(!dir.path().join("l").exists());
+}
