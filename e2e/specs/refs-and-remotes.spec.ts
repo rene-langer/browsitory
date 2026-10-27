@@ -36,7 +36,9 @@ function localHas(ref: string): boolean {
 }
 
 // Right-click via a synthetic DOM event (see rebase.spec.ts on why not `.click({ button: "right" })`).
-async function contextMenu(element: WebdriverIO.Element) {
+async function contextMenu(selector: string) {
+  const element = await $(selector);
+  await element.waitForExist({ timeout: 10000 });
   await browser.execute((el) => {
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
   }, element);
@@ -76,9 +78,7 @@ describe("Browsitory refs and remotes", () => {
     const pushedTip = git(E2E_REPO_PATH, "rev-parse", BRANCH);
 
     // Local row for e2e-publish, found by its unique swatch label (remote rows say "<remote>/<name>").
-    const localRow = await $(`//button[@aria-label="Show ${BRANCH} in graph"]/ancestor::li[1]`);
-    await localRow.waitForExist({ timeout: 10000 });
-    await contextMenu(localRow);
+    await contextMenu(`//button[@aria-label="Show ${BRANCH} in graph"]/ancestor::li[1]`);
     const pushTo = await $("button=Push to…");
     await pushTo.waitForEnabled({ timeout: 10000 });
     await pushTo.click();
@@ -122,9 +122,7 @@ describe("Browsitory refs and remotes", () => {
     const remoteFolder = await $(`button=${REMOTE}`);
     await remoteFolder.waitForExist({ timeout: 10000 });
     await remoteFolder.click();
-    const remoteRow = await $(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]/ancestor::li[1]`);
-    await remoteRow.waitForExist({ timeout: 10000 });
-    await contextMenu(remoteRow);
+    await contextMenu(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]/ancestor::li[1]`);
     const deleteItem = await $(`button=Delete ${REMOTE}/${BRANCH}…`);
     await deleteItem.waitForEnabled({ timeout: 10000 });
     await deleteItem.click();

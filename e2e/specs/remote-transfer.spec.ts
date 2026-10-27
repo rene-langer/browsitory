@@ -245,10 +245,31 @@ describe("Browsitory remote transfer", () => {
       cwd: E2E_REPO_PATH,
       encoding: "utf8",
     }).trim();
-    const remoteHeadBeforePush = execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], {
-      cwd: BARE_REMOTE_PATH,
-      encoding: "utf8",
-    }).trim();
+    // Push targets the upstream's branch name when the upstream lives on the pushed-to remote
+    // (the earlier fast-forward test set `transfer-origin/main` as upstream), else the same name.
+    const configured = (key: string) => {
+      try {
+        return execFileSync("git", ["config", key], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+      } catch {
+        return null;
+      }
+    };
+    const pushTarget =
+      configured(`branch.${currentBranch}.remote`) === "transfer-origin"
+        ? (configured(`branch.${currentBranch}.merge`) ?? `refs/heads/${currentBranch}`).replace(/^refs\/heads\//, "")
+        : currentBranch;
+    const bareTip = (branch: string) => {
+      try {
+        return execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
+          cwd: BARE_REMOTE_PATH,
+          encoding: "utf8",
+        }).trim();
+      } catch {
+        return null;
+      }
+    };
+    const remoteHeadBeforePush = bareTip(pushTarget);
+    const sameNameBeforePush = bareTip(currentBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, BRANCH_PUSH_FILE), "branch push\n");
     execFileSync("git", ["add", BRANCH_PUSH_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["commit", "-m", "e2e: branch push change"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
@@ -256,10 +277,12 @@ describe("Browsitory remote transfer", () => {
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
     await clickRemoteContextItem("transfer-origin", "Push current branch here");
-    await browser.waitUntil(
-      () => execFileSync("git", ["rev-parse", `refs/heads/${currentBranch}`], { cwd: BARE_REMOTE_PATH, encoding: "utf8" }).trim() === localHead,
-      { timeout: 10000, timeoutMsg: "expected Push to advance the remote branch" },
-    );
+    await browser.waitUntil(() => bareTip(pushTarget) === localHead, {
+      timeout: 10000,
+      timeoutMsg: "expected Push to advance the remote branch",
+    });
+    // A differently named upstream is the target; the same-name remote branch is left alone.
+    if (pushTarget !== currentBranch) expect(bareTip(currentBranch)).toBe(sameNameBeforePush);
 
     const createTagButton = await $("button=Create tag");
     await createTagButton.waitForEnabled({ timeout: 10000 });

@@ -65,7 +65,8 @@ describe("Browsitory worktrees", () => {
     await createForm.waitForExist({ timeout: 10000 });
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist({ timeout: 10000 });
-    const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\)$/, "");
+    // The row reads "<name> (current)" optionally followed by ahead/behind counts (↑n ↓m).
+    const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\).*$/s, "");
     const nameInput = await $("aria/Worktree name");
     await nameInput.setValue(WORKTREE_NAME);
     await (await $("aria/Worktree path")).setValue(WORKTREE_PATH);
@@ -79,11 +80,12 @@ describe("Browsitory worktrees", () => {
     await expect(openLinkedWorktree).toBeExisting();
 
     await openLinkedWorktree.click();
-    await expect(await activeCurrentBranchButton()).toHaveText(`${WORKTREE_BRANCH_LEAF} (current)`);
+    // The row may also carry ahead/behind counts (↑n ↓m) after the name.
+    await expect(await activeCurrentBranchButton()).toHaveText(expect.stringContaining(`${WORKTREE_BRANCH_LEAF} (current)`));
     const openMainWorktree = await activeElement(`button=Open ${E2E_REPO_PATH}`);
 
     await openMainWorktree.click();
-    await expect(await activeCurrentBranchButton()).toHaveText(`${mainBranch} (current)`);
+    await expect(await activeCurrentBranchButton()).toHaveText(expect.stringContaining(`${mainBranch} (current)`));
     const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}`);
 
     await removeLinkedWorktree.click();
