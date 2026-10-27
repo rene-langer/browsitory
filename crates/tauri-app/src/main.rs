@@ -3,7 +3,7 @@
 mod commands;
 
 use commands::{
-    abort_merge, abort_rebase, add_remote, amend_commit, apply_stash, cancel_clone,
+    abort_merge, abort_rebase, add_remote, amend_commit, apply_stash, cancel_clone, cancel_search,
     cancel_transfer, checkout_commit, cherry_pick, clear_current_upstream, clone_repo, close_repo,
     commit, commits_since, create_branch, create_pull_request, create_tag, create_worktree,
     delete_branch, delete_tag, delete_workspace, detect_forge_repository, discard_all_unstaged,
@@ -21,11 +21,11 @@ use commands::{
     rebase_continue, redo_last, remove_remote, remove_worktree, rename_branch, rename_remote,
     reset_to_commit, resolve_add_delete_conflict, resolve_conflict, restore_reflog_entry,
     revert_commit, save_forge_token, save_https_credential, save_stash, save_workspace,
-    scan_repos_in_root, set_current_upstream, set_diff_settings, set_graph_branch_selection,
-    set_graph_remote_branch_selection, set_last_seen_version, set_remote_auth_mode, stage_file,
-    stage_hunk, stage_lines, start_merge, start_rebase, switch_branch, undo_last, unstage_file,
-    unstage_hunk, unstage_lines, update_remote_urls, update_submodule, update_workspace, AppState,
-    CloneState,
+    scan_repos_in_root, search_commits, set_current_upstream, set_diff_settings,
+    set_graph_branch_selection, set_graph_remote_branch_selection, set_last_seen_version,
+    set_remote_auth_mode, stage_file, stage_hunk, stage_lines, start_merge, start_rebase,
+    switch_branch, undo_last, unstage_file, unstage_hunk, unstage_lines, update_remote_urls,
+    update_submodule, update_workspace, AppState, CloneState,
 };
 
 fn main() {
@@ -72,6 +72,8 @@ fn main() {
             get_commit_rename_diff,
             get_commit_files,
             get_file_history,
+            search_commits,
+            cancel_search,
             get_commit_message,
             get_commit_signature,
             stage_file,

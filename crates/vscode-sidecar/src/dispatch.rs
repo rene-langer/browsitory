@@ -68,6 +68,8 @@ pub fn dispatch(
         "get_working_diff" => get_working_diff(params, repos),
         "get_commit_diff" => get_commit_diff(params, repos),
         "get_file_history" => get_file_history(params, repos),
+        "search_commits" => search_commits(params, repos),
+        "cancel_search" => cancel_search(params, repos),
         "get_commit_rename_diff" => get_commit_rename_diff(params, repos),
         "list_recent_repos" => list_recent_repos(),
         "list_open_repos" => list_open_repos_handler(),
@@ -401,6 +403,50 @@ fn get_file_history(params: Value, repos: &Repos) -> Result<Value, String> {
         })
         .collect();
     serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchCommitsParams {
+    repo_path: String,
+    query: String,
+    refs: Option<Vec<String>>,
+    cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchPageDto {
+    commits: Vec<GraphCommitDto>,
+    // Serialized as `null` (not omitted) — the TS type is `string | null`.
+    next_cursor: Option<String>,
+    scanned: usize,
+}
+
+fn search_commits(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: SearchCommitsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let page = worker_handle(repos, &params.repo_path)?.search_commits(
+        params.query,
+        params.refs,
+        params.cursor,
+    )?;
+    serde_json::to_value(SearchPageDto {
+        commits: page.commits.into_iter().map(GraphCommitDto::from).collect(),
+        next_cursor: page.next_cursor,
+        scanned: page.scanned,
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Stops the repo's in-flight search, if any. Every request runs on its own thread (see
+/// `main.rs`), and the cancel goes through the worker's side channel, so it never waits for the
+/// search it stops.
+fn cancel_search(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.cancel_search();
+    Ok(Value::Null)
 }
 
 #[derive(Deserialize)]

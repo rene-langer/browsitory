@@ -18,6 +18,7 @@ mod merge;
 mod rebase;
 mod reflog;
 mod remote;
+mod search;
 mod stash;
 mod status;
 mod submodule;
@@ -41,6 +42,7 @@ pub use merge::{
 pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use remote::*;
+pub use search::{cancel_search, search_commits};
 pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
 pub use status::{
     commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
@@ -485,6 +487,26 @@ impl From<git_core::history::FileHistoryEntry> for FileHistoryEntryDto {
             commit: GraphCommitDto::from(e.commit),
             path: e.path,
             old_path: e.old_path,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchPageDto {
+    pub commits: Vec<GraphCommitDto>,
+    // Serialized as `null` (not omitted) once the walk is exhausted — the TS type is
+    // `string | null`.
+    pub next_cursor: Option<String>,
+    pub scanned: usize,
+}
+
+impl From<git_core::search::SearchPage> for SearchPageDto {
+    fn from(p: git_core::search::SearchPage) -> Self {
+        SearchPageDto {
+            commits: p.commits.into_iter().map(GraphCommitDto::from).collect(),
+            next_cursor: p.next_cursor,
+            scanned: p.scanned,
         }
     }
 }
@@ -1208,7 +1230,7 @@ mod tests {
         transfer_event_payload, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
         OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        ResetModeDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
+        ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
         WorktreeInfoDto,
     };
 
@@ -1354,6 +1376,39 @@ mod tests {
         assert!(plain.as_object().unwrap().contains_key("oldPath"));
         assert_eq!(plain["commit"]["shortId"], "abc123");
         assert_eq!(serde_json::to_value(renamed).unwrap()["oldPath"], "old.txt");
+    }
+
+    #[test]
+    fn search_page_dto_serializes_camel_case_and_null_cursor() {
+        let commit = GraphCommit {
+            id: "abc123".into(),
+            short_id: "abc123".into(),
+            summary: "Hit".into(),
+            author_name: "Rene".into(),
+            author_email: "rene@example.com".into(),
+            timestamp: 1_700_000_000,
+            parent_ids: vec![],
+            branch_refs: vec![],
+            remote_branch_refs: vec![],
+        };
+        let done = serde_json::to_value(SearchPageDto::from(git_core::search::SearchPage {
+            commits: vec![commit.clone()],
+            next_cursor: None,
+            scanned: 42,
+        }))
+        .unwrap();
+        assert_eq!(done["nextCursor"], serde_json::Value::Null);
+        assert!(done.as_object().unwrap().contains_key("nextCursor"));
+        assert_eq!(done["scanned"], 42);
+        assert_eq!(done["commits"][0]["shortId"], "abc123");
+
+        let more = serde_json::to_value(SearchPageDto::from(git_core::search::SearchPage {
+            commits: vec![],
+            next_cursor: Some("20000:0123456789abcdef".into()),
+            scanned: 20_000,
+        }))
+        .unwrap();
+        assert_eq!(more["nextCursor"], "20000:0123456789abcdef");
     }
 
     #[test]
