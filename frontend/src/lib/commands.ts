@@ -8,6 +8,11 @@ export interface AppCommands {
   onNewRepository: () => void;
 }
 
+export interface SearchCommands {
+  /** Focuses the commit search field (closing file history first). */
+  onSearchCommits(): void;
+}
+
 export interface UndoCommands {
   undoLabel: string | null;
   redoLabel: string | null;
@@ -159,6 +164,7 @@ export function buildCommands(
   diffCommands?: DiffCommands,
   appCommands?: AppCommands,
   undoCommands?: UndoCommands,
+  searchCommands?: SearchCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -198,6 +204,16 @@ export function buildCommands(
     state.transfer !== null ||
     state.mergeMessage !== null ||
     state.rebaseProgress !== null;
+
+  // Read-only, so available even while an operation is running.
+  if (searchCommands !== undefined) {
+    commands.push({
+      id: "search-commits",
+      label: "Search commits",
+      keywords: ["search", "find", "filter", "author", "grep", "log"],
+      run: searchCommands.onSearchCommits,
+    });
+  }
 
   if (!repositoryOperationDisabled && undoCommands !== undefined) {
     if (undoCommands.undoLabel !== null) {

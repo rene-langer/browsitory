@@ -9,6 +9,8 @@ import { ShortcutSheet } from "./components/ShortcutSheet";
 const NARROW_BREAKPOINT = 900;
 import { CommitGraph } from "./components/CommitGraph";
 import { FileHistoryList } from "./components/FileHistoryList";
+import { CommitSearchBar } from "./components/CommitSearchBar";
+import { CommitSearchResults } from "./components/CommitSearchResults";
 import { SyncBar } from "./components/SyncBar";
 import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import { DiffPane } from "./components/DiffPane";
@@ -41,6 +43,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
+import { useCommitSearch } from "./state/useCommitSearch";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -96,15 +99,35 @@ function RepoWorkspace({
     appState.state.selectedRow,
     appState.selectRow,
   );
+  const commitSearch = useCommitSearch(
+    client,
+    repoPath,
+    appState.state.refreshGeneration,
+    appState.state.graphBranchSelection,
+    appState.state.selectedRow,
+    appState.selectRow,
+  );
+  const [searchFocusRequested, setSearchFocusRequested] = useState(false);
+  const clearSearchFocusRequest = useCallback(() => setSearchFocusRequested(false), []);
+  const searchResultsRef = useRef<HTMLUListElement>(null);
+  const closeFileHistory = fileHistory.close;
+  const fileHistoryOpen = fileHistory.history !== null;
+  // Ctrl/Cmd+F on a commit list, or the palette: the field is hidden while file history is
+  // open, so close that first.
+  const requestSearchFocus = useCallback(() => {
+    if (fileHistoryOpen) closeFileHistory();
+    setSearchFocusRequested(true);
+  }, [fileHistoryOpen, closeFileHistory]);
   const selectedRow = appState.state.selectedRow;
   const historyEntry =
     fileHistory.history !== null && typeof selectedRow === "object"
       ? fileHistory.history.entries.find((e) => e.commit.id === selectedRow.commitId) ?? null
       : null;
   const historyEntries = fileHistory.history?.entries;
+  const searchCommits = commitSearch.results?.commits;
   const diffPaneCommits = useMemo(
-    () => historyEntries?.map((e) => e.commit) ?? appState.state.commits,
-    [historyEntries, appState.state.commits],
+    () => historyEntries?.map((e) => e.commit) ?? searchCommits ?? appState.state.commits,
+    [historyEntries, searchCommits, appState.state.commits],
   );
   const handleCommitDraftChange = useCallback(
     (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
@@ -416,6 +439,7 @@ function RepoWorkspace({
                 onUndo: handleUndo,
                 onRedo: handleRedo,
               },
+              { onSearchCommits: requestSearchFocus },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -601,30 +625,54 @@ function RepoWorkspace({
                   onRetry={fileHistory.retry}
                 />
               ) : (
-                <CommitGraph
-                  hasMore={appState.state.hasMoreHistory}
-                  onLoadMore={() => void appState.loadMoreHistory()}
-                  status={appState.state.status}
-                  commits={appState.state.commits}
-                  selectedRow={appState.state.selectedRow}
-                  pending={repositoryOperationDisabled}
-                  onSelectRow={appState.selectRow}
-                  onBranchFromCommit={appState.openCreateBranchDraft}
-                  onRebaseFromCommit={appState.openRebasePlanner}
-                  onRebaseSelection={appState.openRebaseSelection}
-                  headInfo={appState.state.headInfo}
-                  currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
-                  onCherryPick={announce("Cherry-picked", appState.cherryPick)}
-                  onRevert={announce("Reverted", appState.revertCommit)}
-                  onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
-                  onResetToCommit={announce("Reset branch", appState.resetToCommit)}
-                  onEditHeadMessage={() => {
-                    appState.selectRow("uncommitted");
-                    appState.setAmendMode(true);
-                    setFocusCommitMessage(true);
-                  }}
-                  graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
-                />
+                <>
+                  <CommitSearchBar
+                    query={commitSearch.query}
+                    onQueryChange={commitSearch.setQuery}
+                    onClose={commitSearch.close}
+                    onFocusResults={() => searchResultsRef.current?.focus()}
+                    focusRequested={searchFocusRequested}
+                    onFocusHandled={clearSearchFocusRequest}
+                  />
+                  {commitSearch.results !== null ? (
+                    <CommitSearchResults
+                      results={commitSearch.results}
+                      selectedRow={appState.state.selectedRow}
+                      onSelectRow={appState.selectRow}
+                      onClose={commitSearch.close}
+                      onLoadMore={commitSearch.loadMore}
+                      onRetry={commitSearch.retry}
+                      onRequestSearch={requestSearchFocus}
+                      listRef={searchResultsRef}
+                    />
+                  ) : (
+                    <CommitGraph
+                      onRequestSearch={requestSearchFocus}
+                      hasMore={appState.state.hasMoreHistory}
+                      onLoadMore={() => void appState.loadMoreHistory()}
+                      status={appState.state.status}
+                      commits={appState.state.commits}
+                      selectedRow={appState.state.selectedRow}
+                      pending={repositoryOperationDisabled}
+                      onSelectRow={appState.selectRow}
+                      onBranchFromCommit={appState.openCreateBranchDraft}
+                      onRebaseFromCommit={appState.openRebasePlanner}
+                      onRebaseSelection={appState.openRebaseSelection}
+                      headInfo={appState.state.headInfo}
+                      currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                      onCherryPick={announce("Cherry-picked", appState.cherryPick)}
+                      onRevert={announce("Reverted", appState.revertCommit)}
+                      onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                      onResetToCommit={announce("Reset branch", appState.resetToCommit)}
+                      onEditHeadMessage={() => {
+                        appState.selectRow("uncommitted");
+                        appState.setAmendMode(true);
+                        setFocusCommitMessage(true);
+                      }}
+                      graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
+                    />
+                  )}
+                </>
               )}
               </>
             }

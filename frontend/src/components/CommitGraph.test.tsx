@@ -855,6 +855,28 @@ describe("CommitGraph — keyboard access", () => {
     return { ...utils, ...handlers, list: screen.getByRole("listbox") };
   }
 
+  it("asks for the search field on Ctrl/Cmd+F while the list has focus", () => {
+    const onRequestSearch = vi.fn();
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={chain}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onRequestSearch={onRequestSearch}
+      />,
+    );
+    const list = screen.getByRole("listbox", { name: "Commit history" });
+    fireEvent.keyDown(list, { key: "f", ctrlKey: true });
+    fireEvent.keyDown(list, { key: "F", metaKey: true });
+    expect(onRequestSearch).toHaveBeenCalledTimes(2);
+    expect(list.getAttribute("aria-keyshortcuts")).toContain("Control+F Meta+F");
+  });
+
   it("advertises its shortcuts", () => {
     const { list } = setup("uncommitted");
     expect(list.getAttribute("aria-keyshortcuts")).toContain("Enter");
