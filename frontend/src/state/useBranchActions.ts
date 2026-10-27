@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type {
@@ -29,7 +30,17 @@ export function useBranchActions(
   runOptimisticMutation: RunOptimisticMutation,
   runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
+  graphBranchSelection: string[] | null,
+  branchNames: string[],
 ): BranchActions {
+  // Read at mutation time, after the backend call succeeded (see deleteBranch/renameBranch).
+  const selectionRef = useRef(graphBranchSelection);
+  const branchNamesRef = useRef(branchNames);
+  useEffect(() => {
+    selectionRef.current = graphBranchSelection;
+    branchNamesRef.current = branchNames;
+  }, [graphBranchSelection, branchNames]);
+
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
       runOptimisticMutationWithMessage(
@@ -53,7 +64,16 @@ export function useBranchActions(
     (name: string, force: boolean) =>
       runOptimisticMutation(
         (prev) => ({ ...prev, branches: prev.branches.filter((branch) => branch.name !== name) }),
-        () => client.deleteBranch(repoPath, name, force),
+        async () => {
+          await client.deleteBranch(repoPath, name, force);
+          // A persisted selection naming the deleted branch would otherwise linger (#97).
+          const next = withoutBranch(
+            selectionRef.current,
+            name,
+            branchNamesRef.current.filter((candidate) => candidate !== name),
+          );
+          if (next !== null) await client.setGraphBranchSelection(repoPath, next);
+        },
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -64,7 +84,11 @@ export function useBranchActions(
           ...prev,
           branches: prev.branches.map((branch) => (branch.name === oldName ? { ...branch, name: newName } : branch)),
         }),
-        () => client.renameBranch(repoPath, oldName, newName),
+        async () => {
+          await client.renameBranch(repoPath, oldName, newName);
+          const next = withRenamedBranch(selectionRef.current, oldName, newName);
+          if (next !== null) await client.setGraphBranchSelection(repoPath, next);
+        },
       ),
     [client, runOptimisticMutation, repoPath],
   );

@@ -41,6 +41,9 @@ const BASE_STATE: AppState = {
   headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
   forcePushOffer: null,
   forcePushConfirm: null,
+  fetchPrune: null,
+  pushDialog: null,
+  deleteRemoteBranchDialog: null,
   amendMode: false,
   undoState: { undo: null, redo: null },
 };
