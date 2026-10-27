@@ -87,9 +87,11 @@ Show ahead/behind counts per local branch. Both frontends (Tauri app, VSCode ext
   `NonFastForward`, as today.
 - **`set_upstream` runs only after a successful push.** It writes `branch.<local>.remote` and
   `.merge = refs/heads/<remote_branch>` through a shared `set_branch_upstream` helper. That
-  helper is `set_current_upstream`'s body, generalized to any local branch:
-  `Branch::set_upstream`, with a raw config write when the tracking ref is missing. A failed push
-  leaves the config alone.
+  helper always writes the two config keys directly (after checking the remote and the local
+  branch exist), and `set_current_upstream` delegates to it. It does not use
+  `Branch::set_upstream`: that resolves `<remote>/<branch>` as a local branch first, so a local
+  branch literally named `origin/topic` made it write `remote = .` (found in review). A failed
+  push leaves the config alone.
 - **Push honors `push.default` (user decision, after review).** Pushing to the upstream's
   branch name unconditionally would push a branch `feat` created from `origin/main` (so it tracks
   `origin/main`) straight onto `origin/main`. One git-core rule, `resolve_push_target` /
@@ -120,11 +122,13 @@ Show ahead/behind counts per local branch. Both frontends (Tauri app, VSCode ext
   when pushing to the upstream's remote (no offer when that is null), else the local name.
 - **`delete_remote_branch` pushes `:refs/heads/<branch>` through `push_refs`.** It has
   negotiation-time cancel and the same rejection mapping. A refusal (protected branch, server
-  hook) is `RejectedRemoteRef`. On success it deletes `refs/remotes/<remote>/<branch>` if it is
-  still there. libgit2's push `update_tips` normally deletes it already, and the explicit delete
+  hook) is `RejectedRemoteRef`. On success it deletes the local tracking ref if it is still
+  there. That ref is wherever the remote's fetch refspecs map `refs/heads/<branch>`
+  (`Refspec::transform`), not the `refs/remotes/<remote>/<branch>` convention; when no refspec
+  covers the branch, no local ref is touched. libgit2's push `update_tips` normally deletes it already, and the explicit delete
   makes this independent of that. Local branches whose upstream was the deleted branch keep their
   config, like git's "gone" upstream. Their `ahead`/`behind` become `None`. `branch` must be a
-  valid name and not `HEAD`.
+  valid name and not `HEAD`, `@`, or a name starting with `refs/`, `-` or `+`.
 - **`prune: Option<bool>`, not `bool`.** `None` maps to `FetchPrune::Unspecified`, which lets
   libgit2 apply `remote.<name>.prune`, then `fetch.prune`, per remote. That is the roadmap's
   "default reads fetch.prune / remote.<name>.prune" with no code of ours. `Some(true)` maps to
