@@ -355,7 +355,7 @@ describe("amend", () => {
       headMessage: "previous message",
       pushed: false,
       onToggle: vi.fn(),
-      onAmend: vi.fn(),
+      onAmend: vi.fn(async () => true),
       ...overrides,
     };
     const onCommit = vi.fn(async () => true);
@@ -394,7 +394,7 @@ describe("amend", () => {
       headMessage: "previous message",
       pushed: false,
       onToggle: vi.fn(),
-      onAmend: vi.fn(),
+      onAmend: vi.fn(async () => true),
     };
     const { rerender } = render(<CommitBox {...props} amend={{ ...amend, on: false }} />);
     fireEvent.change(screen.getByLabelText("Commit message"), {
@@ -437,8 +437,23 @@ describe("amend draft safety", () => {
     headMessage: "previous message",
     pushed: false,
     onToggle: vi.fn(),
-    onAmend: vi.fn(),
+    onAmend: vi.fn(async () => true),
   };
+
+  it("amends once per submit and disables Amend while it runs", async () => {
+    let finish: (ok: boolean) => void = () => {};
+    const onAmend = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
+    render(<CommitBox {...base} amend={{ ...amend, on: true, onAmend }} />);
+    const box = await screen.findByDisplayValue("previous message");
+
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    expect(onAmend).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Amend" })).toBeDisabled();
+
+    finish(false);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Amend" })).toBeEnabled());
+  });
 
   it("survives a remount while amending and still restores the original draft", () => {
     let saved: CommitDraft | undefined;
@@ -467,7 +482,7 @@ describe("amend draft safety", () => {
   });
 
   it("keeps the typed amend message on submit and restores the draft once amend ends", () => {
-    const onAmend = vi.fn();
+    const onAmend = vi.fn(async () => true);
     const { rerender } = render(<CommitBox {...base} amend={{ ...amend, on: false, onAmend }} />);
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "my draft" } });
     rerender(<CommitBox {...base} amend={{ ...amend, on: true, onAmend }} />);

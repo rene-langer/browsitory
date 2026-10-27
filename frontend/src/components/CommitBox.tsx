@@ -85,7 +85,8 @@ export function CommitBox({
     headMessage: string | null;
     pushed: boolean;
     onToggle: (on: boolean) => void;
-    onAmend: (message: string) => unknown;
+    /** Resolves `true` once amended; Amend is disabled while it runs. */
+    onAmend: (message: string) => Promise<boolean>;
   };
 }) {
   const [message, setMessage] = useState(initialDraft?.message ?? "");
@@ -166,12 +167,13 @@ export function CommitBox({
 
   const commitIfReady = () => {
     if (amendOn) {
-      if (message.trim() === "") {
+      if (submitting || message.trim() === "") {
         return;
       }
       // Leave message and stash alone: on success amend mode turns off and the stashed draft
       // is restored; on failure the typed message stays put.
-      amend.onAmend(message);
+      setSubmitting(true);
+      void amend.onAmend(message).finally(() => setSubmitting(false));
       return;
     }
     if (disabled || submitting || message.trim() === "") {
@@ -253,7 +255,7 @@ export function CommitBox({
         <button
           className={styles.commitButton}
           onClick={commitIfReady}
-          disabled={amendOn ? message.trim() === "" : disabled || submitting || message.trim() === ""}
+          disabled={submitting || message.trim() === "" || (!amendOn && disabled)}
           aria-describedby={
             !amendOn && disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined
           }

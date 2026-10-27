@@ -388,6 +388,7 @@ export interface CommitHooksControls {
 
 const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] };
 const noop = () => {};
+const noAmend = async () => false;
 
 export function DiffPane({
   repoPath,
@@ -418,7 +419,7 @@ export function DiffPane({
   amendMode = false,
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
-  onAmendCommit = noop,
+  onAmendCommit = noAmend,
   focusCommitMessage = false,
   onCommitMessageFocused,
   commitHooks,
@@ -495,7 +496,7 @@ export function DiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => unknown;
+  onAmendCommit?: (message: string) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
@@ -633,7 +634,7 @@ function UncommittedDiffPane({
   amendMode = false,
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
-  onAmendCommit = noop,
+  onAmendCommit = noAmend,
   focusCommitMessage = false,
   onCommitMessageFocused,
   commitHooks,
@@ -688,7 +689,7 @@ function UncommittedDiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => unknown;
+  onAmendCommit?: (message: string) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
