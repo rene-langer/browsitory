@@ -105,14 +105,15 @@
   animation: accordion-body-in 120ms ease;
 }
 
+/* Opacity only, never `transform`: a transformed `.body` (even for one animation frame) becomes
+   the containing block for `position: fixed` descendants, so a sidebar ContextMenu opened
+   meanwhile is positioned relative to, and clipped by, this scroll box (issue #98). */
 @keyframes accordion-body-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
