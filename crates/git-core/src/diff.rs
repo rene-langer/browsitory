@@ -7,6 +7,13 @@ use thiserror::Error;
 pub enum DiffError {
     #[error("failed to compute diff: {0}")]
     Diff(#[from] git2::Error),
+    #[error("There is no commit checked out to compare with.")]
+    UnbornHead,
+    /// The short ref name (without `refs/heads/` / `refs/remotes/`).
+    #[error("{0} and HEAD have no common ancestor.")]
+    NoMergeBase(String),
+    #[error("No branch named \"{0}\".")]
+    UnknownRef(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +64,13 @@ impl Default for DiffOptions {
 pub struct ChangedFile {
     pub path: String,
     pub old_path: Option<String>,
+}
+
+/// Resolved ends of a branch compare: the merge base with HEAD, and the branch tip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompareRange {
+    pub from_id: String,
+    pub to_id: String,
 }
 
 fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
@@ -249,6 +263,86 @@ pub fn range_diff(
         detect_renames(&mut diff)?;
     }
     hunks_from_diff(&diff)
+}
+
+/// The working tree compares like the Uncommitted view: staged, unstaged and untracked files.
+fn include_untracked_content(git_opts: &mut git2::DiffOptions) {
+    git_opts
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
+}
+
+/// Paths that differ between `commit_id` and the working tree (`git diff <commit>` plus
+/// untracked files), with renames detected among tracked files.
+pub fn compare_working_tree_files(
+    repo: &Repository,
+    commit_id: &str,
+) -> Result<Vec<ChangedFile>, DiffError> {
+    let tree = commit_tree(repo, commit_id)?;
+    let mut git_opts = git2::DiffOptions::new();
+    include_untracked_content(&mut git_opts);
+    let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    detect_renames(&mut diff)?;
+    Ok(changed_files(&diff))
+}
+
+/// One file's diff from `commit_id` to the working tree; `old_path` as in `range_diff`.
+pub fn compare_working_tree(
+    repo: &Repository,
+    commit_id: &str,
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let tree = commit_tree(repo, commit_id)?;
+    let mut git_opts = literal_path_options(path, old_path, opts);
+    include_untracked_content(&mut git_opts);
+    let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    if old_path.is_some() {
+        detect_renames(&mut diff)?;
+    }
+    hunks_from_diff(&diff)
+}
+
+/// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…` or `refs/remotes/…`
+/// name) changed since it diverged from HEAD. A detached HEAD is used as is.
+pub fn branch_compare_range(repo: &Repository, ref_name: &str) -> Result<CompareRange, DiffError> {
+    let short = ref_name
+        .strip_prefix("refs/heads/")
+        .or_else(|| ref_name.strip_prefix("refs/remotes/"))
+        .unwrap_or(ref_name)
+        .to_string();
+    let head = match repo.head() {
+        Ok(head) => head.peel_to_commit()?.id(),
+        Err(e)
+            if matches!(
+                e.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            return Err(DiffError::UnbornHead)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let tip = match repo.find_reference(ref_name) {
+        Ok(reference) => reference.peel_to_commit()?.id(),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(DiffError::UnknownRef(short))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let base = match repo.merge_base(head, tip) {
+        Ok(base) => base,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(DiffError::NoMergeBase(short))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    Ok(CompareRange {
+        from_id: base.to_string(),
+        to_id: tip.to_string(),
+    })
 }
 
 fn commit_and_parent_trees<'repo>(
