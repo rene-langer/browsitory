@@ -19,8 +19,9 @@ use crate::process::{run_captured, Captured, RunError};
 pub const HOOK_TIMEOUT: Duration = Duration::from_secs(600);
 /// Only the last 64 KiB of a hook's combined output is kept.
 pub const OUTPUT_LIMIT: usize = 64 * 1024;
-/// The hooks `git commit` runs before writing the commit; what the "Skip hooks" UI is about.
-pub const COMMIT_HOOKS: [&str; 3] = ["pre-commit", "prepare-commit-msg", "commit-msg"];
+/// The commit hooks `--no-verify` skips: what the "Skip hooks" checkbox is about, so it shows
+/// only when one of these is installed (not for `prepare-commit-msg` or `post-commit` alone).
+pub const SKIPPABLE_COMMIT_HOOKS: [&str; 2] = ["pre-commit", "commit-msg"];
 /// What `--no-verify` skips.
 pub const SKIPPABLE_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
 

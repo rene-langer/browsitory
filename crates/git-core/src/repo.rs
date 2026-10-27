@@ -57,7 +57,7 @@ pub struct HeadInfo {
     pub operation: Option<OperationKind>,
     /// A pending squash merge's message (`SQUASH_MSG`), which pre-fills the commit box.
     pub squash_message: Option<String>,
-    /// Installed commit hooks (`pre-commit`, `prepare-commit-msg`, `commit-msg`); drives the
+    /// Installed commit hooks that `--no-verify` skips (`pre-commit`, `commit-msg`); drives the
     /// "Skip hooks" checkbox.
     pub commit_hooks: Vec<String>,
 }
@@ -66,7 +66,7 @@ pub struct HeadInfo {
 /// is deliberately absent — it has its own richer `rebase::rebase_progress`.
 pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
     use git2::RepositoryState;
-    let commit_hooks = crate::hooks::installed_hooks(repo, &crate::hooks::COMMIT_HOOKS);
+    let commit_hooks = crate::hooks::installed_hooks(repo, &crate::hooks::SKIPPABLE_COMMIT_HOOKS);
     let operation = match repo.state() {
         RepositoryState::Merge => Some(OperationKind::Merge),
         RepositoryState::CherryPick | RepositoryState::CherryPickSequence => {

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use git_core::hooks::{
     find_hook, hooks_dir, installed_hooks, run_hook, HookInvocation, HookLookup, HookOutcome,
-    COMMIT_HOOKS,
+    SKIPPABLE_COMMIT_HOOKS,
 };
 
 fn run(repo: &git2::Repository, name: &str, args: &[&str]) -> HookOutcome {
@@ -69,7 +69,7 @@ fn a_missing_hook_is_not_installed_and_a_non_executable_one_is_not_run() {
         HookLookup::NotExecutable(_)
     ));
     assert_eq!(run(&repo, "pre-commit", &[]), HookOutcome::NotExecutable);
-    assert!(installed_hooks(&repo, &COMMIT_HOOKS).is_empty());
+    assert!(installed_hooks(&repo, &SKIPPABLE_COMMIT_HOOKS).is_empty());
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn installed_hooks_lists_executable_commit_hooks() {
     common::install_hook(&hooks, "commit-msg", "exit 0");
     common::install_hook(&hooks, "pre-push", "exit 0");
     assert_eq!(
-        installed_hooks(&repo, &COMMIT_HOOKS),
+        installed_hooks(&repo, &SKIPPABLE_COMMIT_HOOKS),
         vec!["commit-msg".to_string()]
     );
 }
@@ -778,4 +778,21 @@ fn a_commit_hook_that_cannot_start_is_a_retryable_hook_failure() {
     .unwrap();
     let error = amend_head(&repo, "y", HookOptions::default()).unwrap_err();
     assert!(matches!(error, CommitError::HookFailed { ref hook, .. } if hook == "pre-commit"));
+}
+
+#[test]
+fn head_info_lists_only_commit_hooks_that_no_verify_skips() {
+    let (_dir, repo) = common::init_repo();
+    let hooks = hooks_dir(&repo).unwrap();
+    common::install_hook(&hooks, "prepare-commit-msg", "exit 0");
+    common::install_hook(&hooks, "post-commit", "exit 0");
+    assert!(git_core::repo::head_info(&repo)
+        .unwrap()
+        .commit_hooks
+        .is_empty());
+    common::install_hook(&hooks, "commit-msg", "exit 0");
+    assert_eq!(
+        git_core::repo::head_info(&repo).unwrap().commit_hooks,
+        vec!["commit-msg".to_string()]
+    );
 }

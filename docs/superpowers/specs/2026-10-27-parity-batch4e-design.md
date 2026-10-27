@@ -158,7 +158,7 @@ VSCode extension) through `RepoClient`. Refines section 4e of
 - **"Skip hooks" is a checkbox under "Amend last commit", shown only when a commit hook is
   installed**, for the next commit or amend only (reset after a successful one). There is no
   CommitBox overflow menu to put it in, and one control does not justify adding one. `HeadInfo`
-  gains `commit_hooks: Vec<String>` (installed `pre-commit`, `prepare-commit-msg`, `commit-msg`),
+  gains `commit_hooks: Vec<String>` (installed hooks `--no-verify` skips: `pre-commit`, `commit-msg`),
   refreshed with the rest of `HeadInfo`, also for an unborn HEAD. Palette: "Skip hooks for the
   next commit" / "Run hooks for the next commit". *(Open question 1 — recommendation used here.)*
 - **Failure UI reuses `ConfirmDialog`.** `HookFailureDialog`: aria-label `<hook> hook failed`, the
@@ -216,7 +216,7 @@ pub(crate) fn run_captured(
 ```rust
 pub const HOOK_TIMEOUT: Duration = Duration::from_secs(600);
 pub const OUTPUT_LIMIT: usize = 64 * 1024;
-pub const COMMIT_HOOKS: [&str; 3] = ["pre-commit", "prepare-commit-msg", "commit-msg"];
+pub const SKIPPABLE_COMMIT_HOOKS: [&str; 2] = ["pre-commit", "commit-msg"];
 pub const SKIPPABLE_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,7 +306,7 @@ pub fn amend_head(repo: &Repository, message: &str, hooks: HookOptions<'_>) -> R
 
 ### `repo.rs`
 
-`HeadInfo` gains `commit_hooks: Vec<String>` = `installed_hooks(repo, &COMMIT_HOOKS)`, on both
+`HeadInfo` gains `commit_hooks: Vec<String>` = `installed_hooks(repo, &SKIPPABLE_COMMIT_HOOKS)`, on both
 the unborn and the normal path.
 
 ## `repo-service`, Tauri, sidecar, `RepoClient`

@@ -175,8 +175,8 @@ skipped, so its dialog only has **Close**. Close the dialog and **Show hook outp
 error banner brings it back. Your commit message stays in the box until a commit succeeds.
 Failures of `post-commit`, `post-checkout` and `post-merge` are ignored, as in git.
 
-To skip hooks up front, tick **Skip hooks** under the commit message (shown only when a commit
-hook is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
+To skip hooks up front, tick **Skip hooks** under the commit message (shown only when a
+`pre-commit` or `commit-msg` hook is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
 next commit or amend only.
 
 While a commit hook runs, "Running pre-commit hook…" shows under the commit message with

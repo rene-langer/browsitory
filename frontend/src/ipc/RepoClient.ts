@@ -108,7 +108,7 @@ export interface HeadInfo {
   operation: OperationKind | null;
   /** A pending squash merge's message (`SQUASH_MSG`); pre-fills the commit box. */
   squashMessage: string | null;
-  /** Installed commit hooks (`pre-commit`, `prepare-commit-msg`, `commit-msg`). */
+  /** Installed commit hooks that `noVerify` skips (`pre-commit`, `commit-msg`). */
   commitHooks: string[];
 }
 export interface UndoState {
