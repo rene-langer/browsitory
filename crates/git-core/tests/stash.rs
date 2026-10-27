@@ -675,3 +675,81 @@ fn stash_files_rejects_a_commit_that_is_not_a_stash() {
     );
     assert_eq!(error.to_string(), format!("No stash with id {head}."));
 }
+
+#[test]
+fn path_limited_stash_of_a_file_replaced_by_a_symlink_never_writes_through_it() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tc", "plain\n");
+    write_file(dir.path(), "other", "o1\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "other", "precious unstaged edit\n");
+    std::fs::remove_file(dir.path().join("tc")).unwrap();
+    std::os::unix::fs::symlink("other", dir.path().join("tc")).unwrap();
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["tc".into()])).unwrap();
+
+    assert_eq!(read(dir.path(), "other"), "precious unstaged edit\n");
+    let meta = std::fs::symlink_metadata(dir.path().join("tc")).unwrap();
+    assert!(meta.file_type().is_file(), "tc is a regular file again");
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    let meta = std::fs::symlink_metadata(dir.path().join("tc")).unwrap();
+    assert!(meta.file_type().is_symlink(), "pop restores the symlink");
+    assert_eq!(
+        std::fs::read_link(dir.path().join("tc")).unwrap(),
+        std::path::PathBuf::from("other")
+    );
+    assert_eq!(read(dir.path(), "other"), "precious unstaged edit\n");
+}
+
+#[test]
+fn path_limited_stash_of_a_symlink_to_an_outside_file_leaves_that_file_alone() {
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("outside.txt");
+    std::fs::write(&target, "outside\n").unwrap();
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tc", "plain\n");
+    commit_all(&repo, "initial");
+    std::fs::remove_file(dir.path().join("tc")).unwrap();
+    std::os::unix::fs::symlink(&target, dir.path().join("tc")).unwrap();
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["tc".into()])).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "outside\n");
+    assert!(std::fs::symlink_metadata(dir.path().join("tc"))
+        .unwrap()
+        .file_type()
+        .is_file());
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+fn path_limited_stash_refuses_a_path_beyond_a_symlinked_directory() {
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("f"), "outside\n").unwrap();
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "d/f", "inside\n");
+    commit_all(&repo, "initial");
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("d")).unwrap();
+
+    let error = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["d/f".into()]))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, StashError::BeyondSymlink(ref p) if p == "d/f"),
+        "{error:?}"
+    );
+    assert_eq!(error.to_string(), "'d/f' is beyond a symbolic link.");
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("f")).unwrap(),
+        "outside\n"
+    );
+    assert!(std::fs::symlink_metadata(dir.path().join("d"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}

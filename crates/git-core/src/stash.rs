@@ -19,6 +19,8 @@ pub enum StashError {
     IndexConflict,
     #[error("No stash with id {0}.")]
     NotAStash(String),
+    #[error("'{0}' is beyond a symbolic link.")]
+    BeyondSymlink(String),
 }
 
 impl From<crate::diff::DiffError> for StashError {
@@ -180,6 +182,13 @@ fn save_path_limited_stash(
     if tracked.is_empty() && untracked.is_empty() {
         return Err(StashError::NothingToStash);
     }
+    // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
+    // possibly outside the repository. Refuse before anything is written, like git does.
+    for path in opts.paths.iter().chain(&tracked).chain(&untracked) {
+        if has_symlinked_ancestor(&workdir, path) {
+            return Err(StashError::BeyondSymlink(path.clone()));
+        }
+    }
 
     let mut index = repo.index()?;
     let base_tree = base.tree()?;
@@ -249,7 +258,16 @@ fn save_path_limited_stash(
     repo.reference_ensure_log("refs/stash")?;
     repo.reference("refs/stash", stash_id, true, &reflog_message)?;
 
-    // The stash is saved; now revert exactly the stashed paths.
+    // The stash is saved; now revert exactly the stashed paths. A tracked file replaced by a
+    // symlink (typechange) must be removed first: a forced checkout writes the file's content
+    // *through* the symlink, overwriting its target, which may be another file with unsaved
+    // edits or a file outside the repository. The symlink itself is in the stash.
+    for path in &tracked {
+        let full = workdir.join(path);
+        if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            std::fs::remove_file(&full)?;
+        }
+    }
     if !tracked.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().disable_pathspec_match(true);
@@ -276,6 +294,19 @@ fn save_path_limited_stash(
         }
     }
     Ok(())
+}
+
+/// True when a directory on the way to `path` (relative to `workdir`) is a symlink.
+fn has_symlinked_ancestor(workdir: &std::path::Path, path: &str) -> bool {
+    let mut current = workdir.to_path_buf();
+    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        current.push(component);
+        if std::fs::symlink_metadata(&current).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
