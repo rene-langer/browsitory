@@ -16,7 +16,7 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{TransferEvent, Worker};
+use repo_service::worker::{HookEvent, TransferEvent, Worker};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -104,7 +104,7 @@ pub fn dispatch(
         "discard_file" => discard_file(params, repos),
         "discard_all_unstaged" => discard_all_unstaged(params, repos),
         "ignore_path" => ignore_path(params, repos),
-        "commit" => commit(params, repos),
+        "commit" => commit(params, repos, stdout),
         "list_branches" => list_branches(params, repos),
         "create_branch" => create_branch(params, repos),
         "switch_branch" => switch_branch(params, repos),
@@ -141,7 +141,7 @@ pub fn dispatch(
         "push_current_branch" => push_current_branch(params, repos, stdout),
         "force_push_current_branch" => force_push_current_branch(params, repos, stdout),
         "get_head_info" => get_head_info(params, repos),
-        "amend_commit" => amend_commit(params, repos),
+        "amend_commit" => amend_commit(params, repos, stdout),
         "get_undo_state" => get_undo_state(params, repos),
         "undo_last" => undo_last(params, repos),
         "redo_last" => redo_last(params, repos),
@@ -1060,25 +1060,107 @@ fn set_diff_settings(params: Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// `commit` / `amend_commit` params; `noVerify` (skip `pre-commit` and `commit-msg`) defaults
+/// to `false`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CommitParams {
+struct CommitMessageParams {
     repo_path: String,
     message: String,
+    #[serde(default)]
+    no_verify: bool,
 }
 
-fn commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CommitParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    match worker_handle(repos, &params.repo_path)?.commit(
-        params.message,
-        false,
-        mpsc::channel().0,
-    )? {
-        git_core::commit::CommitOutcome::Committed { commit_id } => Ok(Value::String(commit_id)),
-        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
-            Err(format!("The {hook} hook failed."))
+/// A commit/amend result: a failing gate hook is data the UI renders, not an error.
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum CommitOutcomeDto {
+    Committed {
+        #[serde(rename = "commitId")]
+        commit_id: String,
+    },
+    HookFailed {
+        hook: String,
+        output: String,
+    },
+}
+
+impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
+    fn from(outcome: git_core::commit::CommitOutcome) -> Self {
+        match outcome {
+            git_core::commit::CommitOutcome::Committed { commit_id } => {
+                Self::Committed { commit_id }
+            }
+            git_core::commit::CommitOutcome::HookFailed { hook, output } => {
+                Self::HookFailed { hook, output }
+            }
         }
     }
+}
+
+/// Payload of the `hookProgress` notification (commit/amend hooks).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HookProgressDto {
+    repo_path: String,
+    operation_id: String,
+    hook: String,
+    phase: &'static str,
+}
+
+fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
+    let (operation_id, hook, phase) = match event {
+        HookEvent::Started { operation_id, hook } => (operation_id, hook, "Started"),
+        HookEvent::Finished { operation_id, hook } => (operation_id, hook, "Finished"),
+    };
+    HookProgressDto {
+        repo_path: repo_path.to_string(),
+        operation_id,
+        hook,
+        phase,
+    }
+}
+
+/// Writes each hook event as a `hookProgress` notification; same framing and shutdown as
+/// `spawn_progress_relay`.
+fn spawn_hook_relay<W: std::io::Write + Send + 'static>(
+    repo_path: String,
+    event_rx: mpsc::Receiver<HookEvent>,
+    out: Arc<Mutex<W>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for event in event_rx {
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "hookProgress",
+                "params": hook_progress_dto(&repo_path, event),
+            });
+            let Ok(line) = serde_json::to_string(&notification) else {
+                continue;
+            };
+            let mut out = out.lock().unwrap_or_else(|error| error.into_inner());
+            if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
+                return;
+            }
+        }
+    })
+}
+
+fn commit(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: CommitMessageParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
+    let outcome = worker_handle(repos, &params.repo_path)?.commit(
+        params.message,
+        params.no_verify,
+        event_tx,
+    )?;
+    serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]
@@ -2021,6 +2103,7 @@ struct HeadInfoDto {
     head_pushed: bool,
     operation: Option<&'static str>,
     squash_message: Option<String>,
+    commit_hooks: Vec<String>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -2036,6 +2119,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 OperationKind::Revert => "Revert",
             }),
             squash_message: info.squash_message,
+            commit_hooks: info.commit_hooks,
         }
     }
 }
@@ -2180,13 +2264,6 @@ struct CommitIdParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MessageParams {
-    repo_path: String,
-    message: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ResetParams {
     repo_path: String,
     commit_id: String,
@@ -2221,19 +2298,21 @@ fn redo_last(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn amend_commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: MessageParams =
+fn amend_commit(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: CommitMessageParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    match worker_handle(repos, &params.repo_path)?.amend_commit(
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
+    let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
         params.message,
-        false,
-        mpsc::channel().0,
-    )? {
-        git_core::commit::CommitOutcome::Committed { .. } => Ok(Value::Null),
-        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
-            Err(format!("The {hook} hook failed."))
-        }
-    }
+        params.no_verify,
+        event_tx,
+    )?;
+    serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {

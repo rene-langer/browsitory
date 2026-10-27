@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use repo_service::worker::{TransferEvent, Worker};
+use repo_service::worker::{HookEvent, TransferEvent, Worker};
 
 mod branch;
 mod clone;
@@ -605,6 +605,7 @@ pub struct HeadInfoDto {
     pub head_pushed: bool,
     pub operation: Option<&'static str>,
     pub squash_message: Option<String>,
+    pub commit_hooks: Vec<String>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -620,8 +621,69 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 OperationKind::Revert => "Revert",
             }),
             squash_message: info.squash_message,
+            commit_hooks: info.commit_hooks,
         }
     }
+}
+
+/// A commit/amend result: a failing gate hook is data the UI renders, not an error.
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum CommitOutcomeDto {
+    Committed {
+        #[serde(rename = "commitId")]
+        commit_id: String,
+    },
+    HookFailed {
+        hook: String,
+        output: String,
+    },
+}
+
+impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
+    fn from(outcome: git_core::commit::CommitOutcome) -> Self {
+        match outcome {
+            git_core::commit::CommitOutcome::Committed { commit_id } => {
+                Self::Committed { commit_id }
+            }
+            git_core::commit::CommitOutcome::HookFailed { hook, output } => {
+                Self::HookFailed { hook, output }
+            }
+        }
+    }
+}
+
+/// Payload of the `hook-progress` event (commit/amend hooks; pushes report `RunningHook`
+/// through `transfer-progress` instead).
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookProgressDto {
+    pub repo_path: String,
+    pub operation_id: String,
+    pub hook: String,
+    pub phase: &'static str,
+}
+
+fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
+    let (operation_id, hook, phase) = match event {
+        HookEvent::Started { operation_id, hook } => (operation_id, hook, "Started"),
+        HookEvent::Finished { operation_id, hook } => (operation_id, hook, "Finished"),
+    };
+    HookProgressDto {
+        repo_path: repo_path.to_string(),
+        operation_id,
+        hook,
+        phase,
+    }
+}
+
+/// Like `emit_transfer_events`: drains on its own thread until the worker drops its sender.
+fn emit_hook_events(app: AppHandle, repo_path: String, events: mpsc::Receiver<HookEvent>) {
+    thread::spawn(move || {
+        for event in events {
+            let _ = app.emit("hook-progress", hook_progress_dto(&repo_path, event));
+        }
+    });
 }
 
 #[derive(Serialize)]
@@ -1433,8 +1495,9 @@ mod tests {
     use git_core::submodule::SubmoduleInfo;
     use git_core::worktree::WorktreeInfo;
 
-    use repo_service::worker::TransferEvent;
+    use repo_service::worker::{HookEvent, TransferEvent};
 
+    use super::{hook_progress_dto, ChangedFileDto, CommitOutcomeDto, CompareRangeDto};
     use super::{
         transfer_event_payload, BranchInfoDto, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
@@ -1442,7 +1505,6 @@ mod tests {
         RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
         UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
-    use super::{ChangedFileDto, CompareRangeDto};
     use super::{
         MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
     };
@@ -1991,6 +2053,52 @@ mod tests {
     }
 
     #[test]
+    fn commit_outcome_dto_is_kind_tagged() {
+        assert_eq!(
+            serde_json::to_value(CommitOutcomeDto::from(
+                git_core::commit::CommitOutcome::Committed {
+                    commit_id: "c1".into()
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Committed", "commitId": "c1"})
+        );
+        assert_eq!(
+            serde_json::to_value(CommitOutcomeDto::from(
+                git_core::commit::CommitOutcome::HookFailed {
+                    hook: "pre-commit".into(),
+                    output: "no\n".into()
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "HookFailed", "hook": "pre-commit", "output": "no\n"})
+        );
+    }
+
+    #[test]
+    fn hook_progress_dto_carries_the_repo_and_phase() {
+        let dto = hook_progress_dto(
+            "/repo",
+            HookEvent::Started {
+                operation_id: "commit-1".into(),
+                hook: "pre-commit".into(),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(dto).unwrap(),
+            serde_json::json!({"repoPath": "/repo", "operationId": "commit-1", "hook": "pre-commit", "phase": "Started"})
+        );
+        let dto = hook_progress_dto(
+            "/repo",
+            HookEvent::Finished {
+                operation_id: "commit-1".into(),
+                hook: "pre-commit".into(),
+            },
+        );
+        assert_eq!(serde_json::to_value(dto).unwrap()["phase"], "Finished");
+    }
+
+    #[test]
     fn a_hook_failed_transfer_carries_its_output_and_others_do_not() {
         let (_, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "push-1".into(),
@@ -2020,11 +2128,11 @@ mod tests {
             head_pushed: true,
             operation: Some(git_core::repo::OperationKind::CherryPick),
             squash_message: None,
-            commit_hooks: vec![],
+            commit_hooks: vec!["pre-commit".into()],
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"]})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),

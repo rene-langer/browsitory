@@ -1,5 +1,8 @@
-use super::{worker_handle, AppState, HeadInfoDto, PickOutcomeDto, ResetModeDto};
-use tauri::State;
+use super::{
+    emit_hook_events, worker_handle, AppState, CommitOutcomeDto, HeadInfoDto, PickOutcomeDto,
+    ResetModeDto,
+};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn get_head_info(
@@ -15,18 +18,15 @@ pub async fn get_head_info(
 pub async fn amend_commit(
     repo_path: String,
     message: String,
+    no_verify: bool,
+    app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    match worker_handle(&state, &repo_path)?.amend_commit(
-        message,
-        false,
-        std::sync::mpsc::channel().0,
-    )? {
-        git_core::commit::CommitOutcome::Committed { .. } => Ok(()),
-        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
-            Err(format!("The {hook} hook failed."))
-        }
-    }
+) -> Result<CommitOutcomeDto, String> {
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    emit_hook_events(app, repo_path.clone(), event_rx);
+    Ok(CommitOutcomeDto::from(
+        worker_handle(&state, &repo_path)?.amend_commit(message, no_verify, event_tx)?,
+    ))
 }
 
 #[tauri::command]
