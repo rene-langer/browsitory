@@ -317,7 +317,9 @@ export function BranchTree({
               </span>
             )}
             {!isRenaming && counts !== null && (
-              <span className={styles.aheadBehind} aria-label={counts.label} title={counts.label}>
+              // role="img": a plain span's aria-label is ignored by screen readers; the arrows
+              // themselves are hidden so they are not read as "up arrow 2".
+              <span className={styles.aheadBehind} role="img" aria-label={counts.label} title={counts.label}>
                 {counts.ahead > 0 && <span aria-hidden="true">↑{counts.ahead}</span>}
                 {counts.behind > 0 && <span aria-hidden="true">↓{counts.behind}</span>}
               </span>

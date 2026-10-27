@@ -1290,11 +1290,12 @@ describe("BranchTree — refs and remotes (4b)", () => {
         { name: "untracked", isCurrent: false },
       ],
     });
-    const counts = screen.getByLabelText("2 ahead, 0 behind origin/main");
+    // role="img" so the label is exposed to screen readers (a bare span's aria-label is not).
+    const counts = screen.getByRole("img", { name: "2 ahead, 0 behind origin/main" });
     expect(counts).toHaveTextContent("↑2");
     expect(counts).not.toHaveTextContent("↓");
     expect(counts).toHaveAttribute("title", "2 ahead, 0 behind origin/main");
-    const behind = screen.getByLabelText("0 ahead, 3 behind origin/behind");
+    const behind = screen.getByRole("img", { name: "0 ahead, 3 behind origin/behind" });
     expect(behind).toHaveTextContent("↓3");
     expect(behind).not.toHaveTextContent("↑");
     expect(screen.queryByLabelText(/behind origin\/synced/)).toBeNull();
