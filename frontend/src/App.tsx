@@ -518,6 +518,9 @@ function RepoWorkspace({
               addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
               onOpenAddRemoteDraft={appState.openAddRemoteDraft}
               onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
+              onOpenPushDialog={appState.openPushDialog}
+              onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
+              refreshGeneration={appState.state.refreshGeneration}
             />
             {panelVisibility.visibility.stash && (
               <StashPanel
@@ -604,6 +607,10 @@ function RepoWorkspace({
                 onFetch={appState.fetchRemote}
                 onPull={appState.pullCurrentUpstream}
                 onPush={appState.pushCurrentBranch}
+                prune={false}
+                onFetchAll={appState.fetchAllRemotes}
+                onTogglePrune={appState.setFetchPrune}
+                onPublish={() => {}}
                 leading={
                   <UndoRedoButtons
                     undoLabel={appState.state.undoState.undo}

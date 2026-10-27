@@ -31,3 +31,15 @@
   font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
+
+/* Fetch and its chevron read as one split button. */
+.splitGroup {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bar button.split {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+}

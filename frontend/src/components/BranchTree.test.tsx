@@ -56,6 +56,9 @@ function renderTree(overrides: Partial<BranchTreeProps> = {}) {
     addRemoteDraftOpen: false,
     onOpenAddRemoteDraft: vi.fn(),
     onCloseAddRemoteDraft: vi.fn(),
+    onOpenPushDialog: vi.fn(),
+    onOpenDeleteRemoteBranch: vi.fn(),
+    refreshGeneration: 0,
     ...overrides,
   };
   return { ...render(<BranchTree {...props} />), props };
@@ -721,11 +724,13 @@ describe("BranchTree — remotes", () => {
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "main");
   });
 
-  it("does not offer Set upstream… or Push on a non-current branch's context menu", () => {
+  it("does not offer Set upstream… or Push to <upstream remote> on a non-current branch's context menu", () => {
     renderTree({ remotes: oneRemote, upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.queryByRole("menuitem", { name: "Set upstream…" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /^Push to/ })).not.toBeInTheDocument();
+    // Only the dialog-based "Push to…" (any local branch, 4b); never the current branch's direct push.
+    expect(screen.queryByRole("menuitem", { name: /^Push to (?!…$)/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Push to…" })).toBeInTheDocument();
   });
 
   it("offers Push to <remote> on the current branch's context menu when it has an upstream", () => {
@@ -1265,5 +1270,112 @@ describe("BranchTree — new branch form", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/x"));
+  });
+});
+
+const originOnly = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+
+describe("BranchTree — refs and remotes (4b)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("shows only the non-zero ahead/behind parts with an accessible label", () => {
+    renderTree({
+      branches: [
+        { name: "main", isCurrent: true, upstream: "origin/main", ahead: 2, behind: 0 },
+        { name: "behind", isCurrent: false, upstream: "origin/behind", ahead: 0, behind: 3 },
+        { name: "synced", isCurrent: false, upstream: "origin/synced", ahead: 0, behind: 0 },
+        { name: "never-fetched", isCurrent: false, upstream: "origin/x", ahead: null, behind: null },
+        { name: "untracked", isCurrent: false },
+      ],
+    });
+    const counts = screen.getByLabelText("2 ahead, 0 behind origin/main");
+    expect(counts).toHaveTextContent("↑2");
+    expect(counts).not.toHaveTextContent("↓");
+    expect(counts).toHaveAttribute("title", "2 ahead, 0 behind origin/main");
+    const behind = screen.getByLabelText("0 ahead, 3 behind origin/behind");
+    expect(behind).toHaveTextContent("↓3");
+    expect(behind).not.toHaveTextContent("↑");
+    expect(screen.queryByLabelText(/behind origin\/synced/)).toBeNull();
+    expect(screen.queryByLabelText(/behind origin\/x/)).toBeNull();
+  });
+
+  it("offers Push to… on a non-current local branch", () => {
+    const { props } = renderTree({ remotes: originOnly });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Push to…" }));
+    expect(props.onOpenPushDialog).toHaveBeenCalledWith("feat/foo");
+  });
+
+  it("offers Push to… on the current branch too", () => {
+    const { props } = renderTree({ remotes: originOnly });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Push to…" }));
+    expect(props.onOpenPushDialog).toHaveBeenCalledWith("main");
+  });
+
+  it("disables Push to… without a remote", () => {
+    renderTree({ remotes: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    const item = screen.getByRole("menuitem", { name: "Push to…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "No remote configured.");
+  });
+
+  it("offers a destructive Delete <remote>/<branch>… on remote branches", async () => {
+    const { props } = renderTree({
+      remotes: originOnly,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    const item = screen.getByRole("menuitem", { name: "Delete origin/topic…" });
+    expect(item).toHaveAttribute("data-destructive", "true");
+    fireEvent.click(item);
+    expect(props.onOpenDeleteRemoteBranch).toHaveBeenCalledWith("origin", "topic");
+  });
+
+  it("disables Delete <remote>/<branch>… while another operation runs", async () => {
+    renderTree({
+      remotes: originOnly,
+      operationDisabled: true,
+      operationDisabledReason: "A transfer is in progress.",
+      onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    expect(screen.getByRole("menuitem", { name: "Delete origin/topic…" })).toBeDisabled();
+  });
+
+  it("reloads open remote folders when refreshGeneration changes", async () => {
+    const onListRemoteBranches = vi.fn().mockResolvedValueOnce(["main", "topic"]).mockResolvedValueOnce(["main"]);
+    const { props, rerender } = renderTree({ remotes: originOnly, onListRemoteBranches });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    expect(await screen.findByRole("button", { name: "Show origin/topic in graph" })).toBeInTheDocument();
+
+    rerender(<BranchTree {...props} refreshGeneration={1} />);
+
+    // No "Loading…" flash: the old list stays until the new one lands.
+    expect(screen.queryByText("Loading…")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show origin/topic in graph" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Show origin/main in graph" })).toBeInTheDocument();
+    expect(onListRemoteBranches).toHaveBeenCalledTimes(2);
+  });
+
+  it("forgets a closed folder's list on refresh so the next expand reloads it", async () => {
+    const onListRemoteBranches = vi.fn().mockResolvedValue(["main"]);
+    const { props, rerender } = renderTree({ remotes: originOnly, onListRemoteBranches });
+    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand
+    await screen.findByRole("button", { name: "Show origin/main in graph" });
+    fireEvent.click(screen.getByRole("button", { name: "origin" })); // collapse
+
+    rerender(<BranchTree {...props} refreshGeneration={1} />);
+    expect(onListRemoteBranches).toHaveBeenCalledOnce(); // closed folders are not reloaded eagerly
+    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
+
+    await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledTimes(2));
   });
 });
