@@ -1448,7 +1448,9 @@ mod tests {
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
-    use super::{ensure_worker, Command, HookEvent, TransferEvent, UndoOutcome, UndoState, Worker};
+    #[cfg(unix)]
+    use super::HookEvent;
+    use super::{ensure_worker, Command, TransferEvent, UndoOutcome, UndoState, Worker};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
