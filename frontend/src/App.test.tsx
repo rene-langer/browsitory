@@ -917,6 +917,41 @@ describe("App", () => {
     expect(screen.getByRole("searchbox", { name: "Search commits" })).toHaveValue("");
   });
 
+  it("compares two selected commits in place of the diff pane, and × restores the commit view", async () => {
+    const base = { authorName: "Rene", authorEmail: "rene@example.com", timestamp: 1_700_000_000, branchRefs: [], remoteBranchRefs: [], tags: [] };
+    const newer = { ...base, id: "n".repeat(40), shortId: "nnnnnnn", summary: "newer commit", parentIds: ["o".repeat(40)] };
+    const older = { ...base, id: "o".repeat(40), shortId: "ooooooo", summary: "older commit", parentIds: [] };
+    const getRangeFiles = vi.fn(async () => [{ path: "a.txt", oldPath: null }]);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [newer, older],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getGraphBranchSelection: async () => null,
+      getCommitFiles: async () => [],
+      getCommitMessage: async () => "older commit",
+      getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+      getRangeFiles,
+      getRangeDiff: async () => [],
+    });
+
+    render(<App client={client} />);
+    const graph = await screen.findByRole("listbox", { name: "Commit history" });
+    fireEvent.click(await within(graph).findByText(/newer commit/));
+    fireEvent.click(within(graph).getByText(/older commit/), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Compare these commits" }));
+
+    const comparison = await screen.findByRole("region", { name: "Comparison" });
+    expect(within(comparison).getByRole("heading")).toHaveTextContent("Comparing ooooooo..nnnnnnn");
+    await waitFor(() => expect(getRangeFiles).toHaveBeenCalledWith("/repos/a", "o".repeat(40), "n".repeat(40)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close compare" }));
+    expect(screen.queryByRole("region", { name: "Comparison" })).toBeNull();
+  });
+
   describe("undo/redo", () => {
     function undoClient(overrides: Partial<RepoClient> = {}) {
       return fakeClient({

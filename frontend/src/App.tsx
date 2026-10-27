@@ -8,6 +8,7 @@ import { ShortcutSheet } from "./components/ShortcutSheet";
 
 const NARROW_BREAKPOINT = 900;
 import { CommitGraph } from "./components/CommitGraph";
+import { CompareDiffPane } from "./components/CompareDiffPane";
 import { FileHistoryList } from "./components/FileHistoryList";
 import { CommitSearchBar } from "./components/CommitSearchBar";
 import { CommitSearchResults } from "./components/CommitSearchResults";
@@ -50,6 +51,7 @@ import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } f
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
 import { useCommitSearch } from "./state/useCommitSearch";
+import { useCompare } from "./state/useCompare";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -113,6 +115,7 @@ function RepoWorkspace({
     appState.state.selectedRow,
     appState.selectRow,
   );
+  const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
   const [searchFocusRequested, setSearchFocusRequested] = useState(false);
   const clearSearchFocusRequest = useCallback(() => setSearchFocusRequested(false), []);
   const searchResultsRef = useRef<HTMLUListElement>(null);
@@ -608,6 +611,7 @@ function RepoWorkspace({
               onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
               onOpenPushDialog={appState.openPushDialog}
               onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
+              onCompareBranch={compare.compareBranch}
               refreshGeneration={appState.state.refreshGeneration}
             />
             {panelVisibility.visibility.stash && (
@@ -750,6 +754,8 @@ function RepoWorkspace({
                   ) : (
                     <CommitGraph
                       onRequestSearch={requestSearchFocus}
+                      onCompareCommits={compare.compareCommits}
+                      onCompareWithWorkingTree={compare.compareWorkingTree}
                       hasMore={appState.state.hasMoreHistory}
                       onLoadMore={() => void appState.loadMoreHistory()}
                       status={appState.state.status}
@@ -782,60 +788,75 @@ function RepoWorkspace({
               </>
             }
             right={
-              <DiffPane
-                repoPath={repoPath}
-                client={client}
-                selectedRow={appState.state.selectedRow}
-                commits={diffPaneCommits}
-                fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
-                stashes={appState.state.stashes}
-                stashActions={{
-                  onApply: appState.applyStash,
-                  onPop: appState.popStash,
-                  onDrop: appState.dropStash,
-                  restoreIndex: appState.state.stashRestoreIndex,
-                  onSetRestoreIndex: appState.setStashRestoreIndex,
-                  disabledReason: stashApplyDisabledReason,
-                }}
-                onOpenFileHistory={fileHistory.open}
-                status={appState.state.status}
-                refreshGeneration={appState.state.refreshGeneration}
-                discardRequest={discardRequest}
-                onDiscardRequestChange={setDiscardRequest}
-                onCurrentFileChange={setCurrentFile}
-                initialCommitDraft={getCommitDraft(repoPath)}
-                onCommitDraftChange={handleCommitDraftChange}
-                onStageFile={appState.stageFile}
-                onUnstageFile={appState.unstageFile}
-                onStageAllFiles={appState.stageAllFiles}
-                onUnstageAllFiles={appState.unstageAllFiles}
-                onStageHunk={appState.stageHunk}
-                onUnstageHunk={appState.unstageHunk}
-                onDiscardHunk={appState.discardHunk}
-                onStageLines={(p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown)}
-                onUnstageLines={(p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown)}
-                onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
-                onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
-                onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
-                onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
-                onCommit={announce("Committed", appState.commit)}
-                onSaveStash={announce("Changes stashed", () => appState.saveStash())}
-                onOpenStashDialog={appState.openStashDialog}
-                onSelectRow={appState.selectRow}
-                onResolveConflict={appState.resolveConflict}
-                onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
-                mergeMessage={appState.state.mergeMessage}
-                onAbortMerge={appState.abortMerge}
-                amendMode={appState.state.amendMode}
-                headInfo={appState.state.headInfo}
-                onSetAmendMode={appState.setAmendMode}
-                onAmendCommit={announce("Amended commit", appState.amendCommit)}
-                focusCommitMessage={focusCommitMessage}
-                onCommitMessageFocused={clearFocusCommitMessage}
-                rebaseProgress={appState.state.rebaseProgress}
-                onRebaseContinue={appState.rebaseContinue}
-                onRebaseAbort={appState.abortRebase}
-              />
+              compare.compare !== null ? (
+                <CompareDiffPane
+                  repoPath={repoPath}
+                  client={client}
+                  compare={compare.compare}
+                  commits={diffPaneCommits}
+                  refreshGeneration={appState.state.refreshGeneration}
+                  onSwap={compare.swap}
+                  onClose={compare.close}
+                  onRetry={compare.retry}
+                  onSelectRow={appState.selectRow}
+                  onOpenFileHistory={fileHistory.open}
+                />
+              ) : (
+                <DiffPane
+                  repoPath={repoPath}
+                  client={client}
+                  selectedRow={appState.state.selectedRow}
+                  commits={diffPaneCommits}
+                  fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
+                  stashes={appState.state.stashes}
+                  stashActions={{
+                    onApply: appState.applyStash,
+                    onPop: appState.popStash,
+                    onDrop: appState.dropStash,
+                    restoreIndex: appState.state.stashRestoreIndex,
+                    onSetRestoreIndex: appState.setStashRestoreIndex,
+                    disabledReason: stashApplyDisabledReason,
+                  }}
+                  onOpenFileHistory={fileHistory.open}
+                  status={appState.state.status}
+                  refreshGeneration={appState.state.refreshGeneration}
+                  discardRequest={discardRequest}
+                  onDiscardRequestChange={setDiscardRequest}
+                  onCurrentFileChange={setCurrentFile}
+                  initialCommitDraft={getCommitDraft(repoPath)}
+                  onCommitDraftChange={handleCommitDraftChange}
+                  onStageFile={appState.stageFile}
+                  onUnstageFile={appState.unstageFile}
+                  onStageAllFiles={appState.stageAllFiles}
+                  onUnstageAllFiles={appState.unstageAllFiles}
+                  onStageHunk={appState.stageHunk}
+                  onUnstageHunk={appState.unstageHunk}
+                  onDiscardHunk={appState.discardHunk}
+                  onStageLines={(p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown)}
+                  onUnstageLines={(p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown)}
+                  onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
+                  onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
+                  onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
+                  onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
+                  onCommit={announce("Committed", appState.commit)}
+                  onSaveStash={announce("Changes stashed", () => appState.saveStash())}
+                  onOpenStashDialog={appState.openStashDialog}
+                  onSelectRow={appState.selectRow}
+                  onResolveConflict={appState.resolveConflict}
+                  onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
+                  mergeMessage={appState.state.mergeMessage}
+                  onAbortMerge={appState.abortMerge}
+                  amendMode={appState.state.amendMode}
+                  headInfo={appState.state.headInfo}
+                  onSetAmendMode={appState.setAmendMode}
+                  onAmendCommit={announce("Amended commit", appState.amendCommit)}
+                  focusCommitMessage={focusCommitMessage}
+                  onCommitMessageFocused={clearFocusCommitMessage}
+                  rebaseProgress={appState.state.rebaseProgress}
+                  onRebaseContinue={appState.rebaseContinue}
+                  onRebaseAbort={appState.abortRebase}
+                />
+              )
             }
           />
         }
