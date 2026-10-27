@@ -440,6 +440,12 @@ function RepoWorkspace({
       {active && appState.state.stashDialog !== null && (
         <StashDialog
           paths={appState.state.stashDialog.paths}
+          untrackedOnly={
+            appState.state.stashDialog.paths.length > 0 &&
+            appState.state.stashDialog.paths.every((path) =>
+              appState.state.status.some((entry) => entry.path === path && !entry.staged && entry.kind === "New"),
+            )
+          }
           onStash={(options) => void announce("Changes stashed", appState.saveStash)(options)}
           onCancel={appState.closeStashDialog}
         />

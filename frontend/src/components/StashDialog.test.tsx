@@ -51,3 +51,15 @@ describe("StashDialog", () => {
     expect(onStash).not.toHaveBeenCalled();
   });
 });
+
+describe("StashDialog for an untracked file", () => {
+  it("always includes untracked files and does not offer to leave them out", () => {
+    const onStash = vi.fn();
+    render(<StashDialog paths={["new.txt"]} untrackedOnly onStash={onStash} onCancel={() => {}} />);
+
+    expect(screen.queryByRole("checkbox", { name: "Include untracked files" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stash" }));
+
+    expect(onStash).toHaveBeenCalledWith({ message: null, keepIndex: false, includeUntracked: true, paths: ["new.txt"] });
+  });
+});

@@ -7,14 +7,18 @@ import styles from "./StashDialog.module.css";
 
 /**
  * "Stash…" (everything) or "Stash file…" (`paths` = that file): an optional message and the
- * keep-staged / include-untracked switches. Nothing here is remembered between openings.
+ * keep-staged / include-untracked switches. Nothing here is remembered between openings. For an
+ * untracked file (`untrackedOnly`) untracked files are always included: leaving them out would
+ * leave nothing to stash.
  */
 export function StashDialog({
   paths,
+  untrackedOnly = false,
   onStash,
   onCancel,
 }: {
   paths: string[];
+  untrackedOnly?: boolean;
   onStash: (options: StashOptions) => void;
   onCancel: () => void;
 }) {
@@ -29,7 +33,12 @@ export function StashDialog({
         onSubmit={(event) => {
           event.preventDefault();
           const trimmed = message.trim();
-          onStash({ message: trimmed === "" ? null : trimmed, keepIndex, includeUntracked, paths });
+          onStash({
+            message: trimmed === "" ? null : trimmed,
+            keepIndex,
+            includeUntracked: untrackedOnly || includeUntracked,
+            paths,
+          });
         }}
       >
         {paths.length > 0 && <p className={styles.scope}>Only: {paths.join(", ")}</p>}
@@ -49,14 +58,16 @@ export function StashDialog({
           <input type="checkbox" checked={keepIndex} onChange={(event) => setKeepIndex(event.target.checked)} />
           Keep staged changes
         </label>
-        <label className={styles.option}>
-          <input
-            type="checkbox"
-            checked={includeUntracked}
-            onChange={(event) => setIncludeUntracked(event.target.checked)}
-          />
-          Include untracked files
-        </label>
+        {!untrackedOnly && (
+          <label className={styles.option}>
+            <input
+              type="checkbox"
+              checked={includeUntracked}
+              onChange={(event) => setIncludeUntracked(event.target.checked)}
+            />
+            Include untracked files
+          </label>
+        )}
         <Toolbar>
           <button type="submit">Stash</button>
           <button type="button" onClick={onCancel}>

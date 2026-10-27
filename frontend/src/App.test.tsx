@@ -761,6 +761,30 @@ describe("App", () => {
       localStorage.clear();
     });
 
+    it("stashes an untracked file without offering to leave untracked files out", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(
+        <App
+          client={stashClient({ saveStash, getStatus: async () => [{ path: "new.txt", staged: false, kind: "New" }] })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Actions for new.txt" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Stash changes" });
+      expect(within(dialog).queryByRole("checkbox", { name: "Include untracked files" })).toBeNull();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stash" }));
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: null,
+          keepIndex: false,
+          includeUntracked: true,
+          paths: ["new.txt"],
+        }),
+      );
+    });
+
     it("stashes everything from the Stash button", async () => {
       const saveStash = vi.fn(async () => {});
       render(<App client={stashClient({ saveStash })} />);
