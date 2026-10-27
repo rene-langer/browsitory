@@ -4029,6 +4029,34 @@ describe("useAppState — refs and remotes (4b)", () => {
     expect(setGraphBranchSelection).not.toHaveBeenCalled();
   });
 
+  it("does not report a successful rename or delete as failed when the selection update fails", async () => {
+    const logFrontendError = vi.fn(async () => {});
+    const client = transferClient({
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+        { name: "old", isCurrent: false },
+      ],
+      getGraphBranchSelection: async () => ["topic", "old"],
+      renameBranch: async () => {},
+      deleteBranch: async () => {},
+      setGraphBranchSelection: async () => {
+        throw new Error("config locked");
+      },
+      logFrontendError,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.renameBranch("topic", "feature"));
+    expect(result.current.state.error).toBeNull();
+    await act(() => result.current.deleteBranch("old", false));
+    expect(result.current.state.error).toBeNull();
+
+    expect(logFrontendError).toHaveBeenCalledTimes(2);
+    expect(logFrontendError).toHaveBeenCalledWith(expect.stringContaining("graph branch selection"), expect.any(Error));
+  });
+
   it("renames a branch inside the saved graph selection", async () => {
     const setGraphBranchSelection = vi.fn(async () => {});
     const client = transferClient({

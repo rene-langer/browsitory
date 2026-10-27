@@ -41,6 +41,21 @@ export function useBranchActions(
     branchNamesRef.current = branchNames;
   }, [graphBranchSelection, branchNames]);
 
+  // The branch operation already succeeded; a failure to rewrite the saved selection must not
+  // report it as failed (the graph skips missing names anyway, #97), so it is only logged.
+  const updateSelection = useCallback(
+    async (next: string[], after: "delete" | "rename") => {
+      try {
+        await client.setGraphBranchSelection(repoPath, next);
+      } catch (error) {
+        void client
+          .logFrontendError(`Updating the graph branch selection after a branch ${after} failed`, error)
+          .catch(() => {});
+      }
+    },
+    [client, repoPath],
+  );
+
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
       runOptimisticMutationWithMessage(
@@ -72,10 +87,10 @@ export function useBranchActions(
             name,
             branchNamesRef.current.filter((candidate) => candidate !== name),
           );
-          if (next !== null) await client.setGraphBranchSelection(repoPath, next);
+          if (next !== null) await updateSelection(next, "delete");
         },
       ),
-    [client, runOptimisticMutation, repoPath],
+    [client, runOptimisticMutation, repoPath, updateSelection],
   );
   const renameBranch = useCallback(
     (oldName: string, newName: string) =>
@@ -87,10 +102,10 @@ export function useBranchActions(
         async () => {
           await client.renameBranch(repoPath, oldName, newName);
           const next = withRenamedBranch(selectionRef.current, oldName, newName);
-          if (next !== null) await client.setGraphBranchSelection(repoPath, next);
+          if (next !== null) await updateSelection(next, "rename");
         },
       ),
-    [client, runOptimisticMutation, repoPath],
+    [client, runOptimisticMutation, repoPath, updateSelection],
   );
 
   const openCreateBranchDraft = useCallback(
