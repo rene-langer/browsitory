@@ -391,11 +391,12 @@ fn an_unknown_branch_is_reported_by_its_short_name() {
 fn an_unborn_head_has_nothing_to_compare_with() {
     let (_dir, repo) = init_repo();
     let only = commit_tree(&repo, &[("x.txt", "x\n", REGULAR)], &[], "only");
-    repo.reference("refs/heads/feature", only, true, "test")
+    repo.reference("refs/heads/compare-unborn-target", only, true, "test")
         .unwrap();
-    // HEAD still points at the unborn default branch.
+    // Point HEAD at an unborn branch explicitly, whatever `init.defaultBranch` says.
+    repo.set_head("refs/heads/compare-unborn-head").unwrap();
 
-    let error = branch_compare_range(&repo, "refs/heads/feature").unwrap_err();
+    let error = branch_compare_range(&repo, "refs/heads/compare-unborn-target").unwrap_err();
 
     assert!(matches!(error, DiffError::UnbornHead));
     assert_eq!(

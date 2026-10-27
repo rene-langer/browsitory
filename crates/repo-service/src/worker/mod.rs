@@ -3078,7 +3078,8 @@ mod tests {
         write_file(dir.path(), "a.txt", "one\n");
         commit_all(&repo, "base");
         let base = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.branch("feature", &base, false).unwrap();
+        // A name no `init.defaultBranch` would pick, so HEAD is never this branch.
+        repo.branch("compare-worker-target", &base, false).unwrap();
         write_file(dir.path(), "a.txt", "two\n");
         commit_all(&repo, "main only");
 
@@ -3086,7 +3087,7 @@ mod tests {
         let handle = worker.handle();
 
         let range = handle
-            .get_branch_compare_range("refs/heads/feature".into())
+            .get_branch_compare_range("refs/heads/compare-worker-target".into())
             .unwrap();
         assert_eq!(range.from_id, base.id().to_string());
         assert_eq!(range.to_id, base.id().to_string());
