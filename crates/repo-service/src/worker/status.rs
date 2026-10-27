@@ -271,15 +271,46 @@ pub(super) fn ignore_path(
         reply.send(git_core::stage::ignore_path(repo, &pattern).map_err(|error| error.to_string()));
 }
 
+/// The reply both commit and amend send: a hook failure is an outcome the UI renders, every
+/// other failure stays an error message.
+pub(super) fn commit_reply(
+    result: Result<String, git_core::commit::CommitError>,
+) -> Result<git_core::commit::CommitOutcome, String> {
+    use git_core::commit::{CommitError, CommitOutcome};
+    match result {
+        Ok(commit_id) => Ok(CommitOutcome::Committed { commit_id }),
+        Err(CommitError::HookFailed { hook, output }) => {
+            Ok(CommitOutcome::HookFailed { hook, output })
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 pub(super) fn commit(
     repo: &mut git2::Repository,
     message: String,
-    reply: Sender<Result<String, String>>,
+    no_verify: bool,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
+    reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
 ) {
-    let _ = reply.send(
-        git_core::commit::commit(repo, &message, git_core::hooks::HookOptions::default())
-            .map_err(|error| error.to_string()),
+    let cancel = op.cancel_check();
+    let mut reporter = super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+    };
+    let result = git_core::commit::commit(
+        repo,
+        &message,
+        git_core::hooks::HookOptions {
+            no_verify,
+            cancel: Some(&cancel),
+            reporter: Some(&mut reporter),
+            ..Default::default()
+        },
     );
+    op.clear();
+    let _ = reply.send(commit_reply(result));
 }
 
 impl WorkerHandle {
@@ -621,10 +652,24 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn commit(&self, message: String) -> Result<String, String> {
+    /// Commits the index, running the commit hooks (`pre-commit` and `commit-msg` skipped with
+    /// `no_verify`). Hook progress goes to `events`, tagged with this commit's operation id,
+    /// which `cancel_transfer` accepts. A failing gate hook is `Ok(CommitOutcome::HookFailed)`.
+    pub fn commit(
+        &self,
+        message: String,
+        no_verify: bool,
+        events: Sender<super::HookEvent>,
+    ) -> Result<git_core::commit::CommitOutcome, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
-            .send(Command::Commit { message, reply: tx })
+            .send(Command::Commit {
+                message,
+                no_verify,
+                operation_id: super::remote::next_operation_id("commit"),
+                events,
+                reply: tx,
+            })
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?

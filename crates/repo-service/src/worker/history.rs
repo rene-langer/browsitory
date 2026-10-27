@@ -7,12 +7,31 @@ use std::sync::mpsc::Sender;
 pub(super) fn head_info(repo: &git2::Repository, reply: Sender<Result<HeadInfo, String>>) {
     let _ = reply.send(git_core::repo::head_info(repo).map_err(|error| error.to_string()));
 }
-pub(super) fn amend(repo: &git2::Repository, message: String, reply: Sender<Result<(), String>>) {
-    let _ = reply.send(
-        git_core::commit::amend_head(repo, &message, git_core::hooks::HookOptions::default())
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+pub(super) fn amend(
+    repo: &git2::Repository,
+    message: String,
+    no_verify: bool,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
+    reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
+) {
+    let cancel = op.cancel_check();
+    let mut reporter = super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+    };
+    let result = git_core::commit::amend_head(
+        repo,
+        &message,
+        git_core::hooks::HookOptions {
+            no_verify,
+            cancel: Some(&cancel),
+            reporter: Some(&mut reporter),
+            ..Default::default()
+        },
     );
+    op.clear();
+    let _ = reply.send(super::status::commit_reply(result));
 }
 pub(super) fn cherry_pick(
     repo: &git2::Repository,
@@ -65,8 +84,21 @@ impl WorkerHandle {
     pub fn get_head_info(&self) -> Result<HeadInfo, String> {
         round_trip(self, |reply| Command::GetHeadInfo { reply })
     }
-    pub fn amend_commit(&self, message: String) -> Result<(), String> {
-        round_trip(self, |reply| Command::AmendCommit { message, reply })
+    /// Amends HEAD; hooks, events and cancel as for `commit`.
+    pub fn amend_commit(
+        &self,
+        message: String,
+        no_verify: bool,
+        events: Sender<super::HookEvent>,
+    ) -> Result<git_core::commit::CommitOutcome, String> {
+        let operation_id = super::remote::next_operation_id("amend");
+        round_trip(self, |reply| Command::AmendCommit {
+            message,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn cherry_pick(&self, commit_id: String) -> Result<PickOutcome, String> {
         round_trip(self, |reply| Command::CherryPick { commit_id, reply })

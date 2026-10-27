@@ -1069,8 +1069,16 @@ struct CommitParams {
 
 fn commit(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: CommitParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let commit_id = worker_handle(repos, &params.repo_path)?.commit(params.message)?;
-    Ok(Value::String(commit_id))
+    match worker_handle(repos, &params.repo_path)?.commit(
+        params.message,
+        false,
+        mpsc::channel().0,
+    )? {
+        git_core::commit::CommitOutcome::Committed { commit_id } => Ok(Value::String(commit_id)),
+        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
+            Err(format!("The {hook} hook failed."))
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -2188,8 +2196,16 @@ fn redo_last(params: Value, repos: &Repos) -> Result<Value, String> {
 fn amend_commit(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: MessageParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.amend_commit(params.message)?;
-    Ok(Value::Null)
+    match worker_handle(repos, &params.repo_path)?.amend_commit(
+        params.message,
+        false,
+        mpsc::channel().0,
+    )? {
+        git_core::commit::CommitOutcome::Committed { .. } => Ok(Value::Null),
+        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
+            Err(format!("The {hook} hook failed."))
+        }
+    }
 }
 
 fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {

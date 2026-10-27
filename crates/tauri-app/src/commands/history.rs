@@ -17,7 +17,16 @@ pub async fn amend_commit(
     message: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.amend_commit(message)
+    match worker_handle(&state, &repo_path)?.amend_commit(
+        message,
+        false,
+        std::sync::mpsc::channel().0,
+    )? {
+        git_core::commit::CommitOutcome::Committed { .. } => Ok(()),
+        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
+            Err(format!("The {hook} hook failed."))
+        }
+    }
 }
 
 #[tauri::command]

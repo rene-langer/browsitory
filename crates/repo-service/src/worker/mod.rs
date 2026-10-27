@@ -32,6 +32,7 @@ mod branch;
 mod compare;
 mod forge;
 mod history;
+mod hooks;
 mod merge;
 mod rebase;
 mod reflog;
@@ -45,6 +46,7 @@ mod undo;
 mod undo_store;
 mod worktree;
 
+pub use hooks::HookEvent;
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,7 +239,10 @@ pub(crate) enum Command {
     },
     Commit {
         message: String,
-        reply: Sender<Result<String, String>>,
+        no_verify: bool,
+        operation_id: String,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
     },
     ListBranches {
         reply: Sender<Result<Vec<BranchInfo>, String>>,
@@ -477,7 +482,10 @@ pub(crate) enum Command {
     },
     AmendCommit {
         message: String,
-        reply: Sender<Result<(), String>>,
+        no_verify: bool,
+        operation_id: String,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
     },
     CherryPick {
         commit_id: String,
@@ -879,7 +887,23 @@ impl Worker {
                     Command::IgnorePath { pattern, reply } => {
                         status::ignore_path(&repo, pattern, reply)
                     }
-                    Command::Commit { message, reply } => status::commit(&mut repo, message, reply),
+                    Command::Commit {
+                        message,
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => status::commit(
+                        &mut repo,
+                        message,
+                        no_verify,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
                         name,
@@ -1038,9 +1062,23 @@ impl Worker {
                     } => merge::resolve(&repo, path, resolved_content, reply),
                     Command::AbortMerge { reply } => merge::abort(&repo, reply),
                     Command::GetHeadInfo { reply } => history::head_info(&repo, reply),
-                    Command::AmendCommit { message, reply } => {
-                        history::amend(&repo, message, reply)
-                    }
+                    Command::AmendCommit {
+                        message,
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => history::amend(
+                        &repo,
+                        message,
+                        no_verify,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::CherryPick { commit_id, reply } => {
                         history::cherry_pick(&repo, commit_id, reply)
                     }
@@ -1392,7 +1430,7 @@ mod tests {
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
-    use super::{ensure_worker, Command, TransferEvent, UndoOutcome, UndoState, Worker};
+    use super::{ensure_worker, Command, HookEvent, TransferEvent, UndoOutcome, UndoState, Worker};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
@@ -1488,8 +1526,109 @@ mod tests {
             config.set_str("user.email", "test@example.com").unwrap();
             config.set_bool("core.autocrlf", false).unwrap();
             config.set_bool("commit.gpgSign", false).unwrap();
+            // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
+            let hooks = repo.path().join("hooks");
+            config
+                .set_str("core.hooksPath", hooks.to_str().expect("utf-8 temp path"))
+                .unwrap();
         }
         (dir, repo)
+    }
+
+    #[cfg(unix)]
+    fn install_hook(repo: &Repository, name: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = git_core::hooks::hooks_dir(repo).expect("hooks dir");
+        std::fs::create_dir_all(&dir).expect("create hooks dir");
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write hook");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_pre_commit_replies_a_hook_failed_outcome_and_records_no_undo() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        install_hook(&repo, "pre-commit", "echo nope; exit 1");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        let undo_before = handle.get_undo_state().unwrap().undo;
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let outcome = handle.commit("msg".into(), false, events_tx).unwrap();
+
+        assert_eq!(
+            outcome,
+            git_core::commit::CommitOutcome::HookFailed {
+                hook: "pre-commit".into(),
+                output: "nope\n".into()
+            }
+        );
+        let events: Vec<HookEvent> = events_rx.iter().collect();
+        assert!(
+            matches!(&events[..], [
+                HookEvent::Started { operation_id: a, hook: h1 },
+                HookEvent::Finished { operation_id: b, hook: h2 },
+            ] if a == b && a.starts_with("commit-") && h1 == "pre-commit" && h2 == "pre-commit"),
+            "{events:?}"
+        );
+        assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
+        assert!(repo.head().is_err(), "nothing may be committed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_transfer_stops_a_running_pre_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        install_hook(&repo, "pre-commit", "sleep 30");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            if let Ok(HookEvent::Started { operation_id, .. }) = events_rx.recv() {
+                canceller.cancel_transfer(&operation_id);
+            }
+        });
+        let started = std::time::Instant::now();
+
+        let result = handle.commit("msg".into(), false, events_tx);
+
+        cancel_thread.join().unwrap();
+        assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
+        // Generous bound: only proves the hook's `sleep 30` was not waited out.
+        assert!(started.elapsed() < Duration::from_secs(25));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn amend_with_no_verify_skips_a_failing_pre_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        install_hook(&repo, "pre-commit", "exit 1");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let failed = handle
+            .amend_commit("amended".into(), false, mpsc::channel().0)
+            .unwrap();
+        assert!(matches!(
+            failed,
+            git_core::commit::CommitOutcome::HookFailed { .. }
+        ));
+        let outcome = handle
+            .amend_commit("amended".into(), true, mpsc::channel().0)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
     }
 
     fn write_file(dir: &Path, relative_path: &str, contents: &str) {
@@ -1596,7 +1735,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle.stage_file("new.txt".into()).unwrap();
-        let result = handle.commit("message".into());
+        let result = handle.commit("message".into(), false, mpsc::channel().0);
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
@@ -1708,7 +1847,7 @@ mod tests {
         let handle = worker.handle();
         handle.stage_file("b.txt".into()).unwrap();
         let undo_before = handle.get_undo_state().unwrap().undo;
-        let result = handle.commit("signed?".into());
+        let result = handle.commit("signed?".into(), false, mpsc::channel().0);
 
         assert_eq!(
             result.unwrap_err(),
@@ -3514,7 +3653,9 @@ mod tests {
             git_core::pick::PickOutcome::Committed { .. }
         ));
 
-        handle.amend_commit("side, amended".into()).unwrap();
+        handle
+            .amend_commit("side, amended".into(), false, mpsc::channel().0)
+            .unwrap();
         let picked = handle.get_head_info().unwrap().head_id.unwrap();
 
         let reverted = handle.revert_commit(picked).unwrap();
@@ -3766,7 +3907,9 @@ mod tests {
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
-        handle.commit("Merge feature".into()).unwrap();
+        handle
+            .commit("Merge feature".into(), false, mpsc::channel().0)
+            .unwrap();
         assert_eq!(
             handle.get_undo_state().unwrap(),
             UndoState {

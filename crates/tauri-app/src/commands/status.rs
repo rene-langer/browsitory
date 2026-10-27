@@ -323,5 +323,10 @@ pub async fn commit(
     message: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    worker_handle(&state, &repo_path)?.commit(message)
+    match worker_handle(&state, &repo_path)?.commit(message, false, std::sync::mpsc::channel().0)? {
+        git_core::commit::CommitOutcome::Committed { commit_id } => Ok(commit_id),
+        git_core::commit::CommitOutcome::HookFailed { hook, .. } => {
+            Err(format!("The {hook} hook failed."))
+        }
+    }
 }

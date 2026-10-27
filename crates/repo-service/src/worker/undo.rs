@@ -383,7 +383,7 @@ impl HeldReplies {
 /// `AbortMerge`, `AbortRebase`). Guarded by `every_recordable_command_has_its_reply_held`.
 ///
 /// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
-/// whose reply isn't `Sender<Result<(), String>>` (`Commit` replies with the new oid,
+/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a `CommitOutcome`,
 /// `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
 pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
     match command {
@@ -393,7 +393,6 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
         | Command::UnstageHunk { reply, .. }
         | Command::StageLines { reply, .. }
         | Command::UnstageLines { reply, .. }
-        | Command::AmendCommit { reply, .. }
         | Command::CreateBranch { reply, .. }
         | Command::DeleteBranch { reply, .. }
         | Command::RenameBranch { reply, .. }
@@ -410,7 +409,7 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
         | Command::RestoreReflogEntry { reply, .. }
         | Command::AbortMerge { reply, .. }
         | Command::AbortRebase { reply, .. } => held.hold(reply),
-        Command::Commit { reply, .. } => held.hold(reply),
+        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => held.hold(reply),
         Command::StartMerge { reply, .. } => held.hold(reply),
         Command::StartRebase { reply, .. } | Command::RebaseContinue { reply, .. } => {
             held.hold(reply)
@@ -554,6 +553,9 @@ mod tests {
         assert_eq!(
             label(Command::Commit {
                 message: "Fix parser\n\nbody".into(),
+                no_verify: false,
+                operation_id: "commit-1".into(),
+                events: channel().0,
                 reply: tx
             }),
             Some(("Commit “Fix parser”".into(), SnapshotScope::RefsAndIndex))
@@ -661,6 +663,9 @@ mod tests {
         let (tx, _rx) = channel();
         let (text, _) = label(Command::Commit {
             message: "x".repeat(200),
+            no_verify: false,
+            operation_id: "commit-1".into(),
+            events: channel().0,
             reply: tx,
         })
         .unwrap();
@@ -726,8 +731,18 @@ mod tests {
             line_indices: vec![],
             expected_lines: vec![],
         });
-        assert_held!(Commit { message: s() });
-        assert_held!(AmendCommit { message: s() });
+        assert_held!(Commit {
+            message: s(),
+            no_verify: false,
+            operation_id: s(),
+            events: channel().0
+        });
+        assert_held!(AmendCommit {
+            message: s(),
+            no_verify: false,
+            operation_id: s(),
+            events: channel().0
+        });
         assert_held!(CreateBranch {
             name: s(),
             start_point: s()
@@ -807,6 +822,9 @@ mod tests {
         assert_eq!(
             label(Command::AmendCommit {
                 message: "  ".into(),
+                no_verify: false,
+                operation_id: "amend-1".into(),
+                events: channel().0,
                 reply: tx
             })
             .map(|(l, _)| l),

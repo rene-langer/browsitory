@@ -9,6 +9,15 @@ use crate::credentials::{CredentialService, CredentialStore, CredentialStoreErro
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
+/// `"<prefix>-<n>"`, unique per process; also used for commit/amend so their hooks can be
+/// cancelled through `CancelRegistry` like a transfer.
+pub(super) fn next_operation_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}",
+        NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 struct ChannelReporter {
     events: Sender<TransferEvent>,
     operation_id: String,
@@ -214,7 +223,7 @@ impl TransferOp<'_> {
     ///
     /// Owns a clone of the shared registry and the operation's own ID, so the check stays valid
     /// for the whole (blocking) transfer without borrowing anything from the command loop.
-    fn cancel_check(&self) -> impl Fn() -> bool {
+    pub(super) fn cancel_check(&self) -> impl Fn() -> bool {
         let cancelled = Arc::clone(self.cancelled);
         let operation_id = self.id.clone();
         move || {
@@ -228,7 +237,7 @@ impl TransferOp<'_> {
     /// Drops this operation from the shared registry. Called on every terminal path (success,
     /// real failure and cancellation alike) so a long-lived worker's cancel set cannot grow
     /// unbounded.
-    fn clear(&self) {
+    pub(super) fn clear(&self) {
         self.cancelled
             .lock()
             .unwrap_or_else(|error| error.into_inner())
