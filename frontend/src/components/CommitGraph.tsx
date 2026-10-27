@@ -50,6 +50,7 @@ export function CommitGraph({
   hasMore = false,
   onLoadMore,
   graphRemoteBranchSelection = null,
+  onRequestSearch,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -80,6 +81,8 @@ export function CommitGraph({
   // `graphBranchSelection ?? branches.map(...)` fallback, but computed here from the commits
   // actually on screen since remote selection never narrows which commits are fetched.
   graphRemoteBranchSelection?: string[] | null;
+  /** Ctrl/Cmd+F while the list has focus: focus the commit search field. */
+  onRequestSearch?: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -180,6 +183,11 @@ export function CommitGraph({
   const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     // Keys from the open context menu (or any nested control) are not list navigation.
     if (event.target !== event.currentTarget) return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f" && onRequestSearch) {
+      event.preventDefault();
+      onRequestSearch();
+      return;
+    }
     const extend = event.shiftKey;
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
@@ -310,7 +318,7 @@ export function CommitGraph({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
-      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape"
+      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F"
     >
       <ListRow
         className={styles.uncommittedRow}

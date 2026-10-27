@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
@@ -38,6 +38,8 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     getWorkingDiff: async () => [],
     getCommitDiff: async () => [],
     getFileHistory: unused,
+    searchCommits: unused,
+    cancelSearch: async () => {},
     getCommitRenameDiff: unused,
     getCommitFiles: unused,
     getCommitMessage: unused,
@@ -610,6 +612,54 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close file history" }));
     expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+  });
+
+  it("searches from the graph with Ctrl+F, replaces the graph with results, and × restores it", async () => {
+    const hit = {
+      id: "s1",
+      shortId: "s1",
+      summary: "search hit",
+      authorName: "Searchy McAuthor",
+      authorEmail: "searchy@example.com",
+      timestamp: 1_700_000_000,
+      parentIds: [],
+      branchRefs: [],
+      remoteBranchRefs: [],
+    };
+    const searchCommits = vi.fn(async () => ({ commits: [hit], nextCursor: null, scanned: 1 }));
+    const cancelSearch = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getGraphBranchSelection: async () => ["main"],
+      getCommitFiles: async () => [],
+      getCommitMessage: async () => "search hit",
+      getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+      searchCommits,
+      cancelSearch,
+    });
+
+    render(<App client={client} />);
+    const graph = await screen.findByRole("listbox", { name: "Commit history" });
+    graph.focus();
+    fireEvent.keyDown(graph, { key: "f", ctrlKey: true });
+    const input = screen.getByRole("searchbox", { name: "Search commits" });
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.change(input, { target: { value: "author:searchy" } });
+    const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", ["main"], null));
+    expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
+    expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("search hit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+    expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search commits" })).toHaveValue("");
   });
 
   describe("undo/redo", () => {

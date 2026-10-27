@@ -16,6 +16,7 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  SearchPage,
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
@@ -118,6 +119,11 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>
     loggedInvoke<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+  // Plain `invoke` on purpose: query errors and cancellations are expected while typing and are
+  // shown in the UI, not logged.
+  searchCommits: (repoPath: string, query: string, refs: string[] | null, cursor: string | null) =>
+    invoke<SearchPage>("search_commits", { repoPath, query, refs, cursor }),
+  cancelSearch: (repoPath: string) => loggedInvoke<void>("cancel_search", { repoPath }),
   getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
     loggedInvoke<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
   getCommitFiles: (repoPath: string, commitId: string) =>

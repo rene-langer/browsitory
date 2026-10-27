@@ -1,0 +1,97 @@
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  padding: var(--space-1);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
+}
+
+/* The native clear button duplicates our ×, which also restores the selection. */
+.input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.iconButton:hover,
+.iconButton[aria-expanded="true"] {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
+.help {
+  position: absolute;
+  top: 100%;
+  left: var(--space-2);
+  right: var(--space-2);
+  z-index: 10;
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-sm);
+}
+
+.syntax {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.syntaxRow {
+  display: grid;
+  grid-template-columns: minmax(9em, auto) 1fr;
+  gap: var(--space-3);
+}
+
+.syntaxRow dt,
+.syntaxRow dd {
+  margin: 0;
+}
+
+.syntaxRow code {
+  font-family: var(--font-mono);
+}
+
+.footer {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}

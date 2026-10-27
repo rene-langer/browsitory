@@ -9,6 +9,7 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  SearchPage,
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
@@ -197,6 +198,9 @@ export const vscodeRepoClient: RepoClient = {
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>
     call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+  searchCommits: (repoPath: string, query: string, refs: string[] | null, cursor: string | null) =>
+    call<SearchPage>("search_commits", { repoPath, query, refs, cursor }),
+  cancelSearch: (repoPath: string) => call<void>("cancel_search", { repoPath }),
   getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
     call<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
 

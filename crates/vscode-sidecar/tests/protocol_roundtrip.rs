@@ -211,6 +211,47 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
 }
 
 #[test]
+fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "alpha commit");
+    write_file(dir.path(), "b.txt", "b");
+    commit_all(&repo, "beta commit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let page = sidecar.call(
+        2,
+        "search_commits",
+        serde_json::json!({"repoPath": repo_path, "query": "beta", "refs": null, "cursor": null}),
+    );
+    let result = &page["result"];
+    assert_eq!(result["commits"].as_array().unwrap().len(), 1);
+    assert_eq!(result["commits"][0]["summary"], "beta commit");
+    assert_eq!(result["nextCursor"], serde_json::Value::Null);
+    assert_eq!(result["scanned"], 2);
+
+    let invalid = sidecar.call(
+        3,
+        "search_commits",
+        serde_json::json!({"repoPath": repo_path, "query": "feat: x", "refs": null, "cursor": null}),
+    );
+    assert!(invalid["error"]["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("Unknown search key"));
+
+    let cancelled = sidecar.call(
+        4,
+        "cancel_search",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(cancelled["result"], serde_json::Value::Null);
+}
+
+#[test]
 fn working_and_commit_diff_round_trip_through_the_sidecar() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

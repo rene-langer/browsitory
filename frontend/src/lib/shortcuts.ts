@@ -32,6 +32,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Home / End", description: "Jump to first / last commit" },
       { keys: "PageUp / PageDown", description: "Move by a page" },
       { keys: "Enter / Menu / Shift+F10", description: "Open the commit context menu" },
+      { keys: "Ctrl/Cmd+F", description: "Search commits" },
     ],
   },
   {

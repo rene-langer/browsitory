@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -34,6 +35,7 @@ mod merge;
 mod rebase;
 mod reflog;
 mod remote;
+mod search;
 mod stash;
 mod status;
 mod submodule;
@@ -112,6 +114,16 @@ pub(crate) enum Command {
         path: String,
         limit: usize,
         reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
+    },
+    /// One page of a commit search. `generation` is the `SearchGeneration` value claimed when
+    /// the command was queued; once a newer search or `cancel_search` bumps the counter, this
+    /// one stops and replies `Search cancelled.`.
+    SearchCommits {
+        query: String,
+        refs: Option<Vec<String>>,
+        cursor: Option<String>,
+        generation: u64,
+        reply: Sender<Result<git_core::search::SearchPage, String>>,
     },
     GetCommitRenameDiff {
         commit_id: String,
@@ -496,9 +508,16 @@ pub(crate) enum Command {
 /// tick from inside the blocked call (see `worker/remote.rs`'s `cancel_check`).
 pub type CancelRegistry = Arc<Mutex<HashSet<String>>>;
 
+/// The generation of the newest commit search. A running search whose generation is no longer
+/// current stops, so a newer search (or `cancel_search`) supersedes any older one, queued or
+/// running. A side channel for the same reason as `CancelRegistry`: a cancel sent as a
+/// `Command` would queue behind the very search it is meant to stop.
+pub type SearchGeneration = Arc<AtomicU64>;
+
 pub struct Worker {
     tx: Sender<Command>,
     cancelled: CancelRegistry,
+    search_generation: SearchGeneration,
 }
 
 /// Cheap, cloneable handle to a `Worker`'s command channel.
@@ -510,6 +529,8 @@ pub struct WorkerHandle {
     tx: Sender<Command>,
     /// Shared with the worker thread — see `CancelRegistry`.
     cancelled: CancelRegistry,
+    /// Shared with the worker thread — see `SearchGeneration`.
+    search_generation: SearchGeneration,
 }
 
 /// Finds the `ForgeRepository` for a named remote. Returns a secret-free, static error (never
@@ -551,9 +572,12 @@ impl Worker {
         let (tx, rx) = mpsc::channel::<Command>();
         let cancelled: CancelRegistry = Arc::new(Mutex::new(HashSet::new()));
         let worker_cancelled = Arc::clone(&cancelled);
+        let search_generation: SearchGeneration = Arc::new(AtomicU64::new(0));
+        let worker_search_generation = Arc::clone(&search_generation);
 
         thread::spawn(move || {
             let cancelled = worker_cancelled;
+            let search_generation = worker_search_generation;
             let mut repo = repo;
             let mut rebase_state: Option<RebaseState> = None;
             let credential_service = CredentialService::new(credential_store);
@@ -622,6 +646,21 @@ impl Worker {
                     Command::GetFileHistory { path, limit, reply } => {
                         status::get_file_history(&repo, path, limit, reply)
                     }
+                    Command::SearchCommits {
+                        query,
+                        refs,
+                        cursor,
+                        generation,
+                        reply,
+                    } => search::search_commits(
+                        &repo,
+                        &search_generation,
+                        generation,
+                        query,
+                        refs,
+                        cursor,
+                        reply,
+                    ),
                     Command::GetCommitRenameDiff {
                         commit_id,
                         old_path,
@@ -1044,7 +1083,11 @@ impl Worker {
             }
         });
 
-        Ok(Worker { tx, cancelled })
+        Ok(Worker {
+            tx,
+            cancelled,
+            search_generation,
+        })
     }
 
     /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.
@@ -1052,6 +1095,7 @@ impl Worker {
         WorkerHandle {
             tx: self.tx.clone(),
             cancelled: Arc::clone(&self.cancelled),
+            search_generation: Arc::clone(&self.search_generation),
         }
     }
 }
@@ -1151,6 +1195,7 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::{HashMap, VecDeque};
     use std::path::Path;
+    use std::sync::atomic::Ordering;
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -1384,6 +1429,78 @@ mod tests {
         assert_eq!(
             signature.status,
             git_core::signing::SignatureStatus::Unsigned
+        );
+    }
+
+    fn two_commit_repo() -> (TempDir, Repository) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "alpha commit");
+        write_file(dir.path(), "b.txt", "b");
+        commit_all(&repo, "beta commit");
+        (dir, repo)
+    }
+
+    #[test]
+    fn search_commits_round_trips_through_the_worker() {
+        let (dir, _repo) = two_commit_repo();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        let page = worker
+            .handle()
+            .search_commits("alpha".into(), None, None)
+            .unwrap();
+
+        assert_eq!(page.commits.len(), 1);
+        assert_eq!(page.commits[0].summary, "alpha commit");
+        assert_eq!(page.next_cursor, None);
+        assert_eq!(page.scanned, 2);
+    }
+
+    #[test]
+    fn an_invalid_search_query_replies_its_message() {
+        let (dir, _repo) = two_commit_repo();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        assert_eq!(
+            worker
+                .handle()
+                .search_commits("author:".into(), None, None)
+                .unwrap_err(),
+            "author: needs a value."
+        );
+    }
+
+    #[test]
+    fn a_search_superseded_before_it_runs_replies_cancelled() {
+        let (dir, _repo) = two_commit_repo();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        // Claim a generation the way `search_commits` does, then let a newer search/cancel
+        // supersede it before the command is even queued.
+        let stale = handle.search_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        handle.cancel_search();
+        let (tx, rx) = mpsc::channel();
+        handle
+            .tx
+            .send(Command::SearchCommits {
+                query: "alpha".into(),
+                refs: None,
+                cursor: None,
+                generation: stale,
+                reply: tx,
+            })
+            .unwrap();
+
+        assert_eq!(rx.recv().unwrap().unwrap_err(), "Search cancelled.");
+        // A fresh search after the cancel runs normally.
+        assert_eq!(
+            handle
+                .search_commits("alpha".into(), None, None)
+                .unwrap()
+                .commits
+                .len(),
+            1
         );
     }
 

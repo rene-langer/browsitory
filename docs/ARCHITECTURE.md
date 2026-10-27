@@ -174,6 +174,25 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 - Tests use real `gpg`/`ssh-keygen` with throwaway keys and skip when they are missing.
   `tests/signing_gpg.rs` is its own binary because it sets `GNUPGHOME` once per process.
 
+## Commit search
+
+- `git-core::search` parses the query once (`parse_query`) and pages a `TOPOLOGICAL | TIME`
+  revwalk (`search_commits`): cheap filters first, first-parent diff filters (`path:`,
+  `contents:`) last. A page ends at 100 matches, after 20,000 scanned commits, or after a
+  250 ms time budget (`PageLimits::time`, checked after each commit so a page always makes
+  progress) — so a commit/stage queued on the single in-order repo worker never waits behind
+  thousands of `path:`/`contents:` tree diffs; a time-boxed page just returns `next_cursor`
+  and the frontend's paging round continues.
+- The cursor is `<offset>:<fingerprint of the start oids>`; resuming re-walks and skips
+  `offset` (polling cancel every 1,024 skipped commits), and any moved start point is
+  `StaleCursor` instead of a duplicate or a gap.
+- A refresh after any mutation (or a graph branch selection change) deliberately restarts an
+  open search from page 1 rather than resuming its cursor.
+- One in-flight search per repo: `WorkerHandle::search_commits` bumps a shared
+  `SearchGeneration` (`Arc<AtomicU64>`) before queueing, and the running walk polls it, so a
+  newer search or `cancel_search` stops an older one without going through the command queue
+  (same reasoning as `CancelRegistry`).
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

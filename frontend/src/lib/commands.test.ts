@@ -169,6 +169,27 @@ describe("buildCommands", () => {
     expect(onShow).toHaveBeenCalled();
   });
 
+  it("offers Search commits when search commands are given", () => {
+    const onSearchCommits = vi.fn();
+    expect(buildCommands(makeAppState()).some((c) => c.id === "search-commits")).toBe(false);
+    const cmd = buildCommands(
+      makeAppState(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { onSearchCommits },
+    ).find((c) => c.id === "search-commits");
+    expect(cmd?.label).toBe("Search commits");
+    cmd?.run();
+    expect(onSearchCommits).toHaveBeenCalled();
+  });
+
   it("includes a Close tab command, grouped under Repositories, only when a close handler is supplied", () => {
     const onClose = vi.fn();
     expect(buildCommands(makeAppState()).some((c) => c.id === "close-tab")).toBe(false);

@@ -356,3 +356,28 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_diff_settings", { settings });
   });
 });
+
+describe("tauriRepoClient commit search", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(logError).mockClear();
+  });
+
+  it("invokes search_commits without logging its errors, and cancel_search", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce("Search cancelled.");
+    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, "100:abc")).rejects.toBe(
+      "Search cancelled.",
+    );
+    expect(invoke).toHaveBeenLastCalledWith("search_commits", {
+      repoPath: "/repo",
+      query: "author:ada",
+      refs: null,
+      cursor: "100:abc",
+    });
+    expect(logError).not.toHaveBeenCalled();
+
+    vi.mocked(invoke).mockResolvedValueOnce(null);
+    await tauriRepoClient.cancelSearch("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("cancel_search", { repoPath: "/repo" });
+  });
+});
