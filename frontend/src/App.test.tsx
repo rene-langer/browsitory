@@ -952,6 +952,65 @@ describe("App", () => {
     expect(screen.queryByRole("region", { name: "Comparison" })).toBeNull();
   });
 
+  describe("compare closes on any row click", () => {
+    const base = { authorName: "Rene", authorEmail: "rene@example.com", timestamp: 1_700_000_000, branchRefs: [], remoteBranchRefs: [], tags: [] };
+    const newer = { ...base, id: "n".repeat(40), shortId: "nnnnnnn", summary: "newer commit", parentIds: ["o".repeat(40)] };
+    const older = { ...base, id: "o".repeat(40), shortId: "ooooooo", summary: "older commit", parentIds: [] };
+    const stash = { index: 0, message: "wip stash", commitId: "s".repeat(40) };
+    function compareClient() {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => [newer, older],
+        listBranches: async () => [],
+        listStashes: async () => [stash],
+        getStashFiles: async () => ({ tracked: [], untracked: [], untrackedCommitId: null }),
+        getGraphBranchSelection: async () => null,
+        getCommitFiles: async () => [],
+        getCommitMessage: async () => "commit",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+        getRangeFiles: async () => [],
+        getWorkingTreeCompareFiles: async () => [],
+      });
+    }
+
+    it("clicking the already-selected commit closes the compare", async () => {
+      render(<App client={compareClient()} />);
+      const graph = await screen.findByRole("listbox", { name: "Commit history" });
+      fireEvent.click(await within(graph).findByText(/newer commit/));
+      fireEvent.click(within(graph).getByText(/older commit/), { ctrlKey: true });
+      fireEvent.click(screen.getByRole("button", { name: "Compare these commits" }));
+      await screen.findByRole("region", { name: "Comparison" });
+
+      // `older commit` is the focused row after the ctrl-click; clicking it again keeps the
+      // same selected row but must still close the compare.
+      fireEvent.click(within(graph).getByText(/older commit/));
+      expect(screen.queryByRole("region", { name: "Comparison" })).toBeNull();
+    });
+
+    it("clicking the already-selected stash closes the compare and shows the stash", async () => {
+      render(<App client={compareClient()} />);
+      const graph = await screen.findByRole("listbox", { name: "Commit history" });
+      await within(graph).findByText(/newer commit/);
+      const stashesToggle = screen.getByRole("button", { name: /^Stashes/ });
+      if (stashesToggle.getAttribute("aria-expanded") !== "true") fireEvent.click(stashesToggle);
+      const stashRow = await screen.findByText("wip stash");
+      fireEvent.click(stashRow);
+      await screen.findByRole("region", { name: "Stash details" });
+
+      fireEvent.contextMenu(within(graph).getByText(/older commit/));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Diff against working tree" }));
+      await screen.findByRole("region", { name: "Comparison" });
+      expect(screen.queryByRole("region", { name: "Stash details" })).toBeNull();
+
+      fireEvent.click(screen.getByText("wip stash"));
+      expect(screen.queryByRole("region", { name: "Comparison" })).toBeNull();
+      expect(await screen.findByRole("region", { name: "Stash details" })).toBeInTheDocument();
+    });
+  });
+
   describe("undo/redo", () => {
     function undoClient(overrides: Partial<RepoClient> = {}) {
       return fakeClient({

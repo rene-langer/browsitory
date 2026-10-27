@@ -52,6 +52,7 @@ import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
+import type { SelectedRow } from "./state/useAppState";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -116,6 +117,18 @@ function RepoWorkspace({
     appState.selectRow,
   );
   const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
+  // A click on a row closes an open compare even when it is the row already selected (the
+  // compare otherwise only closes when `selectedRow` changes), so clicking a stash or commit
+  // always shows it.
+  const closeCompare = compare.close;
+  const selectRow = appState.selectRow;
+  const selectRowClosingCompare = useCallback(
+    (row: SelectedRow) => {
+      closeCompare();
+      selectRow(row);
+    },
+    [closeCompare, selectRow],
+  );
   const [searchFocusRequested, setSearchFocusRequested] = useState(false);
   const clearSearchFocusRequest = useCallback(() => setSearchFocusRequested(false), []);
   const searchResultsRef = useRef<HTMLUListElement>(null);
@@ -617,7 +630,7 @@ function RepoWorkspace({
             {panelVisibility.visibility.stash && (
               <StashPanel
                 stashes={appState.state.stashes}
-                onSelectRow={appState.selectRow}
+                onSelectRow={selectRowClosingCompare}
                 onApplyStash={appState.applyStash}
                 onPopStash={appState.popStash}
                 onDropStash={appState.dropStash}
@@ -725,7 +738,7 @@ function RepoWorkspace({
                 <FileHistoryList
                   history={fileHistory.history}
                   selectedRow={appState.state.selectedRow}
-                  onSelectRow={appState.selectRow}
+                  onSelectRow={selectRowClosingCompare}
                   onClose={fileHistory.close}
                   onLoadMore={fileHistory.loadMore}
                   onRetry={fileHistory.retry}
@@ -744,7 +757,7 @@ function RepoWorkspace({
                     <CommitSearchResults
                       results={commitSearch.results}
                       selectedRow={appState.state.selectedRow}
-                      onSelectRow={appState.selectRow}
+                      onSelectRow={selectRowClosingCompare}
                       onClose={commitSearch.close}
                       onLoadMore={commitSearch.loadMore}
                       onRetry={commitSearch.retry}
@@ -762,7 +775,7 @@ function RepoWorkspace({
                       commits={appState.state.commits}
                       selectedRow={appState.state.selectedRow}
                       pending={repositoryOperationDisabled}
-                      onSelectRow={appState.selectRow}
+                      onSelectRow={selectRowClosingCompare}
                       onBranchFromCommit={appState.openCreateBranchDraft}
                       onRebaseFromCommit={appState.openRebasePlanner}
                       onRebaseSelection={appState.openRebaseSelection}
@@ -798,7 +811,7 @@ function RepoWorkspace({
                   onSwap={compare.swap}
                   onClose={compare.close}
                   onRetry={compare.retry}
-                  onSelectRow={appState.selectRow}
+                  onSelectRow={selectRowClosingCompare}
                   onOpenFileHistory={fileHistory.open}
                 />
               ) : (
