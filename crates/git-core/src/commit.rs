@@ -46,7 +46,17 @@ fn gate(
     invocation: &HookInvocation<'_>,
     options: &mut HookOptions<'_>,
 ) -> Result<bool, CommitError> {
-    let outcome = hooks::run_reported(repo, invocation, options)?;
+    let outcome = match hooks::run_reported(repo, invocation, options) {
+        Ok(outcome) => outcome,
+        // A hook that cannot start blocks like a failing one, and is retryable without hooks.
+        Err(error @ hooks::HookError::Spawn { .. }) => {
+            return Err(CommitError::HookFailed {
+                hook: invocation.name.to_string(),
+                output: hooks::spawn_failure_output(&error),
+            })
+        }
+        Err(error) => return Err(error.into()),
+    };
     if let Some(output) = hooks::failure_output(&outcome, options.timeout) {
         return Err(CommitError::HookFailed {
             hook: invocation.name.to_string(),

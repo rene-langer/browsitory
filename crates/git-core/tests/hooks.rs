@@ -734,3 +734,48 @@ fn a_failing_pre_push_blocks_a_remote_branch_delete() {
     assert!(matches!(error, RemoteError::HookFailed { .. }));
     assert!(remote_ref(&fixture.remote_path, "refs/heads/topic").is_some());
 }
+
+fn install_raw_hook(repo: &git2::Repository, name: &str, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = hooks_dir(repo).unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, contents).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn a_commit_hook_that_cannot_start_is_a_retryable_hook_failure() {
+    let (dir, mut repo) = common::init_repo();
+    stage(dir.path(), &repo, "a.txt", "a");
+    install_raw_hook(
+        &repo,
+        "pre-commit",
+        "#!/browsitory/no/such/interpreter\nexit 0\n",
+    );
+
+    let error = commit(&mut repo, "x", HookOptions::default()).unwrap_err();
+    match error {
+        CommitError::HookFailed { hook, output } => {
+            assert_eq!(hook, "pre-commit");
+            assert!(
+                output.starts_with("Could not run the pre-commit hook:"),
+                "{output}"
+            );
+            assert!(output.contains("#!"), "{output}");
+        }
+        other => panic!("expected HookFailed, got {other:?}"),
+    }
+
+    commit(
+        &mut repo,
+        "x",
+        HookOptions {
+            no_verify: true,
+            ..HookOptions::default()
+        },
+    )
+    .unwrap();
+    let error = amend_head(&repo, "y", HookOptions::default()).unwrap_err();
+    assert!(matches!(error, CommitError::HookFailed { ref hook, .. } if hook == "pre-commit"));
+}

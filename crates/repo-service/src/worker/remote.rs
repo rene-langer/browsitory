@@ -256,7 +256,7 @@ fn complete(
         Err(git_core::remote::RemoteError::HookFailed { output, .. }) => Some(output.clone()),
         Err(git_core::remote::RemoteError::Hook(
             error @ git_core::hooks::HookError::Spawn { .. },
-        )) => Some(error.to_string()),
+        )) => Some(git_core::hooks::spawn_failure_output(error)),
         _ => None,
     };
     let _ = events.send(TransferEvent::Completed {

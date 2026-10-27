@@ -302,6 +302,17 @@ fn describe(timeout: Duration) -> String {
     }
 }
 
+/// What the user sees when a gate hook could not even start: usually a `#!` line naming an
+/// interpreter that is not installed (exec then fails with "No such file or directory").
+pub fn spawn_failure_output(error: &HookError) -> String {
+    match error {
+        HookError::Spawn { .. } => {
+            format!("{error}\nCheck the hook's #! line: is its interpreter installed and on PATH?")
+        }
+        HookError::Cancelled { .. } => error.to_string(),
+    }
+}
+
 /// What a failed gate hook shows the user; `None` when the outcome lets the operation proceed.
 pub fn failure_output(outcome: &HookOutcome, timeout: Duration) -> Option<String> {
     match outcome {
