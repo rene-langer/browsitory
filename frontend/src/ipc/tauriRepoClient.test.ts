@@ -438,4 +438,36 @@ describe("tauriRepoClient commit search", () => {
     await tauriRepoClient.cancelSearch("/repo");
     expect(invoke).toHaveBeenLastCalledWith("cancel_search", { repoPath: "/repo" });
   });
+
+  it("invokes the compare commands with camelCase args", async () => {
+    const opts = { ignoreWhitespace: false, contextLines: 3 };
+    vi.mocked(invoke).mockResolvedValue([]);
+    await tauriRepoClient.getRangeFiles("/repo", "a", "b");
+    expect(invoke).toHaveBeenLastCalledWith("get_range_files", { repoPath: "/repo", fromId: "a", toId: "b" });
+    await tauriRepoClient.getRangeDiff("/repo", "a", "b", "new.txt", "old.txt", opts);
+    expect(invoke).toHaveBeenLastCalledWith("get_range_diff", {
+      repoPath: "/repo",
+      fromId: "a",
+      toId: "b",
+      path: "new.txt",
+      oldPath: "old.txt",
+      opts,
+    });
+    await tauriRepoClient.getWorkingTreeCompareFiles("/repo", "a");
+    expect(invoke).toHaveBeenLastCalledWith("get_working_tree_compare_files", { repoPath: "/repo", commitId: "a" });
+    await tauriRepoClient.getWorkingTreeCompareDiff("/repo", "a", "x.txt", null, opts);
+    expect(invoke).toHaveBeenLastCalledWith("get_working_tree_compare_diff", {
+      repoPath: "/repo",
+      commitId: "a",
+      path: "x.txt",
+      oldPath: null,
+      opts,
+    });
+    vi.mocked(invoke).mockResolvedValue({ fromId: "base", toId: "tip" });
+    await expect(tauriRepoClient.getBranchCompareRange("/repo", "refs/heads/feature")).resolves.toEqual({
+      fromId: "base",
+      toId: "tip",
+    });
+    expect(invoke).toHaveBeenLastCalledWith("get_branch_compare_range", { repoPath: "/repo", refName: "refs/heads/feature" });
+  });
 });

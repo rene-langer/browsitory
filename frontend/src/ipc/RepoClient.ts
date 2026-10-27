@@ -228,6 +228,18 @@ export interface FileHistoryEntry {
   oldPath: string | null;
 }
 
+/** One changed path in a compare; `oldPath` is set when the file was renamed (then `path` is the new name). */
+export interface ChangedFile {
+  path: string;
+  oldPath: string | null;
+}
+
+/** Resolved ends of a branch compare: the merge base with HEAD, and the branch tip. */
+export interface CompareRange {
+  fromId: string;
+  toId: string;
+}
+
 /** One page of a commit search. */
 export interface SearchPage {
   commits: GraphCommit[];
@@ -434,6 +446,15 @@ export interface RepoClient {
   cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
+  /** Files that differ between two commits' trees (`git diff from to`), renames detected. */
+  getRangeFiles(repoPath: string, fromId: string, toId: string): Promise<ChangedFile[]>;
+  /** One file's diff between two commits; pass `oldPath` from `getRangeFiles` for a rename. */
+  getRangeDiff(repoPath: string, fromId: string, toId: string, path: string, oldPath: string | null, opts: DiffOptions): Promise<DiffHunk[]>;
+  /** Files that differ between a commit and the working tree (staged, unstaged and untracked). */
+  getWorkingTreeCompareFiles(repoPath: string, commitId: string): Promise<ChangedFile[]>;
+  getWorkingTreeCompareDiff(repoPath: string, commitId: string, path: string, oldPath: string | null, opts: DiffOptions): Promise<DiffHunk[]>;
+  /** `merge-base(HEAD, refName)..refName` for a full ref name (`refs/heads/…`, `refs/remotes/…`). */
+  getBranchCompareRange(repoPath: string, refName: string): Promise<CompareRange>;
   // Full raw commit message (subject plus body).
   getCommitMessage(repoPath: string, commitId: string): Promise<string>;
   getCommitSignature(repoPath: string, commitId: string): Promise<CommitSignature>;

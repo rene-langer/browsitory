@@ -14,7 +14,7 @@ import {
   presetPickAll,
   type PresetAction,
 } from "../lib/rebaseSelection";
-import type { SelectedRow } from "../state/useAppState";
+import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ResetDialog } from "./ResetDialog";
@@ -25,13 +25,6 @@ import { RefBadges } from "./RefBadges";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
-
-function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
-  if (a === "uncommitted" || b === "uncommitted") {
-    return a === b;
-  }
-  return a.commitId === b.commitId;
-}
 
 export function CommitGraph({
   status,
@@ -53,6 +46,8 @@ export function CommitGraph({
   onLoadMore,
   graphRemoteBranchSelection = null,
   onRequestSearch,
+  onCompareCommits,
+  onCompareWithWorkingTree,
   remotes = [],
   onPushTag,
   onDeleteTag,
@@ -88,6 +83,11 @@ export function CommitGraph({
   graphRemoteBranchSelection?: string[] | null;
   /** Ctrl/Cmd+F while the list has focus: focus the commit search field. */
   onRequestSearch?: () => void;
+  // Read-only compare actions: never disabled by `pending`.
+  /** Exactly two commits selected: compare `fromId` (further down the graph) with `toId`. */
+  onCompareCommits?: (fromId: string, toId: string) => void;
+  /** Single-commit menu: compare that commit with the working tree. */
+  onCompareWithWorkingTree?: (commitId: string) => void;
   /** Push targets offered by a tag badge's menu. */
   remotes?: RemoteInfo[];
   /**
@@ -161,6 +161,9 @@ export function CommitGraph({
     ];
     if (isHead) {
       items.push({ label: "Edit commit message…", onSelect: onEditHeadMessage, disabled: pending });
+    }
+    if (onCompareWithWorkingTree !== undefined) {
+      items.push({ label: "Diff against working tree", onSelect: () => onCompareWithWorkingTree(commitId) });
     }
     return items;
   }
@@ -279,8 +282,8 @@ export function CommitGraph({
     ? planRebaseSelection(commits, effectiveSelection.ids)
     : null;
 
-  // The same four actions back the context menu and the toolbar under the list.
-  const multiSelectItems: ContextMenuItem[] = (() => {
+  // The same actions back the context menu and the toolbar under the list.
+  const rebaseItems: ContextMenuItem[] = (() => {
     if (rebasePlan === null) return [];
     const count = effectiveSelection.ids.size;
     if (!rebasePlan.ok) {
@@ -327,6 +330,18 @@ export function CommitGraph({
       },
     ];
   })();
+
+  // Read-only, so neither `pending` nor a blocked rebase plan disables it.
+  const compareItem: ContextMenuItem | null = (() => {
+    if (onCompareCommits === undefined || effectiveSelection.ids.size !== 2) return null;
+    const [first, second] = [...effectiveSelection.ids];
+    // Graph order is newest first, so the higher index is the older commit.
+    const firstIndex = commits.findIndex((c) => c.id === first);
+    const secondIndex = commits.findIndex((c) => c.id === second);
+    const [fromId, toId] = firstIndex > secondIndex ? [first, second] : [second, first];
+    return { label: "Compare these commits", onSelect: () => onCompareCommits(fromId, toId) };
+  })();
+  const multiSelectItems: ContextMenuItem[] = compareItem === null ? rebaseItems : [...rebaseItems, compareItem];
 
   const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   // `null` means "show every remote badge" — skip building the membership set entirely in that

@@ -88,6 +88,7 @@ export function BranchTree({
   onCloseAddRemoteDraft,
   onOpenPushDialog,
   onOpenDeleteRemoteBranch,
+  onCompareBranch,
   refreshGeneration,
 }: {
   branches: BranchInfo[];
@@ -160,6 +161,11 @@ export function BranchTree({
   onOpenPushDialog: (localBranch: string) => void;
   /** "Delete <remote>/<branch>…" on a remote branch: opens the delete confirmation. */
   onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
+  /**
+   * "Compare with current branch" on a non-current local branch or a remote-tracking branch:
+   * `refName` is the full ref (`refs/heads/…`, `refs/remotes/…`), `label` its display name.
+   */
+  onCompareBranch?: (refName: string, label: string) => void;
   /**
    * `AppState.refreshGeneration`. A change means remote branches may have changed (a fetch from
    * anywhere, a push that published one, a remote branch delete): open remote folders reload
@@ -565,6 +571,14 @@ export function BranchTree({
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => void onSetUpstream(remoteName, branchName),
       },
+      ...(onCompareBranch !== undefined
+        ? [
+            {
+              label: compareLabel,
+              onSelect: () => onCompareBranch(`refs/remotes/${remoteName}/${branchName}`, `${remoteName}/${branchName}`),
+            },
+          ]
+        : []),
       {
         label: `Delete ${remoteName}/${branchName}…`,
         destructive: true,
@@ -588,6 +602,8 @@ export function BranchTree({
   const newBranchProblem = branchNameProblem(newBranchName.trim());
   const startPoint = createBranchDraft?.startPoint ?? "HEAD";
   const currentBranchName = branches.find((branch) => branch.isCurrent)?.name;
+  // Read-only, so never disabled; on a detached HEAD the compare runs against HEAD.
+  const compareLabel = currentBranchName !== undefined ? "Compare with current branch" : "Compare with HEAD";
   const createBaseLabel =
     startPoint === "HEAD" ? (currentBranchName ?? "HEAD") : /^[0-9a-f]{40}$/i.test(startPoint) ? startPoint.slice(0, 7) : startPoint;
 
@@ -657,6 +673,9 @@ export function BranchTree({
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => onMergeBranch(branch.name),
       });
+      if (onCompareBranch !== undefined) {
+        items.push({ label: compareLabel, onSelect: () => onCompareBranch(`refs/heads/${branch.name}`, branch.name) });
+      }
     }
     if (branch.isCurrent) {
       if (upstream !== null) {

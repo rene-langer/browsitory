@@ -193,6 +193,29 @@ describe("BranchTree — local branches", () => {
     expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/foo");
   });
 
+  it("Compare with current branch is offered on other local branches only", () => {
+    const onCompareBranch = vi.fn();
+    renderTree({ onCompareBranch });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compare with current branch" }));
+    expect(onCompareBranch).toHaveBeenCalledWith("refs/heads/feat/foo", "feat/foo");
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /main \(current\)/ }));
+    expect(screen.queryByRole("menuitem", { name: "Compare with current branch" })).toBeNull();
+  });
+
+  it("says Compare with HEAD when no branch is checked out", () => {
+    renderTree({
+      branches: [
+        { name: "main", isCurrent: false },
+        { name: "feat/foo", isCurrent: false },
+      ],
+      onCompareBranch: vi.fn(),
+    });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    expect(screen.getByRole("menuitem", { name: "Compare with HEAD" })).toBeInTheDocument();
+  });
+
   it("Checkout is disabled for the current branch", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: /main \(current\)/ }));
@@ -599,6 +622,15 @@ describe("BranchTree — remotes", () => {
     await Promise.resolve();
     expect(onCreateBranch).toHaveBeenCalledWith("feat/only-remote", "origin/feat/only-remote");
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "feat/only-remote");
+  });
+
+  it("Compare with current branch on a remote-tracking branch passes its full ref", async () => {
+    const onCompareBranch = vi.fn();
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["main"]), onCompareBranch });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.contextMenu(await screen.findByText("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compare with current branch" }));
+    expect(onCompareBranch).toHaveBeenCalledWith("refs/remotes/origin/main", "origin/main");
   });
 
   it("Set as upstream for current branch calls onSetUpstream directly, no dialog", async () => {

@@ -58,6 +58,8 @@ impl From<crate::diff::DiffError> for StashError {
     fn from(error: crate::diff::DiffError) -> Self {
         match error {
             crate::diff::DiffError::Diff(error) => StashError::Git(error),
+            // Compare-only variants; the stash code never calls a compare, but keep the message.
+            other => StashError::Git(git2::Error::from_str(&other.to_string())),
         }
     }
 }

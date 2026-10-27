@@ -9,6 +9,8 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  ChangedFile,
+  CompareRange,
   SearchPage,
   ForgeProvider,
   ForgeRepository,
@@ -239,6 +241,16 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     call<string[]>("get_commit_files", { repoPath, commitId }),
+  getRangeFiles: (repoPath: string, fromId: string, toId: string) =>
+    call<ChangedFile[]>("get_range_files", { repoPath, fromId, toId }),
+  getRangeDiff: (repoPath: string, fromId: string, toId: string, path: string, oldPath: string | null, opts: DiffOptions) =>
+    call<DiffHunk[]>("get_range_diff", { repoPath, fromId, toId, path, oldPath, opts }),
+  getWorkingTreeCompareFiles: (repoPath: string, commitId: string) =>
+    call<ChangedFile[]>("get_working_tree_compare_files", { repoPath, commitId }),
+  getWorkingTreeCompareDiff: (repoPath: string, commitId: string, path: string, oldPath: string | null, opts: DiffOptions) =>
+    call<DiffHunk[]>("get_working_tree_compare_diff", { repoPath, commitId, path, oldPath, opts }),
+  getBranchCompareRange: (repoPath: string, refName: string) =>
+    call<CompareRange>("get_branch_compare_range", { repoPath, refName }),
   getCommitMessage: (repoPath: string, commitId: string) =>
     call<string>("get_commit_message", { repoPath, commitId }),
   getCommitSignature: (repoPath: string, commitId: string) =>

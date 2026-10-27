@@ -7,6 +7,13 @@ use thiserror::Error;
 pub enum DiffError {
     #[error("failed to compute diff: {0}")]
     Diff(#[from] git2::Error),
+    #[error("There is no commit checked out to compare with.")]
+    UnbornHead,
+    /// The short ref name (without `refs/heads/` / `refs/remotes/`).
+    #[error("{0} and HEAD have no common ancestor.")]
+    NoMergeBase(String),
+    #[error("No branch named \"{0}\".")]
+    UnknownRef(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +58,76 @@ impl Default for DiffOptions {
     }
 }
 
+/// One changed path in a compare. `old_path` is set when rename detection paired a delete and
+/// an add; `path` is then the new name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
+/// Resolved ends of a branch compare: the merge base with HEAD, and the branch tip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompareRange {
+    pub from_id: String,
+    pub to_id: String,
+}
+
 fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
     git_opts
         .ignore_whitespace(opts.ignore_whitespace)
         .context_lines(opts.context_lines.min(MAX_CONTEXT_LINES));
+}
+
+/// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.
+fn literal_path_options(
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> git2::DiffOptions {
+    let mut git_opts = git2::DiffOptions::new();
+    // Literal paths, not globs — see `working_diff_options`.
+    if let Some(old_path) = old_path {
+        git_opts.pathspec(old_path);
+    }
+    git_opts.pathspec(path).disable_pathspec_match(true);
+    apply_display_options(&mut git_opts, opts);
+    git_opts
+}
+
+/// Pairs deletes and adds into renames (git's default 50% similarity, no copies).
+fn detect_renames(diff: &mut git2::Diff) -> Result<(), DiffError> {
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
+    Ok(())
+}
+
+fn changed_files(diff: &git2::Diff) -> Vec<ChangedFile> {
+    let lossy = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    diff.deltas()
+        .filter_map(|delta| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(lossy)?;
+            let old_path = if delta.status() == git2::Delta::Renamed {
+                delta.old_file().path().map(lossy)
+            } else {
+                None
+            };
+            Some(ChangedFile { path, old_path })
+        })
+        .collect()
+}
+
+fn commit_tree<'repo>(
+    repo: &'repo Repository,
+    commit_id: &str,
+) -> Result<git2::Tree<'repo>, DiffError> {
+    let oid = git2::Oid::from_str(commit_id)?;
+    Ok(repo.find_commit(oid)?.tree()?)
 }
 
 /// Single source of the git2 options for working-tree diffs (display *and* staging).
@@ -115,10 +188,7 @@ pub fn commit_diff(
     opts: &DiffOptions,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
-    let mut git_opts = git2::DiffOptions::new();
-    // Literal path, not a glob — see `working_diff_options`.
-    git_opts.pathspec(path).disable_pathspec_match(true);
-    apply_display_options(&mut git_opts, opts);
+    let mut git_opts = literal_path_options(path, None, opts);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     hunks_from_diff(&diff)
 }
@@ -134,18 +204,10 @@ pub fn commit_rename_diff(
     opts: &DiffOptions,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
-    let mut git_opts = git2::DiffOptions::new();
-    // Literal paths, not globs — see `working_diff_options`.
-    git_opts
-        .pathspec(old_path)
-        .pathspec(new_path)
-        .disable_pathspec_match(true);
-    apply_display_options(&mut git_opts, opts);
+    let mut git_opts = literal_path_options(new_path, Some(old_path), opts);
     let mut diff =
         repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
-    let mut find = git2::DiffFindOptions::new();
-    find.renames(true);
-    diff.find_similar(Some(&mut find))?;
+    detect_renames(&mut diff)?;
     hunks_from_diff(&diff)
 }
 
@@ -167,6 +229,120 @@ pub fn commit_files(repo: &Repository, commit_id: &str) -> Result<Vec<String>, D
         }
     }
     Ok(paths)
+}
+
+/// Paths that differ between the trees of `from_id` and `to_id` (`git diff from to`), with
+/// renames detected. The commits need not be related.
+pub fn range_diff_files(
+    repo: &Repository,
+    from_id: &str,
+    to_id: &str,
+) -> Result<Vec<ChangedFile>, DiffError> {
+    let old_tree = commit_tree(repo, from_id)?;
+    let new_tree = commit_tree(repo, to_id)?;
+    let mut diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
+    detect_renames(&mut diff)?;
+    Ok(changed_files(&diff))
+}
+
+/// One file's diff between `from_id` and `to_id`. With `old_path` (a rename reported by
+/// `range_diff_files`), both paths are diffed with rename detection, like `commit_rename_diff`.
+pub fn range_diff(
+    repo: &Repository,
+    from_id: &str,
+    to_id: &str,
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let old_tree = commit_tree(repo, from_id)?;
+    let new_tree = commit_tree(repo, to_id)?;
+    let mut git_opts = literal_path_options(path, old_path, opts);
+    let mut diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut git_opts))?;
+    if old_path.is_some() {
+        detect_renames(&mut diff)?;
+    }
+    hunks_from_diff(&diff)
+}
+
+/// The working tree compares like the Uncommitted view: staged, unstaged and untracked files.
+fn include_untracked_content(git_opts: &mut git2::DiffOptions) {
+    git_opts
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .show_untracked_content(true);
+}
+
+/// Paths that differ between `commit_id` and the working tree (`git diff <commit>` plus
+/// untracked files), with renames detected among tracked files.
+pub fn compare_working_tree_files(
+    repo: &Repository,
+    commit_id: &str,
+) -> Result<Vec<ChangedFile>, DiffError> {
+    let tree = commit_tree(repo, commit_id)?;
+    let mut git_opts = git2::DiffOptions::new();
+    include_untracked_content(&mut git_opts);
+    let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    detect_renames(&mut diff)?;
+    Ok(changed_files(&diff))
+}
+
+/// One file's diff from `commit_id` to the working tree; `old_path` as in `range_diff`.
+pub fn compare_working_tree(
+    repo: &Repository,
+    commit_id: &str,
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let tree = commit_tree(repo, commit_id)?;
+    let mut git_opts = literal_path_options(path, old_path, opts);
+    include_untracked_content(&mut git_opts);
+    let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    if old_path.is_some() {
+        detect_renames(&mut diff)?;
+    }
+    hunks_from_diff(&diff)
+}
+
+/// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…` or `refs/remotes/…`
+/// name) changed since it diverged from HEAD. A detached HEAD is used as is.
+pub fn branch_compare_range(repo: &Repository, ref_name: &str) -> Result<CompareRange, DiffError> {
+    let short = ref_name
+        .strip_prefix("refs/heads/")
+        .or_else(|| ref_name.strip_prefix("refs/remotes/"))
+        .unwrap_or(ref_name)
+        .to_string();
+    let head = match repo.head() {
+        Ok(head) => head.peel_to_commit()?.id(),
+        Err(e)
+            if matches!(
+                e.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            return Err(DiffError::UnbornHead)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let tip = match repo.find_reference(ref_name) {
+        Ok(reference) => reference.peel_to_commit()?.id(),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(DiffError::UnknownRef(short))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let base = match repo.merge_base(head, tip) {
+        Ok(base) => base,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(DiffError::NoMergeBase(short))
+        }
+        Err(e) => return Err(e.into()),
+    };
+    Ok(CompareRange {
+        from_id: base.to_string(),
+        to_id: tip.to_string(),
+    })
 }
 
 fn commit_and_parent_trees<'repo>(

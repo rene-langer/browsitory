@@ -12,6 +12,7 @@ use repo_service::worker::{TransferEvent, Worker};
 
 mod branch;
 mod clone;
+mod compare;
 mod forge;
 mod history;
 mod merge;
@@ -28,6 +29,10 @@ mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
 pub use clone::{cancel_clone, clone_repo, init_repo, CloneState};
+pub use compare::{
+    get_branch_compare_range, get_range_diff, get_range_files, get_working_tree_compare_diff,
+    get_working_tree_compare_files,
+};
 pub use forge::{
     create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
     save_forge_token,
@@ -547,6 +552,39 @@ impl From<git_core::search::SearchPage> for SearchPageDto {
             commits: p.commits.into_iter().map(GraphCommitDto::from).collect(),
             next_cursor: p.next_cursor,
             scanned: p.scanned,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFileDto {
+    pub path: String,
+    // Serialized as `null` (not omitted) — the TS type is `string | null`.
+    pub old_path: Option<String>,
+}
+
+impl From<git_core::diff::ChangedFile> for ChangedFileDto {
+    fn from(f: git_core::diff::ChangedFile) -> Self {
+        ChangedFileDto {
+            path: f.path,
+            old_path: f.old_path,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareRangeDto {
+    pub from_id: String,
+    pub to_id: String,
+}
+
+impl From<git_core::diff::CompareRange> for CompareRangeDto {
+    fn from(r: git_core::diff::CompareRange) -> Self {
+        CompareRangeDto {
+            from_id: r.from_id,
+            to_id: r.to_id,
         }
     }
 }
@@ -1396,6 +1434,7 @@ mod tests {
         RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
         UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
+    use super::{ChangedFileDto, CompareRangeDto};
     use super::{
         MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
     };
@@ -1667,6 +1706,36 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(more["nextCursor"], "20000:0123456789abcdef");
+    }
+
+    #[test]
+    fn compare_dtos_serialize_camel_case_with_a_null_old_path() {
+        let plain = serde_json::to_value(ChangedFileDto::from(git_core::diff::ChangedFile {
+            path: "a.txt".into(),
+            old_path: None,
+        }))
+        .unwrap();
+        assert_eq!(
+            plain,
+            serde_json::json!({ "path": "a.txt", "oldPath": null })
+        );
+
+        let renamed = serde_json::to_value(ChangedFileDto::from(git_core::diff::ChangedFile {
+            path: "new.txt".into(),
+            old_path: Some("old.txt".into()),
+        }))
+        .unwrap();
+        assert_eq!(renamed["oldPath"], "old.txt");
+
+        let range = serde_json::to_value(CompareRangeDto::from(git_core::diff::CompareRange {
+            from_id: "base".into(),
+            to_id: "tip".into(),
+        }))
+        .unwrap();
+        assert_eq!(
+            range,
+            serde_json::json!({ "fromId": "base", "toId": "tip" })
+        );
     }
 
     #[test]

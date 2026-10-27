@@ -330,6 +330,50 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(["a.txt"]);
   });
 
+  it("wires the compare methods", async () => {
+    const opts = { ignoreWhitespace: true, contextLines: 5 };
+    const files = vscodeRepoClient.getRangeFiles("/repo", "a", "b");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_range_files",
+      params: { repoPath: "/repo", fromId: "a", toId: "b" },
+    });
+    respond(1, [{ path: "new.txt", oldPath: "old.txt" }]);
+    await expect(files).resolves.toEqual([{ path: "new.txt", oldPath: "old.txt" }]);
+
+    void vscodeRepoClient.getRangeDiff("/repo", "a", "b", "new.txt", "old.txt", opts);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "get_range_diff",
+      params: { repoPath: "/repo", fromId: "a", toId: "b", path: "new.txt", oldPath: "old.txt", opts },
+    });
+    void vscodeRepoClient.getWorkingTreeCompareFiles("/repo", "a");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "get_working_tree_compare_files",
+      params: { repoPath: "/repo", commitId: "a" },
+    });
+    void vscodeRepoClient.getWorkingTreeCompareDiff("/repo", "a", "x.txt", null, opts);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "get_working_tree_compare_diff",
+      params: { repoPath: "/repo", commitId: "a", path: "x.txt", oldPath: null, opts },
+    });
+    const range = vscodeRepoClient.getBranchCompareRange("/repo", "refs/remotes/origin/main");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "get_branch_compare_range",
+      params: { repoPath: "/repo", refName: "refs/remotes/origin/main" },
+    });
+    respond(5, { fromId: "base", toId: "tip" });
+    await expect(range).resolves.toEqual({ fromId: "base", toId: "tip" });
+  });
+
   it("wires getCommitMessage", async () => {
     const promise = vscodeRepoClient.getCommitMessage("/repo", "abc123");
     expect(postMessage).toHaveBeenCalledWith({
