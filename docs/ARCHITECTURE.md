@@ -93,6 +93,19 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   with an unhelpful error at the call site.
 - `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>` per
   slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`.
+- libgit2 1.9.6's path-limited stash (`stash_save_ext` with a pathspec) resets the *whole*
+  index and worktree to HEAD afterwards, discarding changes outside the paths, and git2 0.21's
+  `StashSaveOptions` has no message setter. `stash::save_stash` therefore builds a path-limited
+  stash itself (same commit shape and messages, pushed on `refs/stash` before reverting only the
+  stashed paths); stashing everything still uses `stash_save2`.
+- `Repository::stash_pop` drops the stash even when the apply left conflicts; Browsitory applies
+  and drops itself. `stash_apply` refuses whenever the index differs from HEAD
+  (`ErrorCode::Uncommitted`); `stash::apply_stash` maps that and the other refusals to
+  user-facing `StashError` variants.
+- `cleanup_state` does not remove `SQUASH_MSG`; `merge::clear_squash_message` does, after a
+  commit, an abort, a reset or an undo.
+- `git_merge` ignores the merge analysis: called when a fast-forward is possible it still writes
+  `MERGE_HEAD`, which is what `FastForward::Never` relies on.
 
 ## Threading model
 

@@ -141,6 +141,7 @@ Checked against the vendored sources (`git2` 0.21.0, `libgit2-sys` 0.18.7+1.9.6)
   and dropping the message for file stashes (the issue's E2E needs both).
 - **Paths are pathspecs.** libgit2's stash has no literal-path flag, so a file name containing
   `*`, `?` or `[` also matches other files. Known limitation, written in the user guide.
+  (Superseded: see "Deviations during implementation"; paths are literal.)
 - **`StashError` gains user-facing variants**, mapped from libgit2 codes:
   - save, `NotFound` with class `Stash` → `NothingToStash` ("There are no changes to stash.").
   - apply/pop, index has conflicts (checked first) → `UnresolvedConflicts` ("Resolve the current
@@ -385,6 +386,49 @@ getStashFiles(repoPath: string, commitId: string): Promise<StashFiles>;
   `git_stash_pop` drops on conflict, apply refuses a dirty index, `cleanup_state` leaves
   `SQUASH_MSG`.
 - No `docs/LICENSE_COMPLIANCE.md` change (no new dependency).
+
+## Deviations during implementation
+
+Recorded after the pre-flight re-check on top of batch 4b (#113) and during implementation.
+
+- **Path-limited stash is built by git-core, not by `stash_save_ext` + restamp.** libgit2
+  1.9.6's `git_stash_save_with_opts` with a pathspec stashes the paths but then runs
+  `reset_index_and_workdir` on the *whole* tree (`GIT_CHECKOUT_FORCE`, plus
+  `REMOVE_UNTRACKED` with `INCLUDE_UNTRACKED`): every other modified, staged or untracked file
+  is silently reverted or deleted, and the untracked commit holds *all* untracked files. A
+  real-repo test (`path_limited_stash_leaves_other_files`) caught it. `stash::save_stash` with
+  paths now writes the index commit (whole index, as git), a parentless untracked commit holding
+  only the matched untracked files, and a worktree commit (HEAD's tree plus the matched files'
+  worktree contents, clean-filtered), with libgit2's messages (`WIP on <branch>: <short>
+  <summary>` or `On <branch>: <message>`). It pushes the stash on `refs/stash`
+  (`reference_ensure_log` first) and only then reverts exactly the stashed paths (tracked: to
+  HEAD in index and worktree, or to the index version in the worktree with `keep_index`;
+  untracked: deleted, emptied directories removed). The "restamp" step and its reflog surgery
+  are gone; the older-entries test now runs with three existing stashes. Stashing everything
+  still uses `stash_save2`.
+- **Stash paths are literal file paths**, not pathspecs (`disable_pathspec_match`), so the
+  `*`/`?`/`[` caveat is gone from the user guide.
+- **`SplitButton` is extracted from 4b's SyncBar Fetch split button** (4b built it inline, no
+  primitive). `SyncBar` now renders `SplitButton` with a `chevronClassName` for its quieter
+  toolbar styling; the Stash dock button uses it too. `menuTitle` was added for SyncBar's chevron
+  title.
+- **`merge.ff` "unset" is tested through the pure `merge::fast_forward_from_merge_ff`**; the
+  real-repo test sets every value in the repo's own config, so a global `merge.ff` cannot leak in
+  (issue #111). The sidecar round trip sets `merge.ff=true` in its fixture repo for the same
+  reason.
+- **4b stores the Fetch Prune choice in localStorage** (`frontend/src/lib/fetchPrune.ts`), not in
+  the `config` crate, so `merge_preferences` is simply the last `ConfigFile` field.
+- **StashPanel**: Apply/Pop are disabled when `applyDisabledReason` is set *or*
+  `operationDisabled` (keeps the existing "pending" guard); the reason wins as title. The
+  "Restore staged changes" checkbox shows only when there are stashes.
+- **Stash view Drop** stays enabled regardless of `disabledReason`, as specified; the panel's
+  Drop still follows `operationDisabled`.
+- **E2E**: WebdriverIO cannot combine a CSS prefix with `button=Text`; the merge and stash specs
+  chain `$(dialog).$("button=…")`. The stash-options spec reloads the page after its on-disk
+  setup.
+- `HeadInfo` fixtures got `squashMessage: null`; `GraphCommit.tags` (optional) and
+  `BranchInfo.upstream/ahead/behind` from 4b needed no changes here. 4b's BranchTree menu items
+  ("Push to…") sit next to the relabelled "Merge into current branch…" unchanged.
 
 ## Out of scope
 

@@ -49,8 +49,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   delete, not only after its own Fetch.
 - Palette: "Fetch all remotes", "Push branch to…", "Delete remote branch…".
 
+### Merge and stash options
+
+- "Merge into current branch…" asks how to merge: fast-forward if possible, always create a
+  merge commit, or fast-forward only, plus **Squash** (stages the combined changes and pre-fills
+  the commit message). The choice is remembered per repository; the first default follows
+  `merge.ff`.
+- Stash is a split button: **Stash all** or **Stash…** with a message, "Keep staged changes" and
+  "Include untracked files". **Stash file…** in a changed file's menu stashes just that file and
+  leaves every other change alone.
+- Click a stash to see its changes, including untracked files, and Apply, **Pop** or Drop it from
+  there or from the Stashes panel. "Restore staged changes" brings staged work back staged.
+  Conflicts leave the stash in place and open in the conflict pane.
+- Applying a stash while something is staged now says what to do ("Commit or unstage your staged
+  changes before applying a stash.") instead of libgit2's "uncommitted changes exist in the
+  index"; Apply and Pop are disabled with that reason.
+- Palette: "Merge <branch> into current branch…", "Stash all changes" (was "Save stash"),
+  "Stash…", "Stash <file>…", "Show stash: …", "Pop stash: …".
+
 ### Fixed
 
+- Merge in the "Pull has diverged" dialog failed with "reference not found" (#104).
+- "Drop stash" in the command palette dropped the stash without asking; it now shows the stash
+  and opens the Stashes section, where Drop asks first (#105).
 - A saved graph branch selection naming a deleted or renamed branch no longer breaks the whole
   refresh; deleting or renaming a branch in the app now updates the selection, and deleting the
   only isolated branch shows all branches again (#97).
