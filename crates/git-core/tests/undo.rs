@@ -874,3 +874,41 @@ fn keeps_the_recorded_symlink_mode_with_symlinks_off() {
     let meta = fs::symlink_metadata(repo.workdir().unwrap().join("link")).unwrap();
     assert!(meta.is_file());
 }
+
+#[test]
+fn a_successful_restore_clears_a_leftover_squash_message() {
+    let (_dir, repo) = seeded();
+    write(&repo, "a.txt", "two\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    stage(&repo, "a.txt");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::write(
+        repo.path().join("SQUASH_MSG"),
+        "Squashed commit of the following:\n",
+    )
+    .unwrap();
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+
+    assert!(!repo.path().join("SQUASH_MSG").exists());
+}
+
+#[test]
+fn a_refused_restore_keeps_the_squash_message() {
+    let (_dir, repo) = seeded();
+    write(&repo, "a.txt", "two\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    stage(&repo, "a.txt");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "staged since\n");
+    stage(&repo, "a.txt");
+    fs::write(
+        repo.path().join("SQUASH_MSG"),
+        "Squashed commit of the following:\n",
+    )
+    .unwrap();
+
+    assert!(restore(&repo, &after, &before, "browsitory: undo test").is_err());
+
+    assert!(repo.path().join("SQUASH_MSG").exists());
+}

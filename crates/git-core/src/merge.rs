@@ -50,7 +50,12 @@ pub enum MergeOutcome {
     UpToDate,
     FastForwarded,
     Merged,
-    Conflicted { files: Vec<String> },
+    /// Squash merge staged the combined changes and wrote `SQUASH_MSG`; nothing is committed
+    /// and no merge is in progress.
+    Squashed,
+    Conflicted {
+        files: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +91,10 @@ pub fn start_merge(
         return Ok(MergeOutcome::UpToDate);
     }
 
+    if opts.squash {
+        return squash_merge(repo, &their_annotated, their_commit.id());
+    }
+
     if analysis.is_fast_forward() && opts.fast_forward != FastForward::Never {
         // Check out the target tree before moving the branch ref — a refused checkout
         // (modified/untracked files in the way) leaves the repo exactly as it was, matching
@@ -104,20 +113,91 @@ pub fn start_merge(
 
     repo.merge(&[&their_annotated], None, None)?;
 
-    let index = repo.index()?;
-    if index.has_conflicts() {
-        let mut files = Vec::new();
-        for conflict in index.conflicts()? {
-            let conflict = conflict?;
-            if let Some(path) = conflict_path(&conflict) {
-                if !files.contains(&path) {
-                    files.push(path);
-                }
+    let files = conflicted_files(&repo.index()?)?;
+    if files.is_empty() {
+        Ok(MergeOutcome::Merged)
+    } else {
+        Ok(MergeOutcome::Conflicted { files })
+    }
+}
+
+/// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no
+/// merge state (`cleanup_state`), so the next commit has HEAD as its only parent. HEAD never
+/// moves, even when a fast-forward was possible.
+fn squash_merge(
+    repo: &Repository,
+    their_annotated: &git2::AnnotatedCommit<'_>,
+    their_id: git2::Oid,
+) -> Result<MergeOutcome, MergeError> {
+    // Built before `repo.merge` so a failure here leaves the repository untouched.
+    let message = build_squash_message(repo, their_id)?;
+    repo.merge(&[their_annotated], None, None)?;
+    let files = conflicted_files(&repo.index()?)?;
+    std::fs::write(repo.path().join("SQUASH_MSG"), message)?;
+    repo.cleanup_state()?;
+    if files.is_empty() {
+        Ok(MergeOutcome::Squashed)
+    } else {
+        Ok(MergeOutcome::Conflicted { files })
+    }
+}
+
+/// git's `SQUASH_MSG` without the `Date:` lines: every commit reachable from `their_id` but not
+/// from HEAD, newest first.
+fn build_squash_message(repo: &Repository, their_id: git2::Oid) -> Result<String, MergeError> {
+    let mut walk = repo.revwalk()?;
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    walk.push(their_id)?;
+    if let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) {
+        walk.hide(head.id())?;
+    }
+    let mut message = String::from("Squashed commit of the following:\n");
+    for oid in walk {
+        let commit = repo.find_commit(oid?)?;
+        let author = commit.author();
+        message.push_str(&format!(
+            "\ncommit {}\nAuthor: {} <{}>\n\n",
+            commit.id(),
+            String::from_utf8_lossy(author.name_bytes()),
+            String::from_utf8_lossy(author.email_bytes()),
+        ));
+        let body = String::from_utf8_lossy(commit.message_bytes()).into_owned();
+        for line in body.trim_end_matches('\n').lines() {
+            message.push_str("    ");
+            message.push_str(line);
+            message.push('\n');
+        }
+    }
+    Ok(message)
+}
+
+fn conflicted_files(index: &git2::Index) -> Result<Vec<String>, MergeError> {
+    let mut files = Vec::new();
+    if !index.has_conflicts() {
+        return Ok(files);
+    }
+    for conflict in index.conflicts()? {
+        let conflict = conflict?;
+        if let Some(path) = conflict_path(&conflict) {
+            if !files.contains(&path) {
+                files.push(path);
             }
         }
-        Ok(MergeOutcome::Conflicted { files })
-    } else {
-        Ok(MergeOutcome::Merged)
+    }
+    Ok(files)
+}
+
+/// The pending squash merge's commit message (`<gitdir>/SQUASH_MSG`), if any.
+pub fn squash_message(repo: &Repository) -> Option<String> {
+    std::fs::read_to_string(repo.path().join("SQUASH_MSG")).ok()
+}
+
+/// Removes `SQUASH_MSG` once it no longer applies (commit, abort, reset, undo); `cleanup_state`
+/// leaves it behind. A missing file is fine.
+pub(crate) fn clear_squash_message(repo: &Repository) -> std::io::Result<()> {
+    match std::fs::remove_file(repo.path().join("SQUASH_MSG")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
     }
 }
 
@@ -313,6 +393,7 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         repo.checkout_head(Some(&mut checkout))?;
     }
     repo.cleanup_state()?;
+    clear_squash_message(repo)?;
     Ok(())
 }
 

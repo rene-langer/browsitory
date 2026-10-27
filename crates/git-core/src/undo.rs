@@ -326,6 +326,8 @@ pub fn restore(
             }
         }
     }
+    // Undoing (or redoing) moves away from whatever a pending squash merge staged.
+    crate::merge::clear_squash_message(repo)?;
     Ok(())
 }
 

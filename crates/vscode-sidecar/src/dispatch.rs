@@ -2249,6 +2249,7 @@ enum MergeOutcomeDto {
     UpToDate,
     FastForwarded,
     Merged,
+    Squashed,
     Conflicted { files: Vec<String> },
 }
 
@@ -2258,6 +2259,7 @@ impl From<MergeOutcome> for MergeOutcomeDto {
             MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
             MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
             MergeOutcome::Merged => MergeOutcomeDto::Merged,
+            MergeOutcome::Squashed => MergeOutcomeDto::Squashed,
             MergeOutcome::Conflicted { files } => MergeOutcomeDto::Conflicted { files },
         }
     }

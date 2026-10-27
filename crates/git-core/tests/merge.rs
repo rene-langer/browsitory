@@ -635,3 +635,144 @@ fn merge_ff_values_map_to_fast_forward_modes() {
     }
     assert_eq!(map(Some("garbage")), FastForward::Allow);
 }
+
+fn squash() -> MergeOptions {
+    MergeOptions {
+        fast_forward: FastForward::Allow,
+        squash: true,
+    }
+}
+
+#[test]
+fn squash_stages_the_changes_writes_squash_msg_and_leaves_no_merge_state() {
+    let (dir, repo, _main) = diverged_repo();
+    let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
+    let feature_tip = repo
+        .find_reference("refs/heads/feature")
+        .unwrap()
+        .target()
+        .unwrap();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Squashed);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert!(!repo.path().join("MERGE_MSG").exists());
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        head_before
+    );
+    let staged: Vec<_> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.staged)
+        .collect();
+    assert_eq!(staged.len(), 1);
+    assert_eq!(staged[0].path, "feature.txt");
+    assert!(dir.path().join("feature.txt").exists());
+    let msg = git_core::merge::squash_message(&repo).unwrap();
+    assert!(msg.starts_with("Squashed commit of the following:\n\ncommit "));
+    assert!(msg.contains(&format!(
+        "commit {feature_tip}\nAuthor: Test User <test@example.com>\n\n    feature commit\n"
+    )));
+    assert!(!msg.contains("main commit"));
+    let info = git_core::repo::head_info(&repo).unwrap();
+    assert_eq!(info.operation, None);
+    assert_eq!(info.squash_message.as_deref(), Some(msg.as_str()));
+}
+
+#[test]
+fn squash_message_lists_every_squashed_commit_newest_first() {
+    let (dir, repo, main) = diverged_repo();
+    git_core::branch::switch_branch(&repo, "feature").unwrap();
+    write_file(dir.path(), "feature2.txt", "more\n");
+    commit_all(&repo, "second feature commit\n\nwith a body");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+
+    git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    let msg = git_core::merge::squash_message(&repo).unwrap();
+    let second = msg.find("    second feature commit\n    \n    with a body\n");
+    let first = msg.find("    feature commit\n");
+    assert!(second.is_some() && first.is_some(), "{msg}");
+    assert!(second < first, "{msg}");
+}
+
+#[test]
+fn squash_does_not_move_head_even_when_fast_forward_is_possible() {
+    let (_dir, repo, _main, _feature_tip) = fast_forwardable_repo();
+    let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Squashed);
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        head_before
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(git_core::status::status(&repo)
+        .unwrap()
+        .iter()
+        .any(|e| e.path == "feature.txt" && e.staged));
+}
+
+#[test]
+fn squash_when_up_to_date_is_up_to_date_and_writes_nothing() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::UpToDate);
+    assert_eq!(git_core::merge::squash_message(&repo), None);
+}
+
+#[test]
+fn squash_with_a_conflict_reports_it_and_leaves_clean_state() {
+    let (_dir, repo) = make_conflicting_branches();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicted {
+            files: vec!["shared.txt".into()]
+        }
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(repo.index().unwrap().has_conflicts());
+    assert!(git_core::merge::squash_message(&repo).is_some());
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+}
+
+#[test]
+fn commit_after_squash_has_one_parent_and_clears_squash_msg() {
+    let (_dir, mut repo, _main) = diverged_repo();
+    let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
+    git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    git_core::commit::commit(&mut repo, "Squash feature").unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_ids().collect::<Vec<_>>(), vec![head_before]);
+    assert_eq!(git_core::merge::squash_message(&repo), None);
+}
+
+#[test]
+fn abort_after_a_conflicted_squash_clears_squash_msg() {
+    let (dir, repo) = make_conflicting_branches();
+    git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(git_core::merge::squash_message(&repo), None);
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "line one\nmain two\nline three\n"
+    );
+}

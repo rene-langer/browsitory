@@ -713,6 +713,7 @@ pub enum MergeOutcomeDto {
     UpToDate,
     FastForwarded,
     Merged,
+    Squashed,
     Conflicted { files: Vec<String> },
 }
 
@@ -722,6 +723,7 @@ impl From<git_core::merge::MergeOutcome> for MergeOutcomeDto {
             git_core::merge::MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
             git_core::merge::MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
             git_core::merge::MergeOutcome::Merged => MergeOutcomeDto::Merged,
+            git_core::merge::MergeOutcome::Squashed => MergeOutcomeDto::Squashed,
             git_core::merge::MergeOutcome::Conflicted { files } => {
                 MergeOutcomeDto::Conflicted { files }
             }
@@ -1788,6 +1790,7 @@ mod tests {
             detached_at: None,
             head_pushed: true,
             operation: Some(git_core::repo::OperationKind::CherryPick),
+            squash_message: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),

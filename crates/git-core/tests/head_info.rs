@@ -10,6 +10,7 @@ fn unborn_head_has_no_id_and_no_operation() {
     assert_eq!(info.detached_at, None);
     assert!(!info.head_pushed);
     assert_eq!(info.operation, None);
+    assert_eq!(info.squash_message, None);
 }
 
 #[test]
