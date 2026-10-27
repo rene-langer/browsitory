@@ -59,6 +59,19 @@ pub(super) fn log_hook_result(hook: &str, result: &Result<HookOutcome, HookError
     }
 }
 
+/// `git-core` runs `pre-push` inside the push and never prints; a `pre-push` it skipped for
+/// lacking an execute bit is logged here, like every other hook.
+pub(super) fn log_skipped_pre_push(repo: &git2::Repository, no_verify: bool) {
+    if no_verify {
+        return;
+    }
+    if let Ok(git_core::hooks::HookLookup::NotExecutable(_)) =
+        git_core::hooks::find_hook(repo, "pre-push")
+    {
+        log_hook_result("pre-push", &Ok(HookOutcome::NotExecutable));
+    }
+}
+
 /// Runs a hook whose failure must not affect the command that triggered it. Not cancellable;
 /// bounded by `HOOK_TIMEOUT`.
 pub(super) fn run_post_hook(repo: &git2::Repository, name: &str, args: &[&str]) {

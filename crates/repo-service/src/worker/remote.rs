@@ -398,6 +398,7 @@ pub(super) fn push_current<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
@@ -435,6 +436,7 @@ pub(super) fn force_push_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
@@ -469,6 +471,7 @@ pub(super) fn push_tags<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
@@ -576,6 +579,7 @@ pub(super) fn push_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, target.no_verify);
     let cancel = op.cancel_check();
     let result =
         git_core::remote::remote_auth_profile(repo, &target.remote_name).and_then(|profile| {
@@ -615,6 +619,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
