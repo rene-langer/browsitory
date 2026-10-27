@@ -27,6 +27,7 @@ pub enum TransferOperation {
     PushBranch,
     ForcePushBranch,
     PushTags,
+    DeleteRemoteBranch,
     Clone,
 }
 
@@ -368,9 +369,10 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// Pushes the current branch. `cancel` is checked once, at `push_negotiation` (before any data
-/// is sent); a cancel requested after that is ignored so a push that lands is never reported as
-/// cancelled — see `push_refs`.
+/// Pushes the current branch to `remote_name`: to its upstream's branch name when the upstream
+/// lives on that remote, else to the same name. `cancel` is checked once, at `push_negotiation`
+/// (before any data is sent); a cancel requested after that is ignored so a push that lands is
+/// never reported as cancelled — see `push_refs`.
 pub fn push_current_branch(
     repo: &Repository,
     remote_name: &str,
@@ -378,23 +380,24 @@ pub fn push_current_branch(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
-    let branch = current_local_branch_name(repo)?;
-    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-    push_refs(
+    let (local, target) = current_push_target(repo, remote_name)?;
+    push_branch(
         repo,
         remote_name,
-        &[refspec],
-        TransferOperation::PushBranch,
+        &local,
+        &target,
+        false,
         credentials,
         reporter,
         cancel,
-        None,
     )
 }
 
-/// Force-pushes the current branch, but only if the remote's branch still points where our
-/// `refs/remotes/<remote>/<branch>` says it did at the last fetch (a missing tracking ref means
-/// "must not exist on the remote"). A mismatch is `RemoteError::StaleLease`, remote untouched.
+/// Force-pushes the current branch to the same target `push_current_branch` resolves (its
+/// upstream's branch name when the upstream lives on `remote_name`, else the same name), but only
+/// if the remote's branch still points where our `refs/remotes/<remote>/<target>` says it did at
+/// the last fetch (a missing tracking ref means "must not exist on the remote"). A mismatch is
+/// `RemoteError::StaleLease`, remote untouched.
 pub fn force_push_current_branch(
     repo: &Repository,
     remote_name: &str,
@@ -402,14 +405,14 @@ pub fn force_push_current_branch(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
-    let branch = current_local_branch_name(repo)?;
+    let (local, target) = current_push_target(repo, remote_name)?;
     let expected = repo
-        .find_reference(&format!("refs/remotes/{remote_name}/{branch}"))
+        .find_reference(&format!("refs/remotes/{remote_name}/{target}"))
         .ok()
         .and_then(|reference| reference.target())
         .unwrap_or(git2::Oid::ZERO_SHA1);
-    let dst = format!("refs/heads/{branch}");
-    let refspec = format!("+refs/heads/{branch}:{dst}");
+    let dst = format!("refs/heads/{target}");
+    let refspec = format!("+refs/heads/{local}:{dst}");
     push_refs(
         repo,
         remote_name,
@@ -420,6 +423,128 @@ pub fn force_push_current_branch(
         cancel,
         Some((dst.as_str(), expected)),
     )
+}
+
+/// The current branch and where pushing it to `remote_name` lands: its upstream branch when the
+/// upstream lives on that remote, else the same name.
+fn current_push_target(
+    repo: &Repository,
+    remote_name: &str,
+) -> Result<(String, String), RemoteError> {
+    let local = current_local_branch_name(repo)?;
+    let config = repo.config()?;
+    let target = match configured_upstream(&config, &local)? {
+        Some((remote, branch)) if remote == remote_name => branch,
+        _ => local.clone(),
+    };
+    Ok((local, target))
+}
+
+/// Rejects a remote branch name that is empty, `HEAD`, starts with `-`/`+`, or is not a valid
+/// `refs/heads/<name>`, so a refspec built from it can only ever address that one branch.
+fn validate_branch_name(name: &str) -> Result<(), RemoteError> {
+    if name.is_empty()
+        || name == "HEAD"
+        || name.starts_with('-')
+        || name.starts_with('+')
+        || !git2::Reference::is_valid_name(&format!("refs/heads/{name}"))
+    {
+        return Err(git2::Error::from_str("invalid branch name").into());
+    }
+    Ok(())
+}
+
+/// Records `<remote_name>/<remote_branch>` as `local_branch`'s upstream. Uses
+/// `Branch::set_upstream` when the tracking ref exists, else writes the two config keys itself
+/// (a branch can track a remote branch that has not been fetched yet).
+pub fn set_branch_upstream(
+    repo: &Repository,
+    local_branch: &str,
+    remote_name: &str,
+    remote_branch: &str,
+) -> Result<(), RemoteError> {
+    repo.find_remote(remote_name)?;
+    let mut branch = repo.find_branch(local_branch, BranchType::Local)?;
+    let upstream = format!("{remote_name}/{remote_branch}");
+    match branch.set_upstream(Some(&upstream)) {
+        Ok(()) => {}
+        Err(error) if error.code() == ErrorCode::NotFound => {
+            let mut config = repo.config()?;
+            config.set_str(&format!("branch.{local_branch}.remote"), remote_name)?;
+            config.set_str(
+                &format!("branch.{local_branch}.merge"),
+                &format!("refs/heads/{remote_branch}"),
+            )?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+/// Pushes `local_branch` to `refs/heads/<remote_branch>` on `remote_name` (never forced: a
+/// non-fast-forward is `NonFastForward`). With `set_upstream`, a push that lands also makes that
+/// remote branch the local branch's upstream; a failed push leaves the config untouched.
+/// `cancel` behaves as for `push_current_branch`.
+#[allow(clippy::too_many_arguments)]
+pub fn push_branch(
+    repo: &Repository,
+    remote_name: &str,
+    local_branch: &str,
+    remote_branch: &str,
+    set_upstream: bool,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), RemoteError> {
+    repo.find_branch(local_branch, BranchType::Local)?;
+    validate_branch_name(remote_branch)?;
+    let refspec = format!("refs/heads/{local_branch}:refs/heads/{remote_branch}");
+    push_refs(
+        repo,
+        remote_name,
+        &[refspec],
+        TransferOperation::PushBranch,
+        credentials,
+        reporter,
+        cancel,
+        None,
+    )?;
+    if set_upstream {
+        set_branch_upstream(repo, local_branch, remote_name, remote_branch)?;
+    }
+    Ok(())
+}
+
+/// Deletes `refs/heads/<branch>` on `remote_name`, then our `refs/remotes/<remote>/<branch>`.
+/// Local branches that tracked it keep their config (git's "gone" upstream). A refusal
+/// (protected branch, server hook) is `RejectedRemoteRef`; `cancel` behaves as for
+/// `push_current_branch`.
+pub fn delete_remote_branch(
+    repo: &Repository,
+    remote_name: &str,
+    branch: &str,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), RemoteError> {
+    validate_branch_name(branch)?;
+    push_refs(
+        repo,
+        remote_name,
+        &[format!(":refs/heads/{branch}")],
+        TransferOperation::DeleteRemoteBranch,
+        credentials,
+        reporter,
+        cancel,
+        None,
+    )?;
+    // libgit2's push update_tips normally removed it already; this makes it not depend on that.
+    match repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}")) {
+        Ok(mut tracking) => tracking.delete()?,
+        Err(error) if error.code() == ErrorCode::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
 }
 
 /// Pushes `names` (or every local tag when empty). `cancel` behaves as for
@@ -643,21 +768,7 @@ pub fn set_current_upstream(
 ) -> Result<(), RemoteError> {
     repo.find_remote(remote_name)?;
     let local_branch = current_local_branch_name(repo)?;
-    let mut branch = repo.find_branch(&local_branch, BranchType::Local)?;
-    let upstream = format!("{remote_name}/{remote_branch}");
-    match branch.set_upstream(Some(&upstream)) {
-        Ok(()) => {}
-        Err(error) if error.code() == ErrorCode::NotFound => {
-            let mut config = repo.config()?;
-            config.set_str(&format!("branch.{local_branch}.remote"), remote_name)?;
-            config.set_str(
-                &format!("branch.{local_branch}.merge"),
-                &format!("refs/heads/{remote_branch}"),
-            )?;
-        }
-        Err(error) => return Err(error.into()),
-    }
-    Ok(())
+    set_branch_upstream(repo, &local_branch, remote_name, remote_branch)
 }
 
 pub fn clear_current_upstream(repo: &Repository) -> Result<(), RemoteError> {
