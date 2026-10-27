@@ -2247,3 +2247,47 @@ fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to()
         .find_reference("refs/remotes/narrow/doomed")
         .is_ok());
 }
+
+#[test]
+fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+    for name in ["@", "refs/heads/main", "refs/x"] {
+        let pushed = push_branch(
+            &fixture.local,
+            "origin",
+            "main",
+            name,
+            false,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(matches!(pushed, Err(RemoteError::Git(_))), "push {name:?}");
+        let deleted = delete_remote_branch(
+            &fixture.local,
+            "origin",
+            name,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(
+            matches!(deleted, Err(RemoteError::Git(_))),
+            "delete {name:?}"
+        );
+    }
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "upstream").unwrap();
+    config.set_str("branch.main.merge", "refs/heads/@").unwrap();
+    let forced = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+    assert!(matches!(forced, Err(RemoteError::Git(_))));
+    assert!(reporter.events.is_empty());
+    assert!(fixture.bare_tip("main").is_some());
+}

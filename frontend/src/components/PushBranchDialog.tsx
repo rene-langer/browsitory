@@ -15,8 +15,11 @@ function defaultRemote(remotes: RemoteInfo[], branchUpstream: string | null | un
 }
 
 /** `branchNameProblem` plus the names the backend refuses as a push target. */
+// Mirrors git-core's `validate_branch_name` (HEAD, @, a leading refs/, - or +).
 function remoteBranchProblem(name: string): string | null {
   if (name === "HEAD") return "Branch name can't be HEAD.";
+  if (name === "@") return "Branch name can't be just @.";
+  if (name.startsWith("refs/")) return "Give the branch name without refs/.";
   if (name.startsWith("+")) return "Branch names can't start with +.";
   return branchNameProblem(name);
 }

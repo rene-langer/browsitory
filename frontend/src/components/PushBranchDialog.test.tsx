@@ -69,6 +69,12 @@ describe("PushBranchDialog", () => {
     expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Remote branch"), { target: { value: "HEAD" } });
     expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Remote branch"), { target: { value: "@" } });
+    expect(screen.getByText("Branch name can't be just @.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Remote branch"), { target: { value: "refs/heads/x" } });
+    expect(screen.getByText("Give the branch name without refs/.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Remote branch"), { target: { value: " " } });
     expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
     fireEvent.submit(screen.getByRole("button", { name: "Push" }).closest("form")!);

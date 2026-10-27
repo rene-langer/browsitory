@@ -670,11 +670,14 @@ fn current_push_destination(
     }
 }
 
-/// Rejects a remote branch name that is empty, `HEAD`, starts with `-`/`+`, or is not a valid
+/// Rejects a remote branch name that is empty, `HEAD`, `@`, starts with `refs/`, `-` or `+`
+/// (`refs/heads/refs/...` would read as a full ref name to git), or is not a valid
 /// `refs/heads/<name>`, so a refspec built from it can only ever address that one branch.
 fn validate_branch_name(name: &str) -> Result<(), RemoteError> {
     if name.is_empty()
         || name == "HEAD"
+        || name == "@"
+        || name.starts_with("refs/")
         || name.starts_with('-')
         || name.starts_with('+')
         || !git2::Reference::is_valid_name(&format!("refs/heads/{name}"))
