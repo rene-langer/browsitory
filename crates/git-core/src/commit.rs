@@ -161,9 +161,11 @@ fn run_post_commit(repo: &git2::Repository, options: &mut HookOptions<'_>) {
     );
 }
 
-/// `prepare-commit-msg`'s second argument.
+/// `prepare-commit-msg`'s second argument, as `git commit` picks it when the message came from a
+/// file: `merge` while finishing a merge, cherry-pick or revert (MERGE_MSG, which pre-fills
+/// Browsitory's message box too), `squash` for a pending squash merge, else `message`.
 fn message_source(repo: &git2::Repository, is_merging: bool) -> &'static str {
-    if is_merging {
+    if is_merging || repo.path().join("MERGE_MSG").exists() {
         "merge"
     } else if repo.path().join("SQUASH_MSG").exists() {
         "squash"

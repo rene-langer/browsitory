@@ -105,8 +105,9 @@ VSCode extension) through `RepoClient`. Refines section 4e of
   `post-commit` (failure ignored, reported to the caller's `HookReporter`, logged by the worker).
   `<file>` is `<git dir>/COMMIT_EDITMSG` (the path git uses; some tools assume it), written only
   when `prepare-commit-msg` or `commit-msg` will run, and re-read afterwards so hook edits apply.
-  `<source>` is `merge` while finishing a merge (`MERGE_HEAD` present) and `message` otherwise
-  (Browsitory always supplies the message, like `git commit -m`). A message that is empty or
+  `<source>` is `merge` while finishing a merge, cherry-pick or revert (`MERGE_HEAD` or
+  `MERGE_MSG` present, the file `git commit` then takes its message from), `squash` with a
+  pending `SQUASH_MSG`, and `message` otherwise. A message that is empty or
   whitespace after the hooks aborts with `CommitError::EmptyMessage`
   ("Aborting commit due to empty commit message.", git's text). Without message hooks the message
   is used exactly as before.

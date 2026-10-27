@@ -796,3 +796,31 @@ fn head_info_lists_only_commit_hooks_that_no_verify_skips() {
         vec!["commit-msg".to_string()]
     );
 }
+
+#[test]
+fn prepare_commit_msg_source_is_merge_while_finishing_a_cherry_pick() {
+    // `git commit` after a conflicted cherry-pick/revert takes its message from MERGE_MSG and
+    // passes `merge`.
+    let (dir, mut repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a");
+    common::commit_all(&repo, "first");
+    let first_id = repo.head().unwrap().target().unwrap();
+    common::write_file(dir.path(), "b.txt", "b");
+    common::commit_all(&repo, "second");
+    std::fs::write(
+        repo.path().join("CHERRY_PICK_HEAD"),
+        format!("{first_id}\n"),
+    )
+    .unwrap();
+    std::fs::write(repo.path().join("MERGE_MSG"), "first\n").unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "prepare-commit-msg",
+        r#"echo "[$2]" >> "$1""#,
+    );
+
+    commit(&mut repo, "first\n", HookOptions::default()).unwrap();
+
+    assert_eq!(head_message(&repo), "first\n[merge]\n");
+}
