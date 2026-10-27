@@ -429,15 +429,15 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires commit", async () => {
-    const promise = vscodeRepoClient.commit("/repo", "message");
+    const promise = vscodeRepoClient.commit("/repo", "message", true);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "commit",
-      params: { repoPath: "/repo", message: "message" },
+      params: { repoPath: "/repo", message: "message", noVerify: true },
     });
-    respond(1, "abc123");
-    await expect(promise).resolves.toBeDefined();
+    respond(1, { kind: "Committed", commitId: "abc123" });
+    await expect(promise).resolves.toEqual({ kind: "Committed", commitId: "abc123" });
   });
 
   it("wires listBranches", async () => {
@@ -726,6 +726,7 @@ describe("vscodeRepoClient", () => {
     total: 0,
     receivedBytes: 0,
     message: null,
+    hookOutput: null,
   });
 
   it("wires fetchRemote, pushCurrentBranch, and pushTags", async () => {
@@ -739,22 +740,22 @@ describe("vscodeRepoClient", () => {
     respond(1, "fetch-1");
     await expect(fetchPromise).resolves.toBe("fetch-1");
 
-    const pushPromise = vscodeRepoClient.pushCurrentBranch("/repo", "origin");
+    const pushPromise = vscodeRepoClient.pushCurrentBranch("/repo", "origin", false);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 2,
       method: "push_current_branch",
-      params: { repoPath: "/repo", remoteName: "origin" },
+      params: { repoPath: "/repo", remoteName: "origin", noVerify: false },
     });
     respond(2, "push-1");
     await expect(pushPromise).resolves.toBe("push-1");
 
-    const tagsPromise = vscodeRepoClient.pushTags("/repo", "origin", ["v1.0.0"]);
+    const tagsPromise = vscodeRepoClient.pushTags("/repo", "origin", ["v1.0.0"], true);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 3,
       method: "push_tags",
-      params: { repoPath: "/repo", remoteName: "origin", names: ["v1.0.0"] },
+      params: { repoPath: "/repo", remoteName: "origin", names: ["v1.0.0"], noVerify: true },
     });
     respond(3, "push-2");
     await expect(tagsPromise).resolves.toBe("push-2");
@@ -771,22 +772,22 @@ describe("vscodeRepoClient", () => {
     respond(1, "fetch-all-1");
     await expect(all).resolves.toBe("fetch-all-1");
 
-    const push = vscodeRepoClient.pushBranch("/repo", "origin", "topic", "topic", false);
+    const push = vscodeRepoClient.pushBranch("/repo", "origin", "topic", "topic", false, true);
     expect(postMessage).toHaveBeenLastCalledWith({
       jsonrpc: "2.0",
       id: 2,
       method: "push_branch",
-      params: { repoPath: "/repo", remoteName: "origin", localBranch: "topic", remoteBranch: "topic", setUpstream: false },
+      params: { repoPath: "/repo", remoteName: "origin", localBranch: "topic", remoteBranch: "topic", setUpstream: false, noVerify: true },
     });
     respond(2, "push-2");
     await expect(push).resolves.toBe("push-2");
 
-    const del = vscodeRepoClient.deleteRemoteBranch("/repo", "origin", "topic");
+    const del = vscodeRepoClient.deleteRemoteBranch("/repo", "origin", "topic", false);
     expect(postMessage).toHaveBeenLastCalledWith({
       jsonrpc: "2.0",
       id: 3,
       method: "delete_remote_branch",
-      params: { repoPath: "/repo", remoteName: "origin", branchName: "topic" },
+      params: { repoPath: "/repo", remoteName: "origin", branchName: "topic", noVerify: false },
     });
     respond(3, "delete-remote-3");
     await expect(del).resolves.toBe("delete-remote-3");
@@ -817,6 +818,19 @@ describe("vscodeRepoClient", () => {
       kind: "FastForwarded",
       upstreamRef: "refs/remotes/origin/main",
     });
+  });
+
+  it("delivers hookProgress notifications to subscribed listeners and stops after unsubscribe", () => {
+    const received: unknown[] = [];
+    const unsubscribe = vscodeRepoClient.subscribeHookProgress((event) => received.push(event));
+    const event = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started" };
+
+    notify("hookProgress", event);
+    expect(received).toEqual([event]);
+
+    unsubscribe();
+    notify("hookProgress", event);
+    expect(received).toHaveLength(1);
   });
 
   it("delivers transferProgress notifications to subscribed listeners and stops after unsubscribe", () => {
@@ -1147,8 +1161,8 @@ describe("vscodeRepoClient", () => {
     expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, method: "get_head_info", params: { repoPath: "/repo" } });
     respond(1, null);
     await p1;
-    const p2 = vscodeRepoClient.amendCommit("/repo", "msg");
-    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, method: "amend_commit", params: { repoPath: "/repo", message: "msg" } });
+    const p2 = vscodeRepoClient.amendCommit("/repo", "msg", false);
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, method: "amend_commit", params: { repoPath: "/repo", message: "msg", noVerify: false } });
     respond(2, null);
     await p2;
     const p3 = vscodeRepoClient.cherryPick("/repo", "abc");
@@ -1167,8 +1181,8 @@ describe("vscodeRepoClient", () => {
     expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 6, method: "checkout_commit", params: { repoPath: "/repo", commitId: "abc" } });
     respond(6, null);
     await p6;
-    const p7 = vscodeRepoClient.forcePushCurrentBranch("/repo", "origin");
-    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 7, method: "force_push_current_branch", params: { repoPath: "/repo", remoteName: "origin" } });
+    const p7 = vscodeRepoClient.forcePushCurrentBranch("/repo", "origin", true);
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 7, method: "force_push_current_branch", params: { repoPath: "/repo", remoteName: "origin", noVerify: true } });
     respond(7, null);
     await p7;
   });

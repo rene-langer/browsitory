@@ -13,7 +13,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
-import type { TransferProgress } from "../ipc/RepoClient";
+import type { CommitOutcome, HookProgress, TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -63,6 +63,7 @@ const remoteManagementClient = {
     pushBranch: async () => "push-1",
     deleteRemoteBranch: async () => "delete-remote-1",
     subscribeTransferProgress: () => () => {},
+    subscribeHookProgress: () => () => {},
   listWorktrees: async () => [],
   createWorktree: async () => unimplemented(),
   removeWorktree: async () => unimplemented(),
@@ -148,7 +149,7 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: async () => unimplemented(),
     abortMerge: async () => unimplemented(),
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -621,7 +622,7 @@ describe("useAppState", () => {
         return () => {};
       },
       pushCurrentBranch: async () => {
-        listener?.({ operationId: "push-42", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "push-42", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         return "push-42";
       },
     });
@@ -644,8 +645,8 @@ describe("useAppState", () => {
       },
       pullCurrentUpstream: () => new Promise((resolve) => {
         resolvePull = resolve;
-        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 128, message: null });
+        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        listener?.({ operationId: "pull-42", operation: "Pull", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 128, message: null, hookOutput: null });
       }),
     });
 
@@ -660,7 +661,7 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(true);
 
     await act(async () => {
-      listener?.({ operationId: "pull-42", operation: "Pull", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "pull-42", operation: "Pull", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
       resolvePull?.({ kind: "UpToDate" });
       await pull;
     });
@@ -687,7 +688,7 @@ describe("useAppState", () => {
     expect(result.current.state.pending).toBe(false);
 
     act(() => {
-      listener?.({ operationId: "pull-late", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "pull-late", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
     });
 
     expect(result.current.state.transfer?.operationId).toBe("pull-late");
@@ -897,7 +898,7 @@ describe("useAppState", () => {
         return () => {};
       },
       pullCurrentUpstream: async () => {
-        listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         throw new Error("pull failed");
       },
     });
@@ -907,7 +908,7 @@ describe("useAppState", () => {
     await act(() => result.current.pullCurrentUpstream());
 
     act(() => {
-      listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null });
+      listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
     });
 
     expect(result.current.state.transfer).toBeNull();
@@ -928,8 +929,8 @@ describe("useAppState", () => {
         return () => {};
       },
       fetchRemote: async () => {
-        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        listener?.({ operationId: "fast-fetch", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         return "fast-fetch";
       },
     });
@@ -954,9 +955,9 @@ describe("useAppState", () => {
       fetchRemote: async () => {
         fetchCalls += 1;
         const operationId = `fetch-${fetchCalls}`;
-        listener?.({ operationId, operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId, operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         if (fetchCalls === 1) {
-          listener?.({ operationId, operation: "Fetch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git" });
+          listener?.({ operationId, operation: "Fetch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: "https://alice:secret@example.test/repo.git", hookOutput: null });
         }
         return operationId;
       },
@@ -990,8 +991,8 @@ describe("useAppState", () => {
         return () => {};
       },
       fetchRemote: async () => {
-        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Failed", errorKind: "Cancelled", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        listener?.({ operationId: "cancelled-fetch", operation: "Fetch", phase: "Failed", errorKind: "Cancelled", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         return "cancelled-fetch";
       },
     });
@@ -1013,7 +1014,7 @@ describe("useAppState", () => {
         return () => {};
       },
       fetchRemote: async () => {
-        listener?.({ operationId: "credential-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "credential-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         listener?.({
           operationId: "credential-fetch",
           operation: "Fetch",
@@ -1023,6 +1024,7 @@ describe("useAppState", () => {
           total: 0,
           receivedBytes: 0,
           message: null,
+          hookOutput: null,
         });
         return "credential-fetch";
       },
@@ -1040,14 +1042,14 @@ describe("useAppState", () => {
     const client = transferClient({
       subscribeTransferProgress: (next) => { listener = next; return () => {}; },
       fetchRemote: async () => {
-        listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         throw new Error("Fetch failed");
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
-    act(() => listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
 
     expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
   });
@@ -1057,13 +1059,13 @@ describe("useAppState", () => {
     const client = transferClient({
       subscribeTransferProgress: (next) => { listener = next; return () => {}; },
       fetchRemote: async () => {
-        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Failed", errorKind: "CredentialStoreFailure", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        listener?.({ operationId: "keychain-fetch", operation: "Fetch", phase: "Failed", errorKind: "CredentialStoreFailure", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         return "keychain-fetch";
       },
       pushCurrentBranch: async () => {
-        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null });
-        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Failed", errorKind: "SshAgentFailure", current: 0, total: 0, receivedBytes: 0, message: null });
+        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        listener?.({ operationId: "agent-push", operation: "PushBranch", phase: "Failed", errorKind: "SshAgentFailure", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
         return "agent-push";
       },
     });
@@ -1094,6 +1096,7 @@ describe("useAppState", () => {
           total: 0,
           receivedBytes: 0,
           message: null,
+          hookOutput: null,
         });
         listener?.({
           operationId,
@@ -1104,6 +1107,7 @@ describe("useAppState", () => {
           total: 0,
           receivedBytes: 0,
           message: null,
+          hookOutput: null,
         });
         return operationId;
       },
@@ -1166,7 +1170,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1259,7 +1263,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1352,7 +1356,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1865,7 +1869,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1955,7 +1959,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2041,7 +2045,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2127,7 +2131,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2219,7 +2223,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2307,7 +2311,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2514,7 +2518,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2601,7 +2605,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2687,7 +2691,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2771,7 +2775,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2858,7 +2862,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2950,7 +2954,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3042,7 +3046,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3130,7 +3134,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3262,7 +3266,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3349,7 +3353,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3435,7 +3439,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3581,7 +3585,7 @@ describe("useAppState pull requests", () => {
 
 describe("history actions", () => {
   it("loads headInfo on refresh", async () => {
-    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, squashMessage: null };
+    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, squashMessage: null, commitHooks: [] };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
     expect(result.current.state.headInfo).toEqual(info);
@@ -3620,15 +3624,16 @@ describe("history actions", () => {
 
   it("amendCommit turns amend mode off on success and keeps it on failure", async () => {
     let fail = true;
-    const amendCommit = vi.fn(async () => {
+    const amendCommit = vi.fn(async (): Promise<CommitOutcome> => {
       if (fail) throw new Error("boom");
+      return { kind: "Committed", commitId: "c" };
     });
     const { result } = renderHook(() => useAppState(transferClient({ amendCommit }), TEST_REPO_PATH));
     act(() => result.current.setAmendMode(true));
-    await act(() => result.current.amendCommit("m"));
+    await act(() => result.current.amendCommit("m", false));
     expect(result.current.state.amendMode).toBe(true);
     fail = false;
-    await act(() => result.current.amendCommit("m"));
+    await act(() => result.current.amendCommit("m", false));
     expect(result.current.state.amendMode).toBe(false);
   });
 
@@ -3645,14 +3650,14 @@ describe("history actions", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.pushCurrentBranch("origin"));
-    act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.forcePushOffer).toEqual({ remoteName: "origin" });
 
     act(() => result.current.requestForcePush("origin"));
     expect(result.current.state.forcePushConfirm).toEqual({ remoteName: "origin" });
 
     await act(() => result.current.forcePushCurrentBranch("origin"));
-    expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin");
+    expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
     expect(result.current.state.forcePushOffer).toBeNull();
     expect(result.current.state.forcePushConfirm).toBeNull();
   });
@@ -3678,7 +3683,7 @@ describe("history actions", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
     await act(() => result.current.forcePushCurrentBranch("origin"));
-    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.error).toBe(
       "origin/main changed since your last fetch. Fetch and review before force pushing.",
     );
@@ -3698,7 +3703,7 @@ describe("history actions", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
     await act(() => result.current.forcePushCurrentBranch("fork"));
-    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "StaleLease", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.error).toBe(
       "fork/feature changed since your last fetch. Fetch and review before force pushing.",
     );
@@ -3715,7 +3720,7 @@ describe("history actions", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.forcePushCurrentBranch("origin"));
-    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.error).toBe("The remote refused the force push.");
   });
 
@@ -3730,13 +3735,13 @@ describe("history actions", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.forcePushCurrentBranch("origin"));
-    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null }));
+    act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.error).toBe("Push failed");
   });
 
   describe("force push offer lifecycle", () => {
     const failed = (operationId: string, operation: TransferProgress["operation"], errorKind: TransferProgress["errorKind"]): TransferProgress => ({
-      operationId, operation, phase: "Failed", errorKind, current: 0, total: 0, receivedBytes: 0, message: null,
+      operationId, operation, phase: "Failed", errorKind, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null,
     });
     async function setup() {
       let listener: ((progress: TransferProgress) => void) | null = null;
@@ -3791,7 +3796,7 @@ function progress(
   phase: TransferProgress["phase"],
   extra: Partial<TransferProgress> = {},
 ): TransferProgress {
-  return { operationId, operation, phase, errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, ...extra };
+  return { operationId, operation, phase, errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null, ...extra };
 }
 
 describe("useAppState — refs and remotes (4b)", () => {
@@ -3844,7 +3849,7 @@ describe("useAppState — refs and remotes (4b)", () => {
 
     await act(() => result.current.pushCurrentBranch("origin"));
 
-    expect(pushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin");
+    expect(pushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
     expect(result.current.state.pushDialog).toBeNull();
   });
 
@@ -4454,5 +4459,209 @@ describe("useAppState merge and stash options", () => {
     expect(applyStash).not.toHaveBeenCalled();
     expect(popStash).not.toHaveBeenCalled();
     expect(dropStash).not.toHaveBeenCalled();
+  });
+});
+
+describe("git hooks", () => {
+  it("stores a commit hook failure with its retry and reports the error", async () => {
+    const commit = vi.fn(async (): Promise<CommitOutcome> => ({ kind: "HookFailed", hook: "pre-commit", output: "lint\n" }));
+    const { result } = renderHook(() => useAppState(transferClient({ commit }), TEST_REPO_PATH));
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.commit("msg", false);
+    });
+
+    expect(ok).toBe(false);
+    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "msg", false);
+    expect(result.current.state.error).toBe("The pre-commit hook failed.");
+    expect(result.current.state.hookFailure).toEqual({
+      hook: "pre-commit",
+      output: "lint\n",
+      retry: { kind: "commit", message: "msg" },
+      dialogOpen: true,
+    });
+  });
+
+  it("retries a commit without hooks and asks the CommitBox to clear", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const { result } = renderHook(() => useAppState(transferClient({ commit }), TEST_REPO_PATH));
+    await act(async () => void (await result.current.commit("msg", false)));
+
+    await act(async () => {
+      await result.current.retryWithoutHooks({ kind: "commit", message: "msg" });
+    });
+
+    expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", true);
+    expect(result.current.state.hookFailure).toBeNull();
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.clearCommitMessage).toBe(true);
+    act(() => result.current.clearCommitMessageHandled());
+    expect(result.current.state.clearCommitMessage).toBe(false);
+  });
+
+  it("stores an amend hook failure and retries it as an amend", async () => {
+    const amendCommit = vi
+      .fn<RepoClient["amendCommit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "bad subject\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const { result } = renderHook(() => useAppState(transferClient({ amendCommit }), TEST_REPO_PATH));
+    act(() => result.current.setAmendMode(true));
+    await act(async () => void (await result.current.amendCommit("m", false)));
+    expect(result.current.state.hookFailure?.retry).toEqual({ kind: "amend", message: "m" });
+    expect(result.current.state.amendMode).toBe(true);
+
+    await act(async () => result.current.retryWithoutHooks({ kind: "amend", message: "m" }));
+
+    expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", true);
+    expect(result.current.state.amendMode).toBe(false);
+    expect(result.current.state.clearCommitMessage).toBe(false);
+  });
+
+  it("skip hooks applies to the next commit only", async () => {
+    const commit = vi.fn(async (): Promise<CommitOutcome> => ({ kind: "Committed", commitId: "c" }));
+    const { result } = renderHook(() => useAppState(transferClient({ commit }), TEST_REPO_PATH));
+    act(() => result.current.setSkipHooks(true));
+
+    await act(async () => void (await result.current.commit("m", result.current.state.skipHooks)));
+
+    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "m", true);
+    expect(result.current.state.skipHooks).toBe(false);
+  });
+
+  it("keeps skip hooks after a failed commit", async () => {
+    const commit = vi.fn(async (): Promise<CommitOutcome> => {
+      throw new Error("nothing to commit");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ commit }), TEST_REPO_PATH));
+    act(() => result.current.setSkipHooks(true));
+
+    await act(async () => void (await result.current.commit("m", true)));
+
+    expect(result.current.state.skipHooks).toBe(true);
+  });
+
+  it("tracks the running hook for this repo only and clears it when the commit settles", async () => {
+    let emit: ((event: HookProgress) => void) | undefined;
+    let finish: ((outcome: CommitOutcome) => void) | undefined;
+    const client = transferClient({
+      subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+        emit = listener;
+        return () => {};
+      },
+      commit: () => new Promise<CommitOutcome>((resolve) => (finish = resolve)),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let pending: Promise<boolean> | undefined;
+    act(() => {
+      pending = result.current.commit("m", false);
+    });
+    act(() => emit?.({ repoPath: "/other", operationId: "commit-9", hook: "pre-commit", phase: "Started" }));
+    expect(result.current.state.hookRun).toBeNull();
+    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started" }));
+    expect(result.current.state.hookRun).toEqual({ operationId: "commit-1", hook: "pre-commit" });
+
+    await act(async () => {
+      finish?.({ kind: "Committed", commitId: "c" });
+      await pending;
+    });
+    expect(result.current.state.hookRun).toBeNull();
+  });
+
+  it("cancels the running hook through cancelTransfer", async () => {
+    const cancelTransfer = vi.fn(async () => {});
+    let emit: ((event: HookProgress) => void) | undefined;
+    const client = transferClient({
+      cancelTransfer,
+      subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started" }));
+
+    await act(async () => result.current.cancelHookRun());
+
+    expect(cancelTransfer).toHaveBeenCalledWith(TEST_REPO_PATH, "commit-1");
+  });
+
+  it("turns a HookFailed push into a retryable hook failure", async () => {
+    let listener: ((progress: TransferProgress) => void) | undefined;
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const client = transferClient({
+      pushCurrentBranch,
+      subscribeTransferProgress: (next: (progress: TransferProgress) => void) => {
+        listener = next;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => result.current.pushCurrentBranch("origin"));
+    expect(pushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
+
+    act(() =>
+      listener?.({
+        operationId: "push-1",
+        operation: "PushBranch",
+        phase: "Failed",
+        errorKind: "HookFailed",
+        current: 0,
+        total: 0,
+        receivedBytes: 0,
+        message: null,
+        hookOutput: "tests failed\n",
+      }),
+    );
+
+    expect(result.current.state.error).toBe("The pre-push hook failed.");
+    expect(result.current.state.hookFailure).toEqual({
+      hook: "pre-push",
+      output: "tests failed\n",
+      retry: { kind: "push", push: { operation: "PushBranch", remoteName: "origin" } },
+      dialogOpen: true,
+    });
+
+    await act(async () => result.current.retryWithoutHooks(result.current.state.hookFailure!.retry));
+    expect(pushCurrentBranch).toHaveBeenLastCalledWith(TEST_REPO_PATH, "origin", true);
+  });
+
+  it("retries a Push to… and a remote branch delete with the same arguments", async () => {
+    const pushBranch = vi.fn(async () => "push-2");
+    const deleteRemoteBranch = vi.fn(async () => "delete-1");
+    const { result } = renderHook(() => useAppState(transferClient({ pushBranch, deleteRemoteBranch }), TEST_REPO_PATH));
+
+    await act(async () =>
+      result.current.retryWithoutHooks({
+        kind: "push",
+        push: { operation: "PushBranchTo", remoteName: "origin", localBranch: "topic", remoteBranch: "pub", setUpstream: true },
+      }),
+    );
+    expect(pushBranch).toHaveBeenLastCalledWith(TEST_REPO_PATH, "origin", "topic", "pub", true, true);
+
+    await act(async () =>
+      result.current.retryWithoutHooks({
+        kind: "push",
+        push: { operation: "DeleteRemoteBranch", remoteName: "origin", branchName: "old" },
+      }),
+    );
+    expect(deleteRemoteBranch).toHaveBeenLastCalledWith(TEST_REPO_PATH, "origin", "old", true);
+  });
+
+  it("dismissing the error forgets the hook failure; closing the dialog keeps it", async () => {
+    const commit = vi.fn(async (): Promise<CommitOutcome> => ({ kind: "HookFailed", hook: "pre-commit", output: "" }));
+    const { result } = renderHook(() => useAppState(transferClient({ commit }), TEST_REPO_PATH));
+    await act(async () => void (await result.current.commit("m", false)));
+
+    act(() => result.current.closeHookFailure());
+    expect(result.current.state.hookFailure?.dialogOpen).toBe(false);
+    act(() => result.current.openHookFailure());
+    expect(result.current.state.hookFailure?.dialogOpen).toBe(true);
+    act(() => result.current.dismissError());
+    expect(result.current.state.hookFailure).toBeNull();
   });
 });

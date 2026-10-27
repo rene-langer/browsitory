@@ -851,7 +851,7 @@ function RepoWorkspace({
                   onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
                   onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
                   onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
-                  onCommit={announce("Committed", appState.commit)}
+                  onCommit={(message) => announce("Committed", appState.commit)(message, appState.state.skipHooks)}
                   onSaveStash={announce("Changes stashed", () => appState.saveStash())}
                   onOpenStashDialog={appState.openStashDialog}
                   onSelectRow={appState.selectRow}
@@ -862,7 +862,9 @@ function RepoWorkspace({
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}
-                  onAmendCommit={announce("Amended commit", appState.amendCommit)}
+                  onAmendCommit={(message) =>
+                    announce("Amended commit", appState.amendCommit)(message, appState.state.skipHooks)
+                  }
                   focusCommitMessage={focusCommitMessage}
                   onCommitMessageFocused={clearFocusCommitMessage}
                   rebaseProgress={appState.state.rebaseProgress}

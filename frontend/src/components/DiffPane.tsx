@@ -378,7 +378,7 @@ function UncommittedFileSection({
   );
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] };
 const noop = () => {};
 
 export function DiffPane({

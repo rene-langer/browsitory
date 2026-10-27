@@ -16,6 +16,7 @@ describe("TransferPanel", () => {
           total: 100,
           receivedBytes: 2048,
           message: null,
+          hookOutput: null,
         }}
         onCancel={onCancel}
       />,
@@ -39,6 +40,7 @@ describe("TransferPanel", () => {
           total: 100,
           receivedBytes: 2048,
           message: null,
+          hookOutput: null,
         }}
         onCancel={onCancel}
       />,
@@ -64,6 +66,7 @@ describe("TransferPanel", () => {
           total: 4,
           receivedBytes: 1024,
           message: null,
+          hookOutput: null,
         }}
         onCancel={() => {}}
       />,
@@ -89,6 +92,7 @@ describe("TransferPanel", () => {
           total: 2,
           receivedBytes,
           message: null,
+          hookOutput: null,
         }}
         onCancel={() => {}}
       />,
@@ -108,6 +112,7 @@ describe("TransferPanel", () => {
           total: 4,
           receivedBytes: 1024,
           message: "https://alice:secret@example.test/repo.git",
+          hookOutput: null,
         }}
         onCancel={() => {}}
       />,

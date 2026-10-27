@@ -253,19 +253,66 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("fetch_remote", { repoPath: TEST_REPO_PATH, remoteName: "origin", prune: false });
     await tauriRepoClient.fetchAllRemotes(TEST_REPO_PATH, true);
     expect(invoke).toHaveBeenLastCalledWith("fetch_all_remotes", { repoPath: TEST_REPO_PATH, prune: true });
-    await tauriRepoClient.pushBranch(TEST_REPO_PATH, "origin", "topic", "published", true);
+    await tauriRepoClient.pushBranch(TEST_REPO_PATH, "origin", "topic", "published", true, false);
     expect(invoke).toHaveBeenLastCalledWith("push_branch", {
       repoPath: TEST_REPO_PATH,
       remoteName: "origin",
       localBranch: "topic",
       remoteBranch: "published",
       setUpstream: true,
+      noVerify: false,
     });
-    await tauriRepoClient.deleteRemoteBranch(TEST_REPO_PATH, "origin", "topic");
+    await tauriRepoClient.deleteRemoteBranch(TEST_REPO_PATH, "origin", "topic", true);
     expect(invoke).toHaveBeenLastCalledWith("delete_remote_branch", {
       repoPath: TEST_REPO_PATH,
       remoteName: "origin",
       branchName: "topic",
+      noVerify: true,
+    });
+    await tauriRepoClient.pushTags(TEST_REPO_PATH, "origin", ["v1"], true);
+    expect(invoke).toHaveBeenLastCalledWith("push_tags", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+      names: ["v1"],
+      noVerify: true,
+    });
+    await tauriRepoClient.pushCurrentBranch(TEST_REPO_PATH, "origin", false);
+    expect(invoke).toHaveBeenLastCalledWith("push_current_branch", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+      noVerify: false,
+    });
+  });
+
+  it("commits with noVerify and returns the outcome", async () => {
+    vi.mocked(invoke).mockResolvedValue({ kind: "HookFailed", hook: "pre-commit", output: "no\n" });
+
+    await expect(tauriRepoClient.commit(TEST_REPO_PATH, "msg", true)).resolves.toEqual({
+      kind: "HookFailed",
+      hook: "pre-commit",
+      output: "no\n",
+    });
+    expect(invoke).toHaveBeenCalledWith("commit", { repoPath: TEST_REPO_PATH, message: "msg", noVerify: true });
+  });
+
+  it("forwards hook-progress events and unregisters", async () => {
+    const unlisten = vi.fn();
+    let hookListener: ((event: { payload: unknown }) => void) | undefined;
+    vi.mocked(listen).mockImplementation(async (event, listener) => {
+      if (event === "hook-progress") hookListener = listener as typeof hookListener;
+      return unlisten;
+    });
+    const received = vi.fn();
+
+    const unsubscribe = tauriRepoClient.subscribeHookProgress(received);
+    await vi.waitFor(() => expect(hookListener).toBeDefined());
+    const payload = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started" };
+    hookListener?.({ payload });
+    expect(received).toHaveBeenCalledWith(payload);
+
+    await vi.waitFor(() => {
+      unsubscribe();
+      expect(unlisten).toHaveBeenCalled();
     });
   });
 
@@ -310,6 +357,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
         total: 4,
         receivedBytes: 1024,
         message: null,
+        hookOutput: null,
       },
     });
     completedListener?.({
@@ -322,6 +370,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
         total: 4,
         receivedBytes: 1024,
         message: null,
+        hookOutput: null,
       },
     });
 
@@ -334,6 +383,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
       total: 4,
       receivedBytes: 1024,
       message: null,
+      hookOutput: null,
     });
     expect(received).toHaveBeenNthCalledWith(2, {
       operationId: "fetch-42",
@@ -344,6 +394,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
       total: 4,
       receivedBytes: 1024,
       message: null,
+      hookOutput: null,
     });
 
     unsubscribe();
@@ -360,8 +411,8 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("reset_to_commit", { repoPath: "/repo", commitId: "abc", mode: "hard" });
     await tauriRepoClient.checkoutCommit("/repo", "abc");
     expect(invoke).toHaveBeenLastCalledWith("checkout_commit", { repoPath: "/repo", commitId: "abc" });
-    await tauriRepoClient.amendCommit("/repo", "msg");
-    expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg" });
+    await tauriRepoClient.amendCommit("/repo", "msg", false);
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg", noVerify: false });
     await tauriRepoClient.getCommitSignature("/repo", "abc");
     expect(invoke).toHaveBeenLastCalledWith("get_commit_signature", { repoPath: "/repo", commitId: "abc" });
     await tauriRepoClient.getUndoState("/repo");
@@ -372,8 +423,8 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("redo_last", { repoPath: "/repo" });
     await tauriRepoClient.getHeadInfo("/repo");
     expect(invoke).toHaveBeenLastCalledWith("get_head_info", { repoPath: "/repo" });
-    await tauriRepoClient.forcePushCurrentBranch("/repo", "origin");
-    expect(invoke).toHaveBeenLastCalledWith("force_push_current_branch", { repoPath: "/repo", remoteName: "origin" });
+    await tauriRepoClient.forcePushCurrentBranch("/repo", "origin", true);
+    expect(invoke).toHaveBeenLastCalledWith("force_push_current_branch", { repoPath: "/repo", remoteName: "origin", noVerify: true });
   });
 });
 

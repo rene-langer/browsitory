@@ -131,7 +131,7 @@ describe("CloneDialog", () => {
     fill("https://github.com/org/repo.git");
     fireEvent.click(screen.getByRole("button", { name: "Clone" }));
     const opId = vi.mocked(client.cloneRepo).mock.calls[0][0];
-    const base = { operation: "Clone", errorKind: null, receivedBytes: 0, message: null } as const;
+    const base = { operation: "Clone", errorKind: null, receivedBytes: 0, message: null, hookOutput: null } as const;
     act(() => emit({ ...base, operationId: "other", phase: "Receiving", current: 9, total: 9 }));
     act(() => emit({ ...base, operationId: opId, phase: "Receiving", current: 3, total: 10 }));
     expect(screen.getByText("Receiving objects 3/10")).toBeInTheDocument();

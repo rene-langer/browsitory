@@ -60,8 +60,12 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       fetchPrune: null,
       pushDialog: null,
       deleteRemoteBranchDialog: null,
-      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null },
+      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
       amendMode: false,
+      skipHooks: false,
+      hookRun: null,
+      hookFailure: null,
+      clearCommitMessage: false,
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
@@ -178,6 +182,12 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     redo: vi.fn(),
     refreshUndoState: vi.fn(),
     dismissError: vi.fn(),
+    setSkipHooks: vi.fn(),
+    cancelHookRun: vi.fn(),
+    openHookFailure: vi.fn(),
+    closeHookFailure: vi.fn(),
+    clearCommitMessageHandled: vi.fn(),
+    retryWithoutHooks: vi.fn(),
   };
 }
 
@@ -203,7 +213,7 @@ describe("buildCommands", () => {
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
-      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null },
+      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
     });
     expect(detached).not.toContain("Push branch to…");
     expect(detached).toContain("Fetch all remotes");
@@ -634,6 +644,7 @@ describe("buildCommands", () => {
             total: 2,
             receivedBytes: 100,
             message: null,
+            hookOutput: null,
           },
         },
       ],
@@ -857,7 +868,7 @@ describe("history commands", () => {
   const historyState: Partial<AppState> = {
     selectedRow: { commitId: "c2" },
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
-    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null },
+    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
   };
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
@@ -875,7 +886,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         selectedRow: { commitId: "c1" },
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("cherry-pick-selected");
@@ -898,7 +909,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         branches: [{ name: "main", isCurrent: false }],
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("reset-selected");

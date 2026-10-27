@@ -4,7 +4,9 @@ import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import { toCloneError } from "./RepoClient";
 import type {
+  CommitOutcome,
   CommitSignature,
+  HookProgress,
   BlameLine,
   BranchInfo,
   CloneOutcome,
@@ -54,6 +56,7 @@ import type {
 } from "./RepoClient";
 
 let transferListenersReady: Promise<void> = Promise.resolve();
+let hookListenersReady: Promise<void> = Promise.resolve();
 
 // Single choke point for frontend failure logging: writes into the same rotated log file as
 // the Rust backend (see crates/tauri-app/src/main.rs's log plugin setup), so a bug report
@@ -167,7 +170,10 @@ export const tauriRepoClient: RepoClient = {
   ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => loggedInvoke<DiffSettings>("get_diff_settings"),
   setDiffSettings: (settings: DiffSettings) => loggedInvoke("set_diff_settings", { settings }),
-  commit: (repoPath: string, message: string) => loggedInvoke("commit", { repoPath, message }),
+  commit: async (repoPath: string, message: string, noVerify: boolean) => {
+    await hookListenersReady;
+    return loggedInvoke<CommitOutcome>("commit", { repoPath, message, noVerify });
+  },
   listBranches: (repoPath: string) => loggedInvoke<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
     loggedInvoke("create_branch", { repoPath, name, startPoint }),
@@ -229,21 +235,21 @@ export const tauriRepoClient: RepoClient = {
     await transferListenersReady;
     return loggedInvoke<string>("fetch_all_remotes", { repoPath, prune });
   },
-  pushBranch: async (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean) => {
+  pushBranch: async (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) => {
     await transferListenersReady;
-    return loggedInvoke<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream });
+    return loggedInvoke<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify });
   },
-  deleteRemoteBranch: async (repoPath: string, remoteName: string, branchName: string) => {
+  deleteRemoteBranch: async (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) => {
     await transferListenersReady;
-    return loggedInvoke<string>("delete_remote_branch", { repoPath, remoteName, branchName });
+    return loggedInvoke<string>("delete_remote_branch", { repoPath, remoteName, branchName, noVerify });
   },
-  pushCurrentBranch: async (repoPath: string, remoteName: string) => {
+  pushCurrentBranch: async (repoPath: string, remoteName: string, noVerify: boolean) => {
     await transferListenersReady;
-    return loggedInvoke<string>("push_current_branch", { repoPath, remoteName });
+    return loggedInvoke<string>("push_current_branch", { repoPath, remoteName, noVerify });
   },
-  pushTags: async (repoPath: string, remoteName: string, names: string[]) => {
+  pushTags: async (repoPath: string, remoteName: string, names: string[], noVerify: boolean) => {
     await transferListenersReady;
-    return loggedInvoke<string>("push_tags", { repoPath, remoteName, names });
+    return loggedInvoke<string>("push_tags", { repoPath, remoteName, names, noVerify });
   },
   pullCurrentUpstream: async (repoPath: string) => {
     await transferListenersReady;
@@ -273,6 +279,23 @@ export const tauriRepoClient: RepoClient = {
       for (const stop of unlisten) stop();
     };
   },
+  subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+    let disposed = false;
+    let stop: (() => void) | null = null;
+    const registration = listen<HookProgress>("hook-progress", ({ payload }) => listener(payload));
+    // `commit`/`amendCommit` wait for this so a fast hook's events are not emitted before
+    // anyone listens (same reason as `transferListenersReady`).
+    hookListenersReady = registration.then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
+    void hookListenersReady.catch(() => {});
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      stop?.();
+    };
+  },
   listStashes: (repoPath: string) => loggedInvoke<StashEntry[]>("list_stashes", { repoPath }),
   saveStash: (repoPath: string, options: StashOptions) => loggedInvoke("save_stash", { repoPath, options }),
   applyStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
@@ -297,7 +320,10 @@ export const tauriRepoClient: RepoClient = {
   abortMerge: (repoPath: string) => loggedInvoke("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => loggedInvoke<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => loggedInvoke<HeadInfo>("get_head_info", { repoPath }),
-  amendCommit: (repoPath: string, message: string) => loggedInvoke<void>("amend_commit", { repoPath, message }),
+  amendCommit: async (repoPath: string, message: string, noVerify: boolean) => {
+    await hookListenersReady;
+    return loggedInvoke<CommitOutcome>("amend_commit", { repoPath, message, noVerify });
+  },
   getUndoState: (repoPath: string) => loggedInvoke<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => loggedInvoke<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => loggedInvoke<UndoOutcome>("redo_last", { repoPath }),
@@ -306,8 +332,8 @@ export const tauriRepoClient: RepoClient = {
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
     loggedInvoke<void>("reset_to_commit", { repoPath, commitId, mode }),
   checkoutCommit: (repoPath: string, commitId: string) => loggedInvoke<void>("checkout_commit", { repoPath, commitId }),
-  forcePushCurrentBranch: (repoPath: string, remoteName: string) =>
-    loggedInvoke<string>("force_push_current_branch", { repoPath, remoteName }),
+  forcePushCurrentBranch: (repoPath: string, remoteName: string, noVerify: boolean) =>
+    loggedInvoke<string>("force_push_current_branch", { repoPath, remoteName, noVerify }),
   resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
     loggedInvoke("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>

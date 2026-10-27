@@ -98,6 +98,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     pullCurrentUpstream: async () => unused(),
     cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
+    subscribeHookProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
     applyStash: unused,
@@ -117,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -611,7 +612,7 @@ describe("App", () => {
     expect(within(dialog).getByLabelText("Set as upstream")).toBeChecked();
     fireEvent.click(within(dialog).getByRole("button", { name: "Push" }));
 
-    await waitFor(() => expect(pushBranch).toHaveBeenCalledWith("/repos/a", "origin", "main", "main", true));
+    await waitFor(() => expect(pushBranch).toHaveBeenCalledWith("/repos/a", "origin", "main", "main", true, false));
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
@@ -639,7 +640,7 @@ describe("App", () => {
     expect(dialog).toHaveTextContent("Delete origin/topic on the remote? This can't be undone.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete remote branch" }));
 
-    await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic"));
+    await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic", false));
     expect(screen.queryByRole("dialog", { name: "Delete remote branch" })).toBeNull();
     localStorage.clear();
   });
