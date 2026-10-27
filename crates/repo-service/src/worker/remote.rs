@@ -336,6 +336,24 @@ pub(super) fn pull<S: CredentialStore>(
         error,
     });
 }
+/// Refuses a current-branch push before any transfer starts when `push.default` does not settle
+/// its target (the frontend then offers "Push to…"); the reply carries git-core's static,
+/// secret-free message. Other resolution errors are left to the transfer itself to report.
+fn unresolved_push_target(repo: &git2::Repository, remote_name: &str) -> Option<String> {
+    match git_core::remote::current_push_target(repo, remote_name) {
+        Ok(git_core::remote::PushTarget::NeedsChoice {
+            remote,
+            local_branch,
+        }) => Some(
+            git_core::remote::RemoteError::PushTargetNeedsChoice {
+                remote,
+                local_branch,
+            }
+            .to_string(),
+        ),
+        _ => None,
+    }
+}
 pub(super) fn push_current<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
@@ -344,6 +362,11 @@ pub(super) fn push_current<S: CredentialStore>(
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
+    if let Some(message) = unresolved_push_target(repo, &remote_name) {
+        op.clear();
+        let _ = reply.send(Err(message));
+        return;
+    }
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
         operation: TransferOperation::PushBranch,
@@ -374,6 +397,11 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
+    if let Some(message) = unresolved_push_target(repo, &remote_name) {
+        op.clear();
+        let _ = reply.send(Err(message));
+        return;
+    }
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
         operation: TransferOperation::ForcePushBranch,

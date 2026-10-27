@@ -4,10 +4,10 @@ use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
     delete_remote_branch, delete_tag, fetch_all, fetch_remote, force_push_current_branch,
     list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_branch,
-    push_current_branch, push_tags, remote_upstreams, remove_remote,
-    remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
+    push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
+    remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_current_upstream,
     set_remote_auth_profile, update_remote_urls, CredentialProvider, FetchAllOutcome, PullOutcome,
-    RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
+    PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
     TransferProgress, TransferReporter,
 };
 
@@ -1293,12 +1293,18 @@ fn pushing_a_missing_local_branch_is_rejected_before_connecting() {
 }
 
 #[test]
-fn push_current_branch_targets_the_upstream_branch_name_on_that_remote() {
+fn push_current_branch_under_push_default_upstream_targets_the_upstream_branch_name() {
     let fixture = local_and_bare_remote();
     fixture.local_commit("local work");
     let local_tip = fixture.local.head().unwrap().target().unwrap();
     let main_before = fixture.bare_tip("main");
     set_current_upstream(&fixture.local, "origin", "renamed").unwrap();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
     let (mut credentials, mut reporter) = quiet();
 
     push_current_branch(
@@ -1345,8 +1351,14 @@ fn push_current_branch_to_another_remote_keeps_the_local_name() {
 }
 
 #[test]
-fn force_push_with_a_differently_named_upstream_overwrites_that_branch() {
+fn force_push_under_push_default_upstream_overwrites_the_differently_named_upstream() {
     let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
     fixture.local_commit("a");
     let (mut credentials, mut reporter) = quiet();
     push_branch(
@@ -1391,8 +1403,14 @@ fn force_push_with_a_differently_named_upstream_overwrites_that_branch() {
 }
 
 #[test]
-fn force_push_with_a_differently_named_upstream_leases_that_branch() {
+fn force_push_under_push_default_upstream_leases_the_differently_named_upstream() {
     let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
     fixture.local_commit("a");
     let (mut credentials, mut reporter) = quiet();
     push_branch(
@@ -1869,4 +1887,231 @@ fn fetch_all_cancelled_before_the_first_remote_fetches_nothing() {
             .target(),
         before
     );
+}
+
+fn target(remote: &str, branch: &str) -> PushTarget {
+    PushTarget::Branch {
+        remote: remote.into(),
+        branch: branch.into(),
+    }
+}
+
+fn choice(remote: &str, local: &str) -> PushTarget {
+    PushTarget::NeedsChoice {
+        remote: remote.into(),
+        local_branch: local.into(),
+    }
+}
+
+#[test]
+fn push_default_decides_the_target_of_a_differently_named_upstream() {
+    let renamed = Some(("origin", "feature-x"));
+    // Unset push.default is git's default, `simple`.
+    for mode in [None, Some("simple"), Some("matching")] {
+        assert_eq!(
+            resolve_push_target(mode, "fx", "origin", renamed),
+            choice("origin", "fx"),
+            "{mode:?}"
+        );
+    }
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "fx", "origin", renamed),
+        choice("origin", "fx")
+    );
+    assert_eq!(
+        resolve_push_target(Some("upstream"), "fx", "origin", renamed),
+        target("origin", "feature-x")
+    );
+    assert_eq!(
+        resolve_push_target(Some("tracking"), "fx", "origin", renamed),
+        target("origin", "feature-x")
+    );
+    assert_eq!(
+        resolve_push_target(Some("current"), "fx", "origin", renamed),
+        target("origin", "fx")
+    );
+}
+
+#[test]
+fn push_default_pushes_a_same_named_upstream_and_other_remotes_under_the_local_name() {
+    let same = Some(("origin", "main"));
+    for mode in [
+        None,
+        Some("simple"),
+        Some("matching"),
+        Some("upstream"),
+        Some("current"),
+    ] {
+        assert_eq!(
+            resolve_push_target(mode, "main", "origin", same),
+            target("origin", "main"),
+            "{mode:?}"
+        );
+        // An explicitly chosen remote that is not the upstream's (or no upstream at all).
+        assert_eq!(
+            resolve_push_target(mode, "main", "backup", same),
+            target("backup", "main"),
+            "{mode:?}"
+        );
+        assert_eq!(
+            resolve_push_target(mode, "main", "origin", None),
+            target("origin", "main"),
+            "{mode:?}"
+        );
+    }
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "main", "origin", same),
+        choice("origin", "main")
+    );
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "main", "backup", None),
+        choice("backup", "main")
+    );
+}
+
+#[test]
+fn push_target_reads_push_default_and_the_upstream_config() {
+    let fixture = local_and_bare_remote();
+    set_current_upstream(&fixture.local, "origin", "feature-x").unwrap();
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "simple").unwrap();
+    assert_eq!(
+        push_target(&fixture.local, "main", "origin").unwrap(),
+        choice("origin", "main")
+    );
+    assert_eq!(
+        current_upstream(&fixture.local)
+            .unwrap()
+            .unwrap()
+            .push_branch,
+        None
+    );
+    config.set_str("push.default", "upstream").unwrap();
+    assert_eq!(
+        push_target(&fixture.local, "main", "origin").unwrap(),
+        target("origin", "feature-x")
+    );
+    let upstream = current_upstream(&fixture.local).unwrap().unwrap();
+    assert_eq!(upstream.push_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn push_current_branch_with_a_differently_named_upstream_needs_a_choice_by_default() {
+    // A branch created from origin/main tracks origin/main; `simple` must never push it there.
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "simple")
+        .unwrap();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("feat", &head, false).unwrap();
+    fixture.local.set_head("refs/heads/feat").unwrap();
+    set_current_upstream(&fixture.local, "origin", "main").unwrap();
+    fixture.local_commit("feature work");
+    let main_before = fixture.bare_tip("main");
+    let (mut credentials, mut reporter) = quiet();
+
+    let pushed = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+    let forced = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    for result in [pushed, forced] {
+        assert!(matches!(
+            result,
+            Err(RemoteError::PushTargetNeedsChoice { .. })
+        ));
+    }
+    assert!(reporter.events.is_empty());
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert_eq!(fixture.bare_tip("feat"), None);
+}
+
+#[test]
+fn push_current_branch_under_push_default_current_pushes_the_same_name() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "current")
+        .unwrap();
+    set_current_upstream(&fixture.local, "origin", "renamed").unwrap();
+    fixture.local_commit("local work");
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("main"), Some(local_tip));
+    assert_eq!(fixture.bare_tip("renamed"), None);
+}
+
+#[test]
+fn push_current_branch_under_push_default_nothing_needs_a_choice() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "nothing")
+        .unwrap();
+    let main_before = fixture.bare_tip("main");
+    fixture.local_commit("local work");
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(
+        result,
+        Err(RemoteError::PushTargetNeedsChoice { .. })
+    ));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+}
+
+#[test]
+fn force_push_validates_the_resolved_target_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "upstream").unwrap();
+    config
+        .set_str("branch.main.merge", "refs/heads/bad name")
+        .unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert!(reporter.events.is_empty());
 }

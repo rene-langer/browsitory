@@ -138,6 +138,114 @@ pub struct UpstreamInfo {
     pub ahead: Option<usize>,
     /// Commits on the remote-tracking ref not on the local branch; `None` as for `ahead`.
     pub behind: Option<usize>,
+    /// Where pushing `local_branch` to `remote_name` lands under `push.default` (see
+    /// `resolve_push_target`); `None` when that needs the user's choice.
+    pub push_branch: Option<String>,
+}
+
+/// Where a push of a local branch to a remote lands, as `push.default` decides it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PushTarget {
+    /// Push to `refs/heads/<branch>` on `remote`.
+    Branch { remote: String, branch: String },
+    /// `push.default` does not settle a target; ask (the UI opens "Push to…" prefilled with
+    /// `remote` and `local_branch`).
+    NeedsChoice {
+        remote: String,
+        local_branch: String,
+    },
+}
+
+/// The single push-target rule shared by push, force push and the UI.
+///
+/// When `remote_name` is the upstream's remote (`upstream = Some((remote, branch))`):
+/// - `upstream` / `tracking`: the upstream's branch name.
+/// - `current`: the local branch name.
+/// - `simple` (also when unset, git's default) and `matching`: the local name when it equals the
+///   upstream's branch name, otherwise `NeedsChoice` — never silently push a branch that merely
+///   tracks e.g. `origin/main` onto `main`. (`matching` pushes every same-named branch in git;
+///   this app only ever pushes one branch, so it applies the `simple` check to it.)
+/// - `nothing`: always `NeedsChoice`.
+///
+/// When the remote was chosen explicitly and is not the upstream's (or there is no upstream),
+/// every mode but `nothing` pushes under the local name (git's `simple`/`current` behaviour for a
+/// triangular push); `nothing` asks. Unknown values behave like `simple`.
+pub fn resolve_push_target(
+    push_default: Option<&str>,
+    local_branch: &str,
+    remote_name: &str,
+    upstream: Option<(&str, &str)>,
+) -> PushTarget {
+    let branch = |name: &str| PushTarget::Branch {
+        remote: remote_name.to_string(),
+        branch: name.to_string(),
+    };
+    let ask = || PushTarget::NeedsChoice {
+        remote: remote_name.to_string(),
+        local_branch: local_branch.to_string(),
+    };
+    let mode = push_default.unwrap_or("simple");
+    if mode == "nothing" {
+        return ask();
+    }
+    match upstream {
+        Some((remote, upstream_branch)) if remote == remote_name => match mode {
+            "upstream" | "tracking" => branch(upstream_branch),
+            "current" => branch(local_branch),
+            _ if upstream_branch == local_branch => branch(local_branch),
+            _ => ask(),
+        },
+        _ => branch(local_branch),
+    }
+}
+
+fn read_push_default(config: &git2::Config) -> Result<Option<String>, git2::Error> {
+    match config.get_string("push.default") {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// `resolve_push_target` for `local_branch` pushed to `remote_name`, reading `push.default` and
+/// the branch's upstream config.
+pub fn push_target(
+    repo: &Repository,
+    local_branch: &str,
+    remote_name: &str,
+) -> Result<PushTarget, RemoteError> {
+    let config = repo.config()?;
+    let push_default = read_push_default(&config)?;
+    let upstream = configured_upstream(&config, local_branch)?;
+    Ok(resolve_push_target(
+        push_default.as_deref(),
+        local_branch,
+        remote_name,
+        upstream
+            .as_ref()
+            .map(|(remote, branch)| (remote.as_str(), branch.as_str())),
+    ))
+}
+
+/// The `push_branch` for an `UpstreamInfo` of `local_branch` tracking `remote/remote_branch`.
+fn upstream_push_branch(
+    config: &git2::Config,
+    local_branch: &str,
+    remote_name: &str,
+    remote_branch: &str,
+) -> Result<Option<String>, git2::Error> {
+    let push_default = read_push_default(config)?;
+    Ok(
+        match resolve_push_target(
+            push_default.as_deref(),
+            local_branch,
+            remote_name,
+            Some((remote_name, remote_branch)),
+        ) {
+            PushTarget::Branch { branch, .. } => Some(branch),
+            PushTarget::NeedsChoice { .. } => None,
+        },
+    )
 }
 
 /// `(remote, remote_branch)` from `branch.<local_branch>.remote` / `.merge`, or `None` when
@@ -230,6 +338,15 @@ pub enum RemoteError {
     StaleLease,
     #[error("the transfer was cancelled")]
     Cancelled,
+    /// `push.default` does not settle where `local_branch` goes on `remote` (e.g. `simple` with a
+    /// differently named upstream): the caller must ask, e.g. with the "Push to…" dialog.
+    #[error(
+        "push.default does not choose where to push '{local_branch}' on '{remote}'; use Push to… to pick the remote branch"
+    )]
+    PushTargetNeedsChoice {
+        remote: String,
+        local_branch: String,
+    },
 }
 
 impl RemoteError {
@@ -469,10 +586,10 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// Pushes the current branch to `remote_name`: to its upstream's branch name when the upstream
-/// lives on that remote, else to the same name. `cancel` is checked once, at `push_negotiation`
-/// (before any data is sent); a cancel requested after that is ignored so a push that lands is
-/// never reported as cancelled — see `push_refs`.
+/// Pushes the current branch to `remote_name`, to the target `push_target` resolves from
+/// `push.default` (`PushTargetNeedsChoice` when it settles none; nothing is sent). `cancel` is
+/// checked once, at `push_negotiation` (before any data is sent); a cancel requested after that
+/// is ignored so a push that lands is never reported as cancelled — see `push_refs`.
 pub fn push_current_branch(
     repo: &Repository,
     remote_name: &str,
@@ -480,7 +597,7 @@ pub fn push_current_branch(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
-    let (local, target) = current_push_target(repo, remote_name)?;
+    let (local, target) = current_push_destination(repo, remote_name)?;
     push_branch(
         repo,
         remote_name,
@@ -493,10 +610,10 @@ pub fn push_current_branch(
     )
 }
 
-/// Force-pushes the current branch to the same target `push_current_branch` resolves (its
-/// upstream's branch name when the upstream lives on `remote_name`, else the same name), but only
-/// if the remote's branch still points where our `refs/remotes/<remote>/<target>` says it did at
-/// the last fetch (a missing tracking ref means "must not exist on the remote"). A mismatch is
+/// Force-pushes the current branch to the same target `push_current_branch` resolves (so never
+/// to a differently named upstream unless `push.default=upstream`), but only if the remote's
+/// branch still points where our `refs/remotes/<remote>/<target>` says it did at the last fetch
+/// (a missing tracking ref means "must not exist on the remote"). A mismatch is
 /// `RemoteError::StaleLease`, remote untouched.
 pub fn force_push_current_branch(
     repo: &Repository,
@@ -505,7 +622,8 @@ pub fn force_push_current_branch(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), RemoteError> {
-    let (local, target) = current_push_target(repo, remote_name)?;
+    let (local, target) = current_push_destination(repo, remote_name)?;
+    validate_branch_name(&target)?;
     let expected = repo
         .find_reference(&format!("refs/remotes/{remote_name}/{target}"))
         .ok()
@@ -525,19 +643,31 @@ pub fn force_push_current_branch(
     )
 }
 
-/// The current branch and where pushing it to `remote_name` lands: its upstream branch when the
-/// upstream lives on that remote, else the same name.
-fn current_push_target(
+/// `push_target` for the current branch.
+pub fn current_push_target(
+    repo: &Repository,
+    remote_name: &str,
+) -> Result<PushTarget, RemoteError> {
+    let local = current_local_branch_name(repo)?;
+    push_target(repo, &local, remote_name)
+}
+
+/// The current branch and the remote branch it pushes to, or `PushTargetNeedsChoice`.
+fn current_push_destination(
     repo: &Repository,
     remote_name: &str,
 ) -> Result<(String, String), RemoteError> {
     let local = current_local_branch_name(repo)?;
-    let config = repo.config()?;
-    let target = match configured_upstream(&config, &local)? {
-        Some((remote, branch)) if remote == remote_name => branch,
-        _ => local.clone(),
-    };
-    Ok((local, target))
+    match push_target(repo, &local, remote_name)? {
+        PushTarget::Branch { branch, .. } => Ok((local, branch)),
+        PushTarget::NeedsChoice {
+            remote,
+            local_branch,
+        } => Err(RemoteError::PushTargetNeedsChoice {
+            remote,
+            local_branch,
+        }),
+    }
 }
 
 /// Rejects a remote branch name that is empty, `HEAD`, starts with `-`/`+`, or is not a valid
@@ -857,12 +987,14 @@ pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, Remot
     };
 
     let (ahead, behind) = ahead_behind(repo, &local_branch, &remote_name, &remote_branch);
+    let push_branch = upstream_push_branch(&config, &local_branch, &remote_name, &remote_branch)?;
     Ok(Some(UpstreamInfo {
         local_branch,
         remote_name,
         remote_branch,
         ahead,
         behind,
+        push_branch,
     }))
 }
 
@@ -917,12 +1049,14 @@ pub fn remote_upstreams(
             .unwrap_or(&merge_ref)
             .to_string();
         let (ahead, behind) = ahead_behind(repo, local_branch, remote_name, &remote_branch);
+        let push_branch = upstream_push_branch(&config, local_branch, remote_name, &remote_branch)?;
         upstreams.push(UpstreamInfo {
             local_branch: local_branch.to_string(),
             remote_name: remote_name.to_string(),
             remote_branch,
             ahead,
             behind,
+            push_branch,
         });
     }
     Ok(upstreams)

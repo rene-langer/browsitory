@@ -387,6 +387,8 @@ pub struct UpstreamInfoDto {
     pub remote_branch: String,
     pub ahead: Option<usize>,
     pub behind: Option<usize>,
+    /// Where Push lands under `push.default`; null = ask with the Push to… dialog.
+    pub push_branch: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -419,6 +421,7 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             remote_branch: upstream.remote_branch,
             ahead: upstream.ahead,
             behind: upstream.behind,
+            push_branch: upstream.push_branch,
         }
     }
 }
@@ -1268,7 +1271,7 @@ mod tests {
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
         OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
         RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
-        WorkspaceDto, WorktreeInfoDto,
+        UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1376,6 +1379,25 @@ mod tests {
         let json = serde_json::to_value(completed).unwrap();
         assert!(!json.as_object().unwrap().contains_key("remoteName"));
         assert_eq!(json["operation"], "FetchAll");
+    }
+
+    #[test]
+    fn upstream_info_dto_serializes_the_push_branch_including_null() {
+        let upstream = |push_branch: Option<&str>| {
+            serde_json::to_value(UpstreamInfoDto::from(git_core::remote::UpstreamInfo {
+                local_branch: "fx".into(),
+                remote_name: "origin".into(),
+                remote_branch: "feature-x".into(),
+                ahead: None,
+                behind: None,
+                push_branch: push_branch.map(str::to_string),
+            }))
+            .unwrap()
+        };
+        assert_eq!(upstream(Some("feature-x"))["pushBranch"], "feature-x");
+        let json = upstream(None);
+        assert!(json.as_object().unwrap().contains_key("pushBranch"));
+        assert_eq!(json["pushBranch"], serde_json::Value::Null);
     }
 
     #[test]

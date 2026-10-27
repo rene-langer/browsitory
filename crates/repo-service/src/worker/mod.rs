@@ -2112,6 +2112,8 @@ mod tests {
             .unwrap();
         // Repo-local, so a developer's global `fetch.prune` cannot leak into `prune` below.
         config.set_bool("fetch.prune", false).unwrap();
+        // Makes `push_branch` independent of whether the init default branch is main or master.
+        config.set_str("push.default", "upstream").unwrap();
         drop(config);
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
@@ -2137,6 +2139,7 @@ mod tests {
                 remote_branch: "main".into(),
                 ahead: None,
                 behind: None,
+                push_branch: Some("main".into()),
             })
         );
 
@@ -2500,6 +2503,62 @@ mod tests {
         // Only that branch: the remote's default branch is untouched.
         assert!(bare_has("main") || bare_has("master"));
         assert!(handle.get_undo_state().expect("undo state").undo.is_none());
+    }
+
+    #[test]
+    fn push_and_force_push_refuse_up_front_when_push_default_needs_a_choice() {
+        let (_source_dir, remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).expect("open local");
+        write_file(local_dir.path(), "local.txt", "local\n");
+        commit_all(&local, "local root");
+        let mut config = local.config().expect("config");
+        config
+            .set_str("push.default", "simple")
+            .expect("push.default");
+        config
+            .set_str("branch.feat.remote", "origin")
+            .expect("remote");
+        config
+            .set_str("branch.feat.merge", "refs/heads/main")
+            .expect("merge");
+        drop(config);
+        let head = local
+            .head()
+            .expect("head")
+            .peel_to_commit()
+            .expect("commit");
+        local.branch("feat", &head, false).expect("create feat");
+        local.set_head("refs/heads/feat").expect("checkout feat");
+        drop(head);
+        drop(local);
+        let bare_main = || {
+            Repository::open_bare(remote_dir.path())
+                .expect("open bare")
+                .find_reference("refs/heads/main")
+                .ok()
+                .and_then(|reference| reference.target())
+        };
+        let before = bare_main();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let pushed = handle.push_current_branch("origin".into(), event_tx);
+        assert!(event_rx.iter().next().is_none());
+        let (event_tx, event_rx) = mpsc::channel();
+        let forced = handle.force_push_current_branch("origin".into(), event_tx);
+        assert!(event_rx.iter().next().is_none());
+
+        for result in [pushed, forced] {
+            let message = result.expect_err("must not start a transfer");
+            assert!(message.contains("Push to…"), "{message}");
+        }
+        assert_eq!(bare_main(), before);
+        let upstream = handle
+            .get_current_upstream()
+            .expect("upstream")
+            .expect("set");
+        assert_eq!(upstream.push_branch, None);
     }
 
     #[test]

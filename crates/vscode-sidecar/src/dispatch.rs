@@ -1321,6 +1321,8 @@ struct UpstreamInfoDto {
     remote_branch: String,
     ahead: Option<usize>,
     behind: Option<usize>,
+    /// Where Push lands under `push.default`; null = ask with the Push to… dialog.
+    push_branch: Option<String>,
 }
 
 impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
@@ -1331,6 +1333,7 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             remote_branch: upstream.remote_branch,
             ahead: upstream.ahead,
             behind: upstream.behind,
+            push_branch: upstream.push_branch,
         }
     }
 }
