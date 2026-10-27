@@ -14,7 +14,9 @@ fn start_merge_reports_up_to_date_when_the_target_has_nothing_new() {
     git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
 
-    let outcome = git_core::merge::start_merge(&repo, "feature").unwrap();
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
 
     assert_eq!(outcome, MergeOutcome::UpToDate);
 }
@@ -34,7 +36,9 @@ fn start_merge_fast_forwards_when_current_branch_has_not_diverged() {
     let feature_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
 
-    let outcome = git_core::merge::start_merge(&repo, "feature").unwrap();
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
 
     assert_eq!(outcome, MergeOutcome::FastForwarded);
     assert_eq!(
@@ -60,7 +64,9 @@ fn start_merge_produces_a_clean_merge_when_changes_do_not_overlap() {
     write_file(dir.path(), "main.txt", "new\n");
     commit_all(&repo, "main commit");
 
-    let outcome = git_core::merge::start_merge(&repo, "feature").unwrap();
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
 
     assert_eq!(outcome, MergeOutcome::Merged);
     assert!(dir.path().join("feature.txt").exists());
@@ -87,7 +93,9 @@ fn start_merge_reports_conflicted_files_when_the_same_line_diverges() {
     write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
     commit_all(&repo, "main commit");
 
-    let outcome = git_core::merge::start_merge(&repo, "feature").unwrap();
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
 
     match outcome {
         MergeOutcome::Conflicted { files } => assert_eq!(files, vec!["shared.txt".to_string()]),
@@ -98,6 +106,15 @@ fn start_merge_reports_conflicted_files_when_the_same_line_diverges() {
 use git_core::merge::ConflictSegment;
 
 fn make_conflicted_repo() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = make_conflicting_branches();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    (dir, repo)
+}
+
+/// `shared.txt`'s middle line changed differently on `feature` and on the checked-out main
+/// branch, nothing merged yet.
+fn make_conflicting_branches() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "shared.txt", "line one\nline two\nline three\n");
     commit_all(&repo, "base commit");
@@ -115,8 +132,6 @@ fn make_conflicted_repo() -> (tempfile::TempDir, git2::Repository) {
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
     write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
     commit_all(&repo, "main commit");
-
-    git_core::merge::start_merge(&repo, "feature").unwrap();
     (dir, repo)
 }
 
@@ -254,7 +269,8 @@ fn abort_merge_keeps_unrelated_unstaged_edits() {
     write_file(dir.path(), "shared.txt", "main\n");
     commit_all(&repo, "main commit");
     write_file(dir.path(), "other.txt", "my unsaved work\n");
-    git_core::merge::start_merge(&repo, "feature").unwrap();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
     assert!(repo.index().unwrap().has_conflicts());
 
     git_core::merge::abort_merge(&repo).unwrap();
@@ -318,7 +334,8 @@ fn commit_after_a_fast_forward_has_a_single_parent_as_before() {
     commit_all(&repo, "feature commit");
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
 
-    git_core::merge::start_merge(&repo, "feature").unwrap();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
 
     // A fast-forward moves the ref directly — there's nothing to commit, and no merge state to
     // clean up. This test exists to document that `commit()`'s merge-parent logic only engages
@@ -359,7 +376,8 @@ fn make_delete_modify_conflict() -> (tempfile::TempDir, git2::Repository) {
     git_core::stage::stage_file(&repo, "shared.txt").unwrap();
     git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
 
-    git_core::merge::start_merge(&repo, "feature").unwrap();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
     (dir, repo)
 }
 
@@ -405,7 +423,8 @@ fn start_merge_refuses_when_already_merging_and_leaves_conflict_state_untouched(
 
     // Try to start a second merge (e.g. clicking "Merge into current branch" on a different
     // branch) while the first is still conflicted.
-    let result = git_core::merge::start_merge(&repo, "feature");
+    let result =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default());
 
     assert!(result.is_err());
     // The refused attempt must not itself corrupt anything: still merging, still conflicted.
@@ -436,4 +455,183 @@ fn resolve_add_delete_conflict_then_commit_has_two_parents() {
         .find_commit(git2::Oid::from_str(&oid).unwrap())
         .unwrap();
     assert_eq!(commit.parent_count(), 2);
+}
+
+use git_core::merge::{FastForward, MergeOptions};
+
+fn opts(fast_forward: FastForward) -> MergeOptions {
+    MergeOptions {
+        fast_forward,
+        squash: false,
+    }
+}
+
+/// Base commit; `feature` adds `feature.txt` ("feature commit"); the main branch adds
+/// `main.txt` ("main commit") and is checked out. Returns the main branch name.
+fn diverged_repo() -> (tempfile::TempDir, git2::Repository, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "feature.txt", "new\n");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "main.txt", "new\n");
+    commit_all(&repo, "main commit");
+    (dir, repo, main_branch)
+}
+
+/// `feature` is one commit ahead of the checked-out main branch. Returns the main branch name
+/// and the feature tip.
+fn fast_forwardable_repo() -> (tempfile::TempDir, git2::Repository, String, git2::Oid) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "feature.txt", "new\n");
+    commit_all(&repo, "feature commit");
+    let feature_tip = repo.head().unwrap().peel_to_commit().unwrap().id();
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    (dir, repo, main_branch, feature_tip)
+}
+
+#[test]
+fn never_creates_a_merge_commit_even_when_fast_forward_is_possible() {
+    let (_dir, mut repo, _main, feature_tip) = fast_forwardable_repo();
+    let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", opts(FastForward::Never)).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Merged);
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        head_before
+    );
+    git_core::commit::commit(&mut repo, "Merge feature").unwrap();
+    let merge = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        merge.parent_ids().collect::<Vec<_>>(),
+        vec![head_before, feature_tip]
+    );
+}
+
+#[test]
+fn only_fast_forwards_when_possible() {
+    let (_dir, repo, _main, feature_tip) = fast_forwardable_repo();
+
+    let outcome = git_core::merge::start_merge(&repo, "feature", opts(FastForward::Only)).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::FastForwarded);
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        feature_tip
+    );
+}
+
+#[test]
+fn only_refuses_a_diverged_branch_and_changes_nothing() {
+    let (dir, repo, _main) = diverged_repo();
+    let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+    let error =
+        git_core::merge::start_merge(&repo, "feature", opts(FastForward::Only)).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Can't fast-forward: 'feature' has diverged from the current branch."
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().id(),
+        head_before
+    );
+    assert!(git_core::status::status(&repo).unwrap().is_empty());
+    assert!(!dir.path().join("feature.txt").exists());
+}
+
+#[test]
+fn only_names_a_remote_tracking_target_without_its_ref_prefix() {
+    let (_dir, repo, _main) = diverged_repo();
+    let feature_tip = repo
+        .find_reference("refs/heads/feature")
+        .unwrap()
+        .target()
+        .unwrap();
+    repo.reference("refs/remotes/origin/feature", feature_tip, true, "test")
+        .unwrap();
+
+    let error = git_core::merge::start_merge(
+        &repo,
+        "refs/remotes/origin/feature",
+        opts(FastForward::Only),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Can't fast-forward: 'origin/feature' has diverged from the current branch."
+    );
+}
+
+#[test]
+fn start_merge_accepts_a_full_remote_tracking_ref() {
+    let (dir, repo, _main) = diverged_repo();
+    let feature_tip = repo
+        .find_reference("refs/heads/feature")
+        .unwrap()
+        .target()
+        .unwrap();
+    repo.reference("refs/remotes/origin/feature", feature_tip, true, "test")
+        .unwrap();
+
+    let outcome = git_core::merge::start_merge(
+        &repo,
+        "refs/remotes/origin/feature",
+        MergeOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Merged);
+    assert!(dir.path().join("feature.txt").exists());
+}
+
+#[test]
+fn merge_defaults_follow_merge_ff_in_the_repo_config() {
+    let (_dir, repo) = init_repo();
+    // Set in the repo's own config so a global `merge.ff` cannot leak in (issue #111).
+    repo.config().unwrap().set_str("merge.ff", "false").unwrap();
+    assert_eq!(
+        git_core::merge::merge_defaults(&repo),
+        opts(FastForward::Never)
+    );
+    repo.config().unwrap().set_str("merge.ff", "only").unwrap();
+    assert_eq!(
+        git_core::merge::merge_defaults(&repo),
+        opts(FastForward::Only)
+    );
+    repo.config().unwrap().set_str("merge.ff", "true").unwrap();
+    assert_eq!(
+        git_core::merge::merge_defaults(&repo),
+        opts(FastForward::Allow)
+    );
+}
+
+#[test]
+fn merge_ff_values_map_to_fast_forward_modes() {
+    use git_core::merge::fast_forward_from_merge_ff as map;
+    assert_eq!(map(None), FastForward::Allow);
+    assert_eq!(map(Some("true")), FastForward::Allow);
+    assert_eq!(map(Some("only")), FastForward::Only);
+    assert_eq!(map(Some("ONLY")), FastForward::Only);
+    for never in ["false", "no", "off", "0", "FALSE"] {
+        assert_eq!(map(Some(never)), FastForward::Never, "{never}");
+    }
+    assert_eq!(map(Some("garbage")), FastForward::Allow);
 }

@@ -20,6 +20,29 @@ pub enum MergeError {
     AlreadyMerging,
     #[error("'{0}' is a text conflict, not an add/delete conflict")]
     NotAnAddDeleteConflict(String),
+    #[error("Can't fast-forward: '{0}' has diverged from the current branch.")]
+    NotFastForward(String),
+}
+
+/// How "Merge into current branch" may move the branch, like `git merge --ff`, `--no-ff`
+/// and `--ff-only`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FastForward {
+    /// Fast-forward when possible, else create a merge commit.
+    #[default]
+    Allow,
+    /// Always create a merge commit, even when a fast-forward is possible.
+    Never,
+    /// Fast-forward or refuse (`MergeError::NotFastForward`).
+    Only,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MergeOptions {
+    pub fast_forward: FastForward,
+    /// Stage the combined changes without committing or recording a merge (`--squash`).
+    /// Ignores `fast_forward`.
+    pub squash: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,13 +59,24 @@ pub enum ConflictSegment {
     Conflict { ours: String, theirs: String },
 }
 
-pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome, MergeError> {
+/// Merges `target` into the current branch. `target` is a local branch name, or a full ref name
+/// when it starts with `refs/` (the "Pull has diverged → Merge" path passes
+/// `refs/remotes/<remote>/<branch>`).
+pub fn start_merge(
+    repo: &Repository,
+    target: &str,
+    opts: MergeOptions,
+) -> Result<MergeOutcome, MergeError> {
     if is_merging(repo) || repo.index()?.has_conflicts() {
         return Err(MergeError::AlreadyMerging);
     }
 
-    let branch_ref = format!("refs/heads/{branch_name}");
-    let their_reference = repo.find_reference(&branch_ref)?;
+    let refname = if target.starts_with("refs/") {
+        target.to_string()
+    } else {
+        format!("refs/heads/{target}")
+    };
+    let their_reference = repo.find_reference(&refname)?;
     let their_commit = their_reference.peel_to_commit()?;
     let their_annotated = repo.reference_to_annotated_commit(&their_reference)?;
 
@@ -52,7 +86,7 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
         return Ok(MergeOutcome::UpToDate);
     }
 
-    if analysis.is_fast_forward() {
+    if analysis.is_fast_forward() && opts.fast_forward != FastForward::Never {
         // Check out the target tree before moving the branch ref — a refused checkout
         // (modified/untracked files in the way) leaves the repo exactly as it was, matching
         // `branch::switch_branch`'s own ordering for the same reason.
@@ -60,6 +94,12 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
         let mut head_ref = repo.head()?;
         head_ref.set_target(their_commit.id(), "merge: Fast-forward")?;
         return Ok(MergeOutcome::FastForwarded);
+    }
+
+    if !analysis.is_fast_forward() && opts.fast_forward == FastForward::Only {
+        return Err(MergeError::NotFastForward(
+            short_ref_name(target).to_string(),
+        ));
     }
 
     repo.merge(&[&their_annotated], None, None)?;
@@ -78,6 +118,36 @@ pub fn start_merge(repo: &Repository, branch_name: &str) -> Result<MergeOutcome,
         Ok(MergeOutcome::Conflicted { files })
     } else {
         Ok(MergeOutcome::Merged)
+    }
+}
+
+/// `target` without a `refs/heads/` or `refs/remotes/` prefix, for messages.
+fn short_ref_name(target: &str) -> &str {
+    target
+        .strip_prefix("refs/heads/")
+        .or_else(|| target.strip_prefix("refs/remotes/"))
+        .unwrap_or(target)
+}
+
+/// The dialog's first default: `merge.ff` from the repository's (layered) git config.
+pub fn merge_defaults(repo: &Repository) -> MergeOptions {
+    let value = repo
+        .config()
+        .ok()
+        .and_then(|config| config.get_string("merge.ff").ok());
+    MergeOptions {
+        fast_forward: fast_forward_from_merge_ff(value.as_deref()),
+        squash: false,
+    }
+}
+
+/// Maps a `merge.ff` value: `only` → `Only`, a false git boolean → `Never`, anything else or
+/// unset → `Allow`.
+pub fn fast_forward_from_merge_ff(value: Option<&str>) -> FastForward {
+    match value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("only") => FastForward::Only,
+        Some("false" | "no" | "off" | "0") => FastForward::Never,
+        _ => FastForward::Allow,
     }
 }
 

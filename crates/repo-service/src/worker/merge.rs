@@ -6,8 +6,10 @@ pub(super) fn start(
     branch_name: String,
     reply: Sender<Result<MergeOutcome, String>>,
 ) {
-    let _ = reply
-        .send(git_core::merge::start_merge(repo, &branch_name).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::merge::start_merge(repo, &branch_name, git_core::merge::MergeOptions::default())
+            .map_err(|error| error.to_string()),
+    );
 }
 pub(super) fn conflict_hunks(
     repo: &git2::Repository,
