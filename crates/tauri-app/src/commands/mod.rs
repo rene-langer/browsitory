@@ -454,6 +454,7 @@ pub struct GraphCommitDto {
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
     pub remote_branch_refs: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -468,6 +469,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+            tags: c.tags,
         }
     }
 }
@@ -1328,6 +1330,7 @@ mod tests {
             parent_ids: vec!["def456".into()],
             branch_refs: vec!["main".into()],
             remote_branch_refs: vec!["origin/main".into()],
+            tags: vec!["v1.0".into()],
         });
 
         assert_eq!(
@@ -1342,6 +1345,7 @@ mod tests {
                 "parentIds": ["def456"],
                 "branchRefs": ["main"],
                 "remoteBranchRefs": ["origin/main"],
+                "tags": ["v1.0"],
             })
         );
     }
@@ -1358,6 +1362,7 @@ mod tests {
             parent_ids: vec![],
             branch_refs: vec![],
             remote_branch_refs: vec![],
+            tags: vec![],
         };
         let plain = FileHistoryEntryDto::from(git_core::history::FileHistoryEntry {
             commit: commit.clone(),
@@ -1390,6 +1395,7 @@ mod tests {
             parent_ids: vec![],
             branch_refs: vec![],
             remote_branch_refs: vec![],
+            tags: vec![],
         };
         let done = serde_json::to_value(SearchPageDto::from(git_core::search::SearchPage {
             commits: vec![commit.clone()],

@@ -269,6 +269,7 @@ struct GraphCommitDto {
     parent_ids: Vec<String>,
     branch_refs: Vec<String>,
     remote_branch_refs: Vec<String>,
+    tags: Vec<String>,
 }
 
 impl From<GraphCommit> for GraphCommitDto {
@@ -283,6 +284,7 @@ impl From<GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+            tags: c.tags,
         }
     }
 }
