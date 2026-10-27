@@ -263,13 +263,15 @@ pub fn run_reported(
         Some(cancel) => cancel,
         None => &never,
     };
-    if matches!(find_hook(repo, invocation.name), Ok(HookLookup::Found(_))) {
+    let found = matches!(find_hook(repo, invocation.name), Ok(HookLookup::Found(_)));
+    if found {
         if let Some(reporter) = options.reporter.as_deref_mut() {
             reporter.started(invocation.name);
         }
     }
     let result = run_hook(repo, invocation, cancel, options.timeout);
-    if !matches!(result, Ok(HookOutcome::NotInstalled)) {
+    // Every `started` gets its `finished`, even if the hook vanished in between.
+    if found || !matches!(result, Ok(HookOutcome::NotInstalled)) {
         if let Some(reporter) = options.reporter.as_deref_mut() {
             reporter.finished(invocation.name, &result);
         }
