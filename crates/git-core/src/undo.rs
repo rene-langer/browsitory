@@ -14,7 +14,7 @@ use thiserror::Error;
 
 const MODE_FILE: u32 = 0o100644;
 const MODE_EXEC: u32 = 0o100755;
-const MODE_LINK: u32 = 0o120000;
+pub(crate) const MODE_LINK: u32 = 0o120000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeadState {
@@ -103,12 +103,12 @@ fn local_refs(repo: &Repository) -> Result<BTreeMap<String, String>, UndoError> 
     Ok(refs)
 }
 
-struct WorktreeConfig {
+pub(crate) struct WorktreeConfig {
     filemode: bool,
     symlinks: bool,
 }
 
-fn worktree_config(repo: &Repository) -> Result<WorktreeConfig, UndoError> {
+pub(crate) fn worktree_config(repo: &Repository) -> Result<WorktreeConfig, UndoError> {
     let config = repo.config()?;
     Ok(WorktreeConfig {
         filemode: config.get_bool("core.filemode").unwrap_or(cfg!(unix)),
@@ -155,7 +155,7 @@ fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
 /// Raw bytes (no clean filters) and git mode of a worktree path; `None` when absent or a
 /// directory. `previous_mode` keeps the exec bit when `core.filemode` is off and the symlink
 /// mode when `core.symlinks` is off, matching what git itself records.
-fn read_worktree_file(
+pub(crate) fn read_worktree_file(
     full: &Path,
     config: &WorktreeConfig,
     previous_mode: Option<u32>,
@@ -218,7 +218,7 @@ fn link_target_bytes(target: &Path) -> Vec<u8> {
     target.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
-fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
+pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
     IndexEntry {
         ctime: IndexTime::new(0, 0),
         mtime: IndexTime::new(0, 0),

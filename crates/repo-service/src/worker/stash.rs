@@ -10,7 +10,8 @@ pub(super) fn list(repo: &mut git2::Repository, reply: Sender<Result<Vec<StashEn
 }
 
 pub(super) fn save(repo: &mut git2::Repository, reply: Sender<Result<(), String>>) {
-    let result = git_core::stash::save_stash(repo).map_err(|error| error.to_string());
+    let result = git_core::stash::save_stash(repo, &git_core::stash::StashOptions::default())
+        .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
 
