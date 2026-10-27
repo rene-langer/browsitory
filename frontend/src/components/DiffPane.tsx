@@ -3,8 +3,6 @@ import { conflictReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
-  ChevronDown,
-  ChevronRight,
   FileDiff,
   FileMinus,
   FilePlus,
@@ -34,6 +32,7 @@ import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
+import { CollapseAllToggle, CollapseToggle } from "./CollapseToggle";
 import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
@@ -43,6 +42,7 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
+import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
@@ -53,34 +53,6 @@ const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
   TypeChange: FileDiff,
   Conflicted: AlertTriangle,
 };
-
-function CollapseToggle({ collapsed, path, onToggle }: { collapsed: boolean; path: string; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      className={styles.collapseToggle}
-      aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle();
-      }}
-    >
-      {collapsed ? (
-        <ChevronRight size={14} aria-hidden="true" />
-      ) : (
-        <ChevronDown size={14} aria-hidden="true" />
-      )}
-    </button>
-  );
-}
-
-function CollapseAllToggle({ allCollapsed, onToggle }: { allCollapsed: boolean; onToggle: () => void }) {
-  return (
-    <button type="button" onClick={onToggle}>
-      {allCollapsed ? "Expand all" : "Collapse all"}
-    </button>
-  );
-}
 
 function UncommittedFileSection({
   repoPath,
@@ -1085,138 +1057,6 @@ function UncommittedDiffPane({
   );
 }
 
-function CommitFileSection({
-  repoPath,
-  client,
-  commitId,
-  path,
-  oldPath,
-  collapsed,
-  onToggleCollapse,
-  onSelectRow,
-  onOpenFileHistory,
-}: {
-  repoPath: string;
-  client: RepoClient;
-  commitId: string;
-  path: string;
-  oldPath?: string | null;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-  onSelectRow: (row: SelectedRow) => void;
-  onOpenFileHistory?: (path: string) => void;
-}) {
-  const [mode, setMode] = useState<"diff" | "blame">("diff");
-  const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
-  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<DescribedError | null>(null);
-
-  const { settings } = useDiffSettingsContext();
-  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
-  const loadDiff = () => {
-    let ignore = false;
-    const request =
-      oldPath != null
-        ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, diffOptions)
-        : client.getCommitDiff(repoPath, commitId, path, diffOptions);
-    request
-      .then((next) => {
-        if (!ignore) {
-          setHunks(next);
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          setError(describeError(err));
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  };
-
-  useEffect(() => {
-    if (mode !== "diff" || collapsed) return;
-    return loadDiff();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId, path, oldPath, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
-
-  const loadBlame = () => {
-    let ignore = false;
-    client
-      .getBlame(repoPath, commitId, path)
-      .then((next) => {
-        if (!ignore) {
-          setBlameLines(next);
-          setError(null);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setError({ message: "No blame available for this file at this revision." });
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  };
-
-  useEffect(() => {
-    if (mode !== "blame") return;
-    return loadBlame();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId, path, mode]);
-
-  return (
-    <li className={styles.fileSection}>
-      <div className={styles.fileSectionHeader}>
-        <CollapseToggle collapsed={collapsed} path={path} onToggle={onToggleCollapse} />
-        <span className={styles.path}>{path}</span>
-        {oldPath != null && <span className={styles.renamedFrom}>Renamed from {oldPath}</span>}
-        <div className={styles.rowActions}>
-          <button type="button" onClick={() => setMode("blame")}>
-            Blame
-          </button>
-          {onOpenFileHistory !== undefined && (
-            <button type="button" aria-label={`History of ${path}`} onClick={() => onOpenFileHistory(path)}>
-              History
-            </button>
-          )}
-        </div>
-      </div>
-      {!collapsed && (
-        <div className={styles.fileSectionBody}>
-          {mode === "blame" ? (
-            <>
-              {error !== null ? (
-                <InlineError
-                  message={error.message}
-                  hint={error.hint}
-                  onDismiss={() => setError(null)}
-                  onRetry={loadBlame}
-                />
-              ) : (
-                <BlameView lines={blameLines} onSelectRow={onSelectRow} />
-              )}
-              <button onClick={() => setMode("diff")}>Back to diff</button>
-            </>
-          ) : error !== null ? (
-            <InlineError
-              message={error.message}
-              hint={error.hint}
-              onDismiss={() => setError(null)}
-              onRetry={loadDiff}
-            />
-          ) : (
-            <DiffView hunks={hunks} path={path} />
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
 function CommitDiffPane({
   repoPath,
   client,
@@ -1235,6 +1075,10 @@ function CommitDiffPane({
   onOpenFileHistory?: (path: string) => void;
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
+  const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
+    oldPath != null
+      ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, opts)
+      : client.getCommitDiff(repoPath, commitId, path, opts);
   const [files, setFiles] = useState<string[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
@@ -1311,13 +1155,15 @@ function CommitDiffPane({
       {focused ? (
         <>
           <ul className={styles.fileList}>
-            <CommitFileSection
+            <ReadOnlyFileSection
               key={focus.path}
               repoPath={repoPath}
               client={client}
-              commitId={commitId}
               path={focus.path}
               oldPath={focus.oldPath}
+              diffKey={`commit:${commitId}`}
+              fetchDiff={fetchCommitDiff(focus.path, focus.oldPath)}
+              blameAt={commitId}
               collapsed={focusCollapsed}
               onToggleCollapse={() => setFocusCollapsed((c) => !c)}
               onSelectRow={onSelectRow}
@@ -1338,12 +1184,14 @@ function CommitDiffPane({
           )}
           <ul className={styles.fileList}>
             {files.map((path) => (
-              <CommitFileSection
+              <ReadOnlyFileSection
                 key={path}
                 repoPath={repoPath}
                 client={client}
-                commitId={commitId}
                 path={path}
+                diffKey={`commit:${commitId}`}
+                fetchDiff={fetchCommitDiff(path, null)}
+                blameAt={commitId}
                 collapsed={collapsedPaths.has(path)}
                 onToggleCollapse={() => toggleCollapse(path)}
                 onSelectRow={onSelectRow}
@@ -1469,12 +1317,14 @@ function StashDiffPane({
               </div>
               <ul className={styles.fileList}>
                 {files.tracked.map((path) => (
-                  <CommitFileSection
+                  <ReadOnlyFileSection
                     key={path}
                     repoPath={repoPath}
                     client={client}
-                    commitId={stash.commitId}
                     path={path}
+                    diffKey={`commit:${stash.commitId}`}
+                    fetchDiff={(opts) => client.getCommitDiff(repoPath, stash.commitId, path, opts)}
+                    blameAt={stash.commitId}
                     collapsed={collapsedPaths.has(`t:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`t:${path}`)}
                     onSelectRow={onSelectRow}
@@ -1490,12 +1340,14 @@ function StashDiffPane({
               </div>
               <ul className={styles.fileList}>
                 {files.untracked.map((path) => (
-                  <CommitFileSection
+                  <ReadOnlyFileSection
                     key={path}
                     repoPath={repoPath}
                     client={client}
-                    commitId={untrackedCommitId}
                     path={path}
+                    diffKey={`commit:${untrackedCommitId}`}
+                    fetchDiff={(opts) => client.getCommitDiff(repoPath, untrackedCommitId, path, opts)}
+                    blameAt={untrackedCommitId}
                     collapsed={collapsedPaths.has(`u:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`u:${path}`)}
                     onSelectRow={onSelectRow}
