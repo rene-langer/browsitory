@@ -430,6 +430,25 @@ Recorded after the pre-flight re-check on top of batch 4b (#113) and during impl
   `BranchInfo.upstream/ahead/behind` from 4b needed no changes here. 4b's BranchTree menu items
   ("Push to…") sit next to the relabelled "Merge into current branch…" unchanged.
 
+### After the independent review
+
+- **Symlinks.** A selected tracked file that became a symlink is removed before its forced
+  checkout (libgit2 would write HEAD's content through the link, into its target, possibly
+  outside the repository); a selected path below a symlinked directory is refused with
+  `StashError::BeyondSymlink` ("'d/f' is beyond a symbolic link.") before anything is written.
+- **Index commit of a path-limited stash** is HEAD's tree plus only the selected paths' index
+  entries (was: the whole index, like git), so "Restore staged changes" never re-stages
+  unselected files and `git stash apply --index` works on it.
+- **Stash identity.** `apply_stash` / `pop_stash` / `drop_stash` take `expected:
+  Option<&str>`; the worker, Tauri (`commitId` argument), sidecar (`commitId` param) and both
+  RepoClients always send the listed commit id, and a mismatch with `stash@{index}` is
+  `StashError::StashListChanged` ("The stash list changed; refresh and try again."). The frontend
+  refuses an index missing from its own list with the same message without calling the backend.
+  Tauri commands take the id as a plain argument, so there is no DTO to test there; the wire is
+  covered by the client tests and the sidecar round trip.
+- **StashDialog** takes `untrackedOnly` (all selected paths untracked): the "Include untracked
+  files" checkbox is hidden and untracked files are always included.
+
 ## Out of scope
 
 Octopus merges, merge strategies (`-X ours`), `branch.<name>.mergeOptions`, stash branches

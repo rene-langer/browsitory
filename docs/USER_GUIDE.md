@@ -287,8 +287,9 @@ keep their upstream setting (git shows such an upstream as "gone").
 opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep staged changes**
 (stash them but also leave them staged) and **Include untracked files** (on by default).
 **Stash file…** in a changed file's menu (staged or not) opens the same dialog for just that
-file; every other change stays where it is. One file at a time: the change lists have no
-multi-select.
+file; every other change stays where it is, and "Restore staged changes" later restages only
+that file. For an untracked file, untracked files are always included. One file at a time: the
+change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
@@ -299,7 +300,8 @@ turn it off to get everything back unstaged.
 Apply and Pop need nothing staged and no unresolved conflicts; the buttons are disabled with the
 reason until then. A stash that conflicts with your current files applies anyway and opens the
 files in the conflict pane; a conflicting **Pop** keeps the stash, so drop it yourself once the
-files are resolved. Dropping asks for confirmation first, since it can't be undone, and stash
+files are resolved. If the stash list changed since you looked (another tool stashed or
+dropped), Apply, Pop and Drop stop and ask you to refresh. Dropping asks for confirmation first, since it can't be undone, and stash
 operations are not part of **Undo**.
 
 ## Tags

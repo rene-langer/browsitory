@@ -64,6 +64,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Applying a stash while something is staged now says what to do ("Commit or unstage your staged
   changes before applying a stash.") instead of libgit2's "uncommitted changes exist in the
   index"; Apply and Pop are disabled with that reason.
+- Apply, Pop and Drop check that the stash is still the one you clicked; if the stash list
+  changed in the meantime (another tool stashed or dropped), they stop with "The stash list
+  changed; refresh and try again."
 - Palette: "Merge <branch> into current branch…", "Stash all changes" (was "Save stash"),
   "Stash…", "Stash <file>…", "Show stash: …", "Pop stash: …".
 
