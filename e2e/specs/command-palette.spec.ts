@@ -11,6 +11,29 @@ async function waitForAppReady(): Promise<void> {
   await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
 }
 
+// Sends Ctrl/Cmd+K until the palette is showing. Even after `waitForAppReady`, a keypress sent
+// right after `beforeTest`'s reload was occasionally lost (1 failure in 3 full-suite runs; the
+// palette never opened, no error) — most likely because the Branches section can already be in
+// the DOM a beat before the workspace's window keydown listener (attached in a passive effect)
+// is live, or before the startup tab reconciliation has settled. Re-pressing
+// only while the input still isn't displayed keeps the toggle from closing a palette that
+// opened late.
+async function openPalette() {
+  const input = await $('input[aria-label="Command palette"]');
+  await browser.waitUntil(
+    async () => {
+      if (await input.isDisplayed()) return true;
+      await browser.keys(["Control", "k"]);
+      return input.waitForDisplayed({ timeout: 1000 }).then(
+        () => true,
+        () => false,
+      );
+    },
+    { timeout: 10000, interval: 0, timeoutMsg: "expected Ctrl/Cmd+K to open the command palette" },
+  );
+  return input;
+}
+
 describe("command palette", () => {
   it("opens with Ctrl/Cmd+K, filters, and runs a zero-arg command", async () => {
     // Toggle theme is a safe, observable zero-arg effect, but it isn't in `buildCommands`
@@ -24,9 +47,7 @@ describe("command palette", () => {
     await waitForAppReady();
     const before = await browser.execute(() => document.documentElement.dataset.theme);
 
-    await browser.keys(["Control", "k"]);
-    const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    const input = await openPalette();
     await input.setValue("refresh");
     await browser.keys(["Enter"]);
     await input.waitForDisplayed({ reverse: true, timeout: 10000 });
@@ -46,9 +67,7 @@ describe("command palette", () => {
     // inside a `<dialog>` (the `Overlay` primitive) — the app's sidebar/history `<li>`s live
     // outside any dialog, so an unscoped `$$("li")` would pull those in too.
     await waitForAppReady();
-    await browser.keys(["Control", "k"]);
-    const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    const input = await openPalette();
     await input.setValue("prune worktrees");
 
     // Filtering re-renders on React state driven by `setValue`'s keystrokes; querying the DOM
@@ -88,9 +107,7 @@ describe("command palette", () => {
       });
     }
 
-    await browser.keys(["Control", "k"]);
-    const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    const input = await openPalette();
     await input.setValue("go to worktrees");
     await browser.keys(["Enter"]);
     await input.waitForDisplayed({ reverse: true, timeout: 10000 });
@@ -103,9 +120,7 @@ describe("command palette", () => {
 
   it("closes on Escape without running anything", async () => {
     await waitForAppReady();
-    await browser.keys(["Control", "k"]);
-    const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    const input = await openPalette();
     await input.setValue("prune worktrees");
     await browser.keys(["Escape"]);
     await input.waitForDisplayed({ reverse: true, timeout: 10000 });

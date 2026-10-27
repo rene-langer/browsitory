@@ -83,6 +83,12 @@ async function main() {
       E2E_REPO_PATH,
       `--remote-debugging-port=${cdpPort}`,
       "--disable-workspace-trust",
+      // Issue #100: on a Wayland desktop, `xvfb-run` only swaps DISPLAY and Electron's ozone
+      // auto-detection still picks the developer's real Wayland session, so the window opened
+      // there, unfocused/occluded, and the compositor sent it no frames — the webview's
+      // IntersectionObserver never fired and diff lines never rendered. Pin it to X11 (the Xvfb
+      // display); a no-op on CI, which has no Wayland session.
+      ...(process.platform === "linux" ? ["--ozone-platform=x11"] : []),
     ],
   });
 }
