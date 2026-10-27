@@ -637,6 +637,7 @@ mod tests {
         assert_eq!(
             label(Command::PopStash {
                 index: 0,
+                commit_id: "abc".into(),
                 restore_index: true,
                 reply: tx
             }),

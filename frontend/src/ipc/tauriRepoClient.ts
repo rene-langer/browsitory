@@ -263,13 +263,14 @@ export const tauriRepoClient: RepoClient = {
   },
   listStashes: (repoPath: string) => loggedInvoke<StashEntry[]>("list_stashes", { repoPath }),
   saveStash: (repoPath: string, options: StashOptions) => loggedInvoke("save_stash", { repoPath, options }),
-  applyStash: (repoPath: string, index: number, restoreIndex: boolean) =>
-    loggedInvoke<StashApplyOutcome>("apply_stash", { repoPath, index, restoreIndex }),
-  popStash: (repoPath: string, index: number, restoreIndex: boolean) =>
-    loggedInvoke<StashApplyOutcome>("pop_stash", { repoPath, index, restoreIndex }),
+  applyStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    loggedInvoke<StashApplyOutcome>("apply_stash", { repoPath, index, commitId, restoreIndex }),
+  popStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    loggedInvoke<StashApplyOutcome>("pop_stash", { repoPath, index, commitId, restoreIndex }),
   getStashFiles: (repoPath: string, commitId: string) =>
     loggedInvoke<StashFiles>("get_stash_files", { repoPath, commitId }),
-  dropStash: (repoPath: string, index: number) => loggedInvoke("drop_stash", { repoPath, index }),
+  dropStash: (repoPath: string, index: number, commitId: string) =>
+    loggedInvoke("drop_stash", { repoPath, index, commitId }),
   getBlame: (repoPath: string, commitId: string, path: string) =>
     loggedInvoke<BlameLine[]>("get_blame", { repoPath, commitId, path }),
   mergeBranch: (repoPath: string, branchName: string, options: MergeOptions) =>

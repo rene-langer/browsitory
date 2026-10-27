@@ -357,11 +357,13 @@ pub(crate) enum Command {
     },
     ApplyStash {
         index: usize,
+        commit_id: String,
         restore_index: bool,
         reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
     },
     PopStash {
         index: usize,
+        commit_id: String,
         restore_index: bool,
         reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
     },
@@ -371,6 +373,7 @@ pub(crate) enum Command {
     },
     DropStash {
         index: usize,
+        commit_id: String,
         reply: Sender<Result<(), String>>,
     },
     StartMerge {
@@ -942,18 +945,24 @@ impl Worker {
                     Command::SaveStash { options, reply } => stash::save(&mut repo, options, reply),
                     Command::ApplyStash {
                         index,
+                        commit_id,
                         restore_index,
                         reply,
-                    } => stash::apply(&mut repo, index, restore_index, reply),
+                    } => stash::apply(&mut repo, index, &commit_id, restore_index, reply),
                     Command::PopStash {
                         index,
+                        commit_id,
                         restore_index,
                         reply,
-                    } => stash::pop(&mut repo, index, restore_index, reply),
+                    } => stash::pop(&mut repo, index, &commit_id, restore_index, reply),
                     Command::GetStashFiles { commit_id, reply } => {
                         stash::files(&mut repo, commit_id, reply)
                     }
-                    Command::DropStash { index, reply } => stash::drop(&mut repo, index, reply),
+                    Command::DropStash {
+                        index,
+                        commit_id,
+                        reply,
+                    } => stash::drop(&mut repo, index, &commit_id, reply),
                     Command::StartMerge {
                         branch_name,
                         options,
@@ -2733,16 +2742,47 @@ mod tests {
         handle
             .save_stash(git_core::stash::StashOptions::default())
             .unwrap();
+        let id = handle.list_stashes().unwrap()[0].commit_id.clone();
 
         assert_eq!(
-            handle.apply_stash(0, false).unwrap(),
+            handle.apply_stash(0, id.clone(), false).unwrap(),
             git_core::stash::StashApplyOutcome::Applied
         );
         let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
         assert_eq!(contents, "v2");
 
-        handle.drop_stash(0).unwrap();
+        handle.drop_stash(0, id).unwrap();
         assert!(handle.list_stashes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stash_commands_refuse_a_stale_stash_id_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "file.txt", "v2");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
+        let stale = handle.list_stashes().unwrap()[0].commit_id.clone();
+        write_file(dir.path(), "file.txt", "v3");
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
+
+        let expected = "The stash list changed; refresh and try again.".to_string();
+        assert_eq!(
+            handle.apply_stash(0, stale.clone(), true),
+            Err(expected.clone())
+        );
+        assert_eq!(
+            handle.pop_stash(0, stale.clone(), true),
+            Err(expected.clone())
+        );
+        assert_eq!(handle.drop_stash(0, stale), Err(expected));
+        assert_eq!(handle.list_stashes().unwrap().len(), 2);
     }
 
     fn diverged_feature_repo() -> (tempfile::TempDir, git2::Repository) {
@@ -2849,7 +2889,9 @@ mod tests {
         assert_eq!(files.tracked, vec!["a.txt".to_string()]);
         assert_eq!(files.untracked_commit_id, None);
         assert_eq!(
-            handle.pop_stash(0, true).unwrap(),
+            handle
+                .pop_stash(0, stashes[0].commit_id.clone(), true)
+                .unwrap(),
             git_core::stash::StashApplyOutcome::Applied
         );
         assert!(handle.list_stashes().unwrap().is_empty());

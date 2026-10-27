@@ -352,13 +352,14 @@ export const vscodeRepoClient: RepoClient = {
   },
   listStashes: (repoPath: string) => call<StashEntry[]>("list_stashes", { repoPath }),
   saveStash: (repoPath: string, options: StashOptions) => call<void>("save_stash", { repoPath, options }),
-  applyStash: (repoPath: string, index: number, restoreIndex: boolean) =>
-    call<StashApplyOutcome>("apply_stash", { repoPath, index, restoreIndex }),
-  popStash: (repoPath: string, index: number, restoreIndex: boolean) =>
-    call<StashApplyOutcome>("pop_stash", { repoPath, index, restoreIndex }),
+  applyStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    call<StashApplyOutcome>("apply_stash", { repoPath, index, commitId, restoreIndex }),
+  popStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    call<StashApplyOutcome>("pop_stash", { repoPath, index, commitId, restoreIndex }),
   getStashFiles: (repoPath: string, commitId: string) =>
     call<StashFiles>("get_stash_files", { repoPath, commitId }),
-  dropStash: (repoPath: string, index: number) => call<void>("drop_stash", { repoPath, index }),
+  dropStash: (repoPath: string, index: number, commitId: string) =>
+    call<void>("drop_stash", { repoPath, index, commitId }),
   getBlame: (repoPath: string, commitId: string, path: string) =>
     call<BlameLine[]>("get_blame", { repoPath, commitId, path }),
   mergeBranch: (repoPath: string, branchName: string, options: MergeOptions) =>

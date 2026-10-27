@@ -26,11 +26,12 @@ pub async fn save_stash(
 pub async fn apply_stash(
     repo_path: String,
     index: usize,
+    commit_id: String,
     restore_index: bool,
     state: State<'_, AppState>,
 ) -> Result<StashApplyOutcomeDto, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .apply_stash(index, restore_index)?
+        .apply_stash(index, commit_id, restore_index)?
         .into())
 }
 
@@ -38,11 +39,12 @@ pub async fn apply_stash(
 pub async fn pop_stash(
     repo_path: String,
     index: usize,
+    commit_id: String,
     restore_index: bool,
     state: State<'_, AppState>,
 ) -> Result<StashApplyOutcomeDto, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .pop_stash(index, restore_index)?
+        .pop_stash(index, commit_id, restore_index)?
         .into())
 }
 
@@ -61,7 +63,8 @@ pub async fn get_stash_files(
 pub async fn drop_stash(
     repo_path: String,
     index: usize,
+    commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.drop_stash(index)
+    worker_handle(&state, &repo_path)?.drop_stash(index, commit_id)
 }

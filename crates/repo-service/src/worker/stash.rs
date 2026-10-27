@@ -21,22 +21,24 @@ pub(super) fn save(
 pub(super) fn apply(
     repo: &mut git2::Repository,
     index: usize,
+    commit_id: &str,
     restore_index: bool,
     reply: Sender<Result<StashApplyOutcome, String>>,
 ) {
-    let result =
-        git_core::stash::apply_stash(repo, index, restore_index).map_err(|error| error.to_string());
+    let result = git_core::stash::apply_stash(repo, index, Some(commit_id), restore_index)
+        .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
 
 pub(super) fn pop(
     repo: &mut git2::Repository,
     index: usize,
+    commit_id: &str,
     restore_index: bool,
     reply: Sender<Result<StashApplyOutcome, String>>,
 ) {
-    let result =
-        git_core::stash::pop_stash(repo, index, restore_index).map_err(|error| error.to_string());
+    let result = git_core::stash::pop_stash(repo, index, Some(commit_id), restore_index)
+        .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
 
@@ -49,8 +51,14 @@ pub(super) fn files(
     let _ = reply.send(result);
 }
 
-pub(super) fn drop(repo: &mut git2::Repository, index: usize, reply: Sender<Result<(), String>>) {
-    let result = git_core::stash::drop_stash(repo, index).map_err(|error| error.to_string());
+pub(super) fn drop(
+    repo: &mut git2::Repository,
+    index: usize,
+    commit_id: &str,
+    reply: Sender<Result<(), String>>,
+) {
+    let result = git_core::stash::drop_stash(repo, index, Some(commit_id))
+        .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
 
@@ -76,14 +84,17 @@ impl WorkerHandle {
         round_trip(self, |reply| Command::SaveStash { options, reply })
     }
 
-    /// Applies `stash@{index}`; `Conflicted` (not an error) when it applied with conflicts.
+    /// Applies `stash@{index}`, which must still be the stash `commit_id` (else "The stash list
+    /// changed"); `Conflicted` (not an error) when it applied with conflicts.
     pub fn apply_stash(
         &self,
         index: usize,
+        commit_id: String,
         restore_index: bool,
     ) -> Result<StashApplyOutcome, String> {
         round_trip(self, |reply| Command::ApplyStash {
             index,
+            commit_id,
             restore_index,
             reply,
         })
@@ -93,10 +104,12 @@ impl WorkerHandle {
     pub fn pop_stash(
         &self,
         index: usize,
+        commit_id: String,
         restore_index: bool,
     ) -> Result<StashApplyOutcome, String> {
         round_trip(self, |reply| Command::PopStash {
             index,
+            commit_id,
             restore_index,
             reply,
         })
@@ -106,7 +119,12 @@ impl WorkerHandle {
         round_trip(self, |reply| Command::GetStashFiles { commit_id, reply })
     }
 
-    pub fn drop_stash(&self, index: usize) -> Result<(), String> {
-        round_trip(self, |reply| Command::DropStash { index, reply })
+    /// Drops `stash@{index}` if it is still the stash `commit_id`.
+    pub fn drop_stash(&self, index: usize, commit_id: String) -> Result<(), String> {
+        round_trip(self, |reply| Command::DropStash {
+            index,
+            commit_id,
+            reply,
+        })
     }
 }

@@ -198,10 +198,12 @@ describe("tauriRepoClient merge and stash options", () => {
     const stash = { message: "m", keepIndex: false, includeUntracked: true, paths: ["a.txt"] };
     await tauriRepoClient.saveStash("/repo", stash);
     expect(invoke).toHaveBeenLastCalledWith("save_stash", { repoPath: "/repo", options: stash });
-    await tauriRepoClient.applyStash("/repo", 1, true);
-    expect(invoke).toHaveBeenLastCalledWith("apply_stash", { repoPath: "/repo", index: 1, restoreIndex: true });
-    await tauriRepoClient.popStash("/repo", 0, false);
-    expect(invoke).toHaveBeenLastCalledWith("pop_stash", { repoPath: "/repo", index: 0, restoreIndex: false });
+    await tauriRepoClient.applyStash("/repo", 1, "s1", true);
+    expect(invoke).toHaveBeenLastCalledWith("apply_stash", { repoPath: "/repo", index: 1, commitId: "s1", restoreIndex: true });
+    await tauriRepoClient.popStash("/repo", 0, "s0", false);
+    expect(invoke).toHaveBeenLastCalledWith("pop_stash", { repoPath: "/repo", index: 0, commitId: "s0", restoreIndex: false });
+    await tauriRepoClient.dropStash("/repo", 2, "s2");
+    expect(invoke).toHaveBeenLastCalledWith("drop_stash", { repoPath: "/repo", index: 2, commitId: "s2" });
     await tauriRepoClient.getStashFiles("/repo", "abc");
     expect(invoke).toHaveBeenLastCalledWith("get_stash_files", { repoPath: "/repo", commitId: "abc" });
   });

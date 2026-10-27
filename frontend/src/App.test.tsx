@@ -736,7 +736,7 @@ describe("App", () => {
       fireEvent.click(within(row).getByRole("button", { name: button }));
 
       expect(await screen.findByText(toast)).toBeInTheDocument();
-      expect(button === "Pop" ? popStash : applyStash).toHaveBeenCalledWith("/repos/a", 0, true);
+      expect(button === "Pop" ? popStash : applyStash).toHaveBeenCalledWith("/repos/a", 0, "s0", true);
       localStorage.clear();
     });
 

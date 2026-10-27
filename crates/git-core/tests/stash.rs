@@ -54,7 +54,7 @@ fn apply_stash_restores_the_stashed_changes() {
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
     assert_eq!(
-        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap(),
         StashApplyOutcome::Applied
     );
 
@@ -77,7 +77,7 @@ fn apply_stash_is_blocked_by_a_conflicting_dirty_file() {
     // what applying the stash would restore.
     write_file(dir.path(), "file.txt", "uncommitted local edit");
 
-    let result = git_core::stash::apply_stash(&mut repo, 0, false);
+    let result = git_core::stash::apply_stash(&mut repo, 0, None, false);
 
     assert!(
         matches!(result, Err(StashError::WouldOverwrite)),
@@ -97,7 +97,7 @@ fn apply_stash_is_blocked_by_a_conflicting_dirty_file() {
 fn apply_stash_on_an_empty_list_returns_an_error() {
     let (_dir, mut repo) = init_repo();
 
-    let result = git_core::stash::apply_stash(&mut repo, 0, false);
+    let result = git_core::stash::apply_stash(&mut repo, 0, None, false);
 
     assert!(result.is_err());
 }
@@ -115,7 +115,7 @@ fn drop_stash_removes_the_entry_and_shifts_remaining_indices() {
         .commit_id
         .clone();
 
-    git_core::stash::drop_stash(&mut repo, 0).unwrap();
+    git_core::stash::drop_stash(&mut repo, 0, None).unwrap();
 
     let stashes = git_core::stash::list_stashes(&mut repo).unwrap();
     assert_eq!(stashes.len(), 1);
@@ -322,15 +322,15 @@ fn path_limited_stash_with_message_keeps_older_entries() {
     // The restamped stash applies; the older ones are still intact underneath it.
     write_file(dir.path(), "b.txt", "v1");
     assert_eq!(
-        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap(),
         StashApplyOutcome::Applied
     );
     assert_eq!(read(dir.path(), "a.txt"), "mine");
-    git_core::stash::drop_stash(&mut repo, 0).unwrap();
+    git_core::stash::drop_stash(&mut repo, 0, None).unwrap();
     write_file(dir.path(), "a.txt", "v1");
     let after_drop = git_core::stash::list_stashes(&mut repo).unwrap();
     assert_eq!(after_drop, older);
-    git_core::stash::apply_stash(&mut repo, 1, false).unwrap();
+    git_core::stash::apply_stash(&mut repo, 1, None, false).unwrap();
     assert_eq!(read(dir.path(), "b.txt"), "two");
 }
 
@@ -394,7 +394,7 @@ fn path_limited_stash_of_an_untracked_file_stashes_only_it_and_applies_back() {
         assert_eq!(files, vec!["nested/dir/new.txt".to_string()]);
     }
     assert_eq!(
-        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap(),
         StashApplyOutcome::Applied
     );
     assert_eq!(read(dir.path(), "nested/dir/new.txt"), "brand new\n");
@@ -417,7 +417,7 @@ fn path_limited_stash_of_a_staged_new_file_unstages_and_removes_only_it() {
     assert_eq!(status.len(), 1, "{status:?}");
     assert_eq!(status[0].path, "a.txt");
     assert_eq!(
-        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap(),
         StashApplyOutcome::Applied
     );
     assert_eq!(read(dir.path(), "added.txt"), "added\n");
@@ -500,7 +500,7 @@ fn pop_drops_the_stash_on_success() {
     write_file(dir.path(), "a.txt", "v2");
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    let outcome = git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap();
 
     assert_eq!(outcome, StashApplyOutcome::Applied);
     assert_eq!(read(dir.path(), "a.txt"), "v2");
@@ -518,7 +518,7 @@ fn pop_drops_only_the_popped_stash() {
     }
     let before = git_core::stash::list_stashes(&mut repo).unwrap();
 
-    git_core::stash::pop_stash(&mut repo, 1, false).unwrap();
+    git_core::stash::pop_stash(&mut repo, 1, None, false).unwrap();
 
     assert_eq!(read(dir.path(), "a.txt"), "two");
     let after = git_core::stash::list_stashes(&mut repo).unwrap();
@@ -531,7 +531,7 @@ fn pop_drops_only_the_popped_stash() {
 fn pop_keeps_the_stash_and_reports_conflicts() {
     let (_dir, mut repo) = conflicting_stash();
 
-    let outcome = git_core::stash::pop_stash(&mut repo, 0, false).unwrap();
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap();
 
     assert_eq!(
         outcome,
@@ -547,9 +547,9 @@ fn pop_keeps_the_stash_and_reports_conflicts() {
 #[test]
 fn apply_with_unresolved_conflicts_is_refused() {
     let (_dir, mut repo) = conflicting_stash();
-    git_core::stash::pop_stash(&mut repo, 0, false).unwrap();
+    git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap();
 
-    let error = git_core::stash::apply_stash(&mut repo, 0, false).unwrap_err();
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
 
     assert!(
         matches!(error, StashError::UnresolvedConflicts),
@@ -559,7 +559,7 @@ fn apply_with_unresolved_conflicts_is_refused() {
         error.to_string(),
         "Resolve the current conflicts before applying a stash."
     );
-    let error = git_core::stash::pop_stash(&mut repo, 0, false).unwrap_err();
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
     assert!(
         matches!(error, StashError::UnresolvedConflicts),
         "{error:?}"
@@ -578,7 +578,7 @@ fn apply_with_restore_index_restores_staged_state() {
     write_file(dir.path(), "b.txt", "unstaged");
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    let outcome = git_core::stash::apply_stash(&mut repo, 0, true).unwrap();
+    let outcome = git_core::stash::apply_stash(&mut repo, 0, None, true).unwrap();
 
     assert_eq!(outcome, StashApplyOutcome::Applied);
     let status = git_core::status::status(&repo).unwrap();
@@ -589,7 +589,7 @@ fn apply_with_restore_index_restores_staged_state() {
     // Without restoring the index, a.txt comes back unstaged.
     let head = repo.head().unwrap().target().unwrap().to_string();
     git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Hard).unwrap();
-    git_core::stash::apply_stash(&mut repo, 0, false).unwrap();
+    git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap();
     let status = git_core::status::status(&repo).unwrap();
     assert!(!status.iter().any(|e| e.staged), "{status:?}");
     assert_eq!(read(dir.path(), "a.txt"), "staged");
@@ -606,14 +606,14 @@ fn apply_with_staged_changes_reports_staged_changes() {
     write_file(dir.path(), "b.txt", "staged");
     stage(&repo, "b.txt");
 
-    let error = git_core::stash::apply_stash(&mut repo, 0, false).unwrap_err();
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
 
     assert!(matches!(error, StashError::StagedChanges), "{error:?}");
     assert_eq!(
         error.to_string(),
         "Commit or unstage your staged changes before applying a stash."
     );
-    let error = git_core::stash::pop_stash(&mut repo, 0, true).unwrap_err();
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap_err();
     assert!(matches!(error, StashError::StagedChanges), "{error:?}");
     assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
     assert_eq!(read(dir.path(), "a.txt"), "v1");
@@ -693,7 +693,7 @@ fn path_limited_stash_of_a_file_replaced_by_a_symlink_never_writes_through_it() 
     assert!(meta.file_type().is_file(), "tc is a regular file again");
     assert_eq!(read(dir.path(), "tc"), "plain\n");
 
-    let outcome = git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap();
     assert_eq!(outcome, StashApplyOutcome::Applied);
     let meta = std::fs::symlink_metadata(dir.path().join("tc")).unwrap();
     assert!(meta.file_type().is_symlink(), "pop restores the symlink");
@@ -780,7 +780,7 @@ fn restoring_staged_changes_of_a_path_limited_stash_touches_only_its_files() {
     repo.checkout_head(Some(&mut checkout)).unwrap();
     assert!(git_core::status::status(&repo).unwrap().is_empty());
 
-    git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+    git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap();
 
     let status = git_core::status::status(&repo).unwrap();
     assert!(!status.iter().any(|e| e.path == "c"), "{status:?}");
@@ -826,4 +826,36 @@ fn git_stash_apply_index_restores_the_selected_files_of_a_path_limited_stash() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&staged_a.stdout), "a2\n");
     assert_eq!(read(dir.path(), "a"), "a3\n");
+}
+
+#[test]
+fn apply_pop_and_drop_refuse_when_the_stash_list_changed() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "v2");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    let old_top = git_core::stash::list_stashes(&mut repo).unwrap()[0]
+        .commit_id
+        .clone();
+    write_file(dir.path(), "a.txt", "v3");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    for result in [
+        git_core::stash::apply_stash(&mut repo, 0, Some(&old_top), false).map(|_| ()),
+        git_core::stash::pop_stash(&mut repo, 0, Some(&old_top), false).map(|_| ()),
+        git_core::stash::drop_stash(&mut repo, 0, Some(&old_top)),
+    ] {
+        let error = result.unwrap_err();
+        assert!(matches!(error, StashError::StashListChanged), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "The stash list changed; refresh and try again."
+        );
+    }
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 2);
+    assert_eq!(read(dir.path(), "a.txt"), "v1");
+
+    git_core::stash::drop_stash(&mut repo, 1, Some(&old_top)).unwrap();
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
 }

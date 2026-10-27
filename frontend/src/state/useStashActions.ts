@@ -3,6 +3,8 @@ import type { RepoClient, StashEntry, StashOptions } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 
+export const STASH_LIST_CHANGED = "The stash list changed; refresh and try again.";
+
 const STASH_EVERYTHING: StashOptions = { message: null, keepIndex: false, includeUntracked: true, paths: [] };
 
 export interface StashActions {
@@ -47,26 +49,40 @@ export function useStashActions(
     (on: boolean) => setState((prev) => ({ ...prev, stashRestoreIndex: on })),
     [setState],
   );
+  // Apply/Pop/Drop send the listed stash's commit id along with its index; the backend refuses
+  // when `stash@{index}` is now another stash. An index this list doesn't know is refused here.
+  const listedCommitId = useCallback(
+    (index: number): string | null => {
+      const commitId = stashes[index]?.commitId;
+      if (commitId !== undefined) return commitId;
+      setState((prev) => ({ ...prev, error: STASH_LIST_CHANGED }));
+      return null;
+    },
+    [stashes, setState],
+  );
   const applyStash = useCallback(
-    (index: number) =>
-      runMutation(async () => {
+    async (index: number) => {
+      const commitId = listedCommitId(index);
+      if (commitId === null) return;
+      await runMutation(async () => {
         setState((prev) => ({ ...prev, stashOutcome: null }));
-        const outcome = await client.applyStash(repoPath, index, restoreIndex);
+        const outcome = await client.applyStash(repoPath, index, commitId, restoreIndex);
         setState((prev) => ({ ...prev, stashOutcome: { action: "apply", outcome } }));
-      }),
-    [client, runMutation, repoPath, setState, restoreIndex],
+      });
+    },
+    [client, runMutation, repoPath, setState, restoreIndex, listedCommitId],
   );
   const popStash = useCallback(
-    (index: number) =>
-      runMutation(async () => {
+    async (index: number) => {
+      const poppedCommitId = listedCommitId(index);
+      if (poppedCommitId === null) return;
+      await runMutation(async () => {
         setState((prev) => ({ ...prev, stashOutcome: null }));
-        const poppedCommitId = stashes[index]?.commitId;
-        const outcome = await client.popStash(repoPath, index, restoreIndex);
+        const outcome = await client.popStash(repoPath, index, poppedCommitId, restoreIndex);
         setState((prev) => {
           // Only a clean pop drops the stash; a conflicted one keeps it (and its selection).
           const popsSelectedStash =
             outcome.kind === "Applied" &&
-            poppedCommitId !== undefined &&
             typeof prev.selectedRow === "object" &&
             prev.selectedRow.commitId === poppedCommitId;
           return {
@@ -75,16 +91,17 @@ export function useStashActions(
             stashOutcome: { action: "pop", outcome },
           };
         });
-      }),
-    [client, runMutation, repoPath, setState, stashes, restoreIndex],
+      });
+    },
+    [client, runMutation, repoPath, setState, restoreIndex, listedCommitId],
   );
   const dropStash = useCallback(
-    (index: number) =>
-      runOptimisticMutation(
+    async (index: number) => {
+      const droppedCommitId = listedCommitId(index);
+      if (droppedCommitId === null) return;
+      await runOptimisticMutation(
         (prev) => {
-          const droppedCommitId = prev.stashes[index]?.commitId;
           const dropsSelectedStash =
-            droppedCommitId !== undefined &&
             typeof prev.selectedRow === "object" &&
             prev.selectedRow.commitId === droppedCommitId;
           return {
@@ -93,9 +110,10 @@ export function useStashActions(
             selectedRow: dropsSelectedStash ? "uncommitted" : prev.selectedRow,
           };
         },
-        () => client.dropStash(repoPath, index),
-      ),
-    [client, runOptimisticMutation, repoPath],
+        () => client.dropStash(repoPath, index, droppedCommitId),
+      );
+    },
+    [client, runOptimisticMutation, repoPath, listedCommitId],
   );
 
   return {

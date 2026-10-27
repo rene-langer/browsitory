@@ -2212,11 +2212,14 @@ fn save_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// A stash by list index plus the commit id the client listed there; the backend refuses with
+/// "The stash list changed" when `stash@{index}` is now another stash.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StashIndexParams {
     repo_path: String,
     index: usize,
+    commit_id: String,
 }
 
 #[derive(Deserialize)]
@@ -2224,6 +2227,7 @@ struct StashIndexParams {
 struct StashApplyParams {
     repo_path: String,
     index: usize,
+    commit_id: String,
     restore_index: bool,
 }
 
@@ -2246,16 +2250,22 @@ impl From<git_core::stash::StashApplyOutcome> for StashApplyOutcomeDto {
 fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashApplyParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome =
-        worker_handle(repos, &params.repo_path)?.apply_stash(params.index, params.restore_index)?;
+    let outcome = worker_handle(repos, &params.repo_path)?.apply_stash(
+        params.index,
+        params.commit_id,
+        params.restore_index,
+    )?;
     serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 fn pop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashApplyParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome =
-        worker_handle(repos, &params.repo_path)?.pop_stash(params.index, params.restore_index)?;
+    let outcome = worker_handle(repos, &params.repo_path)?.pop_stash(
+        params.index,
+        params.commit_id,
+        params.restore_index,
+    )?;
     serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
@@ -2289,7 +2299,7 @@ fn get_stash_files(params: Value, repos: &Repos) -> Result<Value, String> {
 fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashIndexParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.drop_stash(params.index)?;
+    worker_handle(repos, &params.repo_path)?.drop_stash(params.index, params.commit_id)?;
     Ok(Value::Null)
 }
 

@@ -861,28 +861,34 @@ describe("vscodeRepoClient", () => {
     respond(2, [{ index: 0, message: "WIP", commitId: "abc123" }]);
     await expect(listPromise).resolves.toHaveLength(1);
 
-    const applyPromise = vscodeRepoClient.applyStash("/repo", 0, true);
+    const applyPromise = vscodeRepoClient.applyStash("/repo", 0, "abc123", true);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 3,
       method: "apply_stash",
-      params: { repoPath: "/repo", index: 0, restoreIndex: true },
+      params: { repoPath: "/repo", index: 0, commitId: "abc123", restoreIndex: true },
     });
     respond(3, { kind: "Applied" });
     await expect(applyPromise).resolves.toEqual({ kind: "Applied" });
 
-    const dropPromise = vscodeRepoClient.dropStash("/repo", 0);
+    const dropPromise = vscodeRepoClient.dropStash("/repo", 0, "abc123");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "drop_stash",
+      params: { repoPath: "/repo", index: 0, commitId: "abc123" },
+    });
     respond(4, null);
     await expect(dropPromise).resolves.toBeNull();
   });
 
   it("wires popStash and getStashFiles", async () => {
-    const popPromise = vscodeRepoClient.popStash("/repo", 1, false);
+    const popPromise = vscodeRepoClient.popStash("/repo", 1, "s1", false);
     expect(postMessage).toHaveBeenLastCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "pop_stash",
-      params: { repoPath: "/repo", index: 1, restoreIndex: false },
+      params: { repoPath: "/repo", index: 1, commitId: "s1", restoreIndex: false },
     });
     respond(1, { kind: "Conflicted", files: ["f"] });
     await expect(popPromise).resolves.toEqual({ kind: "Conflicted", files: ["f"] });

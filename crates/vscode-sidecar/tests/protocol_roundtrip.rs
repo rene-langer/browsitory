@@ -359,11 +359,22 @@ fn stash_lifecycle_round_trips_through_the_sidecar() {
     let list = stashes["result"].as_array().expect("stash list");
     assert_eq!(list.len(), 1);
     assert_eq!(list[0]["index"], 0);
+    let stash_id = list[0]["commitId"].clone();
+
+    let stale = sidecar.call(
+        40,
+        "apply_stash",
+        serde_json::json!({"repoPath": repo_path, "index": 0, "commitId": "0000000000000000000000000000000000000000", "restoreIndex": true}),
+    );
+    assert_eq!(
+        stale["error"]["message"], "The stash list changed; refresh and try again.",
+        "{stale}"
+    );
 
     let applied = sidecar.call(
         4,
         "apply_stash",
-        serde_json::json!({"repoPath": repo_path, "index": 0, "restoreIndex": true}),
+        serde_json::json!({"repoPath": repo_path, "index": 0, "commitId": stash_id, "restoreIndex": true}),
     );
     assert_eq!(applied["result"], serde_json::json!({"kind": "Applied"}));
     let on_disk = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
@@ -372,7 +383,7 @@ fn stash_lifecycle_round_trips_through_the_sidecar() {
     let dropped = sidecar.call(
         5,
         "drop_stash",
-        serde_json::json!({"repoPath": repo_path, "index": 0}),
+        serde_json::json!({"repoPath": repo_path, "index": 0, "commitId": stash_id}),
     );
     assert_eq!(dropped["result"], serde_json::Value::Null);
     let stashes_after = sidecar.call(
@@ -2077,7 +2088,7 @@ fn stash_options_files_and_pop_round_trip_through_the_sidecar() {
     let popped = sidecar.call(
         5,
         "pop_stash",
-        serde_json::json!({"repoPath": repo_path, "index": 0, "restoreIndex": true}),
+        serde_json::json!({"repoPath": repo_path, "index": 0, "commitId": entry["commitId"], "restoreIndex": true}),
     );
     assert_eq!(popped["result"], serde_json::json!({"kind": "Applied"}));
     let after = sidecar.call(

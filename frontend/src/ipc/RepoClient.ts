@@ -512,14 +512,16 @@ export interface RepoClient {
   saveStash(repoPath: string, options: StashOptions): Promise<void>;
   /**
    * Applies `stash@{index}`; `restoreIndex` also restages what was staged. Resolves `Conflicted`
-   * (instead of rejecting) when the stash applied with conflicts.
+   * (instead of rejecting) when the stash applied with conflicts. `commitId` is the stash's id as
+   * listed: the backend refuses ("The stash list changed; refresh and try again.") when
+   * `stash@{index}` is now another stash. Same for `popStash` and `dropStash`.
    */
-  applyStash(repoPath: string, index: number, restoreIndex: boolean): Promise<StashApplyOutcome>;
+  applyStash(repoPath: string, index: number, commitId: string, restoreIndex: boolean): Promise<StashApplyOutcome>;
   /** Like `applyStash`, then drops the stash, but only when it applied without conflicts. */
-  popStash(repoPath: string, index: number, restoreIndex: boolean): Promise<StashApplyOutcome>;
+  popStash(repoPath: string, index: number, commitId: string, restoreIndex: boolean): Promise<StashApplyOutcome>;
   /** Files of the stash whose commit is `commitId`; rejects for an id that is not a stash. */
   getStashFiles(repoPath: string, commitId: string): Promise<StashFiles>;
-  dropStash(repoPath: string, index: number): Promise<void>;
+  dropStash(repoPath: string, index: number, commitId: string): Promise<void>;
   getBlame(repoPath: string, commitId: string, path: string): Promise<BlameLine[]>;
   /** Merges a local branch name, or a full ref (`refs/remotes/...`), into the current branch. */
   mergeBranch(repoPath: string, branchName: string, options: MergeOptions): Promise<MergeOutcome>;

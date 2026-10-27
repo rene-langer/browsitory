@@ -21,6 +21,29 @@ pub enum StashError {
     NotAStash(String),
     #[error("'{0}' is beyond a symbolic link.")]
     BeyondSymlink(String),
+    #[error("The stash list changed; refresh and try again.")]
+    StashListChanged,
+}
+
+/// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
+/// (another tool stashed, dropped or popped), and acting on the index would hit another stash.
+fn ensure_stash_at(
+    repo: &Repository,
+    index: usize,
+    expected: Option<&str>,
+) -> Result<(), StashError> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let actual = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new().to_string()));
+    if actual.as_deref() == Some(expected) {
+        Ok(())
+    } else {
+        Err(StashError::StashListChanged)
+    }
 }
 
 impl From<crate::diff::DiffError> for StashError {
@@ -373,11 +396,16 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
 /// Applies `stash@{index}`. `restore_index` also restages what was staged (libgit2's
 /// `REINSTATE_INDEX`, `git stash apply --index`). libgit2 refuses outright while the index
 /// differs from HEAD; its errors are mapped to user-facing variants.
+///
+/// `expected`, when given, is the stash's commit id as the caller listed it; a mismatch with
+/// `stash@{index}` is `StashListChanged`.
 pub fn apply_stash(
     repo: &mut Repository,
     index: usize,
+    expected: Option<&str>,
     restore_index: bool,
 ) -> Result<StashApplyOutcome, StashError> {
+    ensure_stash_at(repo, index, expected)?;
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
     }
@@ -418,9 +446,10 @@ pub fn apply_stash(
 pub fn pop_stash(
     repo: &mut Repository,
     index: usize,
+    expected: Option<&str>,
     restore_index: bool,
 ) -> Result<StashApplyOutcome, StashError> {
-    let outcome = apply_stash(repo, index, restore_index)?;
+    let outcome = apply_stash(repo, index, expected, restore_index)?;
     if outcome == StashApplyOutcome::Applied {
         repo.stash_drop(index)?;
     }
@@ -452,7 +481,13 @@ pub fn stash_files(repo: &mut Repository, commit_id: &str) -> Result<StashFiles,
     })
 }
 
-pub fn drop_stash(repo: &mut Repository, index: usize) -> Result<(), StashError> {
+/// `expected` as for `apply_stash`.
+pub fn drop_stash(
+    repo: &mut Repository,
+    index: usize,
+    expected: Option<&str>,
+) -> Result<(), StashError> {
+    ensure_stash_at(repo, index, expected)?;
     // Indices shift after a drop (git2's own behavior) — callers always re-fetch the full list
     // afterward, so a stale index is never held across calls.
     repo.stash_drop(index)?;
