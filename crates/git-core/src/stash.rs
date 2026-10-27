@@ -23,6 +23,8 @@ pub enum StashError {
     BeyondSymlink(String),
     #[error("The stash list changed; refresh and try again.")]
     StashListChanged,
+    #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
+    SymlinkReplacedByDirectory,
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -295,39 +297,73 @@ fn save_path_limited_stash(
     repo.reference_ensure_log("refs/stash")?;
     repo.reference("refs/stash", stash_id, true, &reflog_message)?;
 
-    // The stash is saved; now revert exactly the stashed paths. A tracked file replaced by a
-    // symlink (typechange) must be removed first: a forced checkout writes the file's content
-    // *through* the symlink, overwriting its target, which may be another file with unsaved
-    // edits or a file outside the repository. The symlink itself is in the stash.
+    // The stash is saved; now revert exactly the stashed paths. Every filesystem change below
+    // re-checks, at that moment, that no directory on the way is a symlink and skips the path if
+    // one is: removing or writing `d/f` with `d` a symlink would act on the link's target,
+    // possibly outside the repository. Skipping only leaves a change in place; it is in the
+    // stash either way.
+    //
+    // 1. Untracked files first, while the directories they live in are still real: reverting a
+    //    tracked path can turn a directory back into HEAD's symlink (a tracked symlink `l` that
+    //    was replaced by a directory holding untracked `l/f`), after which `l/f` would resolve
+    //    into the link's target.
+    for path in &untracked {
+        if has_symlinked_ancestor(&workdir, path) {
+            continue;
+        }
+        let full = workdir.join(path);
+        match std::fs::remove_file(&full) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+        // Remove directories the stash emptied, like git's clean -d; never a symlink, and never
+        // through one.
+        let mut dir = full.parent();
+        while let Some(parent) = dir {
+            if parent == workdir {
+                break;
+            }
+            let Ok(relative) = parent.strip_prefix(&workdir) else {
+                break;
+            };
+            let relative = relative.to_string_lossy();
+            let is_real_dir = std::fs::symlink_metadata(parent).is_ok_and(|meta| meta.is_dir());
+            if !is_real_dir
+                || has_symlinked_ancestor(&workdir, &relative)
+                || std::fs::remove_dir(parent).is_err()
+            {
+                break;
+            }
+            dir = parent.parent();
+        }
+    }
+    // 2. A tracked file replaced by a symlink (typechange) must be removed before its checkout:
+    //    a forced checkout writes the file's content *through* the symlink, overwriting its
+    //    target, which may be another file with unsaved edits or a file outside the repository.
+    //    The symlink itself is in the stash.
+    let mut checkout_paths = Vec::new();
     for path in &tracked {
+        if has_symlinked_ancestor(&workdir, path) {
+            continue;
+        }
         let full = workdir.join(path);
         if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
             std::fs::remove_file(&full)?;
         }
+        checkout_paths.push(path.as_str());
     }
-    if !tracked.is_empty() {
+    // 3. Tracked paths back to HEAD (or to the index with `keep_index`).
+    if !checkout_paths.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().disable_pathspec_match(true);
-        for path in &tracked {
-            checkout.path(path.as_str());
+        for path in &checkout_paths {
+            checkout.path(*path);
         }
         if opts.keep_index {
             index.read(true)?;
             repo.checkout_index(Some(&mut index), Some(&mut checkout))?;
         } else {
             repo.checkout_tree(base_tree.as_object(), Some(&mut checkout))?;
-        }
-    }
-    for path in &untracked {
-        let full = workdir.join(path);
-        std::fs::remove_file(&full)?;
-        // Remove directories the stash emptied, like git's clean -d.
-        let mut dir = full.parent();
-        while let Some(parent) = dir {
-            if parent == workdir || std::fs::remove_dir(parent).is_err() {
-                break;
-            }
-            dir = parent.parent();
         }
     }
     Ok(())

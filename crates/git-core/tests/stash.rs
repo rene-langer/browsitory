@@ -859,3 +859,98 @@ fn apply_pop_and_drop_refuse_when_the_stash_list_changed() {
     git_core::stash::drop_stash(&mut repo, 1, Some(&old_top)).unwrap();
     assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
 }
+
+/// HEAD has `l` as a symlink to `target`; the worktree replaced `l` by a real directory holding
+/// an untracked `l/f` (status ` D l`, `?? l/f`).
+#[cfg(unix)]
+fn symlink_replaced_by_directory(
+    target: &std::path::Path,
+) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "keep.txt", "k\n");
+    std::os::unix::fs::symlink(target, dir.path().join("l")).unwrap();
+    commit_all(&repo, "initial");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    write_file(dir.path(), "l/f", "mine\n");
+    (dir, repo)
+}
+
+#[cfg(unix)]
+fn assert_l_is_heads_symlink(dir: &std::path::Path, target: &std::path::Path) {
+    let meta = std::fs::symlink_metadata(dir.join("l")).unwrap();
+    assert!(meta.file_type().is_symlink(), "l is HEAD's symlink again");
+    assert_eq!(std::fs::read_link(dir.join("l")).unwrap(), target);
+}
+
+#[cfg(unix)]
+#[test]
+fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_outside() {
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("f"), "outside, unsaved\n").unwrap();
+    let (dir, mut repo) = symlink_replaced_by_directory(outside.path());
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()])).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("f")).unwrap(),
+        "outside, unsaved\n"
+    );
+    assert_l_is_heads_symlink(dir.path(), outside.path());
+
+    let result = git_core::stash::pop_stash(&mut repo, 0, None, false);
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("f")).unwrap(),
+        "outside, unsaved\n"
+    );
+    match result {
+        Ok(StashApplyOutcome::Applied) => {
+            assert!(std::fs::symlink_metadata(dir.path().join("l"))
+                .unwrap()
+                .is_dir());
+            assert_eq!(read(dir.path(), "l/f"), "mine\n");
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        }
+        other => {
+            assert!(
+                matches!(other, Err(StashError::SymlinkReplacedByDirectory)),
+                "{other:?}"
+            );
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_in_repo() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "real/f", "committed\n");
+    std::os::unix::fs::symlink("real", dir.path().join("l")).unwrap();
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "real/f", "unsaved edits\n");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    write_file(dir.path(), "l/f", "mine\n");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()])).unwrap();
+
+    assert_eq!(read(dir.path(), "real/f"), "unsaved edits\n");
+    assert_l_is_heads_symlink(dir.path(), std::path::Path::new("real"));
+
+    let result = git_core::stash::pop_stash(&mut repo, 0, None, false);
+    assert_eq!(read(dir.path(), "real/f"), "unsaved edits\n");
+    match result {
+        Ok(StashApplyOutcome::Applied) => {
+            assert!(std::fs::symlink_metadata(dir.path().join("l"))
+                .unwrap()
+                .is_dir());
+            assert_eq!(read(dir.path(), "l/f"), "mine\n");
+        }
+        other => {
+            assert!(
+                matches!(other, Err(StashError::SymlinkReplacedByDirectory)),
+                "{other:?}"
+            );
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        }
+    }
+}
