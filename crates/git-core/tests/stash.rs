@@ -677,6 +677,7 @@ fn stash_files_rejects_a_commit_that_is_not_a_stash() {
 }
 
 #[test]
+#[cfg(unix)]
 fn path_limited_stash_of_a_file_replaced_by_a_symlink_never_writes_through_it() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tc", "plain\n");
@@ -705,6 +706,7 @@ fn path_limited_stash_of_a_file_replaced_by_a_symlink_never_writes_through_it() 
 }
 
 #[test]
+#[cfg(unix)]
 fn path_limited_stash_of_a_symlink_to_an_outside_file_leaves_that_file_alone() {
     let outside = tempfile::TempDir::new().unwrap();
     let target = outside.path().join("outside.txt");
@@ -726,6 +728,7 @@ fn path_limited_stash_of_a_symlink_to_an_outside_file_leaves_that_file_alone() {
 }
 
 #[test]
+#[cfg(unix)]
 fn path_limited_stash_refuses_a_path_beyond_a_symlinked_directory() {
     let outside = tempfile::TempDir::new().unwrap();
     std::fs::write(outside.path().join("f"), "outside\n").unwrap();
