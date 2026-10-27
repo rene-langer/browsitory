@@ -268,8 +268,9 @@ export interface UseAppStateResult {
   openHookFailure(): void;
   closeHookFailure(): void;
   clearCommitMessageHandled(): void;
-  // Replays the failed request with `noVerify: true`.
-  retryWithoutHooks(retry: HookRetry): Promise<void>;
+  // Replays the failed request with `noVerify: true`. Resolves `true` when a commit/amend landed
+  // (pushes: once started; their outcome arrives as transfer progress).
+  retryWithoutHooks(retry: HookRetry): Promise<boolean>;
   listPullRequests(remoteName: string, account: string): Promise<void>;
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
@@ -607,14 +608,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     async (retry: HookRetry) => {
       setState((prev) => ({ ...prev, hookFailure: null, error: null }));
       if (retry.kind === "commit") {
-        if (await commit(retry.message, true)) setState((prev) => ({ ...prev, clearCommitMessage: true }));
-        return;
+        const ok = await commit(retry.message, true);
+        if (ok) setState((prev) => ({ ...prev, clearCommitMessage: true }));
+        return ok;
       }
       if (retry.kind === "amend") {
         // No clear request: a landed amend leaves amend mode, which already puts the
         // pre-amend draft back into the CommitBox.
-        await amendCommit(retry.message, true);
-        return;
+        return amendCommit(retry.message, true);
       }
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
@@ -623,6 +624,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else if (push.operation === "PushBranchTo")
         await pushBranch(push.remoteName, push.localBranch, push.remoteBranch, push.setUpstream, true);
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
+      return true;
     },
     [commit, amendCommit, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch],
   );

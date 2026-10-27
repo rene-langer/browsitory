@@ -27,7 +27,7 @@ import { useToasts, type ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { HookFailureDialog } from "./components/HookFailureDialog";
-import { retrySuccessLabel } from "./lib/hookFailure";
+import { retrySuccessLabel, type HookRetry } from "./lib/hookFailure";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
@@ -156,6 +156,40 @@ function RepoWorkspace({
   const handleCommitDraftChange = useCallback(
     (draft: CommitDraft) => onCommitDraftChange(repoPath, draft),
     [onCommitDraftChange, repoPath],
+  );
+  // A landed commit's message must not come back from the saved draft. CommitBox clears its own
+  // field, but it may have unmounted mid-commit (tab switch, rebase panel), leaving the draft
+  // holding the committed text; clear that too, unless it was edited since.
+  const clearCommittedDraft = useCallback(
+    (message: string) => {
+      const draft = getCommitDraft(repoPath);
+      if (draft !== undefined && draft.message === message) {
+        onCommitDraftChange(repoPath, { ...draft, message: "", lastSeeded: "" });
+      }
+    },
+    [getCommitDraft, onCommitDraftChange, repoPath],
+  );
+  const { commit: commitStaged, retryWithoutHooks } = appState;
+  const commitAndClearDraft = useCallback(
+    async (message: string, noVerify: boolean) => {
+      const ok = await commitStaged(message, noVerify);
+      if (ok) clearCommittedDraft(message);
+      return ok;
+    },
+    [commitStaged, clearCommittedDraft],
+  );
+  // "… without hooks" commits what the box holds now: the user may have fixed the message after
+  // closing the dialog. Falls back to the failed message when the box is empty.
+  const retryWithCurrentMessage = useCallback(
+    async (retry: HookRetry) => {
+      if (retry.kind === "push") return retryWithoutHooks(retry);
+      const current = getCommitDraft(repoPath)?.message ?? "";
+      const message = current.trim() === "" ? retry.message : current;
+      const ok = await retryWithoutHooks({ ...retry, message });
+      if (ok && retry.kind === "commit") clearCommittedDraft(message);
+      return ok;
+    },
+    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath],
   );
   const panelVisibility = useSidebarPanelVisibility();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);
@@ -440,7 +474,7 @@ function RepoWorkspace({
           failure={appState.state.hookFailure}
           onRetry={() => {
             const retry = appState.state.hookFailure!.retry;
-            void announce(retrySuccessLabel(retry), appState.retryWithoutHooks)(retry);
+            void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
           }}
           onClose={appState.closeHookFailure}
         />
@@ -868,7 +902,7 @@ function RepoWorkspace({
                   onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
                   onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
                   onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
-                  onCommit={(message) => announce("Committed", appState.commit)(message, appState.state.skipHooks)}
+                  onCommit={(message) => announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks)}
                   onSaveStash={announce("Changes stashed", () => appState.saveStash())}
                   onOpenStashDialog={appState.openStashDialog}
                   onSelectRow={appState.selectRow}
