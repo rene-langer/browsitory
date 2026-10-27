@@ -14,7 +14,7 @@ import {
   presetPickAll,
   type PresetAction,
 } from "../lib/rebaseSelection";
-import type { SelectedRow } from "../state/useAppState";
+import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ResetDialog } from "./ResetDialog";
@@ -25,13 +25,6 @@ import { RefBadges } from "./RefBadges";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
-
-function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
-  if (a === "uncommitted" || b === "uncommitted") {
-    return a === b;
-  }
-  return a.commitId === b.commitId;
-}
 
 export function CommitGraph({
   status,

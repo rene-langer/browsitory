@@ -49,6 +49,14 @@ const GRAPH_PAGE_SIZE = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
 
+/** Whether two selections name the same row. */
+export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
+  if (a === "uncommitted" || b === "uncommitted") {
+    return a === b;
+  }
+  return a.commitId === b.commitId;
+}
+
 export interface AppState {
   repoPath: string;
   selectedRow: SelectedRow;
