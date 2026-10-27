@@ -51,10 +51,69 @@ impl Default for DiffOptions {
     }
 }
 
+/// One changed path in a compare. `old_path` is set when rename detection paired a delete and
+/// an add; `path` is then the new name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
 fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
     git_opts
         .ignore_whitespace(opts.ignore_whitespace)
         .context_lines(opts.context_lines.min(MAX_CONTEXT_LINES));
+}
+
+/// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.
+fn literal_path_options(
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> git2::DiffOptions {
+    let mut git_opts = git2::DiffOptions::new();
+    // Literal paths, not globs — see `working_diff_options`.
+    if let Some(old_path) = old_path {
+        git_opts.pathspec(old_path);
+    }
+    git_opts.pathspec(path).disable_pathspec_match(true);
+    apply_display_options(&mut git_opts, opts);
+    git_opts
+}
+
+/// Pairs deletes and adds into renames (git's default 50% similarity, no copies).
+fn detect_renames(diff: &mut git2::Diff) -> Result<(), DiffError> {
+    let mut find = git2::DiffFindOptions::new();
+    find.renames(true);
+    diff.find_similar(Some(&mut find))?;
+    Ok(())
+}
+
+fn changed_files(diff: &git2::Diff) -> Vec<ChangedFile> {
+    let lossy = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    diff.deltas()
+        .filter_map(|delta| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(lossy)?;
+            let old_path = if delta.status() == git2::Delta::Renamed {
+                delta.old_file().path().map(lossy)
+            } else {
+                None
+            };
+            Some(ChangedFile { path, old_path })
+        })
+        .collect()
+}
+
+fn commit_tree<'repo>(
+    repo: &'repo Repository,
+    commit_id: &str,
+) -> Result<git2::Tree<'repo>, DiffError> {
+    let oid = git2::Oid::from_str(commit_id)?;
+    Ok(repo.find_commit(oid)?.tree()?)
 }
 
 /// Single source of the git2 options for working-tree diffs (display *and* staging).
@@ -115,10 +174,7 @@ pub fn commit_diff(
     opts: &DiffOptions,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
-    let mut git_opts = git2::DiffOptions::new();
-    // Literal path, not a glob — see `working_diff_options`.
-    git_opts.pathspec(path).disable_pathspec_match(true);
-    apply_display_options(&mut git_opts, opts);
+    let mut git_opts = literal_path_options(path, None, opts);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     hunks_from_diff(&diff)
 }
@@ -134,18 +190,10 @@ pub fn commit_rename_diff(
     opts: &DiffOptions,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
-    let mut git_opts = git2::DiffOptions::new();
-    // Literal paths, not globs — see `working_diff_options`.
-    git_opts
-        .pathspec(old_path)
-        .pathspec(new_path)
-        .disable_pathspec_match(true);
-    apply_display_options(&mut git_opts, opts);
+    let mut git_opts = literal_path_options(new_path, Some(old_path), opts);
     let mut diff =
         repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
-    let mut find = git2::DiffFindOptions::new();
-    find.renames(true);
-    diff.find_similar(Some(&mut find))?;
+    detect_renames(&mut diff)?;
     hunks_from_diff(&diff)
 }
 
@@ -167,6 +215,40 @@ pub fn commit_files(repo: &Repository, commit_id: &str) -> Result<Vec<String>, D
         }
     }
     Ok(paths)
+}
+
+/// Paths that differ between the trees of `from_id` and `to_id` (`git diff from to`), with
+/// renames detected. The commits need not be related.
+pub fn range_diff_files(
+    repo: &Repository,
+    from_id: &str,
+    to_id: &str,
+) -> Result<Vec<ChangedFile>, DiffError> {
+    let old_tree = commit_tree(repo, from_id)?;
+    let new_tree = commit_tree(repo, to_id)?;
+    let mut diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
+    detect_renames(&mut diff)?;
+    Ok(changed_files(&diff))
+}
+
+/// One file's diff between `from_id` and `to_id`. With `old_path` (a rename reported by
+/// `range_diff_files`), both paths are diffed with rename detection, like `commit_rename_diff`.
+pub fn range_diff(
+    repo: &Repository,
+    from_id: &str,
+    to_id: &str,
+    path: &str,
+    old_path: Option<&str>,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let old_tree = commit_tree(repo, from_id)?;
+    let new_tree = commit_tree(repo, to_id)?;
+    let mut git_opts = literal_path_options(path, old_path, opts);
+    let mut diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut git_opts))?;
+    if old_path.is_some() {
+        detect_renames(&mut diff)?;
+    }
+    hunks_from_diff(&diff)
 }
 
 fn commit_and_parent_trees<'repo>(

@@ -1,51 +1,12 @@
 mod common;
 
-use common::init_repo;
+use common::{commit_tree, init_repo};
 use git2::{Oid, Repository};
 use git_core::diff::{commit_rename_diff, DiffLineOrigin, DiffOptions};
 use git_core::history::{file_history, FileHistoryEntry, HistoryError};
 
 const REGULAR: u32 = 0o100644;
 const EXECUTABLE: u32 = 0o100755;
-
-/// Commits exactly `files` (path, contents, mode) as the whole tree, with `parents`, without
-/// touching HEAD or the worktree.
-fn commit_tree(
-    repo: &Repository,
-    files: &[(&str, &str, u32)],
-    parents: &[Oid],
-    message: &str,
-) -> Oid {
-    let mut index = git2::Index::new().unwrap();
-    for (path, contents, mode) in files {
-        let id = repo.blob(contents.as_bytes()).unwrap();
-        index
-            .add(&git2::IndexEntry {
-                ctime: git2::IndexTime::new(0, 0),
-                mtime: git2::IndexTime::new(0, 0),
-                dev: 0,
-                ino: 0,
-                mode: *mode,
-                uid: 0,
-                gid: 0,
-                file_size: contents.len() as u32,
-                id,
-                flags: 0,
-                flags_extended: 0,
-                path: path.as_bytes().to_vec(),
-            })
-            .unwrap();
-    }
-    let tree = repo.find_tree(index.write_tree_to(repo).unwrap()).unwrap();
-    let sig = repo.signature().unwrap();
-    let parents: Vec<git2::Commit> = parents
-        .iter()
-        .map(|id| repo.find_commit(*id).unwrap())
-        .collect();
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    repo.commit(None, &sig, &sig, message, &tree, &parent_refs)
-        .unwrap()
-}
 
 fn set_head(repo: &Repository, tip: Oid) {
     repo.reference("refs/heads/main", tip, true, "test")
