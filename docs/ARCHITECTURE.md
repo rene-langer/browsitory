@@ -193,6 +193,22 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   newer search or `cancel_search` stops an older one without going through the command queue
   (same reasoning as `CancelRegistry`).
 
+## Fetch all
+
+- `git-core::remote::fetch_all` fetches every remote in `repo.remotes()` order under one
+  operation id (`TransferOperation::FetchAll`), building each remote's credential provider
+  through a `credentials_for` callback. A failing remote is recorded, not fatal; a cancel stops
+  the loop.
+- The worker turns each failure into `TransferEvent::RemoteFailed` (wire: phase `RemoteFailed`
+  plus `remoteName`) before `Completed`, which fails only when no remote succeeded.
+- `prune: Option<bool>`: `None` is `FetchPrune::Unspecified`, so libgit2 applies
+  `remote.<name>.prune` then `fetch.prune` itself. The UI's Prune toggle is a per-repo
+  `localStorage` preference; unset, every fetch sends `null`.
+- Push and force push of the current branch target its upstream's branch name when the upstream
+  lives on the remote being pushed to (`current_push_target`), else the local name; the
+  force-push lease reads the same target's tracking ref. The UI only offers "Force push (with
+  lease)" after a rejected push whose target equals that resolution.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

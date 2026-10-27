@@ -230,13 +230,34 @@ branches, and one folder per remote holding that remote's branches (fetched
 lazily the first time you expand it). Double-click a local branch, or choose
 **Checkout** from its context menu, to switch to it;
 right-click a branch, a remote folder, or a remote branch to bring up its
-actions — checkout, rename, delete, or merge a local branch; checkout or set a remote
-branch as upstream; fetch, push, edit, manage credentials for, or remove a
-remote. The **+** button in the section header opens **New branch…** or
+actions — checkout, rename, delete, merge, or **Push to…** a local branch; checkout, set as
+upstream, or **Delete <remote>/<branch>…** a remote branch; fetch, push, edit, manage
+credentials for, or remove a remote. The **+** button in the section header opens **New branch…** or
 **Add remote…**. Creating a branch from a specific commit, or starting a
 rebase onto one, is available from that commit's row in the graph. The
 current branch's upstream status, a **Pull** button, and **Set upstream…**
 live at the bottom of the section.
+
+**Publishing a branch.** **Push to…** pushes any local branch to a remote under any name.
+The dialog asks for the remote (the branch's upstream remote, else `origin`), the remote
+branch name (the local name by default) and **Set as upstream**, which is on by default for
+a branch that has no upstream yet. The sync bar's **Push** opens the same dialog when the
+current branch has no upstream, so a new branch is published in one step.
+
+**Ahead/behind.** A local branch with an upstream shows `↑n` (commits to push) and `↓m`
+(commits to pull) next to its name, counted against the last fetch. Nothing is shown when the
+branch is in sync, or when its upstream has never been fetched.
+
+**Fetching every remote.** The chevron next to **Fetch** opens **Fetch all remotes** and a
+**Prune** toggle. Pruning removes remote-tracking branches whose branch was deleted on the
+remote. The toggle is remembered per repository; until you set it, your git config
+(`remote.<name>.prune`, then `fetch.prune`) decides per remote. If a remote fails during Fetch
+all (unreachable, missing credentials), the others are still fetched and the error names the
+ones that failed.
+
+**Deleting a remote branch** deletes it on the remote and removes its remote-tracking branch.
+Like every network operation, it can't be undone with **Undo**. Local branches that tracked it
+keep their upstream setting (git shows such an upstream as "gone").
 
 ![The Branches tree, open over the commit graph](assets/branches.png)
 
@@ -252,6 +273,11 @@ confirmation first, since it can't be undone.
 
 Expand **Tags** to create lightweight or annotated tags, delete local ones,
 and push a selection (or all of them) to a remote.
+
+Tags also appear as outlined badges (with a tag icon) on commit rows in the graph, file history
+and search results. Right-click a badge in the graph to push that tag to a remote, check out its
+commit (detached), or delete the local tag. The Tags panel remains the keyboard path for pushing
+and deleting tags.
 
 ![The Tags panel: create, delete, and push tags](assets/tags.png)
 
