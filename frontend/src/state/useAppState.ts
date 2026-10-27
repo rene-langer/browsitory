@@ -6,7 +6,11 @@ import type {
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
+  MergeOptions,
+  MergeOutcome,
   PullOutcome,
+  StashApplyOutcome,
+  StashOptions,
   PullRequestList,
   RebasePlanEntry,
   RemoteAuthMode,
@@ -104,6 +108,16 @@ export interface AppState {
   rebasePreset: ReadonlyMap<string, PresetAction> | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
+  // Non-null while the merge options dialog is open for that branch.
+  mergeDialog: { branchName: string } | null;
+  // The last "Merge into current branch" result, for its toast.
+  mergeOutcome: { branchName: string; outcome: MergeOutcome } | null;
+  // Non-null while the stash options dialog is open; `paths` non-empty for a file stash.
+  stashDialog: { paths: string[] } | null;
+  // "Restore staged changes" for stash Apply/Pop; session-only, default on.
+  stashRestoreIndex: boolean;
+  // The last stash Apply/Pop result, for its toast.
+  stashOutcome: { action: "apply" | "pop"; outcome: StashApplyOutcome } | null;
   transfer: TransferProgress | null;
   error: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
@@ -199,10 +213,18 @@ export interface UseAppStateResult {
   closeDeleteRemoteBranchDialog(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
-  saveStash(): Promise<void>;
+  saveStash(options?: StashOptions): Promise<void>;
+  openStashDialog(paths: string[]): void;
+  closeStashDialog(): void;
   applyStash(index: number): Promise<void>;
+  popStash(index: number): Promise<void>;
+  setStashRestoreIndex(on: boolean): void;
   dropStash(index: number): Promise<void>;
-  mergeBranch(branchName: string): Promise<void>;
+  openMergeDialog(branchName: string): void;
+  closeMergeDialog(): void;
+  getMergeOptions(): Promise<MergeOptions>;
+  mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
+  mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
@@ -279,6 +301,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     rebasePreset: null,
     pendingPull: null,
     pullOutcome: null,
+    mergeDialog: null,
+    mergeOutcome: null,
+    stashDialog: null,
+    stashRestoreIndex: true,
+    stashOutcome: null,
     transfer: null,
     error: null,
     pending: false,
@@ -503,15 +530,30 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     currentBranch,
   );
 
-  const { saveStash, applyStash, dropStash } = useStashActions(
+  const {
+    saveStash,
+    openStashDialog,
+    closeStashDialog,
+    applyStash,
+    popStash,
+    setStashRestoreIndex,
+    dropStash,
+  } = useStashActions(
     client,
     repoPath,
     runMutation,
     runOptimisticMutation,
+    setState,
+    state.stashes,
+    state.stashRestoreIndex,
   );
 
   const {
+    openMergeDialog,
+    closeMergeDialog,
+    getMergeOptions,
     mergeBranch,
+    mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
     abortMerge,
@@ -595,9 +637,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,
+    openStashDialog,
+    closeStashDialog,
     applyStash,
+    popStash,
+    setStashRestoreIndex,
     dropStash,
+    openMergeDialog,
+    closeMergeDialog,
+    getMergeOptions,
     mergeBranch,
+    mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
     abortMerge,

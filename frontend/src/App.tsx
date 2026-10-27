@@ -512,7 +512,9 @@ function RepoWorkspace({
               onRenameBranch={appState.renameBranch}
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-              onMergeBranch={appState.mergeBranch}
+              onMergeBranch={(name) =>
+                void appState.getMergeOptions().then((options) => appState.mergeBranch(name, options))
+              }
               isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
@@ -542,7 +544,7 @@ function RepoWorkspace({
               pullOutcome={appState.state.pullOutcome}
               onMergePull={async (upstreamRef) => {
                 appState.clearPendingPull();
-                await appState.mergeBranch(upstreamRef);
+                await appState.mergePull(upstreamRef);
               }}
               onRebasePull={(upstreamRef) => {
                 appState.clearPendingPull();
