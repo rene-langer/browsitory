@@ -29,6 +29,10 @@ export interface UseCommitSearchResult {
   close(): void;
 }
 
+function rowKey(row: SelectedRow): string {
+  return row === "uncommitted" ? row : `commit:${row.commitId}`;
+}
+
 export function useCommitSearch(
   client: RepoClient,
   repoPath: string,
@@ -76,6 +80,9 @@ export function useCommitSearch(
       let cursor = from;
       let found = 0;
       let selectFirstPending = selectFirst;
+      // A row picked by the user (or file history) after the round started wins over the
+      // auto-selected first match.
+      const rowAtStart = rowKey(selectedRowRef.current);
       try {
         do {
           const page = await client.searchCommits(repoPath, q, refsRef.current, cursor);
@@ -93,7 +100,9 @@ export function useCommitSearch(
           );
           if (selectFirstPending && page.commits.length > 0) {
             selectFirstPending = false;
-            selectRow({ commitId: page.commits[0].id });
+            if (rowKey(selectedRowRef.current) === rowAtStart) {
+              selectRow({ commitId: page.commits[0].id });
+            }
           }
         } while (found < SEARCH_ROUND_SIZE && cursor !== null);
         inFlight.current = false;

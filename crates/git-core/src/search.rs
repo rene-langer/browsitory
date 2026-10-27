@@ -2,6 +2,8 @@
 //! revwalk over it (`search_commits`).
 
 use git2::{DiffLineType, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort};
+use std::time::{Duration, Instant};
+
 use thiserror::Error;
 
 use crate::graph::{GraphCommit, RefDecorations};
@@ -38,14 +40,22 @@ pub struct SearchQuery {
 pub struct PageLimits {
     pub matches: usize,
     pub scan: usize,
+    /// Wall-clock budget for one page. Checked after each scanned commit, so a page always
+    /// scans at least one commit (a zero budget still makes progress). Keeps a page with
+    /// expensive `path:`/`contents:` diffs from holding the single repo worker for long.
+    pub time: Duration,
 }
 
 impl PageLimits {
     pub const DEFAULT: PageLimits = PageLimits {
         matches: 100,
         scan: 20_000,
+        time: Duration::from_millis(250),
     };
 }
+
+/// While skipping to a cursor's offset, `cancel` is polled once every this many commits.
+const SKIP_CANCEL_INTERVAL: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchPage {
@@ -245,9 +255,12 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 /// One page of commits matching `query`, walking `TOPOLOGICAL | TIME` from the query's
 /// `branch:` term, or else from `refs` (`None` = every local branch; missing names are skipped).
 ///
-/// A page ends after `limits.matches` matches or `limits.scan` commits scanned in this call.
+/// A page ends after `limits.matches` matches, `limits.scan` commits scanned in this call, or
+/// once `limits.time` has elapsed (checked after each commit, so at least one is scanned); in
+/// every case `next_cursor` resumes right after the last scanned commit while any remain.
 /// `cursor` resumes a previous page; it is rejected as `StaleCursor` when the walk's start
-/// points moved since it was issued. `cancel` is polled once before the walk and before each
+/// points moved since it was issued. `cancel` is polled once before the walk, every
+/// `SKIP_CANCEL_INTERVAL` commits while skipping to the cursor, and before each scanned
 /// commit; when it returns `true` the search stops with `Cancelled`.
 pub fn search_commits(
     repo: &Repository,
@@ -259,6 +272,7 @@ pub fn search_commits(
 ) -> Result<SearchPage, SearchError> {
     let starts = start_points(repo, query, refs)?;
     let fingerprint = fingerprint(&starts)?;
+    let started = Instant::now();
     let offset = match cursor {
         None => 0,
         Some(cursor) => {
@@ -298,11 +312,22 @@ pub fn search_commits(
     }
     let decorations = RefDecorations::load(repo)?;
 
-    let mut walk = revwalk.skip(offset).peekable();
+    let mut walk = revwalk.peekable();
+    for skipped in 0..offset {
+        if skipped % SKIP_CANCEL_INTERVAL == 0 && cancel() {
+            return Err(SearchError::Cancelled);
+        }
+        if walk.next().is_none() {
+            break;
+        }
+    }
     let mut position = offset;
     let mut scanned_here = 0;
     let mut commits = Vec::new();
-    while commits.len() < limits.matches && scanned_here < limits.scan {
+    while commits.len() < limits.matches
+        && scanned_here < limits.scan
+        && (scanned_here == 0 || started.elapsed() < limits.time)
+    {
         if cancel() {
             return Err(SearchError::Cancelled);
         }

@@ -7,6 +7,10 @@ use super::{Command, SearchGeneration, WorkerHandle};
 
 /// Parses `query` and runs one page of the search. The walk stops with `Search cancelled.` as
 /// soon as `current` no longer equals `generation` (a newer search or a cancel claimed it).
+///
+/// `PageLimits::DEFAULT` time-boxes the page (~250 ms), so a queued commit/stage command never
+/// waits long behind an expensive `path:`/`contents:` scan; the frontend pages on through
+/// `next_cursor`.
 pub(super) fn search_commits(
     repo: &git2::Repository,
     current: &SearchGeneration,

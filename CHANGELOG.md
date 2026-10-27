@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `branch:`. Terms combine with AND; quote text with spaces or a colon.
 - Results replace the graph, load 100 at a time with **Load more**, and show how many commits
   were scanned; Esc or × returns to the graph and your previous selection.
+- A slow search (`path:`, `contents:`) works in short slices, so committing or staging while it
+  runs is not held up; a row you pick while results load keeps its selection.
 
 ## [0.3.0] - 2026-10-21
 

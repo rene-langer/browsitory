@@ -72,8 +72,13 @@ extension) through `RepoClient`. Refines section 4a of
   lifetime trouble. If the fingerprint differs (a branch moved between pages) or the cursor is
   malformed, the result is `StaleCursor` ("The history changed since this search started.
   Search again."). Duplicates or gaps are never possible.
-- **Page limits.** `search_commits` returns once 100 matches are collected or 20,000 commits
-  have been scanned in this call (`PageLimits::DEFAULT`). `scanned` is cumulative: the walk
+- **Page limits.** `search_commits` returns once 100 matches are collected, 20,000 commits
+  have been scanned in this call, or 250 ms have passed (`PageLimits::DEFAULT`). The time
+  budget exists because a page of `path:`/`contents:` terms can run up to 20,000 tree diffs on
+  the single in-order repo worker, and a commit or stage queued behind it would wait for all of
+  them. The budget is checked after each scanned commit, so a page always scans at least one
+  commit (a zero budget still makes progress), and a time-boxed page returns `next_cursor`
+  like any other partial page, so the frontend's paging rounds simply continue. `scanned` is cumulative: the walk
   position, so it equals the cursor's offset. `next_cursor` is `None` once the walk is
   exhausted. The walk is peeked, so a page that ends exactly at the last commit already returns
   `None`. `PageLimits` is a parameter, not a constant, so tests can use small budgets. The
@@ -86,7 +91,8 @@ extension) through `RepoClient`. Refines section 4a of
 - **One in-flight search per repo, cancelled by a generation counter.** `Worker` and
   `WorkerHandle` share `search_generation: Arc<AtomicU64>`. `WorkerHandle::search_commits`
   increments it before it queues `Command::SearchCommits { generation, … }`. The running search
-  polls `generation != current`, once before the walk starts and before each commit. So a new
+  polls `generation != current`, once before the walk starts, every 1,024 commits while
+  skipping to a cursor's offset, and before each scanned commit. So a new
   search (or "Load more") cancels any older one, even one still queued, and `cancel_search`
   just increments the counter. This is the same side-channel reasoning as `CancelRegistry`. A
   counter replaces the registry's set of operation ids because there is only ever one search to
@@ -109,7 +115,13 @@ extension) through `RepoClient`. Refines section 4a of
   Closing it returns to the same results with the hit selected (file history restores its own
   saved row). The palette command "Search commits" closes an open file history first.
 - **Results reload on `refreshGeneration` and on a graph branch selection change**, from the
-  first page, without changing the selection.
+  first page, without changing the selection. This is deliberate: any mutation (commit, stage,
+  fetch…) bumps `refreshGeneration`, so it restarts the search from page 1 even mid-paging. A
+  moved start point would make the old cursor `StaleCursor` anyway, and restarting keeps the
+  results consistent with the refreshed graph.
+- **The first match is auto-selected only if the selection is unchanged.** If the user picks
+  another row (or opens file history, which selects its first entry) after a round started,
+  a first match arriving later does not override it.
 - **Retry always restarts from the first page.** This covers `StaleCursor` and any failed
   "Load more".
 - **Result rows have no context menu.** Cherry-pick, revert, etc. stay on the graph. Selecting a
@@ -136,8 +148,11 @@ pub enum SearchTerm {
 pub struct SearchQuery { pub terms: Vec<SearchTerm> }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PageLimits { pub matches: usize, pub scan: usize }
-impl PageLimits { pub const DEFAULT: PageLimits = PageLimits { matches: 100, scan: 20_000 }; }
+pub struct PageLimits { pub matches: usize, pub scan: usize, pub time: Duration }
+impl PageLimits {
+    pub const DEFAULT: PageLimits =
+        PageLimits { matches: 100, scan: 20_000, time: Duration::from_millis(250) };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchPage {
@@ -279,15 +294,17 @@ cancelSearch(repoPath: string): Promise<void>;
   unchanged context, contents limited by path, after/before inclusive in the commit's own
   timezone, branch reachable-only and remote-tracking name, unknown branch), AND of two terms,
   `refs` selection with a missing ref skipped, merge judged against its first parent, unborn
-  repo, paging without duplicates, scan budget pages, stale cursor, cancel before the walk and
-  during it.
+  repo, paging without duplicates, scan budget pages, a zero time budget still scanning one commit
+  per page and paging to the full match set, stale cursor, cancel before the walk, while
+  skipping to a cursor, and during it.
 - `repo-service`: a search round-trips through the worker; an invalid query replies its
   message; a stale-generation command replies `Search cancelled.`; a search after
   `cancel_search` still runs.
 - `tauri-app`: `SearchPageDto` serialization (camelCase, null cursor).
 - `vscode-sidecar`: `search_commits` + `cancel_search` round-trip.
 - Frontend (mock `RepoClient`): both clients' wiring; hook debounce, rounds, load more, stale
-  response dropped, error, retry, close restores selection and cancels, reload on refresh; bar
+  response dropped, error, retry, close restores selection and cancels, reload on refresh, no auto-select after the user changed
+  the selection mid-round; bar
   and results components; App: Ctrl/Cmd+F from the graph, results replace the graph, × restores;
   the palette entry.
 - E2E Tauri (`e2e/specs/commit-search.spec.ts`): a commit with a distinct author, search

@@ -169,4 +169,20 @@ describe("useCommitSearch", () => {
     expect(result.current.results).toBeNull();
     expect(selectRow).toHaveBeenLastCalledWith({ commitId: "before" });
   });
+  it("does not auto-select the first match once the user changed the selection mid-round", async () => {
+    const second = deferred<SearchPage>();
+    const searchCommits = vi.fn()
+      .mockResolvedValueOnce(page([], "250:fp", 250))
+      .mockReturnValueOnce(second.promise);
+    const { result, rerender, selectRow } = setup(searchCommits, { row: { commitId: "before" } });
+
+    act(() => result.current.setQuery("x"));
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(2));
+    // The user clicks another row (or opens file history, which selects its first entry).
+    rerender({ generation: 0, refs: ["main"], selected: { commitId: "picked" } });
+
+    await act(async () => second.resolve(page(["c1"], null, 500)));
+    expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]);
+    expect(selectRow).not.toHaveBeenCalled();
+  });
 });

@@ -2,6 +2,7 @@ mod common;
 
 use std::cell::Cell;
 use std::path::Path;
+use std::time::Duration;
 
 use common::{commit_all, init_repo, write_file};
 use git2::{Oid, Repository, Signature, Time};
@@ -350,6 +351,7 @@ fn paging_resumes_without_duplicates_or_gaps() {
     let limits = PageLimits {
         matches: 2,
         scan: 100,
+        time: Duration::MAX,
     };
 
     let mut seen = Vec::new();
@@ -378,6 +380,7 @@ fn a_page_stops_at_the_scan_budget() {
     let limits = PageLimits {
         matches: 10,
         scan: 2,
+        time: Duration::MAX,
     };
 
     let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
@@ -416,6 +419,7 @@ fn resuming_after_history_moved_is_stale() {
     let limits = PageLimits {
         matches: 1,
         scan: 100,
+        time: Duration::MAX,
     };
     let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
     let cursor = first.next_cursor.expect("more to scan");
@@ -452,4 +456,77 @@ fn cancel_stops_before_and_during_the_walk() {
         Err(SearchError::Cancelled)
     ));
     assert_eq!(polls.get(), 3);
+}
+
+#[test]
+fn a_zero_time_budget_still_scans_one_commit_per_page_and_pages_to_the_full_match_set() {
+    let (dir, repo) = init_repo();
+    linear_history(
+        dir.path(),
+        &repo,
+        &["hit 1", "miss", "hit 2", "hit 3", "miss", "hit 4", "hit 5"],
+    );
+    let query = parse_query("hit").unwrap();
+    let limits = PageLimits {
+        matches: 100,
+        scan: 100,
+        time: Duration::ZERO,
+    };
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut previous_scanned = 0;
+    let mut pages = 0;
+    loop {
+        let page =
+            search_commits(&repo, &query, None, cursor.as_deref(), limits, &|| false).unwrap();
+        pages += 1;
+        assert!(page.scanned > previous_scanned, "every page makes progress");
+        previous_scanned = page.scanned;
+        seen.extend(page.commits.into_iter().map(|c| c.summary));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(previous_scanned, 7);
+    assert_eq!(pages, 7);
+    assert_eq!(seen, summaries(&repo, "hit"));
+    assert_eq!(seen, ["hit 5", "hit 4", "hit 3", "hit 2", "hit 1"]);
+}
+
+#[test]
+fn cancel_is_polled_while_skipping_to_a_cursor() {
+    let (dir, repo) = init_repo();
+    linear_history(dir.path(), &repo, &["a", "b", "c", "d", "e", "f"]);
+    let query = parse_query("zzz").unwrap();
+    let limits = PageLimits {
+        matches: 10,
+        scan: 5,
+        time: Duration::MAX,
+    };
+    let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
+    let cursor = first.next_cursor.expect("one commit left");
+
+    // Polls: once before the walk, then while skipping the 5 already-scanned commits, then
+    // once for the last commit. Without polling during the skip it would be 2.
+    let polls = Cell::new(0);
+    let counting = || {
+        polls.set(polls.get() + 1);
+        false
+    };
+    let page = search_commits(&repo, &query, None, Some(&cursor), limits, &counting).unwrap();
+    assert_eq!(page.scanned, 6);
+    assert!(polls.get() > 2, "polled {} times", polls.get());
+
+    // Cancelled on the first poll inside the skip.
+    let polls = Cell::new(0);
+    let cancel = || {
+        polls.set(polls.get() + 1);
+        polls.get() >= 2
+    };
+    assert!(matches!(
+        search_commits(&repo, &query, None, Some(&cursor), limits, &cancel),
+        Err(SearchError::Cancelled)
+    ));
 }
