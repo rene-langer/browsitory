@@ -3724,7 +3724,38 @@ describe("useAppState — refs and remotes (4b)", () => {
 
     await act(() => result.current.fetchAllRemotes());
 
-    expect(result.current.state.error).toBe("Could not fetch from a, b.");
+    expect(result.current.state.error).toBe(
+      "Could not fetch from a, b. b: Save an HTTPS token for this remote before retrying.",
+    );
+  });
+
+  it("adds the credential hint per remote after a partial fetch all", async () => {
+    let listener: ((p: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchAllRemotes: async () => {
+        listener?.(progress("fetch-all-4", "FetchAll", "Starting"));
+        listener?.(progress("fetch-all-4", "FetchAll", "RemoteFailed", { errorKind: "SshAgentFailure", remoteName: "ssh" }));
+        listener?.(progress("fetch-all-4", "FetchAll", "RemoteFailed", { errorKind: "CredentialStoreFailure", remoteName: "https" }));
+        listener?.(progress("fetch-all-4", "FetchAll", "RemoteFailed", { errorKind: "TransferFailed", remoteName: "dead" }));
+        listener?.(progress("fetch-all-4", "FetchAll", "Completed"));
+        return "fetch-all-4";
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.fetchAllRemotes());
+    await act(async () => {});
+
+    expect(result.current.state.error).toBe(
+      "Could not fetch from ssh, https, dead. The other remotes were fetched. " +
+        "ssh: Load a key into your SSH agent and try again. " +
+        "https: The operating-system credential store is unavailable. Unlock it and try again.",
+    );
   });
 
   it("reports a cancelled fetch all as cancelled", async () => {

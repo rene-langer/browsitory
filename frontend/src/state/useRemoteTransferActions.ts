@@ -54,9 +54,28 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
   return "Transfer failed";
 }
 
-function fetchAllFailureMessage(remotes: string[], othersFetched: boolean): string {
-  const base = `Could not fetch from ${remotes.join(", ")}.`;
-  return othersFetched ? `${base} The other remotes were fetched.` : base;
+/** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
+interface FailedRemote {
+  remoteName: string;
+  errorKind: TransferProgress["errorKind"];
+}
+
+// The same fixed hints `transferFailureMessage` gives a single-remote transfer.
+function credentialHint(errorKind: TransferProgress["errorKind"]): string | null {
+  if (errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
+  if (errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
+  if (errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
+  return null;
+}
+
+function fetchAllFailureMessage(failed: FailedRemote[], othersFetched: boolean): string {
+  const parts = [`Could not fetch from ${failed.map((remote) => remote.remoteName).join(", ")}.`];
+  if (othersFetched) parts.push("The other remotes were fetched.");
+  for (const remote of failed) {
+    const hint = credentialHint(remote.errorKind);
+    if (hint !== null) parts.push(`${remote.remoteName}: ${hint}`);
+  }
+  return parts.join(" ");
 }
 
 export interface RemoteTransferActions {
@@ -141,7 +160,7 @@ export function useRemoteTransferActions(
     currentBranchRef.current = currentBranch;
   }, [currentBranch]);
   // Remotes a Fetch all reported as failed (`RemoteFailed`), for the active operation only.
-  const failedRemotes = useRef<string[]>([]);
+  const failedRemotes = useRef<FailedRemote[]>([]);
 
   useEffect(() => {
     return client.subscribeTransferProgress((progress) => {
@@ -156,7 +175,12 @@ export function useRemoteTransferActions(
       if (progress.operationId !== activeTransferId.current) return;
 
       if (progress.phase === "RemoteFailed") {
-        if (progress.remoteName !== undefined) failedRemotes.current = [...failedRemotes.current, progress.remoteName];
+        if (progress.remoteName !== undefined) {
+          failedRemotes.current = [
+            ...failedRemotes.current,
+            { remoteName: progress.remoteName, errorKind: progress.errorKind },
+          ];
+        }
         return;
       }
 
