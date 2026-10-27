@@ -1,5 +1,5 @@
 import { useState, type ComponentProps } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
@@ -1084,5 +1084,77 @@ describe("CommitGraph — history actions", () => {
     const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "C", detachedAt: "C" }, currentBranch: null });
     openMenu("B");
     expect(screen.getByRole("menuitem", { name: "Reset HEAD to here…" })).toBeDisabled();
+  });
+});
+
+describe("CommitGraph — tag badges", () => {
+  const remotes = [
+    { name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null },
+    { name: "backup", fetchUrl: "y", pushUrl: null, authMode: null, authUsername: null },
+  ];
+  const tagged: GraphCommit[] = [{ ...commits[0], tags: ["v2.0"] }, ...commits.slice(1)];
+
+  function renderGraph(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    const handlers = {
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+      onCherryPick: vi.fn(),
+      onRevert: vi.fn(),
+      onCheckoutCommit: vi.fn(),
+      onResetToCommit: vi.fn(),
+      onEditHeadMessage: vi.fn(),
+    };
+    render(
+      <CommitGraph
+        status={[]}
+        commits={tagged}
+        selectedRow="uncommitted"
+        pending={false}
+        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null }}
+        currentBranch="main"
+        {...handlers}
+        {...overrides}
+      />,
+    );
+    return handlers;
+  }
+
+  it("opens a tag menu with push per remote, checkout, and a confirmed delete", async () => {
+    const onPushTag = vi.fn();
+    const onDeleteTag = vi.fn(async () => {});
+    const { onCheckoutCommit } = renderGraph({ remotes, onPushTag, onDeleteTag });
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Push v2.0 to backup" }));
+    expect(onPushTag).toHaveBeenCalledWith("backup", "v2.0");
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    expect(screen.getByRole("menuitem", { name: "Push v2.0 to origin" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
+    expect(onCheckoutCommit).toHaveBeenCalledWith(tagged[0].id);
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete local tag v2.0" });
+    expect(dialog).toHaveTextContent("Delete local tag v2.0?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete tag" }));
+    await waitFor(() => expect(onDeleteTag).toHaveBeenCalledWith("v2.0"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete local tag v2.0" })).toBeNull());
+  });
+
+  it("disables tag push without remotes", () => {
+    renderGraph({ remotes: [], onPushTag: vi.fn(), onDeleteTag: vi.fn(async () => {}) });
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    const push = screen.getByRole("menuitem", { name: "Push tag" });
+    expect(push).toBeDisabled();
+    expect(push).toHaveAttribute("title", "No remote configured.");
+  });
+
+  it("falls back to the commit menu when no tag actions are wired", () => {
+    renderGraph();
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeInTheDocument();
   });
 });

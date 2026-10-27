@@ -5,6 +5,7 @@ import type { SelectedRow } from "../state/useAppState";
 import type { FileHistoryState } from "../state/useFileHistory";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
+import { RefBadges } from "./RefBadges";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./FileHistoryList.module.css";
 
@@ -89,16 +90,7 @@ export function FileHistoryList({
             selected={entry.commit.id === selectedId}
             onClick={() => onSelectRow({ commitId: entry.commit.id })}
           >
-            {entry.commit.branchRefs.map((ref) => (
-              <span key={ref} className={graphStyles.branchBadge}>
-                {ref}
-              </span>
-            ))}
-            {entry.commit.remoteBranchRefs.map((ref) => (
-              <span key={ref} className={graphStyles.remoteBranchBadge}>
-                {ref}
-              </span>
-            ))}
+            <RefBadges commit={entry.commit} />
             <span className={graphStyles.commitSummary}>
               {entry.commit.shortId} {entry.commit.summary}
             </span>

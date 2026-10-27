@@ -46,6 +46,20 @@
   flex-shrink: 0;
 }
 
+/* Outlined with a tag icon, so tags never read as branches. */
+.tagBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
 /* Match the commit rows' size and face; the selected tint comes from ListRow's shared token. */
 li.uncommittedRow {
   font-size: var(--text-sm);

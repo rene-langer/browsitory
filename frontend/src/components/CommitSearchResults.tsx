@@ -6,6 +6,7 @@ import type { SelectedRow } from "../state/useAppState";
 import type { CommitSearchResultsState } from "../state/useCommitSearch";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
+import { RefBadges } from "./RefBadges";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./CommitSearchResults.module.css";
 
@@ -88,16 +89,7 @@ export function CommitSearchResults({
             selected={commit.id === selectedId}
             onClick={() => onSelectRow({ commitId: commit.id })}
           >
-            {commit.branchRefs.map((name) => (
-              <span key={name} className={graphStyles.branchBadge}>
-                {name}
-              </span>
-            ))}
-            {commit.remoteBranchRefs.map((name) => (
-              <span key={name} className={graphStyles.remoteBranchBadge}>
-                {name}
-              </span>
-            ))}
+            <RefBadges commit={commit} />
             <span className={graphStyles.commitSummary}>
               {commit.shortId} {commit.summary}
             </span>

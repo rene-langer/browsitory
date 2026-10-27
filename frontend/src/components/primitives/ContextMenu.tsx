@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Check } from "lucide-react";
 import styles from "./ContextMenu.module.css";
 
 export interface ContextMenuItem {
@@ -8,6 +9,8 @@ export interface ContextMenuItem {
   destructive?: boolean;
   /** Rendered as the item button's `title` — e.g. explaining why it's disabled (issue #31/UX-003). */
   title?: string;
+  /** When set, the item is a checkbox (`menuitemcheckbox` + `aria-checked`) with a check mark. */
+  checked?: boolean;
 }
 
 export function ContextMenu({
@@ -135,7 +138,8 @@ export function ContextMenu({
               itemRefs.current[index] = element;
             }}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked}
             className={styles.item}
             disabled={item.disabled}
             title={item.title}
@@ -148,6 +152,9 @@ export function ContextMenu({
               onClose();
             }}
           >
+            {item.checked !== undefined && (
+              <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
+            )}
             {item.label}
           </button>
         </li>

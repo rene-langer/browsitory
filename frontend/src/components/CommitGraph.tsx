@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, HeadInfo, ResetMode, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, HeadInfo, RemoteInfo, ResetMode, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
   EMPTY_SELECTION,
@@ -20,6 +20,8 @@ import { formatShortDate } from "../lib/formatDate";
 import { ResetDialog } from "./ResetDialog";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { RefBadges } from "./RefBadges";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -51,6 +53,9 @@ export function CommitGraph({
   onLoadMore,
   graphRemoteBranchSelection = null,
   onRequestSearch,
+  remotes = [],
+  onPushTag,
+  onDeleteTag,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -83,6 +88,15 @@ export function CommitGraph({
   graphRemoteBranchSelection?: string[] | null;
   /** Ctrl/Cmd+F while the list has focus: focus the commit search field. */
   onRequestSearch?: () => void;
+  /** Push targets offered by a tag badge's menu. */
+  remotes?: RemoteInfo[];
+  /**
+   * Tag badge menu actions (push, checkout, delete). Without `onPushTag`, tag badges have no menu
+   * and a right-click on them opens the commit menu. Badges stay non-focusable; `TagPanel` is
+   * the keyboard path for push and delete, and the commit menu has "Checkout (detached)".
+   */
+  onPushTag?: (remoteName: string, tag: string) => void;
+  onDeleteTag?: (tag: string) => Promise<void>;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -90,6 +104,8 @@ export function CommitGraph({
     y: number;
   } | null>(null);
   const [resetTarget, setResetTarget] = useState<GraphCommit | null>(null);
+  const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
+  const [tagToDelete, setTagToDelete] = useState<string | null>(null);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -147,6 +163,22 @@ export function CommitGraph({
       items.push({ label: "Edit commit message…", onSelect: onEditHeadMessage, disabled: pending });
     }
     return items;
+  }
+
+  function tagItems(tag: string, commitId: string): ContextMenuItem[] {
+    const push: ContextMenuItem[] =
+      remotes.length === 0
+        ? [{ label: "Push tag", onSelect: () => {}, disabled: true, title: "No remote configured." }]
+        : remotes.map((remote) => ({
+            label: `Push ${tag} to ${remote.name}`,
+            onSelect: () => onPushTag?.(remote.name, tag),
+            disabled: pending,
+          }));
+    return [
+      ...push,
+      { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
+      { label: "Delete tag…", destructive: true, onSelect: () => setTagToDelete(tag), disabled: pending },
+    ];
   }
 
   // Keep the keyboard-driven selection visible in a long history.
@@ -352,19 +384,15 @@ export function CommitGraph({
               hoveredSegmentId={hoveredSegmentId}
             />
           </div>
-          {commit.branchRefs.map((ref) => (
-            <span key={ref} className={styles.branchBadge}>
-              {ref}
-            </span>
-          ))}
-          {(shownRemoteBranches === null
-            ? commit.remoteBranchRefs
-            : commit.remoteBranchRefs.filter((ref) => shownRemoteBranches.has(ref))
-          ).map((ref) => (
-            <span key={ref} className={styles.remoteBranchBadge}>
-              {ref}
-            </span>
-          ))}
+          <RefBadges
+            commit={commit}
+            shownRemoteBranches={shownRemoteBranches}
+            onTagContextMenu={
+              onPushTag === undefined
+                ? undefined
+                : (tag, event) => setTagMenu({ tag, commitId: commit.id, x: event.clientX, y: event.clientY })
+            }
+          />
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>
@@ -395,7 +423,28 @@ export function CommitGraph({
           }
         />
       )}
+      {tagMenu !== null && (
+        <ContextMenu
+          x={tagMenu.x}
+          y={tagMenu.y}
+          onClose={() => {
+            setTagMenu(null);
+            listRef.current?.focus();
+          }}
+          items={tagItems(tagMenu.tag, tagMenu.commitId)}
+        />
+      )}
     </ul>
+    {tagToDelete !== null && (
+      <ConfirmDialog
+        ariaLabel={`Delete local tag ${tagToDelete}`}
+        message={`Delete local tag ${tagToDelete}?`}
+        confirmLabel="Delete tag"
+        confirmDisabled={pending}
+        onConfirm={() => void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null))}
+        onCancel={() => setTagToDelete(null)}
+      />
+    )}
     {resetTarget !== null && currentBranch !== null && (
       <ResetDialog
         branch={currentBranch}

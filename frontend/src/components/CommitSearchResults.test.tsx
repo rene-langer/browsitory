@@ -89,3 +89,13 @@ it("shows the error inline with Retry and Dismiss", () => {
   expect(props.onClose).toHaveBeenCalled();
   expect(screen.queryByText("No commits match this search.")).toBeNull();
 });
+
+it("renders branch, remote and tag badges on result rows", () => {
+  renderResults({
+    ...base,
+    commits: [{ ...c("a"), branchRefs: ["main"], remoteBranchRefs: ["origin/main"], tags: ["v1.0"] }],
+  });
+  expect(screen.getByText("main")).toBeInTheDocument();
+  expect(screen.getByText("origin/main")).toBeInTheDocument();
+  expect(screen.getByTitle("Tag v1.0")).toHaveTextContent("v1.0");
+});
