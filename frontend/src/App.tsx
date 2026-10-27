@@ -35,6 +35,7 @@ import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
+import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import type { RepoClient } from "./ipc/RepoClient";
@@ -320,6 +321,15 @@ function RepoWorkspace({
     if (pullOutcome.kind === "UpToDate") pushToast("Already up to date");
     else if (pullOutcome.kind === "FastForwarded") pushToast(`Pulled ${pullOutcome.upstreamRef}`);
   }, [pullOutcome, pushToast]);
+  const mergeOutcome = appState.state.mergeOutcome;
+  useEffect(() => {
+    if (mergeOutcome === null) return;
+    const { branchName, outcome } = mergeOutcome;
+    if (outcome.kind === "UpToDate") pushToast("Already up to date");
+    else if (outcome.kind === "FastForwarded") pushToast(`Fast-forwarded to ${branchName}`);
+    else if (outcome.kind === "Squashed") pushToast(`Squashed ${branchName}. Review and commit.`);
+  }, [mergeOutcome, pushToast]);
+  const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
 
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
@@ -394,6 +404,15 @@ function RepoWorkspace({
             void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
           }
           onCancel={appState.cancelForcePush}
+        />
+      )}
+      {active && mergeDialogBranch !== null && (
+        <MergeDialog
+          branchName={mergeDialogBranch}
+          currentBranchName={currentBranchName}
+          loadOptions={appState.getMergeOptions}
+          onMerge={(options) => void appState.mergeBranch(mergeDialogBranch, options)}
+          onCancel={appState.closeMergeDialog}
         />
       )}
       {active && pushDialogBranch !== null && (
@@ -512,9 +531,7 @@ function RepoWorkspace({
               onRenameBranch={appState.renameBranch}
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-              onMergeBranch={(name) =>
-                void appState.getMergeOptions().then((options) => appState.mergeBranch(name, options))
-              }
+              onMergeBranch={appState.openMergeDialog}
               isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}

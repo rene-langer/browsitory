@@ -652,7 +652,7 @@ export function BranchTree({
     ];
     if (!branch.isCurrent) {
       items.push({
-        label: "Merge into current branch",
+        label: "Merge into current branch…",
         disabled: isMerging || isRebasing || operationDisabled,
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => onMergeBranch(branch.name),

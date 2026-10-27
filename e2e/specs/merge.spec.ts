@@ -7,6 +7,26 @@ import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
+/**
+ * "Merge into current branch…" opens the merge options dialog. Picks "Fast-forward if possible"
+ * without Squash (a remembered choice or the machine's `merge.ff` could preselect something
+ * else) and confirms with Merge, which is enabled once the dialog has loaded its options.
+ */
+async function confirmMergeDialog(branch: string) {
+  const dialog = `dialog[aria-label="Merge ${branch}"]`;
+  const confirmMerge = await $(`${dialog} button=Merge`);
+  await confirmMerge.waitForExist({ timeout: 10000 });
+  await browser.waitUntil(async () => confirmMerge.isEnabled(), {
+    timeout: 10000,
+    timeoutMsg: "the merge dialog did not load its options",
+  });
+  const squash = await $(`${dialog} input[type="checkbox"]`);
+  if (await squash.isSelected()) await browser.execute((el) => (el as HTMLElement).click(), squash);
+  const allow = await $(`${dialog} input[type="radio"][value="Allow"]`);
+  await browser.execute((el) => (el as HTMLElement).click(), allow);
+  await browser.execute((el) => (el as HTMLElement).click(), confirmMerge);
+}
+
 describe("Browsitory merge with conflict resolution", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "line one\nline two\nline three\n");
@@ -62,6 +82,7 @@ describe("Browsitory merge with conflict resolution", () => {
     const mergeButton = await $("button*=Merge into current branch");
     await mergeButton.waitForExist({ timeout: 10000 });
     await mergeButton.click();
+    await confirmMergeDialog("e2e-merge-feature");
 
     // The uncommitted file list is a `role="listbox"` of `<li role="option">` rows, each holding
     // a `<span>{path} ({kind})</span>` plus icon-only stage/unstage controls — there is no
@@ -155,6 +176,7 @@ describe("Browsitory merge with conflict resolution", () => {
     const mergeButton = await $("button*=Merge into current branch");
     await mergeButton.waitForExist({ timeout: 10000 });
     await mergeButton.click();
+    await confirmMergeDialog("e2e-merge-adddelete-feature");
 
     // See the first test: the row's path text lives in a `<span>` inside `<li role="option">`.
     const conflictedRow = await $("span*=adddelete.txt (Conflicted)");
@@ -236,6 +258,7 @@ describe("Browsitory merge with conflict resolution", () => {
     const mergeButton = await $("button*=Merge into current branch");
     await mergeButton.waitForExist({ timeout: 10000 });
     await mergeButton.click();
+    await confirmMergeDialog("e2e-merge-abort-feature");
 
     const conflictedRow = await $("span*=abort.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });

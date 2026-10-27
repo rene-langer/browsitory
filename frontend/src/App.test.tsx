@@ -639,6 +639,64 @@ describe("App", () => {
     localStorage.clear();
   });
 
+  describe("merge options", () => {
+    function mergeClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => [],
+        listBranches: async () => [
+          { name: "main", isCurrent: true },
+          { name: "feature", isCurrent: false },
+        ],
+        listStashes: async () => [],
+        getMergeOptions: async () => ({ fastForward: "Allow", squash: false }),
+        setMergeOptions: async () => {},
+        ...overrides,
+      });
+    }
+
+    async function mergeFromMenu() {
+      fireEvent.contextMenu(await screen.findByRole("button", { name: "feature" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Merge feature" });
+      expect(within(dialog).getByRole("heading")).toHaveTextContent("Merge feature into main");
+      const merge = within(dialog).getByRole("button", { name: "Merge" });
+      await waitFor(() => expect(merge).toBeEnabled());
+      return { dialog, merge };
+    }
+
+    it("opens the merge dialog from the branch menu and merges with the chosen options", async () => {
+      const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+      const setMergeOptions = vi.fn(async () => {});
+      render(<App client={mergeClient({ mergeBranch, setMergeOptions })} />);
+
+      const { dialog, merge } = await mergeFromMenu();
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Always create a merge commit" }));
+      fireEvent.click(merge);
+
+      const options = { fastForward: "Never", squash: false };
+      await waitFor(() => expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "feature", options));
+      expect(setMergeOptions).toHaveBeenCalledWith("/repos/a", options);
+      expect(screen.queryByRole("dialog", { name: "Merge feature" })).toBeNull();
+    });
+
+    it.each([
+      [{ kind: "Squashed" as const }, "Squashed feature. Review and commit."],
+      [{ kind: "UpToDate" as const }, "Already up to date"],
+      [{ kind: "FastForwarded" as const }, "Fast-forwarded to feature"],
+    ])("shows a toast for a %o merge", async (outcome, toast) => {
+      render(<App client={mergeClient({ mergeBranch: async () => outcome })} />);
+
+      const { merge } = await mergeFromMenu();
+      fireEvent.click(merge);
+
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+    });
+  });
+
   it("opens a working-tree file's history in place of the graph and closes it again", async () => {
     const graphCommit = {
       id: "c2",
