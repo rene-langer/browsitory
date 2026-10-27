@@ -299,6 +299,73 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
     assert_eq!(commit_hunks.len(), 1);
 }
 
+#[test]
+fn compare_methods_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "first");
+    let first = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    write_file(dir.path(), "a.txt", "two\n");
+    commit_all(&repo, "second");
+    let second = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    write_file(dir.path(), "a.txt", "three\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let opts = serde_json::json!({"ignoreWhitespace": false, "contextLines": 3});
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let files = sidecar.call(
+        2,
+        "get_range_files",
+        serde_json::json!({"repoPath": repo_path, "fromId": first, "toId": second}),
+    );
+    assert_eq!(
+        files["result"],
+        serde_json::json!([{"path": "a.txt", "oldPath": null}])
+    );
+
+    let range_diff = sidecar.call(
+        3,
+        "get_range_diff",
+        serde_json::json!({"repoPath": repo_path, "fromId": first, "toId": second, "path": "a.txt", "oldPath": null, "opts": opts}),
+    );
+    assert_eq!(range_diff["result"].as_array().unwrap().len(), 1);
+
+    let wt_files = sidecar.call(
+        4,
+        "get_working_tree_compare_files",
+        serde_json::json!({"repoPath": repo_path, "commitId": first}),
+    );
+    assert_eq!(wt_files["result"][0]["path"], "a.txt");
+
+    let wt_diff = sidecar.call(
+        5,
+        "get_working_tree_compare_diff",
+        serde_json::json!({"repoPath": repo_path, "commitId": first, "path": "a.txt", "oldPath": null, "opts": opts}),
+    );
+    assert_eq!(wt_diff["result"][0]["lines"][1]["content"], "three\n");
+
+    let range = sidecar.call(
+        6,
+        "get_branch_compare_range",
+        serde_json::json!({"repoPath": repo_path, "refName": "refs/heads/nope"}),
+    );
+    assert_eq!(range["error"]["message"], "No branch named \"nope\".");
+}
+
 struct ConfigDirGuard {
     _dir: tempfile::TempDir,
 }

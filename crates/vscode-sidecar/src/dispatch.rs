@@ -71,6 +71,11 @@ pub fn dispatch(
         "search_commits" => search_commits(params, repos),
         "cancel_search" => cancel_search(params, repos),
         "get_commit_rename_diff" => get_commit_rename_diff(params, repos),
+        "get_range_files" => get_range_files(params, repos),
+        "get_range_diff" => get_range_diff(params, repos),
+        "get_working_tree_compare_files" => get_working_tree_compare_files(params, repos),
+        "get_working_tree_compare_diff" => get_working_tree_compare_diff(params, repos),
+        "get_branch_compare_range" => get_branch_compare_range(params, repos),
         "list_recent_repos" => list_recent_repos(),
         "list_open_repos" => list_open_repos_handler(),
         "persist_open_repos" => persist_open_repos(params),
@@ -482,6 +487,132 @@ fn get_commit_rename_diff(params: Value, repos: &Repos) -> Result<Value, String>
         .map(DiffHunkDto::from)
         .collect();
     serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangedFileDto {
+    path: String,
+    old_path: Option<String>,
+}
+
+impl From<git_core::diff::ChangedFile> for ChangedFileDto {
+    fn from(f: git_core::diff::ChangedFile) -> Self {
+        ChangedFileDto {
+            path: f.path,
+            old_path: f.old_path,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompareRangeDto {
+    from_id: String,
+    to_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetRangeFilesParams {
+    repo_path: String,
+    from_id: String,
+    to_id: String,
+}
+
+fn get_range_files(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetRangeFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
+        .get_range_files(params.from_id, params.to_id)?
+        .into_iter()
+        .map(ChangedFileDto::from)
+        .collect();
+    serde_json::to_value(files).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetRangeDiffParams {
+    repo_path: String,
+    from_id: String,
+    to_id: String,
+    path: String,
+    old_path: Option<String>,
+    opts: DiffOptionsDto,
+}
+
+fn get_range_diff(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetRangeDiffParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
+        .get_range_diff(
+            params.from_id,
+            params.to_id,
+            params.path,
+            params.old_path,
+            params.opts.into(),
+        )?
+        .into_iter()
+        .map(DiffHunkDto::from)
+        .collect();
+    serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+fn get_working_tree_compare_files(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetCommitFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
+        .get_working_tree_compare_files(params.commit_id)?
+        .into_iter()
+        .map(ChangedFileDto::from)
+        .collect();
+    serde_json::to_value(files).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetWorkingTreeCompareDiffParams {
+    repo_path: String,
+    commit_id: String,
+    path: String,
+    old_path: Option<String>,
+    opts: DiffOptionsDto,
+}
+
+fn get_working_tree_compare_diff(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetWorkingTreeCompareDiffParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
+        .get_working_tree_compare_diff(
+            params.commit_id,
+            params.path,
+            params.old_path,
+            params.opts.into(),
+        )?
+        .into_iter()
+        .map(DiffHunkDto::from)
+        .collect();
+    serde_json::to_value(hunks).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetBranchCompareRangeParams {
+    repo_path: String,
+    ref_name: String,
+}
+
+fn get_branch_compare_range(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: GetBranchCompareRangeParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let range =
+        worker_handle(repos, &params.repo_path)?.get_branch_compare_range(params.ref_name)?;
+    serde_json::to_value(CompareRangeDto {
+        from_id: range.from_id,
+        to_id: range.to_id,
+    })
+    .map_err(|error| error.to_string())
 }
 
 fn list_recent_repos() -> Result<Value, String> {
