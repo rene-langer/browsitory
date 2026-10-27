@@ -29,6 +29,7 @@ use crate::pull_requests::{
 };
 
 mod branch;
+mod compare;
 mod forge;
 mod history;
 mod merge;
@@ -137,6 +138,34 @@ pub(crate) enum Command {
         new_path: String,
         opts: git_core::diff::DiffOptions,
         reply: Sender<Result<Vec<DiffHunk>, String>>,
+    },
+    GetRangeFiles {
+        from_id: String,
+        to_id: String,
+        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, String>>,
+    },
+    GetRangeDiff {
+        from_id: String,
+        to_id: String,
+        path: String,
+        old_path: Option<String>,
+        opts: git_core::diff::DiffOptions,
+        reply: Sender<Result<Vec<DiffHunk>, String>>,
+    },
+    GetWorkingTreeCompareFiles {
+        commit_id: String,
+        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, String>>,
+    },
+    GetWorkingTreeCompareDiff {
+        commit_id: String,
+        path: String,
+        old_path: Option<String>,
+        opts: git_core::diff::DiffOptions,
+        reply: Sender<Result<Vec<DiffHunk>, String>>,
+    },
+    GetBranchCompareRange {
+        ref_name: String,
+        reply: Sender<Result<git_core::diff::CompareRange, String>>,
     },
     StageFile {
         path: String,
@@ -716,6 +745,36 @@ impl Worker {
                     } => status::get_commit_rename_diff(
                         &repo, commit_id, old_path, new_path, opts, reply,
                     ),
+                    Command::GetRangeFiles {
+                        from_id,
+                        to_id,
+                        reply,
+                    } => compare::get_range_files(&repo, from_id, to_id, reply),
+                    Command::GetRangeDiff {
+                        from_id,
+                        to_id,
+                        path,
+                        old_path,
+                        opts,
+                        reply,
+                    } => {
+                        compare::get_range_diff(&repo, from_id, to_id, path, old_path, opts, reply)
+                    }
+                    Command::GetWorkingTreeCompareFiles { commit_id, reply } => {
+                        compare::get_working_tree_compare_files(&repo, commit_id, reply)
+                    }
+                    Command::GetWorkingTreeCompareDiff {
+                        commit_id,
+                        path,
+                        old_path,
+                        opts,
+                        reply,
+                    } => compare::get_working_tree_compare_diff(
+                        &repo, commit_id, path, old_path, opts, reply,
+                    ),
+                    Command::GetBranchCompareRange { ref_name, reply } => {
+                        compare::get_branch_compare_range(&repo, ref_name, reply)
+                    }
                     Command::StageFile { path, reply } => status::stage_file(&repo, path, reply),
                     Command::UnstageFile { path, reply } => {
                         status::unstage_file(&repo, path, reply)
@@ -2957,6 +3016,86 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hunks.len(), 1);
+    }
+
+    #[test]
+    fn range_and_working_tree_compares_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "first");
+        let first = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        write_file(dir.path(), "a.txt", "two\n");
+        commit_all(&repo, "second");
+        let second = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        write_file(dir.path(), "a.txt", "three\n");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let a = git_core::diff::ChangedFile {
+            path: "a.txt".into(),
+            old_path: None,
+        };
+        let opts = git_core::diff::DiffOptions::default();
+
+        assert_eq!(
+            handle
+                .get_range_files(first.clone(), second.clone())
+                .unwrap(),
+            vec![a.clone()]
+        );
+        let hunks = handle
+            .get_range_diff(first.clone(), second, "a.txt".into(), None, opts)
+            .unwrap();
+        assert!(hunks[0].lines.iter().any(|l| l.content == "two\n"));
+
+        assert_eq!(
+            handle
+                .get_working_tree_compare_files(first.clone())
+                .unwrap(),
+            vec![a]
+        );
+        let hunks = handle
+            .get_working_tree_compare_diff(first, "a.txt".into(), None, opts)
+            .unwrap();
+        assert!(hunks[0].lines.iter().any(|l| l.content == "three\n"));
+    }
+
+    #[test]
+    fn branch_compare_range_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "base");
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &base, false).unwrap();
+        write_file(dir.path(), "a.txt", "two\n");
+        commit_all(&repo, "main only");
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let range = handle
+            .get_branch_compare_range("refs/heads/feature".into())
+            .unwrap();
+        assert_eq!(range.from_id, base.id().to_string());
+        assert_eq!(range.to_id, base.id().to_string());
+        assert_eq!(
+            handle
+                .get_branch_compare_range("refs/heads/nope".into())
+                .unwrap_err(),
+            "No branch named \"nope\"."
+        );
     }
 
     #[test]
