@@ -160,7 +160,7 @@ const noopHandlers = {
   onStageLines: vi.fn(),
   onUnstageLines: vi.fn(),
   onDiscardLines: vi.fn(),
-  onCommit: vi.fn(),
+  onCommit: vi.fn(async () => true),
   onSaveStash: vi.fn(),
   onOpenStashDialog: vi.fn(),
   onSelectRow: vi.fn(),

@@ -3,6 +3,31 @@ import { describe, expect, it, vi } from "vitest";
 import { TransferPanel } from "./TransferPanel";
 
 describe("TransferPanel", () => {
+  it("names the running pre-push hook instead of object counts, and keeps Cancel", () => {
+    const onCancel = vi.fn();
+    render(
+      <TransferPanel
+        progress={{
+          operationId: "push-1",
+          operation: "PushBranch",
+          phase: "RunningHook",
+          errorKind: null,
+          current: 0,
+          total: 0,
+          receivedBytes: 0,
+          message: null,
+          hookOutput: null,
+        }}
+        onCancel={onCancel}
+      />,
+    );
+
+    expect(screen.getByText("Running pre-push hook…")).toBeInTheDocument();
+    expect(screen.queryByText(/objects/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledWith("push-1");
+  });
+
   it("calls onCancel with the in-flight operation id when Cancel is clicked", () => {
     const onCancel = vi.fn();
     render(

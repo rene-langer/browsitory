@@ -26,6 +26,8 @@ import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts, type ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
+import { HookFailureDialog } from "./components/HookFailureDialog";
+import { retrySuccessLabel } from "./lib/hookFailure";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { Sidebar } from "./components/primitives/Sidebar";
@@ -426,7 +428,22 @@ function RepoWorkspace({
               Force push (with lease)…
             </button>
           )}
+          {appState.state.hookFailure !== null && !appState.state.hookFailure.dialogOpen && (
+            <button type="button" onClick={appState.openHookFailure}>
+              Show hook output…
+            </button>
+          )}
         </div>
+      )}
+      {active && appState.state.hookFailure?.dialogOpen === true && (
+        <HookFailureDialog
+          failure={appState.state.hookFailure}
+          onRetry={() => {
+            const retry = appState.state.hookFailure!.retry;
+            void announce(retrySuccessLabel(retry), appState.retryWithoutHooks)(retry);
+          }}
+          onClose={appState.closeHookFailure}
+        />
       )}
       {active && appState.state.forcePushConfirm !== null && (
         <ConfirmDialog
@@ -867,6 +884,14 @@ function RepoWorkspace({
                   }
                   focusCommitMessage={focusCommitMessage}
                   onCommitMessageFocused={clearFocusCommitMessage}
+                  commitHooks={{
+                    skip: appState.state.skipHooks,
+                    onToggleSkip: appState.setSkipHooks,
+                    running: appState.state.hookRun,
+                    onCancel: () => void appState.cancelHookRun(),
+                  }}
+                  clearCommitMessage={appState.state.clearCommitMessage}
+                  onCommitMessageCleared={appState.clearCommitMessageHandled}
                   rebaseProgress={appState.state.rebaseProgress}
                   onRebaseContinue={appState.rebaseContinue}
                   onRebaseAbort={appState.abortRebase}

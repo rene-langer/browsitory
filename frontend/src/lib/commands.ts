@@ -365,6 +365,20 @@ export function buildCommands(
     }
   }
 
+  // Changes no repository state (only what the next commit passes), so it is offered even while
+  // other operations are blocked.
+  if (state.headInfo.commitHooks.length > 0) {
+    commands.push({
+      id: "toggle-skip-hooks",
+      label: state.skipHooks ? "Run hooks for the next commit" : "Skip hooks for the next commit",
+      keywords: ["hooks", "skip", "no-verify", "bypass", "pre-commit", "commit-msg"],
+      run: () => {
+        appState.selectRow("uncommitted");
+        appState.setSkipHooks(!state.skipHooks);
+      },
+    });
+  }
+
   if (!repositoryOperationDisabled) {
     for (const branch of state.branches) {
       if (branch.isCurrent) continue;
