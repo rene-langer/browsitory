@@ -1064,4 +1064,27 @@ describe("vscodeRepoClient", () => {
     respond(1, result);
     await expect(promise).resolves.toEqual(result);
   });
+
+  it("wires searchCommits and cancelSearch", async () => {
+    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], null);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "search_commits",
+      params: { repoPath: "/repo", query: "fix", refs: ["main"], cursor: null },
+    });
+    const page = { commits: [], nextCursor: null, scanned: 3 };
+    respond(1, page);
+    await expect(promise).resolves.toEqual(page);
+
+    const cancel = vscodeRepoClient.cancelSearch("/repo");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "cancel_search",
+      params: { repoPath: "/repo" },
+    });
+    respond(2, null);
+    await expect(cancel).resolves.toBeNull();
+  });
 });

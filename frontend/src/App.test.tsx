@@ -38,6 +38,8 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     getWorkingDiff: async () => [],
     getCommitDiff: async () => [],
     getFileHistory: unused,
+    searchCommits: unused,
+    cancelSearch: async () => {},
     getCommitRenameDiff: unused,
     getCommitFiles: unused,
     getCommitMessage: unused,

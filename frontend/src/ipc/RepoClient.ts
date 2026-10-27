@@ -195,6 +195,15 @@ export interface FileHistoryEntry {
   oldPath: string | null;
 }
 
+/** One page of a commit search. */
+export interface SearchPage {
+  commits: GraphCommit[];
+  /** Resume point for the next page, or `null` once every commit has been scanned. */
+  nextCursor: string | null;
+  /** Commits scanned so far across all pages of this search (cumulative). */
+  scanned: number;
+}
+
 export interface BlameLine {
   lineNumber: number;
   content: string;
@@ -353,6 +362,16 @@ export interface RepoClient {
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
+  /**
+   * One page of commits matching `query` (see the search syntax help). `refs` has the same
+   * meaning as `getCommitGraph`'s `selectedBranches` (`null` = every local branch); a
+   * `branch:` term overrides it. `cursor` is a previous page's `nextCursor`, or `null` for the
+   * first page. Rejects with the query error text, or "Search cancelled." when a newer search
+   * (or `cancelSearch`) superseded this one.
+   */
+  searchCommits(repoPath: string, query: string, refs: string[] | null, cursor: string | null): Promise<SearchPage>;
+  /** Stops the repo's in-flight search, if any. */
+  cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
   // Full raw commit message (subject plus body).
