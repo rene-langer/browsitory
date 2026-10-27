@@ -16,6 +16,8 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  ChangedFile,
+  CompareRange,
   SearchPage,
   ForgeProvider,
   ForgeRepository,
@@ -132,6 +134,16 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     loggedInvoke<string[]>("get_commit_files", { repoPath, commitId }),
+  getRangeFiles: (repoPath: string, fromId: string, toId: string) =>
+    loggedInvoke<ChangedFile[]>("get_range_files", { repoPath, fromId, toId }),
+  getRangeDiff: (repoPath: string, fromId: string, toId: string, path: string, oldPath: string | null, opts: DiffOptions) =>
+    loggedInvoke<DiffHunk[]>("get_range_diff", { repoPath, fromId, toId, path, oldPath, opts }),
+  getWorkingTreeCompareFiles: (repoPath: string, commitId: string) =>
+    loggedInvoke<ChangedFile[]>("get_working_tree_compare_files", { repoPath, commitId }),
+  getWorkingTreeCompareDiff: (repoPath: string, commitId: string, path: string, oldPath: string | null, opts: DiffOptions) =>
+    loggedInvoke<DiffHunk[]>("get_working_tree_compare_diff", { repoPath, commitId, path, oldPath, opts }),
+  getBranchCompareRange: (repoPath: string, refName: string) =>
+    loggedInvoke<CompareRange>("get_branch_compare_range", { repoPath, refName }),
   getCommitMessage: (repoPath: string, commitId: string) =>
     loggedInvoke<string>("get_commit_message", { repoPath, commitId }),
   getCommitSignature: (repoPath: string, commitId: string) =>
