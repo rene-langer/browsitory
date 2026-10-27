@@ -685,12 +685,12 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires fetchRemote, pushCurrentBranch, and pushTags", async () => {
-    const fetchPromise = vscodeRepoClient.fetchRemote("/repo", "origin");
+    const fetchPromise = vscodeRepoClient.fetchRemote("/repo", "origin", false);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "fetch_remote",
-      params: { repoPath: "/repo", remoteName: "origin" },
+      params: { repoPath: "/repo", remoteName: "origin", prune: false },
     });
     respond(1, "fetch-1");
     await expect(fetchPromise).resolves.toBe("fetch-1");
@@ -714,6 +714,38 @@ describe("vscodeRepoClient", () => {
     });
     respond(3, "push-2");
     await expect(tagsPromise).resolves.toBe("push-2");
+  });
+
+  it("wires fetchAllRemotes, pushBranch and deleteRemoteBranch", async () => {
+    const all = vscodeRepoClient.fetchAllRemotes("/repo", null);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "fetch_all_remotes",
+      params: { repoPath: "/repo", prune: null },
+    });
+    respond(1, "fetch-all-1");
+    await expect(all).resolves.toBe("fetch-all-1");
+
+    const push = vscodeRepoClient.pushBranch("/repo", "origin", "topic", "topic", false);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "push_branch",
+      params: { repoPath: "/repo", remoteName: "origin", localBranch: "topic", remoteBranch: "topic", setUpstream: false },
+    });
+    respond(2, "push-2");
+    await expect(push).resolves.toBe("push-2");
+
+    const del = vscodeRepoClient.deleteRemoteBranch("/repo", "origin", "topic");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "delete_remote_branch",
+      params: { repoPath: "/repo", remoteName: "origin", branchName: "topic" },
+    });
+    respond(3, "delete-remote-3");
+    await expect(del).resolves.toBe("delete-remote-3");
   });
 
   it("wires cancelTransfer", async () => {
@@ -785,7 +817,7 @@ describe("vscodeRepoClient", () => {
   it("never settles a pending request from a notification, and vice versa", async () => {
     const received: unknown[] = [];
     vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
-    const promise = vscodeRepoClient.fetchRemote("/repo", "origin");
+    const promise = vscodeRepoClient.fetchRemote("/repo", "origin", null);
     let settled = false;
     void promise.then(() => {
       settled = true;

@@ -205,9 +205,21 @@ export const tauriRepoClient: RepoClient = {
   listTags: (repoPath: string) => loggedInvoke<TagInfo[]>("list_tags", { repoPath }),
   createTag: (repoPath: string, name: string, message: string | null) => loggedInvoke("create_tag", { repoPath, name, message }),
   deleteTag: (repoPath: string, name: string) => loggedInvoke("delete_tag", { repoPath, name }),
-  fetchRemote: async (repoPath: string, remoteName: string) => {
+  fetchRemote: async (repoPath: string, remoteName: string, prune: boolean | null) => {
     await transferListenersReady;
-    return loggedInvoke<string>("fetch_remote", { repoPath, remoteName });
+    return loggedInvoke<string>("fetch_remote", { repoPath, remoteName, prune });
+  },
+  fetchAllRemotes: async (repoPath: string, prune: boolean | null) => {
+    await transferListenersReady;
+    return loggedInvoke<string>("fetch_all_remotes", { repoPath, prune });
+  },
+  pushBranch: async (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean) => {
+    await transferListenersReady;
+    return loggedInvoke<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream });
+  },
+  deleteRemoteBranch: async (repoPath: string, remoteName: string, branchName: string) => {
+    await transferListenersReady;
+    return loggedInvoke<string>("delete_remote_branch", { repoPath, remoteName, branchName });
   },
   pushCurrentBranch: async (repoPath: string, remoteName: string) => {
     await transferListenersReady;

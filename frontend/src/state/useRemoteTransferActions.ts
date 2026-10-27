@@ -269,7 +269,7 @@ export function useRemoteTransferActions(
   );
 
   const fetchRemote = useCallback(
-    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName)),
+    (remoteName: string) => startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName, null)),
     [client, startTransfer, repoPath],
   );
   const listRemoteBranches = useCallback(

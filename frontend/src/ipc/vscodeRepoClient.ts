@@ -321,8 +321,14 @@ export const vscodeRepoClient: RepoClient = {
   // Fetch and both pushes resolve with the operation id as soon as the sidecar has one — the
   // transfer itself is still running, and reports through `subscribeTransferProgress` below.
   // `pullCurrentUpstream` is the exception: it settles only once the whole pull is done.
-  fetchRemote: (repoPath: string, remoteName: string) =>
-    call<string>("fetch_remote", { repoPath, remoteName }),
+  fetchRemote: (repoPath: string, remoteName: string, prune: boolean | null) =>
+    call<string>("fetch_remote", { repoPath, remoteName, prune }),
+  fetchAllRemotes: (repoPath: string, prune: boolean | null) =>
+    call<string>("fetch_all_remotes", { repoPath, prune }),
+  pushBranch: (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean) =>
+    call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream }),
+  deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string) =>
+    call<string>("delete_remote_branch", { repoPath, remoteName, branchName }),
   pushCurrentBranch: (repoPath: string, remoteName: string) =>
     call<string>("push_current_branch", { repoPath, remoteName }),
   pushTags: (repoPath: string, remoteName: string, names: string[]) =>
