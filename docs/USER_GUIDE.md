@@ -148,6 +148,50 @@ Selecting a signed commit shows a **Signature** row in the commit details:
 - **Bad signature**: the commit does not match its signature.
 - **Signature could not be checked**: for example gpg is not installed.
 
+### Hooks
+
+Browsitory runs your repository's client-side git hooks the way git does:
+
+| Hook | Runs when you… |
+|---|---|
+| `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend |
+| `pre-push` | push a branch, force push, push tags, **Push to…**, or delete a remote branch |
+| `post-checkout` | switch branches or check out a commit |
+| `post-merge` | merge a branch (also a squash merge) or pull with a fast-forward |
+
+Hooks come from `core.hooksPath` (a relative path is relative to the repository root) or
+`.git/hooks`, and get the same arguments, standard input and `GIT_DIR` git gives them. On macOS
+and Linux a hook must be executable. Hook managers such as husky, pre-commit or lefthook work
+through the hook scripts they install. Files a `pre-commit` hook stages (formatters,
+lint-staged) are part of the commit. `pre-push` runs after Browsitory has contacted the remote
+and before anything is sent, so it sees the remote's current commits, as in git.
+
+A failing `pre-commit`, `commit-msg` or `pre-push` stops the commit or push. A dialog shows the
+hook's output; **Commit without hooks**, **Amend without hooks** or **Push without hooks**
+retries with those hooks skipped (`--no-verify`). A failing `prepare-commit-msg` cannot be
+skipped, so its dialog only has **Close**. Close the dialog and **Show hook output…** in the
+error banner brings it back. Your commit message stays in the box until a commit succeeds.
+Failures of `post-commit`, `post-checkout` and `post-merge` are ignored, as in git.
+
+To skip hooks up front, tick **Skip hooks** under the commit message (shown only when a commit
+hook is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
+next commit or amend only.
+
+While a commit hook runs, "Running pre-commit hook…" shows under the commit message with
+**Cancel**; a running `pre-push` shows in the transfer panel, whose Cancel stops it. Browsitory
+stops any hook after 10 minutes. Other actions on the repository wait while a hook runs.
+
+Like signing, apps started from the macOS Dock may not see your shell's `PATH`. If a hook cannot
+find a tool, use absolute paths in the hook or extend `PATH` inside it.
+
+On Windows, hooks run with the `sh.exe` that comes with Git for Windows (found next to `git.exe`
+or on `PATH`). Without it, a `pre-commit`, `commit-msg` or `pre-push` hook fails with a message
+saying so (use the "without hooks" retry to go ahead), and other hooks are skipped. Cancel and
+the time limit stop the hook's shell, but not programs it started.
+
+Rebase, cherry-pick, revert, undo/redo, stash, worktree creation and clone run no hooks.
+Finishing a paused merge, cherry-pick or revert with Commit runs the commit hooks.
+
 ## Browsing history and diffs
 
 Click any commit in the graph to see the files it touched; click a file to

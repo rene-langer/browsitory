@@ -235,6 +235,32 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   newer search or `cancel_search` stops an older one without going through the command queue
   (same reasoning as `CancelRegistry`).
 
+## Git hooks
+
+- `git-core::hooks` finds a hook in `core.hooksPath` (relative to the worktree root) or
+  `<common dir>/hooks` and runs it through `git-core::process::run_captured`, a generic
+  captured-run helper: stdout and stderr share one `std::io::pipe` (true `2>&1` order), the last
+  64 KiB are kept (ANSI escapes and `\r` redraws stripped), the child is polled every 20 ms for
+  exit, cancel and a 10-minute deadline, and it is always reaped. On Unix it leads its own
+  process group and timeout/cancel run `kill -s KILL -- -<pgid>`, so its children die too; after
+  exit the pipe gets a 2 s drain grace in case an escaped grandchild holds it open. Windows runs
+  hooks through Git for Windows' `sh.exe` and only kills that process.
+- Gate hooks live in `git-core`: `commit`/`amend_head` (`pre-commit` → reload the index only if
+  it ran → `prepare-commit-msg` → `commit-msg` via `<git dir>/COMMIT_EDITMSG` → commit →
+  `post-commit`) and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
+  after the ref advertisement and the lease check, before any pack data). Every push
+  (`push_branch` and its `push_current_branch` wrapper, force push, tags,
+  `delete_remote_branch`) funnels through `push_refs`, so all of them run `pre-push`.
+  `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
+  so undo restores, rebase and other git-core internals never trigger hooks.
+- A hook failure crosses IPC as data: `CommitOutcome::HookFailed` for commit/amend, and
+  `TransferErrorKind::HookFailed` + `hookOutput` for pushes. Hook output is the only process
+  output forwarded over IPC; remote sideband text still is not.
+- Progress: `HookReporter` → `HookEvent` → `hook-progress` / `hookProgress` for commit/amend;
+  `TransferPhase::RunningHook` for pushes. Commit/amend get `commit-<n>`/`amend-<n>` ids in
+  `CancelRegistry`, so `cancelTransfer` stops a running hook. Hooks block the repo worker like
+  signing does.
+
 ## Fetch all
 
 - `git-core::remote::fetch_all` fetches every remote in `repo.remotes()` order under one
