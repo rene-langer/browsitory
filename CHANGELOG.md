@@ -20,6 +20,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Denser branch tree: folders and branches share one even 22px row height with no gaps between
   folders, a tighter indent, and each branch's "…" menu shows on hover or focus.
 
+### Commit search
+
+- A search field above the commit graph (**Ctrl/Cmd+F** on the commit list, or "Search commits"
+  in the palette) finds commits by message or SHA, `author:`, `committer:`, `message:`,
+  `commit:`, `path:`, `contents:` (added or removed lines), `after:`/`before:` dates and
+  `branch:`. Terms combine with AND; quote text with spaces or a colon.
+- Results replace the graph, load 100 at a time with **Load more**, and show how many commits
+  were scanned; Esc or × returns to the graph and your previous selection.
+
 ## [0.3.0] - 2026-10-21
 
 ### Commit signing
