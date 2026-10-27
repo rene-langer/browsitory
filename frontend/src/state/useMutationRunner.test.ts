@@ -38,7 +38,7 @@ const BASE_STATE: AppState = {
   pending: false,
   addRemoteDraftOpen: false,
   refreshGeneration: 0,
-  headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+  headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null },
   forcePushOffer: null,
   forcePushConfirm: null,
   fetchPrune: null,

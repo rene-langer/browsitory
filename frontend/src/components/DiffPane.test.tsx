@@ -78,6 +78,10 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     listStashes: unused,
     saveStash: unused,
     applyStash: unused,
+    popStash: unused,
+    getStashFiles: unused,
+    getMergeOptions: unused,
+    setMergeOptions: unused,
     dropStash: unused,
     getBlame: unused,
     mergeBranch: unused,
@@ -85,7 +89,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
@@ -208,7 +212,7 @@ describe("DiffPane", () => {
       const onCommitMessageFocused = vi.fn();
       renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
         amendMode: true,
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null },
         focusCommitMessage: true,
         onCommitMessageFocused,
       });

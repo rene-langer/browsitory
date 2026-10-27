@@ -32,7 +32,10 @@ export function useMergeRebaseActions(
   const mergeBranch = useCallback(
     (branchName: string): Promise<void> =>
       runMutation(async () => {
-        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName);
+        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, {
+          fastForward: "Allow",
+          squash: false,
+        });
         void outcome;
       }),
     [client, runMutation, repoPath],

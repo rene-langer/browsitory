@@ -60,7 +60,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       fetchPrune: null,
       pushDialog: null,
       deleteRemoteBranchDialog: null,
-      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null },
       amendMode: false,
       rebaseProgress: null,
       rebaseOnto: null,
@@ -190,7 +190,7 @@ describe("buildCommands", () => {
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
-      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null },
+      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null },
     });
     expect(detached).not.toContain("Push branch to…");
     expect(detached).toContain("Fetch all remotes");
@@ -788,7 +788,7 @@ describe("history commands", () => {
   const historyState: Partial<AppState> = {
     selectedRow: { commitId: "c2" },
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
-    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null },
+    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null },
   };
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
@@ -806,7 +806,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         selectedRow: { commitId: "c1" },
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("cherry-pick-selected");
@@ -829,7 +829,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         branches: [{ name: "main", isCurrent: false }],
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("reset-selected");

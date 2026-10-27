@@ -101,7 +101,14 @@ export interface UpstreamInfo {
 }
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
-export interface HeadInfo { headId: string | null; detachedAt: string | null; headPushed: boolean; operation: OperationKind | null; }
+export interface HeadInfo {
+  headId: string | null;
+  detachedAt: string | null;
+  headPushed: boolean;
+  operation: OperationKind | null;
+  /** A pending squash merge's message (`SQUASH_MSG`); pre-fills the commit box. */
+  squashMessage: string | null;
+}
 export interface UndoState {
   undo: string | null;
   redo: string | null;
@@ -243,7 +250,34 @@ export type MergeOutcome =
   | { kind: "UpToDate" }
   | { kind: "FastForwarded" }
   | { kind: "Merged" }
+  /** Squash merge: the combined changes are staged and `HeadInfo.squashMessage` is set. */
+  | { kind: "Squashed" }
   | { kind: "Conflicted"; files: string[] };
+
+/** `Allow` = fast-forward if possible, `Never` = always a merge commit, `Only` = ff or refuse. */
+export type FastForwardMode = "Allow" | "Never" | "Only";
+export interface MergeOptions {
+  fastForward: FastForwardMode;
+  /** Stage the combined changes without committing; ignores `fastForward`. */
+  squash: boolean;
+}
+
+export interface StashOptions {
+  /** `null` or blank → git's default "WIP on …" message. */
+  message: string | null;
+  keepIndex: boolean;
+  includeUntracked: boolean;
+  /** File paths limiting the stash; empty stashes everything. */
+  paths: string[];
+}
+export type StashApplyOutcome = { kind: "Applied" } | { kind: "Conflicted"; files: string[] };
+export interface StashFiles {
+  /** Changed against the HEAD the stash was made on. */
+  tracked: string[];
+  /** Untracked files the stash took; diff them with `getCommitDiff(untrackedCommitId, path)`. */
+  untracked: string[];
+  untrackedCommitId: string | null;
+}
 
 export type PullOutcome =
   | { kind: "UpToDate" }
@@ -475,11 +509,23 @@ export interface RepoClient {
   cancelTransfer(repoPath: string, operationId: string): Promise<void>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   listStashes(repoPath: string): Promise<StashEntry[]>;
-  saveStash(repoPath: string): Promise<void>;
-  applyStash(repoPath: string, index: number): Promise<void>;
+  saveStash(repoPath: string, options: StashOptions): Promise<void>;
+  /**
+   * Applies `stash@{index}`; `restoreIndex` also restages what was staged. Resolves `Conflicted`
+   * (instead of rejecting) when the stash applied with conflicts.
+   */
+  applyStash(repoPath: string, index: number, restoreIndex: boolean): Promise<StashApplyOutcome>;
+  /** Like `applyStash`, then drops the stash, but only when it applied without conflicts. */
+  popStash(repoPath: string, index: number, restoreIndex: boolean): Promise<StashApplyOutcome>;
+  /** Files of the stash whose commit is `commitId`; rejects for an id that is not a stash. */
+  getStashFiles(repoPath: string, commitId: string): Promise<StashFiles>;
   dropStash(repoPath: string, index: number): Promise<void>;
   getBlame(repoPath: string, commitId: string, path: string): Promise<BlameLine[]>;
-  mergeBranch(repoPath: string, branchName: string): Promise<MergeOutcome>;
+  /** Merges a local branch name, or a full ref (`refs/remotes/...`), into the current branch. */
+  mergeBranch(repoPath: string, branchName: string, options: MergeOptions): Promise<MergeOutcome>;
+  /** The merge dialog's preselection: the choice remembered for this repo, else `merge.ff`. */
+  getMergeOptions(repoPath: string): Promise<MergeOptions>;
+  setMergeOptions(repoPath: string, options: MergeOptions): Promise<void>;
   getConflictHunks(repoPath: string, path: string): Promise<ConflictSegment[]>;
   resolveConflict(repoPath: string, path: string, resolvedContent: string): Promise<void>;
   abortMerge(repoPath: string): Promise<void>;
