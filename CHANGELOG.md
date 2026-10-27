@@ -31,6 +31,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A slow search (`path:`, `contents:`) works in short slices, so committing or staging while it
   runs is not held up; a row you pick while results load keeps its selection.
 
+### Fixed
+
+- Sidebar menus (e.g. the Branches "Add" menu) are no longer clipped by their section while it
+  is opening: the section open animation now fades only, without the transform that confined
+  fixed-position menus to the section body (#98).
+- E2E: the Tauri suite runs with its own throwaway webview data directory, wiped before every
+  spec file, instead of sharing localStorage with the installed app (#99).
+- E2E: on a Wayland desktop, both suites now pin the app window to the Xvfb X11 display; it
+  previously opened unfocused on the real desktop, received no frames, and never rendered diff
+  lines (#100). The command-palette spec re-sends Ctrl+K if the first keypress after startup is
+  lost.
+
 ## [0.3.0] - 2026-10-21
 
 ### Commit signing

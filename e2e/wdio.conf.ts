@@ -33,6 +33,13 @@ const E2E_WORKSPACE_REPO_A = path.join(E2E_WORKSPACE_ROOT, "repo-a");
 const E2E_WORKSPACE_REPO_B = path.join(E2E_WORKSPACE_ROOT, "repo-b");
 const E2E_WORKSPACE_REPO_C = path.join(E2E_WORKSPACE_ROOT, "repo-c");
 const E2E_CONFIG_DIR = path.join(os.tmpdir(), "browsitory-e2e-config");
+// Webview data root for the app under test (issue #99). Tauri on Linux keeps the webview's
+// localStorage under `$XDG_DATA_HOME/<identifier>/` — by default the *real* app's
+// `~/.local/share/com.browsitory.app/`, shared with any installed build and persisted across
+// runs, so accordion open/closed state and palette history leaked into (and out of) the suite.
+// Pointing XDG_DATA_HOME at a throwaway dir that `beforeSession` wipes gives every spec file a
+// fresh, empty storage.
+const E2E_DATA_HOME = path.join(os.tmpdir(), "browsitory-e2e-data-home");
 const CREDENTIAL_CERT_DIR = path.join(os.tmpdir(), "browsitory-e2e-credential-cert");
 const E2E_PARENT_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-parent-source");
 const E2E_SUBMODULE_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-submodule");
@@ -239,6 +246,8 @@ export const config: WebdriverIO.Config = {
         `member_paths = ["${E2E_WORKSPACE_REPO_A.replace(/\\/g, "\\\\")}", "${E2E_WORKSPACE_REPO_B.replace(/\\/g, "\\\\")}"]\n`,
     );
     process.env.BROWSITORY_CONFIG_DIR = E2E_CONFIG_DIR;
+    // Inherited by the workers, then by tauri-driver → WebKitWebDriver → the app.
+    process.env.XDG_DATA_HOME = E2E_DATA_HOME;
 
     // See `e2e/support/forgeFixtureServer.ts`'s header comment for why this has to be a real
     // loopback server started before the app process exists, rather than something the spec
@@ -254,7 +263,21 @@ export const config: WebdriverIO.Config = {
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
   beforeSession: async () => {
     const driverPath = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
-    tauriDriver = spawn(driverPath, [], { stdio: [null, process.stdout, process.stderr] });
+    // Fresh webview storage per spec file (see E2E_DATA_HOME), wiped before the app launches.
+    fs.rmSync(E2E_DATA_HOME, { recursive: true, force: true });
+    fs.mkdirSync(E2E_DATA_HOME, { recursive: true });
+    // Force GTK onto X11 (issue #100). `xvfb-run` only swaps DISPLAY; on a Wayland desktop
+    // WAYLAND_DISPLAY still leaks through and GTK prefers it, so the app window opened on the
+    // developer's real desktop instead of the Xvfb display. There it sat unfocused/occluded and
+    // the compositor sent it no frame callbacks: zero requestAnimationFrame ticks, no
+    // IntersectionObserver deliveries (so DiffPane never loaded a diff), CSS animations frozen on
+    // frame 0. Under Xvfb the same build renders normally. Harmless on CI (no Wayland session).
+    const driverEnv: NodeJS.ProcessEnv = { ...process.env, XDG_DATA_HOME: E2E_DATA_HOME, GDK_BACKEND: "x11" };
+    delete driverEnv.WAYLAND_DISPLAY;
+    tauriDriver = spawn(driverPath, [], {
+      stdio: [null, process.stdout, process.stderr],
+      env: driverEnv,
+    });
     resetFixtureRepo();
     tauriDriver.on("error", (error) => {
       console.error("tauri-driver error:", error);
