@@ -1731,6 +1731,9 @@ struct TransferProgressDto {
     /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_name: Option<String>,
+    /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
+    /// `message` this comes from the user's own script, not the remote.
+    hook_output: Option<String>,
 }
 
 fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
@@ -1748,6 +1751,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             received_bytes: 0,
             message: None,
             remote_name: None,
+            hook_output: None,
         },
         TransferEvent::Progress(progress) => TransferProgressDto {
             operation_id: progress.operation_id,
@@ -1762,6 +1766,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
             message: None,
             remote_name: None,
+            hook_output: None,
         },
         TransferEvent::RemoteFailed {
             operation_id,
@@ -1778,11 +1783,13 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             received_bytes: 0,
             message: None,
             remote_name: Some(remote_name),
+            hook_output: None,
         },
         TransferEvent::Completed {
             operation_id,
             operation,
             error,
+            hook_output,
         } => {
             let failed = error.is_some();
             TransferProgressDto {
@@ -1795,6 +1802,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
                 received_bytes: 0,
                 message: None,
                 remote_name: None,
+                hook_output,
             }
         }
     }
@@ -1891,6 +1899,8 @@ struct PushBranchParams {
     local_branch: String,
     remote_branch: String,
     set_upstream: bool,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn push_branch(
@@ -1907,6 +1917,7 @@ fn push_branch(
         params.local_branch,
         params.remote_branch,
         params.set_upstream,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -1918,6 +1929,8 @@ struct DeleteRemoteBranchParams {
     repo_path: String,
     remote_name: String,
     branch_name: String,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn delete_remote_branch(
@@ -1932,6 +1945,7 @@ fn delete_remote_branch(
     let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
         params.remote_name,
         params.branch_name,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -1957,17 +1971,29 @@ fn cancel_transfer(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// Params of a current-branch push; `noVerify` (skip `pre-push`) defaults to `false`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushParams {
+    repo_path: String,
+    remote_name: String,
+    #[serde(default)]
+    no_verify: bool,
+}
+
 fn push_current_branch(
     params: Value,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
-    let operation_id = worker_handle(repos, &params.repo_path)?
-        .push_current_branch(params.remote_name, event_tx)?;
+    let operation_id = worker_handle(repos, &params.repo_path)?.push_current_branch(
+        params.remote_name,
+        params.no_verify,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -1976,12 +2002,14 @@ fn force_push_current_branch(
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
-    let operation_id = worker_handle(repos, &params.repo_path)?
-        .force_push_current_branch(params.remote_name, event_tx)?;
+    let operation_id = worker_handle(repos, &params.repo_path)?.force_push_current_branch(
+        params.remote_name,
+        params.no_verify,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -2242,6 +2270,8 @@ struct PushTagsParams {
     repo_path: String,
     remote_name: String,
     names: Vec<String>,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn push_tags(
@@ -2256,6 +2286,7 @@ fn push_tags(
     let operation_id = worker_handle(repos, &params.repo_path)?.push_tags(
         params.remote_name,
         params.names,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -3104,6 +3135,7 @@ mod tests {
                 operation_id: "fetch-1".to_string(),
                 operation: TransferOperation::Fetch,
                 error: Some(TransferErrorKind::TransferFailed),
+                hook_output: None,
             })
             .unwrap();
 
@@ -3132,6 +3164,7 @@ mod tests {
                 "total": 0,
                 "receivedBytes": 0,
                 "message": null,
+                "hookOutput": null,
             })
         );
         // The sideband text above is dropped, not forwarded — same redaction
@@ -3147,6 +3180,7 @@ mod tests {
                 "total": 10,
                 "receivedBytes": 128,
                 "message": null,
+                "hookOutput": null,
             })
         );
         assert_eq!(
@@ -3160,6 +3194,7 @@ mod tests {
                 "total": 0,
                 "receivedBytes": 0,
                 "message": null,
+                "hookOutput": null,
             })
         );
     }
@@ -3237,9 +3272,23 @@ mod tests {
             operation_id: "fetch-all-7".into(),
             operation: TransferOperation::FetchAll,
             error: None,
+            hook_output: None,
         }))
         .unwrap();
         assert!(!completed.as_object().unwrap().contains_key("remoteName"));
+        assert_eq!(completed["hookOutput"], serde_json::Value::Null);
+
+        let hook_failed = serde_json::to_value(transfer_progress_dto(TransferEvent::Completed {
+            operation_id: "push-8".into(),
+            operation: TransferOperation::PushBranch,
+            error: Some(TransferErrorKind::HookFailed),
+            hook_output: Some("tests failed\n".into()),
+        }))
+        .unwrap();
+        assert_eq!(hook_failed["phase"], "Failed");
+        assert_eq!(hook_failed["errorKind"], "HookFailed");
+        assert_eq!(hook_failed["hookOutput"], "tests failed\n");
+        assert_eq!(hook_failed["message"], serde_json::Value::Null);
     }
 
     #[test]

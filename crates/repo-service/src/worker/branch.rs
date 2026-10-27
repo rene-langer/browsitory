@@ -16,8 +16,12 @@ pub(super) fn create(
     );
 }
 pub(super) fn switch(repo: &git2::Repository, name: String, reply: Sender<Result<(), String>>) {
-    let _ =
-        reply.send(git_core::branch::switch_branch(repo, &name).map_err(|error| error.to_string()));
+    let before = super::hooks::head_oid(repo);
+    let result = git_core::branch::switch_branch(repo, &name).map_err(|error| error.to_string());
+    if result.is_ok() {
+        super::hooks::run_post_checkout(repo, before);
+    }
+    let _ = reply.send(result);
 }
 pub(super) fn delete(
     repo: &git2::Repository,

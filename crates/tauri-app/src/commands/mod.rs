@@ -76,6 +76,9 @@ pub struct TransferProgressDto {
     /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_name: Option<String>,
+    /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
+    /// `message` this comes from the user's own script, not the remote.
+    pub hook_output: Option<String>,
 }
 
 impl From<git_core::remote::TransferProgress> for TransferProgressDto {
@@ -92,6 +95,7 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
             // expose over IPC, even when it looks like ordinary progress output.
             message: None,
             remote_name: None,
+            hook_output: None,
         }
     }
 }
@@ -113,6 +117,7 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                 received_bytes: 0,
                 message: None,
                 remote_name: None,
+                hook_output: None,
             },
         ),
         TransferEvent::Progress(progress) => {
@@ -135,12 +140,14 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                 received_bytes: 0,
                 message: None,
                 remote_name: Some(remote_name),
+                hook_output: None,
             },
         ),
         TransferEvent::Completed {
             operation_id,
             operation,
             error,
+            hook_output,
         } => {
             let failed = error.is_some();
             (
@@ -155,6 +162,7 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                     received_bytes: 0,
                     message: None,
                     remote_name: None,
+                    hook_output,
                 },
             )
         }
@@ -1540,6 +1548,7 @@ mod tests {
             operation_id: "fetch-all-7".into(),
             operation: TransferOperation::FetchAll,
             error: None,
+            hook_output: None,
         });
         let json = serde_json::to_value(completed).unwrap();
         assert!(!json.as_object().unwrap().contains_key("remoteName"));
@@ -1914,6 +1923,7 @@ mod tests {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::TransferFailed),
+            hook_output: None,
         });
 
         assert_eq!(progress.message, None);
@@ -1927,6 +1937,7 @@ mod tests {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::TransferFailed),
+            hook_output: None,
         });
 
         assert_eq!(event_name, "transfer-complete");
@@ -1944,6 +1955,7 @@ mod tests {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::Cancelled),
+            hook_output: None,
         });
 
         assert_eq!(event_name, "transfer-complete");
@@ -1957,6 +1969,7 @@ mod tests {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::MissingCredential),
+            hook_output: None,
         });
 
         assert_eq!(failed.error_kind.as_deref(), Some("MissingCredential"));
@@ -1969,11 +1982,34 @@ mod tests {
             operation_id: "push-42".into(),
             operation: TransferOperation::PushBranch,
             error: Some(TransferErrorKind::NonFastForward),
+            hook_output: None,
         });
 
         assert_eq!(failed.operation, "PushBranch");
         assert_eq!(failed.error_kind.as_deref(), Some("NonFastForward"));
         assert_eq!(failed.message, None);
+    }
+
+    #[test]
+    fn a_hook_failed_transfer_carries_its_output_and_others_do_not() {
+        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "push-1".into(),
+            operation: TransferOperation::PushBranch,
+            error: Some(TransferErrorKind::HookFailed),
+            hook_output: Some("tests failed\n".into()),
+        });
+        let value = serde_json::to_value(failed).unwrap();
+        assert_eq!(value["errorKind"], "HookFailed");
+        assert_eq!(value["hookOutput"], "tests failed\n");
+        assert_eq!(value["message"], serde_json::Value::Null);
+        let (_, started) = transfer_event_payload(TransferEvent::Started {
+            operation_id: "push-1".into(),
+            operation: TransferOperation::PushBranch,
+        });
+        assert_eq!(
+            serde_json::to_value(started).unwrap()["hookOutput"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -2216,6 +2252,7 @@ mod tests {
             operation_id: "force-push-1".into(),
             operation: TransferOperation::ForcePushBranch,
             error: Some(TransferErrorKind::StaleLease),
+            hook_output: None,
         });
 
         assert_eq!(failed.operation, "ForcePushBranch");
@@ -2258,11 +2295,13 @@ mod tests {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: None,
+            hook_output: None,
         });
         let (_, failed) = transfer_event_payload(TransferEvent::Completed {
             operation_id: "fetch-42".into(),
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::TransferFailed),
+            hook_output: None,
         });
         assert_eq!(
             [started.phase, completed.phase, failed.phase],

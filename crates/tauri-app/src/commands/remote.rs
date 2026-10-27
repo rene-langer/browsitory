@@ -181,12 +181,14 @@ pub async fn fetch_all_remotes(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn push_branch(
     repo_path: String,
     remote_name: String,
     local_branch: String,
     remote_branch: String,
     set_upstream: bool,
+    no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -196,6 +198,7 @@ pub async fn push_branch(
         local_branch,
         remote_branch,
         set_upstream,
+        no_verify,
         event_tx,
     )?;
     emit_transfer_events(app, event_rx);
@@ -207,6 +210,7 @@ pub async fn delete_remote_branch(
     repo_path: String,
     remote_name: String,
     branch_name: String,
+    no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -214,6 +218,7 @@ pub async fn delete_remote_branch(
     let operation_id = worker_handle(&state, &repo_path)?.delete_remote_branch(
         remote_name,
         branch_name,
+        no_verify,
         event_tx,
     )?;
     emit_transfer_events(app, event_rx);
@@ -240,12 +245,13 @@ pub async fn cancel_transfer(
 pub async fn push_current_branch(
     repo_path: String,
     remote_name: String,
+    no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id =
-        worker_handle(&state, &repo_path)?.push_current_branch(remote_name, event_tx)?;
+        worker_handle(&state, &repo_path)?.push_current_branch(remote_name, no_verify, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -254,12 +260,16 @@ pub async fn push_current_branch(
 pub async fn force_push_current_branch(
     repo_path: String,
     remote_name: String,
+    no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id =
-        worker_handle(&state, &repo_path)?.force_push_current_branch(remote_name, event_tx)?;
+    let operation_id = worker_handle(&state, &repo_path)?.force_push_current_branch(
+        remote_name,
+        no_verify,
+        event_tx,
+    )?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -269,12 +279,13 @@ pub async fn push_tags(
     repo_path: String,
     remote_name: String,
     names: Vec<String>,
+    no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id =
-        worker_handle(&state, &repo_path)?.push_tags(remote_name, names, event_tx)?;
+        worker_handle(&state, &repo_path)?.push_tags(remote_name, names, no_verify, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }

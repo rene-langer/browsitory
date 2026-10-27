@@ -61,7 +61,6 @@ pub(super) fn log_hook_result(hook: &str, result: &Result<HookOutcome, HookError
 
 /// Runs a hook whose failure must not affect the command that triggered it. Not cancellable;
 /// bounded by `HOOK_TIMEOUT`.
-#[allow(dead_code)] // wired up with the post-checkout/post-merge commit
 pub(super) fn run_post_hook(repo: &git2::Repository, name: &str, args: &[&str]) {
     let invocation = HookInvocation {
         name,
@@ -74,7 +73,6 @@ pub(super) fn run_post_hook(repo: &git2::Repository, name: &str, args: &[&str]) 
 }
 
 /// HEAD's commit, or the zero id while unborn (what git passes to post-checkout).
-#[allow(dead_code)] // wired up with the post-checkout/post-merge commit
 pub(super) fn head_oid(repo: &git2::Repository) -> git2::Oid {
     repo.head()
         .ok()
@@ -84,7 +82,6 @@ pub(super) fn head_oid(repo: &git2::Repository) -> git2::Oid {
 }
 
 /// `post-checkout <old HEAD> <new HEAD> 1` (1 = a branch/HEAD checkout, not a file checkout).
-#[allow(dead_code)] // wired up with the post-checkout/post-merge commit
 pub(super) fn run_post_checkout(repo: &git2::Repository, before: git2::Oid) {
     let old = before.to_string();
     let new = head_oid(repo).to_string();

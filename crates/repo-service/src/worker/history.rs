@@ -62,9 +62,13 @@ pub(super) fn checkout(
     commit_id: String,
     reply: Sender<Result<(), String>>,
 ) {
-    let _ = reply.send(
-        git_core::branch::checkout_commit(repo, &commit_id).map_err(|error| error.to_string()),
-    );
+    let before = super::hooks::head_oid(repo);
+    let result =
+        git_core::branch::checkout_commit(repo, &commit_id).map_err(|error| error.to_string());
+    if result.is_ok() {
+        super::hooks::run_post_checkout(repo, before);
+    }
+    let _ = reply.send(result);
 }
 
 fn round_trip<T>(
