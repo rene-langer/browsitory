@@ -764,12 +764,36 @@ pub fn delete_remote_branch(
         None,
     )?;
     // libgit2's push update_tips normally removed it already; this makes it not depend on that.
-    match repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}")) {
-        Ok(mut tracking) => tracking.delete()?,
-        Err(error) if error.code() == ErrorCode::NotFound => {}
-        Err(error) => return Err(error.into()),
+    // The local tracking ref is wherever the remote's fetch refspec maps the branch, not a
+    // `refs/remotes/<remote>/<branch>` convention; no matching refspec means none is touched.
+    if let Some(tracking_name) = tracking_ref_name(repo, remote_name, branch)? {
+        match repo.find_reference(&tracking_name) {
+            Ok(mut tracking) => tracking.delete()?,
+            Err(error) if error.code() == ErrorCode::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
     }
     Ok(())
+}
+
+/// The local ref `remote_name`'s fetch refspecs map `refs/heads/<branch>` to, if any.
+fn tracking_ref_name(
+    repo: &Repository,
+    remote_name: &str,
+    branch: &str,
+) -> Result<Option<String>, RemoteError> {
+    let remote = repo.find_remote(remote_name)?;
+    let source = format!("refs/heads/{branch}");
+    for refspec in remote.refspecs() {
+        if refspec.direction() != git2::Direction::Fetch || !refspec.src_matches(&source) {
+            continue;
+        }
+        let mapped = refspec.transform(&source)?;
+        if let Ok(name) = mapped.as_str() {
+            return Ok(Some(name.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 /// Pushes `names` (or every local tag when empty). `cancel` behaves as for

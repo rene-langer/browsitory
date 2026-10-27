@@ -2155,3 +2155,95 @@ fn setting_an_upstream_rejects_a_missing_local_branch_or_remote() {
     assert!(set_branch_upstream(&fixture.local, "nope", "origin", "topic").is_err());
     assert!(set_branch_upstream(&fixture.local, "main", "nope", "topic").is_err());
 }
+
+#[test]
+fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to() {
+    let fixture = local_and_bare_remote();
+    let url = fixture.remote_dir.path().to_str().unwrap().to_string();
+    fixture
+        .local
+        .remote_with_fetch("mirror", &url, "+refs/heads/*:refs/remotes/mirror-ns/*")
+        .unwrap();
+    fixture
+        .local
+        .remote_with_fetch("narrow", &url, "+refs/heads/main:refs/remotes/narrow/main")
+        .unwrap();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("doomed", &head, false).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        "doomed",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    fixture
+        .local
+        .find_remote("mirror")
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror-ns/doomed")
+        .is_ok());
+    // Decoys at the conventional `refs/remotes/<remote>/<branch>` path, which no refspec maps to.
+    for decoy in ["refs/remotes/mirror/doomed", "refs/remotes/narrow/doomed"] {
+        fixture
+            .local
+            .reference(decoy, head.id(), true, "decoy")
+            .unwrap();
+    }
+
+    delete_remote_branch(
+        &fixture.local,
+        "mirror",
+        "doomed",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("doomed"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror-ns/doomed")
+        .is_err());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror/doomed")
+        .is_ok());
+
+    // A remote whose fetch refspec does not cover the branch: no local tracking ref is touched.
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        "doomed",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    delete_remote_branch(
+        &fixture.local,
+        "narrow",
+        "doomed",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(fixture.bare_tip("doomed"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/narrow/doomed")
+        .is_ok());
+}
