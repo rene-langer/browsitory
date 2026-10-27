@@ -1249,6 +1249,75 @@ fn push_current_branch_and_push_tags_stream_notifications_through_the_sidecar() 
 }
 
 #[test]
+fn fetch_all_push_branch_and_delete_remote_branch_stream_notifications_through_the_sidecar() {
+    let (local_dir, repo) = init_repo();
+    write_file(local_dir.path(), "README.md", "initial commit\n");
+    commit_all(&repo, "initial commit");
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let remote_dir = tempfile::TempDir::new().expect("create bare remote dir");
+    git2::Repository::init_bare(remote_dir.path()).expect("init bare remote");
+    repo.remote("origin", remote_dir.path().to_str().unwrap())
+        .expect("add origin");
+    drop(repo);
+    let repo_path = local_dir.path().to_str().unwrap().to_string();
+    let bare_has = |name: &str| {
+        git2::Repository::open_bare(remote_dir.path())
+            .unwrap()
+            .find_reference(&format!("refs/heads/{name}"))
+            .is_ok()
+    };
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let (fetch_all, notes) = sidecar.call_and_collect_notifications(
+        2,
+        "fetch_all_remotes",
+        serde_json::json!({"repoPath": repo_path, "prune": null}),
+        true,
+    );
+    let fetch_id = fetch_all["result"].as_str().expect("operation id");
+    assert!(fetch_id.starts_with("fetch-all-"));
+    let last = notes.last().expect("terminal notification");
+    assert_eq!(last["params"]["operation"], "FetchAll");
+    assert_eq!(last["params"]["phase"], "Completed");
+
+    let (push, notes) = sidecar.call_and_collect_notifications(
+        3,
+        "push_branch",
+        serde_json::json!({
+            "repoPath": repo_path, "remoteName": "origin", "localBranch": branch,
+            "remoteBranch": "sidecar-published", "setUpstream": false
+        }),
+        true,
+    );
+    assert!(push["result"]
+        .as_str()
+        .expect("operation id")
+        .starts_with("push-"));
+    let last = notes.last().expect("terminal notification");
+    assert_eq!(last["params"]["operation"], "PushBranch");
+    assert_eq!(last["params"]["phase"], "Completed");
+    assert!(bare_has("sidecar-published"));
+
+    let (delete, notes) = sidecar.call_and_collect_notifications(
+        4,
+        "delete_remote_branch",
+        serde_json::json!({
+            "repoPath": repo_path, "remoteName": "origin", "branchName": "sidecar-published"
+        }),
+        true,
+    );
+    assert!(delete["result"]
+        .as_str()
+        .expect("operation id")
+        .starts_with("delete-remote-"));
+    let last = notes.last().expect("terminal notification");
+    assert_eq!(last["params"]["operation"], "DeleteRemoteBranch");
+    assert_eq!(last["params"]["phase"], "Completed");
+    assert!(!bare_has("sidecar-published"));
+}
+
+#[test]
 fn pull_current_upstream_streams_notifications_and_returns_an_outcome() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit("remote change");

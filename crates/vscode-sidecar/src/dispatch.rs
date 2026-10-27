@@ -145,6 +145,9 @@ pub fn dispatch(
         "reset_to_commit" => reset_to_commit(params, repos),
         "checkout_commit" => checkout_commit(params, repos),
         "push_tags" => push_tags(params, repos, stdout),
+        "fetch_all_remotes" => fetch_all_remotes(params, repos, stdout),
+        "push_branch" => push_branch(params, repos, stdout),
+        "delete_remote_branch" => delete_remote_branch(params, repos, stdout),
         "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
         "list_stashes" => list_stashes(params, repos),
         "save_stash" => save_stash(params, repos),
@@ -1244,6 +1247,8 @@ struct RemoteInfoDto {
     push_url: Option<String>,
     auth_mode: Option<RemoteAuthModeDto>,
     auth_username: Option<String>,
+    /// Effective git-config prune default for this remote (the UI's Prune toggle fallback).
+    prune: bool,
 }
 
 impl
@@ -1273,6 +1278,7 @@ impl
             push_url: remote.push_url,
             auth_mode,
             auth_username,
+            prune: remote.prune,
         }
     }
 }
@@ -1687,6 +1693,9 @@ fn spawn_progress_relay<W: std::io::Write + Send + 'static>(
 struct FetchRemoteParams {
     repo_path: String,
     remote_name: String,
+    /// `null`/absent = git config decides (`remote.<name>.prune`, then `fetch.prune`).
+    #[serde(default)]
+    prune: Option<bool>,
 }
 
 fn fetch_remote(
@@ -1700,7 +1709,83 @@ fn fetch_remote(
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.fetch_remote(
         params.remote_name,
-        None,
+        params.prune,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchAllRemotesParams {
+    repo_path: String,
+    #[serde(default)]
+    prune: Option<bool>,
+}
+
+fn fetch_all_remotes(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: FetchAllRemotesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id =
+        worker_handle(repos, &params.repo_path)?.fetch_all_remotes(params.prune, event_tx)?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushBranchParams {
+    repo_path: String,
+    remote_name: String,
+    local_branch: String,
+    remote_branch: String,
+    set_upstream: bool,
+}
+
+fn push_branch(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: PushBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.push_branch(
+        params.remote_name,
+        params.local_branch,
+        params.remote_branch,
+        params.set_upstream,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteRemoteBranchParams {
+    repo_path: String,
+    remote_name: String,
+    branch_name: String,
+}
+
+fn delete_remote_branch(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: DeleteRemoteBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
+        params.remote_name,
+        params.branch_name,
         event_tx,
     )?;
     Ok(Value::String(operation_id))

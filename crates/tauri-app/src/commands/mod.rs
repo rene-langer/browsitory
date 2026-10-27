@@ -313,6 +313,8 @@ pub struct RemoteInfoDto {
     pub push_url: Option<String>,
     pub auth_mode: Option<RemoteAuthModeDto>,
     pub auth_username: Option<String>,
+    /// Effective git-config prune default for this remote (the UI's Prune toggle fallback).
+    pub prune: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -372,6 +374,7 @@ impl
             push_url: remote.push_url,
             auth_mode,
             auth_username,
+            prune: remote.prune,
         }
     }
 }
@@ -1264,8 +1267,8 @@ mod tests {
         transfer_event_payload, BranchInfoDto, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
         OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
-        WorktreeInfoDto,
+        RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
+        WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1373,6 +1376,22 @@ mod tests {
         let json = serde_json::to_value(completed).unwrap();
         assert!(!json.as_object().unwrap().contains_key("remoteName"));
         assert_eq!(json["operation"], "FetchAll");
+    }
+
+    #[test]
+    fn remote_info_dto_serializes_the_prune_default() {
+        let json = serde_json::to_value(RemoteInfoDto::from((
+            git_core::remote::RemoteInfo {
+                name: "origin".into(),
+                fetch_url: "https://example.com/repo.git".into(),
+                push_url: None,
+                prune: true,
+            },
+            None,
+        )))
+        .unwrap();
+        assert_eq!(json["prune"], true);
+        assert_eq!(json["fetchUrl"], "https://example.com/repo.git");
     }
 
     #[test]
