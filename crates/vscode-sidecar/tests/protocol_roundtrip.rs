@@ -341,7 +341,14 @@ fn stash_lifecycle_round_trips_through_the_sidecar() {
     let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
-    let saved = sidecar.call(2, "save_stash", serde_json::json!({"repoPath": repo_path}));
+    let saved = sidecar.call(
+        2,
+        "save_stash",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "options": {"message": null, "keepIndex": false, "includeUntracked": true, "paths": []}
+        }),
+    );
     assert_eq!(saved["result"], serde_json::Value::Null);
 
     let stashes = sidecar.call(
@@ -356,9 +363,9 @@ fn stash_lifecycle_round_trips_through_the_sidecar() {
     let applied = sidecar.call(
         4,
         "apply_stash",
-        serde_json::json!({"repoPath": repo_path, "index": 0}),
+        serde_json::json!({"repoPath": repo_path, "index": 0, "restoreIndex": true}),
     );
-    assert_eq!(applied["result"], serde_json::Value::Null);
+    assert_eq!(applied["result"], serde_json::json!({"kind": "Applied"}));
     let on_disk = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
     assert_eq!(on_disk, "v2");
 
@@ -1495,7 +1502,11 @@ fn merge_conflict_lifecycle_round_trips_through_the_sidecar() {
     let merged = sidecar.call(
         2,
         "start_merge",
-        serde_json::json!({"repoPath": repo_path, "branchName": "feature"}),
+        serde_json::json!({
+            "repoPath": repo_path,
+            "branchName": "feature",
+            "options": {"fastForward": "Allow", "squash": false}
+        }),
     );
     assert_eq!(merged["result"]["kind"], "Conflicted");
     let conflicted_files = merged["result"]["files"].as_array().unwrap();
@@ -1939,4 +1950,144 @@ fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
     );
     let hunks = diff["result"].as_array().expect("rename diff result array");
     assert_eq!(hunks.len(), 1);
+}
+
+/// `feature` adds feature.txt; the checked-out main branch adds main.txt.
+fn diverged_feature_repo() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    // Hermetic default for `get_merge_options` (issue #111): a global `merge.ff` must not leak.
+    repo.config().unwrap().set_str("merge.ff", "true").unwrap();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let main_ref = repo.head().unwrap().name().unwrap().to_string();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &head, false).unwrap();
+    drop(head);
+    repo.set_head("refs/heads/feature").unwrap();
+    write_file(dir.path(), "feature.txt", "new\n");
+    commit_all(&repo, "feature commit");
+    repo.set_head(&main_ref).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "main.txt", "new\n");
+    commit_all(&repo, "main commit");
+    (dir, repo)
+}
+
+#[test]
+fn merge_options_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = diverged_feature_repo();
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let defaults = sidecar.call(
+        2,
+        "get_merge_options",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        defaults["result"],
+        serde_json::json!({"fastForward": "Allow", "squash": false})
+    );
+    let set = sidecar.call(
+        3,
+        "set_merge_options",
+        serde_json::json!({"repoPath": repo_path, "options": {"fastForward": "Never", "squash": false}}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null);
+    let remembered = sidecar.call(
+        4,
+        "get_merge_options",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        remembered["result"],
+        serde_json::json!({"fastForward": "Never", "squash": false})
+    );
+
+    let squashed = sidecar.call(
+        5,
+        "start_merge",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "branchName": "feature",
+            "options": {"fastForward": "Allow", "squash": true}
+        }),
+    );
+    assert_eq!(squashed["result"], serde_json::json!({"kind": "Squashed"}));
+    let head = sidecar.call(
+        6,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert!(head["result"]["squashMessage"]
+        .as_str()
+        .unwrap()
+        .starts_with("Squashed commit of the following:"));
+}
+
+#[test]
+fn stash_options_files_and_pop_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    write_file(dir.path(), "b.txt", "v1");
+    commit_all(&repo, "initial commit");
+    drop(repo);
+    write_file(dir.path(), "a.txt", "mine");
+    write_file(dir.path(), "b.txt", "other");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let saved = sidecar.call(
+        2,
+        "save_stash",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "options": {"message": "only a", "keepIndex": false, "includeUntracked": true, "paths": ["a.txt"]}
+        }),
+    );
+    assert_eq!(saved["result"], serde_json::Value::Null, "{saved}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("b.txt")).unwrap(),
+        "other"
+    );
+
+    let stashes = sidecar.call(
+        3,
+        "list_stashes",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    let entry = &stashes["result"][0];
+    assert!(entry["message"].as_str().unwrap().ends_with(": only a"));
+    let files = sidecar.call(
+        4,
+        "get_stash_files",
+        serde_json::json!({"repoPath": repo_path, "commitId": entry["commitId"]}),
+    );
+    assert_eq!(
+        files["result"],
+        serde_json::json!({"tracked": ["a.txt"], "untracked": [], "untrackedCommitId": null})
+    );
+
+    let popped = sidecar.call(
+        5,
+        "pop_stash",
+        serde_json::json!({"repoPath": repo_path, "index": 0, "restoreIndex": true}),
+    );
+    assert_eq!(popped["result"], serde_json::json!({"kind": "Applied"}));
+    let after = sidecar.call(
+        6,
+        "list_stashes",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after["result"], serde_json::json!([]));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "mine"
+    );
 }

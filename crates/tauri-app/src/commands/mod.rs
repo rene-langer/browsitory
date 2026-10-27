@@ -36,14 +36,14 @@ pub use history::{
     amend_commit, checkout_commit, cherry_pick, get_head_info, reset_to_commit, revert_commit,
 };
 pub use merge::{
-    abort_merge, get_conflict_hunks, get_merge_message, resolve_add_delete_conflict,
-    resolve_conflict, start_merge,
+    abort_merge, get_conflict_hunks, get_merge_message, get_merge_options,
+    resolve_add_delete_conflict, resolve_conflict, set_merge_options, start_merge,
 };
 pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use remote::*;
 pub use search::{cancel_search, search_commits};
-pub use stash::{apply_stash, drop_stash, list_stashes, save_stash};
+pub use stash::{apply_stash, drop_stash, get_stash_files, list_stashes, pop_stash, save_stash};
 pub use status::{
     commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
     get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
@@ -558,6 +558,7 @@ pub struct HeadInfoDto {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<&'static str>,
+    pub squash_message: Option<String>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -572,6 +573,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 OperationKind::CherryPick => "CherryPick",
                 OperationKind::Revert => "Revert",
             }),
+            squash_message: info.squash_message,
         }
     }
 }
@@ -727,6 +729,125 @@ impl From<git_core::merge::MergeOutcome> for MergeOutcomeDto {
             git_core::merge::MergeOutcome::Conflicted { files } => {
                 MergeOutcomeDto::Conflicted { files }
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FastForwardDto {
+    Allow,
+    Never,
+    Only,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeOptionsDto {
+    pub fast_forward: FastForwardDto,
+    pub squash: bool,
+}
+
+impl From<MergeOptionsDto> for git_core::merge::MergeOptions {
+    fn from(dto: MergeOptionsDto) -> Self {
+        use git_core::merge::FastForward;
+        Self {
+            fast_forward: match dto.fast_forward {
+                FastForwardDto::Allow => FastForward::Allow,
+                FastForwardDto::Never => FastForward::Never,
+                FastForwardDto::Only => FastForward::Only,
+            },
+            squash: dto.squash,
+        }
+    }
+}
+
+impl From<git_core::merge::MergeOptions> for MergeOptionsDto {
+    fn from(options: git_core::merge::MergeOptions) -> Self {
+        use git_core::merge::FastForward;
+        Self {
+            fast_forward: match options.fast_forward {
+                FastForward::Allow => FastForwardDto::Allow,
+                FastForward::Never => FastForwardDto::Never,
+                FastForward::Only => FastForwardDto::Only,
+            },
+            squash: options.squash,
+        }
+    }
+}
+
+impl From<config::MergePreference> for MergeOptionsDto {
+    fn from(preference: config::MergePreference) -> Self {
+        Self {
+            fast_forward: match preference.fast_forward {
+                config::MergeFastForward::Allow => FastForwardDto::Allow,
+                config::MergeFastForward::Never => FastForwardDto::Never,
+                config::MergeFastForward::Only => FastForwardDto::Only,
+            },
+            squash: preference.squash,
+        }
+    }
+}
+
+impl From<FastForwardDto> for config::MergeFastForward {
+    fn from(dto: FastForwardDto) -> Self {
+        match dto {
+            FastForwardDto::Allow => Self::Allow,
+            FastForwardDto::Never => Self::Never,
+            FastForwardDto::Only => Self::Only,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashOptionsDto {
+    pub message: Option<String>,
+    pub keep_index: bool,
+    pub include_untracked: bool,
+    pub paths: Vec<String>,
+}
+
+impl From<StashOptionsDto> for git_core::stash::StashOptions {
+    fn from(dto: StashOptionsDto) -> Self {
+        Self {
+            message: dto.message,
+            keep_index: dto.keep_index,
+            include_untracked: dto.include_untracked,
+            paths: dto.paths,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum StashApplyOutcomeDto {
+    Applied,
+    Conflicted { files: Vec<String> },
+}
+
+impl From<git_core::stash::StashApplyOutcome> for StashApplyOutcomeDto {
+    fn from(outcome: git_core::stash::StashApplyOutcome) -> Self {
+        match outcome {
+            git_core::stash::StashApplyOutcome::Applied => Self::Applied,
+            git_core::stash::StashApplyOutcome::Conflicted { files } => Self::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StashFilesDto {
+    pub tracked: Vec<String>,
+    pub untracked: Vec<String>,
+    pub untracked_commit_id: Option<String>,
+}
+
+impl From<git_core::stash::StashFiles> for StashFilesDto {
+    fn from(files: git_core::stash::StashFiles) -> Self {
+        Self {
+            tracked: files.tracked,
+            untracked: files.untracked,
+            untracked_commit_id: files.untracked_commit_id,
         }
     }
 }
@@ -1275,6 +1396,9 @@ mod tests {
         RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
         UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
+    use super::{
+        MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
+    };
 
     #[test]
     fn diff_options_dto_parses_camel_case() {
@@ -1794,7 +1918,104 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick"})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null})
+        );
+        let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
+            head_id: Some("abc".into()),
+            detached_at: None,
+            head_pushed: false,
+            operation: None,
+            squash_message: Some("Squashed commit of the following:\n".into()),
+        });
+        assert_eq!(
+            serde_json::to_value(dto).unwrap()["squashMessage"],
+            serde_json::json!("Squashed commit of the following:\n")
+        );
+    }
+
+    #[test]
+    fn merge_options_dto_round_trips_camel_case() {
+        let dto: MergeOptionsDto =
+            serde_json::from_value(serde_json::json!({"fastForward": "Only", "squash": true}))
+                .unwrap();
+        assert_eq!(
+            git_core::merge::MergeOptions::from(dto),
+            git_core::merge::MergeOptions {
+                fast_forward: git_core::merge::FastForward::Only,
+                squash: true
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(MergeOptionsDto::from(
+                git_core::merge::MergeOptions::default()
+            ))
+            .unwrap(),
+            serde_json::json!({"fastForward": "Allow", "squash": false})
+        );
+        let never: MergeOptionsDto =
+            serde_json::from_value(serde_json::json!({"fastForward": "Never", "squash": false}))
+                .unwrap();
+        let preference = config::MergePreference {
+            repo_path: "/r".into(),
+            fast_forward: config::MergeFastForward::Never,
+            squash: false,
+        };
+        assert_eq!(
+            serde_json::to_value(MergeOptionsDto::from(preference)).unwrap(),
+            serde_json::to_value(never).unwrap()
+        );
+    }
+
+    #[test]
+    fn merge_outcome_dto_has_squashed() {
+        assert_eq!(
+            serde_json::to_value(MergeOutcomeDto::from(
+                git_core::merge::MergeOutcome::Squashed
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Squashed"})
+        );
+    }
+
+    #[test]
+    fn stash_dtos_serialize_camel_case() {
+        let opts: StashOptionsDto = serde_json::from_value(serde_json::json!(
+            {"message": null, "keepIndex": true, "includeUntracked": false, "paths": ["a.txt"]}
+        ))
+        .unwrap();
+        assert_eq!(
+            git_core::stash::StashOptions::from(opts),
+            git_core::stash::StashOptions {
+                message: None,
+                keep_index: true,
+                include_untracked: false,
+                paths: vec!["a.txt".into()]
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(StashApplyOutcomeDto::from(
+                git_core::stash::StashApplyOutcome::Conflicted {
+                    files: vec!["f".into()]
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Conflicted", "files": ["f"]})
+        );
+        assert_eq!(
+            serde_json::to_value(StashApplyOutcomeDto::from(
+                git_core::stash::StashApplyOutcome::Applied
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "Applied"})
+        );
+        assert_eq!(
+            serde_json::to_value(StashFilesDto::from(git_core::stash::StashFiles {
+                tracked: vec!["t".into()],
+                untracked: vec![],
+                untracked_commit_id: None
+            }))
+            .unwrap(),
+            serde_json::json!({"tracked": ["t"], "untracked": [], "untrackedCommitId": null})
         );
     }
 
