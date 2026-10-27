@@ -90,4 +90,34 @@ describe("useCompare", () => {
     await waitFor(() => expect(result.current.compare?.range).toEqual({ fromId: "base", toId: "tip" }));
     expect(result.current.compare?.error).toBeNull();
   });
+
+  it("re-opening a closed branch compare does not show the previous result", async () => {
+    const getBranchCompareRange = vi
+      .fn<(repoPath: string, refName: string) => Promise<CompareRange>>()
+      .mockResolvedValueOnce({ fromId: "base", toId: "old-tip" })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = setup(getBranchCompareRange);
+    act(() => result.current.compareBranch("refs/heads/feature", "feature"));
+    await waitFor(() => expect(result.current.compare?.range).toEqual({ fromId: "base", toId: "old-tip" }));
+    act(() => result.current.close());
+
+    act(() => result.current.compareBranch("refs/heads/feature", "feature"));
+    expect(result.current.compare?.range).toBeNull();
+    await waitFor(() => expect(getBranchCompareRange).toHaveBeenCalledTimes(2));
+    expect(result.current.compare?.range).toBeNull();
+  });
+
+  it("re-opening a closed branch compare does not show the previous error", async () => {
+    const getBranchCompareRange = vi
+      .fn<(repoPath: string, refName: string) => Promise<CompareRange>>()
+      .mockRejectedValueOnce("boom")
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = setup(getBranchCompareRange);
+    act(() => result.current.compareBranch("refs/heads/feature", "feature"));
+    await waitFor(() => expect(result.current.compare?.error?.message).toBe("boom"));
+    act(() => result.current.close());
+
+    act(() => result.current.compareBranch("refs/heads/feature", "feature"));
+    expect(result.current.compare?.error).toBeNull();
+  });
 });

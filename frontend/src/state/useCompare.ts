@@ -30,10 +30,14 @@ interface Opened {
   target: CompareTarget;
   // The selection the compare was opened under; selecting anything else closes it.
   row: SelectedRow;
+  // Increases on every open, so a result resolved for an earlier (closed) compare of the same
+  // ref is never shown for this one.
+  openId: number;
 }
 
 interface Resolved {
   refName: string;
+  openId: number;
   // The `retryToken` this result was produced under; an older error is hidden while a retry runs.
   token: number;
   range: CompareRange | null;
@@ -49,6 +53,10 @@ export function useCompare(
   const [opened, setOpened] = useState<Opened | null>(null);
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  const nextOpenId = useRef(0);
+  // `open` runs from event handlers (menus, buttons), which only fire after a render has
+  // committed, so this ref always holds the selection the user sees. Do not call the openers
+  // during render.
   const selectedRowRef = useRef(selectedRow);
   useEffect(() => {
     selectedRowRef.current = selectedRow;
@@ -63,25 +71,31 @@ export function useCompare(
   const active = opened !== null && rowsEqual(opened.row, selectedRow) ? opened : null;
 
   const branchRef = active?.target.kind === "branch" ? active.target.refName : null;
+  const openId = active?.openId ?? null;
   useEffect(() => {
-    if (branchRef === null) return;
+    if (branchRef === null || openId === null) return;
     let ignore = false;
     // No synchronous reset here: a result for another ref is ignored below, and a range already
     // shown for this ref stays up while it re-resolves after a refresh.
     client.getBranchCompareRange(repoPath, branchRef).then(
       (range) => {
-        if (!ignore) setResolved({ refName: branchRef, token: retryToken, range, error: null });
+        if (!ignore) setResolved({ refName: branchRef, openId, token: retryToken, range, error: null });
       },
       (err: unknown) => {
-        if (!ignore) setResolved({ refName: branchRef, token: retryToken, range: null, error: describeError(err) });
+        if (!ignore) {
+          setResolved({ refName: branchRef, openId, token: retryToken, range: null, error: describeError(err) });
+        }
       },
     );
     return () => {
       ignore = true;
     };
-  }, [client, repoPath, branchRef, refreshGeneration, retryToken]);
+  }, [client, repoPath, branchRef, openId, refreshGeneration, retryToken]);
 
-  const open = useCallback((target: CompareTarget) => setOpened({ target, row: selectedRowRef.current }), []);
+  const open = useCallback((target: CompareTarget) => {
+    nextOpenId.current += 1;
+    setOpened({ target, row: selectedRowRef.current, openId: nextOpenId.current });
+  }, []);
   const compareCommits = useCallback((fromId: string, toId: string) => open({ kind: "commits", fromId, toId }), [open]);
   const compareBranch = useCallback((refName: string, label: string) => open({ kind: "branch", refName, label }), [open]);
   const compareWorkingTree = useCallback((commitId: string) => open({ kind: "workingTree", commitId }), [open]);
@@ -105,7 +119,7 @@ export function useCompare(
     } else if (target.kind === "workingTree") {
       compare = { target, range: { fromId: target.commitId, toId: null }, error: null };
     } else {
-      const current = resolved?.refName === target.refName ? resolved : null;
+      const current = resolved?.refName === target.refName && resolved.openId === active.openId ? resolved : null;
       const error = current !== null && current.token === retryToken ? current.error : null;
       compare = { target, range: current?.range ?? null, error };
     }
