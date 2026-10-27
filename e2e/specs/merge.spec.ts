@@ -14,7 +14,9 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
  */
 async function confirmMergeDialog(branch: string) {
   const dialog = `dialog[aria-label="Merge ${branch}"]`;
-  const confirmMerge = await $(`${dialog} button=Merge`);
+  await $(dialog).waitForExist({ timeout: 10000 });
+  // WebdriverIO cannot mix a CSS prefix with its `button=Text` selector, so chain them.
+  const confirmMerge = await $(dialog).$("button=Merge");
   await confirmMerge.waitForExist({ timeout: 10000 });
   await browser.waitUntil(async () => confirmMerge.isEnabled(), {
     timeout: 10000,
