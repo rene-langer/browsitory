@@ -9,6 +9,42 @@ pub enum StashError {
     NothingToStash,
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    #[error("Resolve the current conflicts before applying a stash.")]
+    UnresolvedConflicts,
+    #[error("Commit or unstage your staged changes before applying a stash.")]
+    StagedChanges,
+    #[error("Applying this stash would overwrite local changes to the same files. Commit, stash or discard them first.")]
+    WouldOverwrite,
+    #[error("The stash's staged changes conflict with the current files. Apply it without \"Restore staged changes\".")]
+    IndexConflict,
+    #[error("No stash with id {0}.")]
+    NotAStash(String),
+}
+
+impl From<crate::diff::DiffError> for StashError {
+    fn from(error: crate::diff::DiffError) -> Self {
+        match error {
+            crate::diff::DiffError::Diff(error) => StashError::Git(error),
+        }
+    }
+}
+
+/// Result of applying (or popping) a stash. `Conflicted` means the stash applied but left
+/// conflicts in the index (and markers in the files); `repo.state()` stays `Clean`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StashApplyOutcome {
+    Applied,
+    Conflicted { files: Vec<String> },
+}
+
+/// The files a stash changed: `tracked` against the HEAD it was made on, `untracked` from its
+/// untracked-files commit (parentless, so `diff::commit_diff` on `untracked_commit_id` shows each
+/// as a whole-file add).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashFiles {
+    pub tracked: Vec<String>,
+    pub untracked: Vec<String>,
+    pub untracked_commit_id: Option<String>,
 }
 
 /// What to stash, like `git stash push [-m <message>] [--keep-index] [-u] [-- <paths>]`.
@@ -289,12 +325,86 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
     Ok(entries)
 }
 
-pub fn apply_stash(repo: &mut Repository, index: usize) -> Result<(), StashError> {
-    // `None` options means libgit2's default (safe) checkout strategy applies, refusing to
-    // overwrite a conflicting file exactly like `branch::switch_branch`'s
-    // `checkout_tree(..., None)` does. Same philosophy, same error-propagation shape.
-    repo.stash_apply(index, None)?;
-    Ok(())
+/// Applies `stash@{index}`. `restore_index` also restages what was staged (libgit2's
+/// `REINSTATE_INDEX`, `git stash apply --index`). libgit2 refuses outright while the index
+/// differs from HEAD; its errors are mapped to user-facing variants.
+pub fn apply_stash(
+    repo: &mut Repository,
+    index: usize,
+    restore_index: bool,
+) -> Result<StashApplyOutcome, StashError> {
+    if repo.index()?.has_conflicts() {
+        return Err(StashError::UnresolvedConflicts);
+    }
+    let mut options = git2::StashApplyOptions::new();
+    if restore_index {
+        options.reinstantiate_index();
+    }
+    // Default (safe) checkout strategy: refuses to overwrite a locally modified file, like
+    // `branch::switch_branch`'s `checkout_tree(..., None)`.
+    repo.stash_apply(index, Some(&mut options))
+        .map_err(|error| match (error.code(), error.class()) {
+            (ErrorCode::Uncommitted, _) => StashError::StagedChanges,
+            (ErrorCode::Conflict, ErrorClass::Checkout) => StashError::WouldOverwrite,
+            (ErrorCode::Conflict, _) => StashError::IndexConflict,
+            _ => StashError::Git(error),
+        })?;
+    let mut files = Vec::new();
+    let repo_index = repo.index()?;
+    if repo_index.has_conflicts() {
+        for conflict in repo_index.conflicts()? {
+            if let Some(path) = crate::merge::conflict_path(&conflict?) {
+                if !files.contains(&path) {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    if files.is_empty() {
+        Ok(StashApplyOutcome::Applied)
+    } else {
+        Ok(StashApplyOutcome::Conflicted { files })
+    }
+}
+
+/// Applies `stash@{index}` and drops it only when it applied cleanly; a conflicted apply keeps
+/// the stash, like `git stash pop`. Not `git2::Repository::stash_pop`: libgit2 drops the stash
+/// even when the apply left conflicts, losing it.
+pub fn pop_stash(
+    repo: &mut Repository,
+    index: usize,
+    restore_index: bool,
+) -> Result<StashApplyOutcome, StashError> {
+    let outcome = apply_stash(repo, index, restore_index)?;
+    if outcome == StashApplyOutcome::Applied {
+        repo.stash_drop(index)?;
+    }
+    Ok(outcome)
+}
+
+/// The files of the stash whose commit is `commit_id`; `NotAStash` when no stash entry has that
+/// id (keyed by id, not index, because indices shift as stashes come and go).
+pub fn stash_files(repo: &mut Repository, commit_id: &str) -> Result<StashFiles, StashError> {
+    if !list_stashes(repo)?
+        .iter()
+        .any(|entry| entry.commit_id == commit_id)
+    {
+        return Err(StashError::NotAStash(commit_id.to_string()));
+    }
+    let tracked = crate::diff::commit_files(repo, commit_id)?;
+    let stash = repo.find_commit(git2::Oid::from_str(commit_id)?)?;
+    let (untracked, untracked_commit_id) = match stash.parent(2) {
+        Ok(untracked_commit) => {
+            let id = untracked_commit.id().to_string();
+            (crate::diff::commit_files(repo, &id)?, Some(id))
+        }
+        Err(_) => (Vec::new(), None),
+    };
+    Ok(StashFiles {
+        tracked,
+        untracked,
+        untracked_commit_id,
+    })
 }
 
 pub fn drop_stash(repo: &mut Repository, index: usize) -> Result<(), StashError> {

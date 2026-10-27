@@ -1,7 +1,7 @@
 mod common;
 
 use common::{commit_all, init_repo, write_file};
-use git_core::stash::{StashError, StashOptions};
+use git_core::stash::{StashApplyOutcome, StashError, StashOptions};
 
 #[test]
 fn save_stash_captures_tracked_and_untracked_changes_and_cleans_the_working_tree() {
@@ -53,7 +53,10 @@ fn apply_stash_restores_the_stashed_changes() {
     write_file(dir.path(), "untracked.txt", "new");
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    git_core::stash::apply_stash(&mut repo, 0).unwrap();
+    assert_eq!(
+        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
 
     let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
     assert_eq!(contents, "v2");
@@ -74,9 +77,16 @@ fn apply_stash_is_blocked_by_a_conflicting_dirty_file() {
     // what applying the stash would restore.
     write_file(dir.path(), "file.txt", "uncommitted local edit");
 
-    let result = git_core::stash::apply_stash(&mut repo, 0);
+    let result = git_core::stash::apply_stash(&mut repo, 0, false);
 
-    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(StashError::WouldOverwrite)),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Applying this stash would overwrite local changes to the same files. Commit, stash or discard them first."
+    );
     let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
     assert_eq!(contents, "uncommitted local edit");
     // The blocked apply must not have dropped the stash either.
@@ -87,7 +97,7 @@ fn apply_stash_is_blocked_by_a_conflicting_dirty_file() {
 fn apply_stash_on_an_empty_list_returns_an_error() {
     let (_dir, mut repo) = init_repo();
 
-    let result = git_core::stash::apply_stash(&mut repo, 0);
+    let result = git_core::stash::apply_stash(&mut repo, 0, false);
 
     assert!(result.is_err());
 }
@@ -311,13 +321,16 @@ fn path_limited_stash_with_message_keeps_older_entries() {
 
     // The restamped stash applies; the older ones are still intact underneath it.
     write_file(dir.path(), "b.txt", "v1");
-    git_core::stash::apply_stash(&mut repo, 0).unwrap();
+    assert_eq!(
+        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
     assert_eq!(read(dir.path(), "a.txt"), "mine");
     git_core::stash::drop_stash(&mut repo, 0).unwrap();
     write_file(dir.path(), "a.txt", "v1");
     let after_drop = git_core::stash::list_stashes(&mut repo).unwrap();
     assert_eq!(after_drop, older);
-    git_core::stash::apply_stash(&mut repo, 1).unwrap();
+    git_core::stash::apply_stash(&mut repo, 1, false).unwrap();
     assert_eq!(read(dir.path(), "b.txt"), "two");
 }
 
@@ -380,7 +393,10 @@ fn path_limited_stash_of_an_untracked_file_stashes_only_it_and_applies_back() {
         let files = git_core::diff::commit_files(&repo, &untracked.id().to_string()).unwrap();
         assert_eq!(files, vec!["nested/dir/new.txt".to_string()]);
     }
-    git_core::stash::apply_stash(&mut repo, 0).unwrap();
+    assert_eq!(
+        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
     assert_eq!(read(dir.path(), "nested/dir/new.txt"), "brand new\n");
 }
 
@@ -400,7 +416,10 @@ fn path_limited_stash_of_a_staged_new_file_unstages_and_removes_only_it() {
     let status = git_core::status::status(&repo).unwrap();
     assert_eq!(status.len(), 1, "{status:?}");
     assert_eq!(status[0].path, "a.txt");
-    git_core::stash::apply_stash(&mut repo, 0).unwrap();
+    assert_eq!(
+        git_core::stash::apply_stash(&mut repo, 0, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
     assert_eq!(read(dir.path(), "added.txt"), "added\n");
 }
 
@@ -459,4 +478,200 @@ fn path_limited_stash_paths_are_literal() {
 
     assert_eq!(read(dir.path(), "[ab].txt"), "v1");
     assert_eq!(read(dir.path(), "a.txt"), "keep");
+}
+
+/// file.txt stashed as "stashed\n", then a conflicting commit changed it to "committed\n".
+fn conflicting_stash() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "file.txt", "base\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "file.txt", "stashed\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "file.txt", "committed\n");
+    commit_all(&repo, "conflicting commit");
+    (dir, repo)
+}
+
+#[test]
+fn pop_drops_the_stash_on_success() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "v2");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_eq!(read(dir.path(), "a.txt"), "v2");
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}
+
+#[test]
+fn pop_drops_only_the_popped_stash() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    commit_all(&repo, "initial");
+    for round in ["one", "two", "three"] {
+        write_file(dir.path(), "a.txt", round);
+        git_core::stash::save_stash(&mut repo, &with(|o| o.message = Some(round.into()))).unwrap();
+    }
+    let before = git_core::stash::list_stashes(&mut repo).unwrap();
+
+    git_core::stash::pop_stash(&mut repo, 1, false).unwrap();
+
+    assert_eq!(read(dir.path(), "a.txt"), "two");
+    let after = git_core::stash::list_stashes(&mut repo).unwrap();
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[0].commit_id, before[0].commit_id);
+    assert_eq!(after[1].commit_id, before[2].commit_id);
+}
+
+#[test]
+fn pop_keeps_the_stash_and_reports_conflicts() {
+    let (_dir, mut repo) = conflicting_stash();
+
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, false).unwrap();
+
+    assert_eq!(
+        outcome,
+        StashApplyOutcome::Conflicted {
+            files: vec!["file.txt".into()]
+        }
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert!(repo.index().unwrap().has_conflicts());
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn apply_with_unresolved_conflicts_is_refused() {
+    let (_dir, mut repo) = conflicting_stash();
+    git_core::stash::pop_stash(&mut repo, 0, false).unwrap();
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::UnresolvedConflicts),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Resolve the current conflicts before applying a stash."
+    );
+    let error = git_core::stash::pop_stash(&mut repo, 0, false).unwrap_err();
+    assert!(
+        matches!(error, StashError::UnresolvedConflicts),
+        "{error:?}"
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+}
+
+#[test]
+fn apply_with_restore_index_restores_staged_state() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    write_file(dir.path(), "b.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "staged");
+    stage(&repo, "a.txt");
+    write_file(dir.path(), "b.txt", "unstaged");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    let outcome = git_core::stash::apply_stash(&mut repo, 0, true).unwrap();
+
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    let status = git_core::status::status(&repo).unwrap();
+    assert!(status.iter().any(|e| e.path == "a.txt" && e.staged));
+    assert!(status.iter().any(|e| e.path == "b.txt" && !e.staged));
+    assert!(!status.iter().any(|e| e.path == "b.txt" && e.staged));
+
+    // Without restoring the index, a.txt comes back unstaged.
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Hard).unwrap();
+    git_core::stash::apply_stash(&mut repo, 0, false).unwrap();
+    let status = git_core::status::status(&repo).unwrap();
+    assert!(!status.iter().any(|e| e.staged), "{status:?}");
+    assert_eq!(read(dir.path(), "a.txt"), "staged");
+}
+
+#[test]
+fn apply_with_staged_changes_reports_staged_changes() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    write_file(dir.path(), "b.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "v2");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "b.txt", "staged");
+    stage(&repo, "b.txt");
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, false).unwrap_err();
+
+    assert!(matches!(error, StashError::StagedChanges), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "Commit or unstage your staged changes before applying a stash."
+    );
+    let error = git_core::stash::pop_stash(&mut repo, 0, true).unwrap_err();
+    assert!(matches!(error, StashError::StagedChanges), "{error:?}");
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert_eq!(read(dir.path(), "a.txt"), "v1");
+}
+
+#[test]
+fn stash_files_lists_tracked_and_untracked_files() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "tracked.txt", "v2");
+    write_file(dir.path(), "new.txt", "brand new\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    let id = git_core::stash::list_stashes(&mut repo).unwrap()[0]
+        .commit_id
+        .clone();
+
+    let files = git_core::stash::stash_files(&mut repo, &id).unwrap();
+
+    assert_eq!(files.tracked, vec!["tracked.txt".to_string()]);
+    assert_eq!(files.untracked, vec!["new.txt".to_string()]);
+    let untracked_id = files.untracked_commit_id.unwrap();
+    let hunks =
+        git_core::diff::commit_diff(&repo, &untracked_id, "new.txt", &Default::default()).unwrap();
+    assert_eq!(hunks[0].old_lines, 0);
+    assert_eq!(hunks[0].lines[0].content, "brand new\n");
+}
+
+#[test]
+fn stash_files_without_untracked_has_no_untracked_commit() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "tracked.txt", "v1");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "tracked.txt", "v2");
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+    let id = git_core::stash::list_stashes(&mut repo).unwrap()[0]
+        .commit_id
+        .clone();
+
+    let files = git_core::stash::stash_files(&mut repo, &id).unwrap();
+
+    assert_eq!(files.tracked, vec!["tracked.txt".to_string()]);
+    assert!(files.untracked.is_empty());
+    assert_eq!(files.untracked_commit_id, None);
+}
+
+#[test]
+fn stash_files_rejects_a_commit_that_is_not_a_stash() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "v1");
+    commit_all(&repo, "initial");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    let error = git_core::stash::stash_files(&mut repo, &head).unwrap_err();
+
+    assert!(
+        matches!(&error, StashError::NotAStash(id) if *id == head),
+        "{error:?}"
+    );
+    assert_eq!(error.to_string(), format!("No stash with id {head}."));
 }

@@ -16,7 +16,9 @@ pub(super) fn save(repo: &mut git2::Repository, reply: Sender<Result<(), String>
 }
 
 pub(super) fn apply(repo: &mut git2::Repository, index: usize, reply: Sender<Result<(), String>>) {
-    let result = git_core::stash::apply_stash(repo, index).map_err(|error| error.to_string());
+    let result = git_core::stash::apply_stash(repo, index, false)
+        .map(|_| ())
+        .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
 
