@@ -122,7 +122,8 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
 /// part-way never loses anything: the changes are already in the stash.
 ///
 /// - Worktree commit: HEAD's tree with the matched tracked paths' worktree contents.
-/// - Index commit: the whole index, like git (so "Restore staged changes" can restage).
+/// - Index commit: HEAD's tree plus the selected paths' index entries (git stores the whole
+///   index; see below).
 /// - Untracked commit (parentless): only the matched untracked files.
 ///
 /// Reverting touches only the matched paths: tracked ones go back to HEAD in index and worktree
@@ -192,7 +193,20 @@ fn save_path_limited_stash(
 
     let mut index = repo.index()?;
     let base_tree = base.tree()?;
-    let index_tree = repo.find_tree(index.write_tree()?)?;
+    // Index commit: HEAD's tree plus only the selected paths' index entries. (git stores the
+    // whole index; then "Restore staged changes" would also re-stage, and `git stash apply
+    // --index` would refuse over, files this stash never took.)
+    let mut staged_overlay = git2::Index::new()?;
+    staged_overlay.read_tree(&base_tree)?;
+    for path in &tracked {
+        match index.get_path(std::path::Path::new(path), 0) {
+            Some(entry) => staged_overlay.add(&entry)?,
+            None => {
+                let _ = staged_overlay.remove_path(std::path::Path::new(path));
+            }
+        }
+    }
+    let index_tree = repo.find_tree(staged_overlay.write_tree_to(repo)?)?;
     let index_commit = repo.find_commit(repo.commit(
         None,
         &signature,

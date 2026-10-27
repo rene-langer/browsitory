@@ -753,3 +753,77 @@ fn path_limited_stash_refuses_a_path_beyond_a_symlinked_directory() {
         .is_symlink());
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 }
+
+#[test]
+fn restoring_staged_changes_of_a_path_limited_stash_touches_only_its_files() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a", "a1\n");
+    write_file(dir.path(), "c", "c1\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a", "a2\n");
+    write_file(dir.path(), "c", "c2\n");
+    stage(&repo, "c");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["a".into()])).unwrap();
+    // The stash's index commit holds nothing of `c`.
+    let stash_id = stash_commit(&mut repo, 0);
+    {
+        let stash = repo.find_commit(stash_id).unwrap();
+        let index_tree = stash.parent(1).unwrap().tree().unwrap();
+        let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let c = |tree: &git2::Tree| tree.get_path(std::path::Path::new("c")).unwrap().id();
+        assert_eq!(c(&index_tree), c(&head_tree));
+    }
+    // Discard `c` back to c1 in index and worktree.
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().path("c");
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    assert!(git_core::status::status(&repo).unwrap().is_empty());
+
+    git_core::stash::pop_stash(&mut repo, 0, true).unwrap();
+
+    let status = git_core::status::status(&repo).unwrap();
+    assert!(!status.iter().any(|e| e.path == "c"), "{status:?}");
+    assert_eq!(read(dir.path(), "a"), "a2\n");
+    assert_eq!(read(dir.path(), "c"), "c1\n");
+}
+
+#[test]
+fn git_stash_apply_index_restores_the_selected_files_of_a_path_limited_stash() {
+    if !common::program_available("git") {
+        return;
+    }
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a", "a1\n");
+    write_file(dir.path(), "c", "c1\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a", "a2\n");
+    stage(&repo, "a");
+    write_file(dir.path(), "a", "a3\n");
+    write_file(dir.path(), "c", "c2\n");
+    stage(&repo, "c");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["a".into()])).unwrap();
+    // Unstage c so git's own apply --index has a clean index to work on.
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Mixed).unwrap();
+
+    let output = std::process::Command::new("git")
+        .args(["stash", "apply", "--index"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let staged_a = std::process::Command::new("git")
+        .args(["show", ":a"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&staged_a.stdout), "a2\n");
+    assert_eq!(read(dir.path(), "a"), "a3\n");
+}
