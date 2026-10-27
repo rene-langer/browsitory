@@ -109,9 +109,33 @@ pub struct UpstreamInfo {
     pub behind: Option<usize>,
 }
 
+/// `(remote, remote_branch)` from `branch.<local_branch>.remote` / `.merge`, or `None` when
+/// either key is missing. Never checks that the tracking ref exists.
+pub(crate) fn configured_upstream(
+    config: &git2::Config,
+    local_branch: &str,
+) -> Result<Option<(String, String)>, git2::Error> {
+    let read = |key: String| match config.get_string(&key) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error),
+    };
+    let Some(remote) = read(format!("branch.{local_branch}.remote"))? else {
+        return Ok(None);
+    };
+    let Some(merge) = read(format!("branch.{local_branch}.merge"))? else {
+        return Ok(None);
+    };
+    let branch = merge
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&merge)
+        .to_string();
+    Ok(Some((remote, branch)))
+}
+
 /// Ahead/behind of `local_branch` against `refs/remotes/<remote>/<remote_branch>`, or
 /// `(None, None)` when either side cannot be resolved.
-fn ahead_behind(
+pub(crate) fn ahead_behind(
     repo: &Repository,
     local_branch: &str,
     remote_name: &str,
@@ -598,17 +622,9 @@ pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, Remot
     }
     let local_branch = current_local_branch_name(repo)?;
     let config = repo.config()?;
-    let remote_key = format!("branch.{local_branch}.remote");
-    let remote_name = match config.get_string(&remote_key) {
-        Ok(name) => name,
-        Err(error) if error.code() == ErrorCode::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
+    let Some((remote_name, remote_branch)) = configured_upstream(&config, &local_branch)? else {
+        return Ok(None);
     };
-    let merge_ref = config.get_string(&format!("branch.{local_branch}.merge"))?;
-    let remote_branch = merge_ref
-        .strip_prefix("refs/heads/")
-        .unwrap_or(&merge_ref)
-        .to_string();
 
     let (ahead, behind) = ahead_behind(repo, &local_branch, &remote_name, &remote_branch);
     Ok(Some(UpstreamInfo {

@@ -940,6 +940,10 @@ fn commit(params: Value, repos: &Repos) -> Result<Value, String> {
 struct BranchInfoDto {
     name: String,
     is_current: bool,
+    // Nulls are part of the wire contract: no `skip_serializing_if`.
+    upstream: Option<String>,
+    ahead: Option<usize>,
+    behind: Option<usize>,
 }
 
 impl From<BranchInfo> for BranchInfoDto {
@@ -947,6 +951,9 @@ impl From<BranchInfo> for BranchInfoDto {
         Self {
             name: branch.name,
             is_current: branch.is_current,
+            upstream: branch.upstream,
+            ahead: branch.ahead,
+            behind: branch.behind,
         }
     }
 }

@@ -153,6 +153,10 @@ pub struct StatusEntryDto {
 pub struct BranchInfoDto {
     pub name: String,
     pub is_current: bool,
+    // Nulls are part of the wire contract: no `skip_serializing_if`.
+    pub upstream: Option<String>,
+    pub ahead: Option<usize>,
+    pub behind: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -396,6 +400,9 @@ impl From<git_core::branch::BranchInfo> for BranchInfoDto {
         BranchInfoDto {
             name: b.name,
             is_current: b.is_current,
+            upstream: b.upstream,
+            ahead: b.ahead,
+            behind: b.behind,
         }
     }
 }
@@ -1229,7 +1236,7 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
+        transfer_event_payload, BranchInfoDto, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
         OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
         ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
@@ -1316,6 +1323,34 @@ mod tests {
 
         assert_eq!(input.path, "/repos/suite/api");
         assert_eq!(input.workspace_id, Some("workspace-1".into()));
+    }
+
+    #[test]
+    fn branch_info_dto_serializes_upstream_and_counts_including_nulls() {
+        let tracked = serde_json::to_value(BranchInfoDto::from(git_core::branch::BranchInfo {
+            name: "main".into(),
+            is_current: true,
+            upstream: Some("origin/main".into()),
+            ahead: Some(2),
+            behind: Some(0),
+        }))
+        .unwrap();
+        assert_eq!(tracked["isCurrent"], true);
+        assert_eq!(tracked["upstream"], "origin/main");
+        assert_eq!(tracked["ahead"], 2);
+        assert_eq!(tracked["behind"], 0);
+
+        let untracked = serde_json::to_value(BranchInfoDto::from(git_core::branch::BranchInfo {
+            name: "topic".into(),
+            is_current: false,
+            upstream: None,
+            ahead: None,
+            behind: None,
+        }))
+        .unwrap();
+        let object = untracked.as_object().unwrap();
+        assert_eq!(object["upstream"], serde_json::Value::Null);
+        assert!(object.contains_key("ahead") && object.contains_key("behind"));
     }
 
     #[test]

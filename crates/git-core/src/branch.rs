@@ -17,18 +17,35 @@ pub enum BranchError {
 pub struct BranchInfo {
     pub name: String,
     pub is_current: bool,
+    /// `<remote>/<branch>` from `branch.<name>.remote`/`.merge`; `None` without upstream config.
+    pub upstream: Option<String>,
+    /// Commits on the branch not on its tracking ref; `None` without upstream or tracking ref.
+    pub ahead: Option<usize>,
+    /// Commits on the tracking ref not on the branch; `None` as for `ahead`.
+    pub behind: Option<usize>,
 }
 
 pub fn list_branches(repo: &Repository) -> Result<Vec<BranchInfo>, BranchError> {
+    let config = repo.config()?;
     let mut branches = Vec::new();
     for entry in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = entry?;
         let Ok(Some(name)) = branch.name() else {
             continue;
         };
+        let configured = crate::remote::configured_upstream(&config, name)?;
+        let (ahead, behind) = match &configured {
+            Some((remote, remote_branch)) => {
+                crate::remote::ahead_behind(repo, name, remote, remote_branch)
+            }
+            None => (None, None),
+        };
         branches.push(BranchInfo {
             name: name.to_string(),
             is_current: branch.is_head(),
+            upstream: configured.map(|(remote, remote_branch)| format!("{remote}/{remote_branch}")),
+            ahead,
+            behind,
         });
     }
     Ok(branches)
