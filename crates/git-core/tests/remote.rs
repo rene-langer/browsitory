@@ -5,10 +5,10 @@ use git_core::remote::{
     delete_remote_branch, delete_tag, fetch_all, fetch_remote, force_push_current_branch,
     list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_branch,
     push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
-    remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_current_upstream,
-    set_remote_auth_profile, update_remote_urls, CredentialProvider, FetchAllOutcome, PullOutcome,
-    PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
-    TransferProgress, TransferReporter,
+    remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_branch_upstream,
+    set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
+    FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind,
+    TransferOperation, TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -2114,4 +2114,44 @@ fn force_push_validates_the_resolved_target_before_connecting() {
 
     assert!(matches!(result, Err(RemoteError::Git(_))));
     assert!(reporter.events.is_empty());
+}
+
+#[test]
+fn setting_an_upstream_is_not_fooled_by_a_local_branch_named_like_the_remote_branch() {
+    // libgit2's Branch::set_upstream resolves "origin/topic" as a LOCAL branch first, which wrote
+    // `remote = .` and `merge = refs/heads/origin/topic`.
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("origin/topic", &head, false).unwrap();
+    fixture.local.branch("other", &head, false).unwrap();
+    fixture
+        .local
+        .reference("refs/remotes/origin/topic", head.id(), true, "test")
+        .unwrap();
+
+    set_branch_upstream(&fixture.local, "other", "origin", "topic").unwrap();
+    set_current_upstream(&fixture.local, "origin", "topic").unwrap();
+
+    let config = fixture.local.config().unwrap();
+    for branch in ["other", "main"] {
+        assert_eq!(
+            config
+                .get_string(&format!("branch.{branch}.remote"))
+                .unwrap(),
+            "origin"
+        );
+        assert_eq!(
+            config
+                .get_string(&format!("branch.{branch}.merge"))
+                .unwrap(),
+            "refs/heads/topic"
+        );
+    }
+}
+
+#[test]
+fn setting_an_upstream_rejects_a_missing_local_branch_or_remote() {
+    let fixture = local_and_bare_remote();
+    assert!(set_branch_upstream(&fixture.local, "nope", "origin", "topic").is_err());
+    assert!(set_branch_upstream(&fixture.local, "main", "nope", "topic").is_err());
 }

@@ -684,9 +684,11 @@ fn validate_branch_name(name: &str) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// Records `<remote_name>/<remote_branch>` as `local_branch`'s upstream. Uses
-/// `Branch::set_upstream` when the tracking ref exists, else writes the two config keys itself
-/// (a branch can track a remote branch that has not been fetched yet).
+/// Records `<remote_name>/<remote_branch>` as `local_branch`'s upstream by writing
+/// `branch.<local>.remote` and `.merge` directly (a branch can track a remote branch that has not
+/// been fetched yet). Deliberately not `Branch::set_upstream`: it resolves its argument as a
+/// *local* branch first, so a local branch literally named `origin/topic` made it write
+/// `remote = .` and `merge = refs/heads/origin/topic`.
 pub fn set_branch_upstream(
     repo: &Repository,
     local_branch: &str,
@@ -694,20 +696,13 @@ pub fn set_branch_upstream(
     remote_branch: &str,
 ) -> Result<(), RemoteError> {
     repo.find_remote(remote_name)?;
-    let mut branch = repo.find_branch(local_branch, BranchType::Local)?;
-    let upstream = format!("{remote_name}/{remote_branch}");
-    match branch.set_upstream(Some(&upstream)) {
-        Ok(()) => {}
-        Err(error) if error.code() == ErrorCode::NotFound => {
-            let mut config = repo.config()?;
-            config.set_str(&format!("branch.{local_branch}.remote"), remote_name)?;
-            config.set_str(
-                &format!("branch.{local_branch}.merge"),
-                &format!("refs/heads/{remote_branch}"),
-            )?;
-        }
-        Err(error) => return Err(error.into()),
-    }
+    repo.find_branch(local_branch, BranchType::Local)?;
+    let mut config = repo.config()?;
+    config.set_str(&format!("branch.{local_branch}.remote"), remote_name)?;
+    config.set_str(
+        &format!("branch.{local_branch}.merge"),
+        &format!("refs/heads/{remote_branch}"),
+    )?;
     Ok(())
 }
 
