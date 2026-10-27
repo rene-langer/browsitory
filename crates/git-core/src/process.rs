@@ -186,6 +186,9 @@ pub(crate) fn run_captured(
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        // Own group, so timeout/cancel can kill the whole tree. Known limitation: launched from a
+        // terminal, a program that reads `/dev/tty` from this background group is stopped by
+        // SIGTTIN until cancel/timeout (a new session would avoid it but needs `libc`).
         command.process_group(0);
     }
     #[cfg(windows)]

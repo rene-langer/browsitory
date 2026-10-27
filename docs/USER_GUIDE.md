@@ -183,6 +183,12 @@ While a commit hook runs, "Running pre-commit hook…" shows under the commit me
 **Cancel**; a running `pre-push` shows in the transfer panel, whose Cancel stops it. Browsitory
 stops any hook after 10 minutes. Other actions on the repository wait while a hook runs.
 
+Hooks cannot ask you anything: their input is empty (or, for `pre-push`, the list of refs).
+If you started Browsitory from a terminal, a hook that tries to read from that terminal
+(`/dev/tty`) is paused by the system and sits there until you press Cancel or the 10 minutes
+run out. If a hook leaves a background process running that keeps its output open, Browsitory
+waits up to 2 more seconds for output after the hook exits, then carries on.
+
 Like signing, apps started from the macOS Dock may not see your shell's `PATH`. If a hook cannot
 find a tool, use absolute paths in the hook or extend `PATH` inside it.
 

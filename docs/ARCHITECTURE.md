@@ -245,7 +245,12 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   64 KiB are kept (ANSI escapes and `\r` redraws stripped), the child is polled every 20 ms for
   exit, cancel and a 10-minute deadline, and it is always reaped. On Unix it leads its own
   process group and timeout/cancel run `kill -s KILL -- -<pgid>`, so its children die too; after
-  exit the pipe gets a 2 s drain grace in case an escaped grandchild holds it open. Windows runs
+  exit the pipe gets a 2 s drain grace in case an escaped grandchild holds it open (the hook's
+  result is not held up longer than that). Because the hook leads a *background* process group,
+  a hook that reads the controlling terminal (app started from a shell, hook opens `/dev/tty`)
+  gets `SIGTTIN` and stays stopped until Cancel or the timeout; starting it in a new session
+  (`setsid`) would make that fail fast but needs `pre_exec` + `libc`, which this batch avoids.
+  Windows runs
   hooks through Git for Windows' `sh.exe` and only kills that process.
 - Gate hooks live in `git-core`: `commit`/`amend_head` (`pre-commit` → reload the index only if
   it ran → `prepare-commit-msg` → `commit-msg` via `<git dir>/COMMIT_EDITMSG` → commit →
