@@ -3,6 +3,28 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextMenu } from "./ContextMenu";
 
 describe("ContextMenu", () => {
+  it("renders checked items as menuitemcheckbox with aria-checked", () => {
+    const onSelect = vi.fn();
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => {}}
+        items={[
+          { label: "Plain", onSelect: () => {} },
+          { label: "Prune", checked: true, onSelect },
+          { label: "Other", checked: false, onSelect: () => {} },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("menuitem", { name: "Plain" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Prune" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Other" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menuitem", { name: "Plain" })).not.toHaveAttribute("aria-checked");
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Prune" }));
+    expect(onSelect).toHaveBeenCalled();
+  });
+
   it("renders items at the given position and calls onSelect then onClose when one is clicked", () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();

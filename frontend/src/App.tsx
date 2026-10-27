@@ -35,9 +35,13 @@ import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
+import { PushBranchDialog } from "./components/PushBranchDialog";
+import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
+import { effectiveFetchPrune } from "./lib/fetchPrune";
+import { upstreamPushBranch } from "./lib/pushTarget";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
@@ -304,6 +308,12 @@ function RepoWorkspace({
     [dismissError],
   );
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
+  // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
+  // for the upstream's remote, else the current branch's own name.
+  const forcePushTargetBranch = (remoteName: string) =>
+    (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
+    currentBranchName;
+  const pushDialogBranch = appState.state.pushDialog?.localBranch ?? null;
   const pullOutcome = appState.state.pullOutcome;
   useEffect(() => {
     if (pullOutcome === null) return;
@@ -375,7 +385,8 @@ function RepoWorkspace({
           ariaLabel="Confirm force push"
           message={
             <p>
-              Overwrites {appState.state.forcePushConfirm.remoteName}/{currentBranchName} with your local branch.
+              Overwrites {appState.state.forcePushConfirm.remoteName}/
+              {forcePushTargetBranch(appState.state.forcePushConfirm.remoteName)} with your local branch.
             </p>
           }
           confirmLabel="Force push"
@@ -383,6 +394,29 @@ function RepoWorkspace({
             void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
           }
           onCancel={appState.cancelForcePush}
+        />
+      )}
+      {active && pushDialogBranch !== null && (
+        <PushBranchDialog
+          localBranch={pushDialogBranch}
+          remotes={appState.state.remotes}
+          branchUpstream={appState.state.branches.find((branch) => branch.name === pushDialogBranch)?.upstream}
+          onPush={(remoteName, remoteBranch, setUpstream) =>
+            void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream)
+          }
+          onCancel={appState.closePushDialog}
+        />
+      )}
+      {active && appState.state.deleteRemoteBranchDialog !== null && (
+        <DeleteRemoteBranchDialog
+          remotes={appState.state.remotes}
+          initialRemote={appState.state.deleteRemoteBranchDialog.remoteName}
+          initialBranch={appState.state.deleteRemoteBranchDialog.branchName}
+          onListRemoteBranches={appState.listRemoteBranches}
+          onDelete={(remoteName, branchName) =>
+            void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName)
+          }
+          onCancel={appState.closeDeleteRemoteBranchDialog}
         />
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
@@ -518,6 +552,9 @@ function RepoWorkspace({
               addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
               onOpenAddRemoteDraft={appState.openAddRemoteDraft}
               onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
+              onOpenPushDialog={appState.openPushDialog}
+              onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
+              refreshGeneration={appState.state.refreshGeneration}
             />
             {panelVisibility.visibility.stash && (
               <StashPanel
@@ -604,6 +641,13 @@ function RepoWorkspace({
                 onFetch={appState.fetchRemote}
                 onPull={appState.pullCurrentUpstream}
                 onPush={appState.pushCurrentBranch}
+                prune={effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream)}
+                onFetchAll={announce("Fetch complete", appState.fetchAllRemotes)}
+                onTogglePrune={appState.setFetchPrune}
+                onPublish={() => {
+                  const current = appState.state.branches.find((branch) => branch.isCurrent);
+                  if (current !== undefined) appState.openPushDialog(current.name);
+                }}
                 leading={
                   <UndoRedoButtons
                     undoLabel={appState.state.undoState.undo}
@@ -670,6 +714,9 @@ function RepoWorkspace({
                         setFocusCommitMessage(true);
                       }}
                       graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
+                      remotes={appState.state.remotes}
+                      onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
+                      onDeleteTag={appState.deleteTag}
                     />
                   )}
                 </>

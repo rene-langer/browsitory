@@ -254,3 +254,64 @@ fn graph_log_keeps_local_and_remote_branch_refs_independent() {
         vec!["origin/main".to_string()]
     );
 }
+
+#[test]
+fn graph_log_reports_lightweight_and_annotated_tags_sorted_on_their_commit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "second");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let signature = repo.signature().unwrap();
+    repo.tag_lightweight("zeta", head.as_object(), false)
+        .unwrap();
+    repo.tag("alpha", head.as_object(), &signature, "annotated", false)
+        .unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+
+    assert_eq!(commits[0].summary, "second");
+    assert_eq!(
+        commits[0].tags,
+        vec!["alpha".to_string(), "zeta".to_string()]
+    );
+    assert!(commits[1].tags.is_empty());
+}
+
+#[test]
+fn graph_log_ignores_a_tag_that_does_not_point_at_a_commit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first");
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    repo.tag_lightweight("tree-tag", tree.as_object(), false)
+        .unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+
+    assert_eq!(commits.len(), 1);
+    assert!(commits[0].tags.is_empty());
+}
+
+#[test]
+fn graph_log_skips_a_selected_branch_that_no_longer_exists() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "gone", "HEAD").unwrap();
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    git_core::branch::delete_branch(&repo, "gone", true).unwrap();
+
+    let commits =
+        git_core::graph::graph_log(&repo, 10, Some(&["gone".to_string(), main.clone()])).unwrap();
+
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0].summary, "initial commit");
+    assert!(
+        git_core::graph::graph_log(&repo, 10, Some(&["gone".to_string()]))
+            .unwrap()
+            .is_empty()
+    );
+}

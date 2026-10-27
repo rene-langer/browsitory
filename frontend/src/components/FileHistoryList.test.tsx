@@ -114,6 +114,14 @@ describe("FileHistoryList", () => {
     expect(screen.getByText("origin/main")).toBeInTheDocument();
   });
 
+  it("renders tag badges", () => {
+    const e = entry("c1");
+    e.commit.tags = ["v1.0"];
+    renderList(state({ entries: [e] }));
+
+    expect(screen.getByTitle("Tag v1.0")).toHaveTextContent("v1.0");
+  });
+
   it("scrolls the newly selected row into view", () => {
     const spy = vi.fn();
     const original = Element.prototype.scrollIntoView;

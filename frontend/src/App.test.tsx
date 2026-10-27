@@ -92,6 +92,9 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     fetchRemote: async () => unused(),
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
+    fetchAllRemotes: async () => unused(),
+    pushBranch: async () => unused(),
+    deleteRemoteBranch: async () => unused(),
     pullCurrentUpstream: async () => unused(),
     cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
@@ -574,6 +577,62 @@ describe("App", () => {
       configurable: true,
       value: originalInnerWidth,
     });
+  });
+
+  it("publishes the current branch from the sync bar through the Push dialog", async () => {
+    const pushBranch = vi.fn(async () => "push-1");
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+      getCurrentUpstream: async () => null,
+      pushBranch,
+    });
+    render(<App client={client} />);
+
+    const push = await screen.findByRole("button", { name: "Push" });
+    await waitFor(() => expect(push).toBeEnabled());
+    fireEvent.click(push);
+    const dialog = await screen.findByRole("dialog", { name: "Push main" });
+    expect(within(dialog).getByLabelText("Set as upstream")).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Push" }));
+
+    await waitFor(() => expect(pushBranch).toHaveBeenCalledWith("/repos/a", "origin", "main", "main", true));
+    expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
+  });
+
+  it("deletes a remote branch from its menu through the confirmation dialog", async () => {
+    localStorage.clear();
+    const deleteRemoteBranch = vi.fn(async () => "delete-remote-1");
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }],
+      listRemoteBranches: async () => ["topic"],
+      deleteRemoteBranch,
+    });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete origin/topic…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete remote branch" });
+    expect(dialog).toHaveTextContent("Delete origin/topic on the remote? This can't be undone.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete remote branch" }));
+
+    await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic"));
+    expect(screen.queryByRole("dialog", { name: "Delete remote branch" })).toBeNull();
+    localStorage.clear();
   });
 
   it("opens a working-tree file's history in place of the graph and closes it again", async () => {

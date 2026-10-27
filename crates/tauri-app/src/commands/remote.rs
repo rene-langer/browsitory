@@ -156,11 +156,66 @@ pub async fn clear_current_upstream(
 pub async fn fetch_remote(
     repo_path: String,
     remote_name: String,
+    prune: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.fetch_remote(remote_name, event_tx)?;
+    let operation_id =
+        worker_handle(&state, &repo_path)?.fetch_remote(remote_name, prune, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn fetch_all_remotes(
+    repo_path: String,
+    prune: Option<bool>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state, &repo_path)?.fetch_all_remotes(prune, event_tx)?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn push_branch(
+    repo_path: String,
+    remote_name: String,
+    local_branch: String,
+    remote_branch: String,
+    set_upstream: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state, &repo_path)?.push_branch(
+        remote_name,
+        local_branch,
+        remote_branch,
+        set_upstream,
+        event_tx,
+    )?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
+#[tauri::command]
+pub async fn delete_remote_branch(
+    repo_path: String,
+    remote_name: String,
+    branch_name: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = worker_handle(&state, &repo_path)?.delete_remote_branch(
+        remote_name,
+        branch_name,
+        event_tx,
+    )?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }

@@ -20,12 +20,16 @@ pub struct GraphCommit {
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
     pub remote_branch_refs: Vec<String>,
+    /// Tag names (without "refs/tags/") whose target peels to this commit, sorted.
+    pub tags: Vec<String>,
 }
 
-/// Local/remote branch names keyed by the commit they point at — the badges on graph rows.
+/// Local/remote branch names and tag names keyed by the commit they point at — the badges on
+/// graph rows (and file history / search results).
 pub(crate) struct RefDecorations {
     local: HashMap<Oid, Vec<String>>,
     remote: HashMap<Oid, Vec<String>>,
+    tags: HashMap<Oid, Vec<String>>,
 }
 
 impl RefDecorations {
@@ -57,7 +61,29 @@ impl RefDecorations {
                 remote.entry(oid).or_default().push(name.to_string());
             }
         }
-        Ok(Self { local, remote })
+        let mut tags: HashMap<Oid, Vec<String>> = HashMap::new();
+        for reference in repo.references_glob("refs/tags/*")? {
+            let reference = reference?;
+            let Ok(full_name) = reference.name() else {
+                continue;
+            };
+            let Some(name) = full_name.strip_prefix("refs/tags/") else {
+                continue;
+            };
+            // Lightweight and (nested) annotated tags alike; a tag on a tree or blob has no row.
+            let Ok(commit) = reference.peel_to_commit() else {
+                continue;
+            };
+            tags.entry(commit.id()).or_default().push(name.to_string());
+        }
+        for names in tags.values_mut() {
+            names.sort();
+        }
+        Ok(Self {
+            local,
+            remote,
+            tags,
+        })
     }
 
     pub(crate) fn graph_commit(&self, commit: &git2::Commit) -> GraphCommit {
@@ -77,6 +103,7 @@ impl RefDecorations {
             parent_ids: commit.parent_ids().map(|p| p.to_string()).collect(),
             branch_refs: self.local.get(&oid).cloned().unwrap_or_default(),
             remote_branch_refs: self.remote.get(&oid).cloned().unwrap_or_default(),
+            tags: self.tags.get(&oid).cloned().unwrap_or_default(),
             id,
         }
     }
@@ -99,8 +126,16 @@ pub fn graph_log(
         // here.
         None => revwalk.push_glob("refs/heads/*")?,
         Some(names) => {
+            // A persisted selection can outlive its branches (deleted or renamed, possibly
+            // outside the app). Skip the missing ones, like `search_commits`, instead of
+            // failing the whole graph (#97).
             for name in names {
-                revwalk.push_ref(&format!("refs/heads/{name}"))?;
+                let refname = format!("refs/heads/{name}");
+                match repo.find_reference(&refname) {
+                    Ok(_) => revwalk.push_ref(&refname)?,
+                    Err(error) if error.code() == git2::ErrorCode::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
     }

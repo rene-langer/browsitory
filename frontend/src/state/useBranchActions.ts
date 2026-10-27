@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type {
@@ -29,7 +30,32 @@ export function useBranchActions(
   runOptimisticMutation: RunOptimisticMutation,
   runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
+  graphBranchSelection: string[] | null,
+  branchNames: string[],
 ): BranchActions {
+  // Read at mutation time, after the backend call succeeded (see deleteBranch/renameBranch).
+  const selectionRef = useRef(graphBranchSelection);
+  const branchNamesRef = useRef(branchNames);
+  useEffect(() => {
+    selectionRef.current = graphBranchSelection;
+    branchNamesRef.current = branchNames;
+  }, [graphBranchSelection, branchNames]);
+
+  // The branch operation already succeeded; a failure to rewrite the saved selection must not
+  // report it as failed (the graph skips missing names anyway, #97), so it is only logged.
+  const updateSelection = useCallback(
+    async (next: string[], after: "delete" | "rename") => {
+      try {
+        await client.setGraphBranchSelection(repoPath, next);
+      } catch (error) {
+        void client
+          .logFrontendError(`Updating the graph branch selection after a branch ${after} failed`, error)
+          .catch(() => {});
+      }
+    },
+    [client, repoPath],
+  );
+
   const createBranch = useCallback(
     (name: string, startPoint: string) =>
       runOptimisticMutationWithMessage(
@@ -53,9 +79,18 @@ export function useBranchActions(
     (name: string, force: boolean) =>
       runOptimisticMutation(
         (prev) => ({ ...prev, branches: prev.branches.filter((branch) => branch.name !== name) }),
-        () => client.deleteBranch(repoPath, name, force),
+        async () => {
+          await client.deleteBranch(repoPath, name, force);
+          // A persisted selection naming the deleted branch would otherwise linger (#97).
+          const next = withoutBranch(
+            selectionRef.current,
+            name,
+            branchNamesRef.current.filter((candidate) => candidate !== name),
+          );
+          if (next !== null) await updateSelection(next, "delete");
+        },
       ),
-    [client, runOptimisticMutation, repoPath],
+    [client, runOptimisticMutation, repoPath, updateSelection],
   );
   const renameBranch = useCallback(
     (oldName: string, newName: string) =>
@@ -64,9 +99,13 @@ export function useBranchActions(
           ...prev,
           branches: prev.branches.map((branch) => (branch.name === oldName ? { ...branch, name: newName } : branch)),
         }),
-        () => client.renameBranch(repoPath, oldName, newName),
+        async () => {
+          await client.renameBranch(repoPath, oldName, newName);
+          const next = withRenamedBranch(selectionRef.current, oldName, newName);
+          if (next !== null) await updateSelection(next, "rename");
+        },
       ),
-    [client, runOptimisticMutation, repoPath],
+    [client, runOptimisticMutation, repoPath, updateSelection],
   );
 
   const openCreateBranchDraft = useCallback(

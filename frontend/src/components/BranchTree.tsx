@@ -1,5 +1,5 @@
 import { branchNameProblem } from "../lib/refName";
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -33,6 +33,14 @@ function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
   const withoutGitSuffix = fetchUrl.replace(/\.git\/?$/, "");
   const slug = withoutGitSuffix.split(/[/:]/).filter((part) => part !== "").pop();
   return slug ?? "";
+}
+
+/** Ahead/behind badge text for a local branch, or `null` when in sync or unknown. */
+function aheadBehind(branch: BranchInfo): { ahead: number; behind: number; label: string } | null {
+  const ahead = branch.ahead ?? null;
+  const behind = branch.behind ?? null;
+  if (branch.upstream == null || ahead === null || behind === null || (ahead === 0 && behind === 0)) return null;
+  return { ahead, behind, label: `${ahead} ahead, ${behind} behind ${branch.upstream}` };
 }
 
 export function BranchTree({
@@ -78,6 +86,9 @@ export function BranchTree({
   addRemoteDraftOpen,
   onOpenAddRemoteDraft,
   onCloseAddRemoteDraft,
+  onOpenPushDialog,
+  onOpenDeleteRemoteBranch,
+  refreshGeneration,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -145,6 +156,16 @@ export function BranchTree({
   addRemoteDraftOpen: boolean;
   onOpenAddRemoteDraft: () => void;
   onCloseAddRemoteDraft: () => void;
+  /** "Push to…" on a local branch: opens the shared Push dialog for it. */
+  onOpenPushDialog: (localBranch: string) => void;
+  /** "Delete <remote>/<branch>…" on a remote branch: opens the delete confirmation. */
+  onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
+  /**
+   * `AppState.refreshGeneration`. A change means remote branches may have changed (a fetch from
+   * anywhere, a push that published one, a remote branch delete): open remote folders reload
+   * their list in place and closed ones forget theirs.
+   */
+  refreshGeneration: number;
 }) {
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -236,6 +257,7 @@ export function BranchTree({
       const rowKey = `local:${branch.name}`;
       const shownInGraph = (graphBranchSelection ?? branches.map((b) => b.name)).includes(branch.name);
       const isRenaming = renaming === branch.name;
+      const counts = aheadBehind(branch);
       return (
         <ListRow
           key={branch.name}
@@ -292,6 +314,14 @@ export function BranchTree({
                 )}
                 {node.name}
                 {branch.isCurrent && " (current)"}
+              </span>
+            )}
+            {!isRenaming && counts !== null && (
+              // role="img": a plain span's aria-label is ignored by screen readers; the arrows
+              // themselves are hidden so they are not read as "up arrow 2".
+              <span className={styles.aheadBehind} role="img" aria-label={counts.label} title={counts.label}>
+                {counts.ahead > 0 && <span aria-hidden="true">↑{counts.ahead}</span>}
+                {counts.behind > 0 && <span aria-hidden="true">↓{counts.behind}</span>}
               </span>
             )}
             {!isRenaming && (
@@ -407,6 +437,27 @@ export function BranchTree({
       .catch(() => setRemoteBranchesError(`Could not list branches for ${remoteName}.`));
   };
 
+  // The remote-branch lists are a cache of `listRemoteBranches`. Any refresh (a fetch from the
+  // sync bar or palette, a push that published a branch, a remote branch delete) may have changed
+  // them. Detected during render (like `TagPanel`'s `previousTags`) so no state is set
+  // synchronously inside an effect: closed folders forget their list, so their next expand reloads.
+  const [cacheGeneration, setCacheGeneration] = useState(refreshGeneration);
+  if (cacheGeneration !== refreshGeneration) {
+    setCacheGeneration(refreshGeneration);
+    setRemoteBranches((prev) => Object.fromEntries(Object.entries(prev).filter(([name]) => isRemoteOpen(name))));
+  }
+  const mountGeneration = useRef(refreshGeneration);
+  useEffect(() => {
+    if (refreshGeneration === mountGeneration.current) return;
+    // Open folders reload in place, keeping their current rows until the new list lands (no
+    // "Loading…" flash).
+    for (const remote of remotes) {
+      if (isRemoteOpen(remote.name)) fetchRemoteBranchList(remote.name);
+    }
+    // Only a new refresh triggers this; opening a folder has its own load path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshGeneration]);
+
   const toggleRemote = (remoteName: string) => {
     const willOpen = !isRemoteOpen(remoteName);
     setOpenRemotes((prev) => ({ ...prev, [remoteName]: willOpen }));
@@ -453,11 +504,8 @@ export function BranchTree({
         label: "Fetch",
         disabled: operationDisabled,
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        // The remote's branch list is cached in `remoteBranches` and never otherwise
-        // invalidated (folder open/closed state is localStorage-persisted, so even an app
-        // restart mid-session doesn't clear it) — drop the cache entry after a successful fetch
-        // so the tree reflects any new/removed remote branches, and re-fetch immediately if the
-        // folder is currently open so the user sees the update without a manual re-toggle.
+        // The `refreshGeneration` reload above already refreshes the cached branch list after
+        // any fetch; this explicit drop-and-reload just makes the update immediate here.
         onSelect: () =>
           void onFetchRemote(remote.name).then(() => {
             setRemoteBranches((prev) => {
@@ -516,6 +564,13 @@ export function BranchTree({
         disabled: operationDisabled,
         title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => void onSetUpstream(remoteName, branchName),
+      },
+      {
+        label: `Delete ${remoteName}/${branchName}…`,
+        destructive: true,
+        disabled: operationDisabled,
+        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
+        onSelect: () => onOpenDeleteRemoteBranch(remoteName, branchName),
       },
     ];
   }
@@ -621,6 +676,16 @@ export function BranchTree({
         },
       });
     }
+    items.push({
+      label: "Push to…",
+      disabled: operationDisabled || remotes.length === 0,
+      title: operationDisabled
+        ? (operationDisabledReason ?? undefined)
+        : remotes.length === 0
+          ? "No remote configured."
+          : undefined,
+      onSelect: () => onOpenPushDialog(branch.name),
+    });
     items.push({
       label: "Isolate branch",
       title: "Show only this branch in the commit graph",

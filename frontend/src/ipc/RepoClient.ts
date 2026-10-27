@@ -37,6 +37,12 @@ export interface DiffHunk {
 export interface BranchInfo {
   name: string;
   isCurrent: boolean;
+  // The backend always sends these three; optional so older fixtures stay valid.
+  /** `<remote>/<branch>` from branch config, even when never fetched; null without upstream. */
+  upstream?: string | null;
+  /** Commits to push / to pull against the tracking ref; null when unknown (no upstream or never fetched). */
+  ahead?: number | null;
+  behind?: number | null;
 }
 
 export interface WorktreeInfo {
@@ -73,6 +79,8 @@ export interface RemoteInfo {
   pushUrl: string | null;
   authMode: RemoteAuthMode | null;
   authUsername: string | null;
+  /** Effective git-config prune default (`remote.<name>.prune`, else `fetch.prune`). Always sent by the backend. */
+  prune?: boolean;
 }
 
 export type RemoteAuthMode = "HttpsToken" | "SshAgent";
@@ -84,6 +92,12 @@ export interface UpstreamInfo {
   // Commits ahead of / behind the remote-tracking ref; null when that ref was never fetched.
   ahead?: number | null;
   behind?: number | null;
+  /**
+   * Where Push lands on `remoteName` under `push.default`; null when it does not choose (e.g.
+   * `simple` with a differently named upstream) and the UI must ask. Always sent by the backend;
+   * see `lib/pushTarget.ts` for how a missing value is read.
+   */
+  pushBranch?: string | null;
 }
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
@@ -100,7 +114,15 @@ export type UndoOutcome =
 export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
 export type ResetMode = "soft" | "mixed" | "hard";
 
-export type TransferOperation = "Fetch" | "Pull" | "PushBranch" | "PushTags" | "ForcePushBranch" | "Clone";
+export type TransferOperation =
+  | "Fetch"
+  | "FetchAll"
+  | "Pull"
+  | "PushBranch"
+  | "PushTags"
+  | "ForcePushBranch"
+  | "DeleteRemoteBranch"
+  | "Clone";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease";
 
@@ -152,12 +174,14 @@ export function toCloneError(raw: unknown): CloneError {
 export interface TransferProgress {
   operationId: string;
   operation: TransferOperation;
-  phase: "Starting" | "Receiving" | "Updating" | "Completed" | "Failed";
+  phase: "Starting" | "Receiving" | "Updating" | "RemoteFailed" | "Completed" | "Failed";
   errorKind: TransferErrorKind | null;
   current: number;
   total: number;
   receivedBytes: number;
   message: string | null;
+  /** Only on `RemoteFailed`: the remote that failed during a Fetch all. */
+  remoteName?: string;
 }
 
 export interface TagInfo {
@@ -185,6 +209,8 @@ export interface GraphCommit {
   parentIds: string[];
   branchRefs: string[];
   remoteBranchRefs: string[];
+  /** Tag names pointing (peeled) at this commit, sorted. Always sent by the backend. */
+  tags?: string[];
 }
 
 /** One commit in a file's history. `path` is the file's name in that commit; `oldPath` is set
@@ -423,9 +449,22 @@ export interface RepoClient {
   listTags(repoPath: string): Promise<TagInfo[]>;
   createTag(repoPath: string, name: string, message: string | null): Promise<void>;
   deleteTag(repoPath: string, name: string): Promise<void>;
-  fetchRemote(repoPath: string, remoteName: string): Promise<string>;
+  /** `prune` `null` = git config decides (`remote.<name>.prune`, then `fetch.prune`). */
+  fetchRemote(repoPath: string, remoteName: string, prune: boolean | null): Promise<string>;
   pushCurrentBranch(repoPath: string, remoteName: string): Promise<string>;
   pushTags(repoPath: string, remoteName: string, names: string[]): Promise<string>;
+  /**
+   * Fetches every remote in turn under one operation id. A failed remote arrives as a
+   * `RemoteFailed` progress event; the operation completes unless every remote failed.
+   */
+  fetchAllRemotes(repoPath: string, prune: boolean | null): Promise<string>;
+  /**
+   * Pushes `localBranch` to `remoteBranch` on `remoteName`, and when `setUpstream` is set and the
+   * push lands, records it as the branch's upstream.
+   */
+  pushBranch(repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean): Promise<string>;
+  /** Deletes the branch on the remote and its remote-tracking ref. */
+  deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
   /**
    * Asks the backend to abort the in-flight transfer `operationId`. Resolves as soon as the

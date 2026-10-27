@@ -37,3 +37,15 @@
 .item[data-destructive="true"] {
   color: var(--color-danger-text);
 }
+
+/* Checkbox items: the mark keeps its slot when unchecked so labels stay aligned. */
+.check,
+.checkHidden {
+  flex-shrink: 0;
+  margin-right: var(--space-1);
+  vertical-align: -1px;
+}
+
+.checkHidden {
+  visibility: hidden;
+}

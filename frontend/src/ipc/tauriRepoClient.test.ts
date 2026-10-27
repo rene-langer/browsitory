@@ -195,7 +195,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
     vi.mocked(invoke).mockResolvedValue("fetch-42");
 
     tauriRepoClient.subscribeTransferProgress(() => {});
-    const fetch = tauriRepoClient.fetchRemote(TEST_REPO_PATH, "origin");
+    const fetch = tauriRepoClient.fetchRemote(TEST_REPO_PATH, "origin", null);
     await Promise.resolve();
     expect(invoke).not.toHaveBeenCalled();
 
@@ -208,6 +208,32 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenCalledWith("fetch_remote", {
       repoPath: TEST_REPO_PATH,
       remoteName: "origin",
+      prune: null,
+    });
+  });
+
+  it("invokes the new transfer commands with camelCase arguments once the listeners are ready", async () => {
+    vi.mocked(listen).mockResolvedValue(() => {});
+    vi.mocked(invoke).mockResolvedValue("op-1");
+    tauriRepoClient.subscribeTransferProgress(() => {});
+
+    await tauriRepoClient.fetchRemote(TEST_REPO_PATH, "origin", false);
+    expect(invoke).toHaveBeenLastCalledWith("fetch_remote", { repoPath: TEST_REPO_PATH, remoteName: "origin", prune: false });
+    await tauriRepoClient.fetchAllRemotes(TEST_REPO_PATH, true);
+    expect(invoke).toHaveBeenLastCalledWith("fetch_all_remotes", { repoPath: TEST_REPO_PATH, prune: true });
+    await tauriRepoClient.pushBranch(TEST_REPO_PATH, "origin", "topic", "published", true);
+    expect(invoke).toHaveBeenLastCalledWith("push_branch", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+      localBranch: "topic",
+      remoteBranch: "published",
+      setUpstream: true,
+    });
+    await tauriRepoClient.deleteRemoteBranch(TEST_REPO_PATH, "origin", "topic");
+    expect(invoke).toHaveBeenLastCalledWith("delete_remote_branch", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+      branchName: "topic",
     });
   });
 

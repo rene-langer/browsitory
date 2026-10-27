@@ -145,6 +145,9 @@ pub fn dispatch(
         "reset_to_commit" => reset_to_commit(params, repos),
         "checkout_commit" => checkout_commit(params, repos),
         "push_tags" => push_tags(params, repos, stdout),
+        "fetch_all_remotes" => fetch_all_remotes(params, repos, stdout),
+        "push_branch" => push_branch(params, repos, stdout),
+        "delete_remote_branch" => delete_remote_branch(params, repos, stdout),
         "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
         "list_stashes" => list_stashes(params, repos),
         "save_stash" => save_stash(params, repos),
@@ -269,6 +272,7 @@ struct GraphCommitDto {
     parent_ids: Vec<String>,
     branch_refs: Vec<String>,
     remote_branch_refs: Vec<String>,
+    tags: Vec<String>,
 }
 
 impl From<GraphCommit> for GraphCommitDto {
@@ -283,6 +287,7 @@ impl From<GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+            tags: c.tags,
         }
     }
 }
@@ -938,6 +943,10 @@ fn commit(params: Value, repos: &Repos) -> Result<Value, String> {
 struct BranchInfoDto {
     name: String,
     is_current: bool,
+    // Nulls are part of the wire contract: no `skip_serializing_if`.
+    upstream: Option<String>,
+    ahead: Option<usize>,
+    behind: Option<usize>,
 }
 
 impl From<BranchInfo> for BranchInfoDto {
@@ -945,6 +954,9 @@ impl From<BranchInfo> for BranchInfoDto {
         Self {
             name: branch.name,
             is_current: branch.is_current,
+            upstream: branch.upstream,
+            ahead: branch.ahead,
+            behind: branch.behind,
         }
     }
 }
@@ -1235,6 +1247,8 @@ struct RemoteInfoDto {
     push_url: Option<String>,
     auth_mode: Option<RemoteAuthModeDto>,
     auth_username: Option<String>,
+    /// Effective git-config prune default for this remote (the UI's Prune toggle fallback).
+    prune: bool,
 }
 
 impl
@@ -1264,6 +1278,7 @@ impl
             push_url: remote.push_url,
             auth_mode,
             auth_username,
+            prune: remote.prune,
         }
     }
 }
@@ -1306,6 +1321,8 @@ struct UpstreamInfoDto {
     remote_branch: String,
     ahead: Option<usize>,
     behind: Option<usize>,
+    /// Where Push lands under `push.default`; null = ask with the Push to… dialog.
+    push_branch: Option<String>,
 }
 
 impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
@@ -1316,6 +1333,7 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             remote_branch: upstream.remote_branch,
             ahead: upstream.ahead,
             behind: upstream.behind,
+            push_branch: upstream.push_branch,
         }
     }
 }
@@ -1567,6 +1585,9 @@ struct TransferProgressDto {
     total: usize,
     received_bytes: usize,
     message: Option<String>,
+    /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_name: Option<String>,
 }
 
 fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
@@ -1583,6 +1604,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             total: 0,
             received_bytes: 0,
             message: None,
+            remote_name: None,
         },
         TransferEvent::Progress(progress) => TransferProgressDto {
             operation_id: progress.operation_id,
@@ -1596,6 +1618,23 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             // over IPC, even when it looks like ordinary progress output. Same redaction
             // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
             message: None,
+            remote_name: None,
+        },
+        TransferEvent::RemoteFailed {
+            operation_id,
+            remote_name,
+            error,
+        } => TransferProgressDto {
+            operation_id,
+            // Only Fetch all reports per-remote failures.
+            operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
+            phase: "RemoteFailed".to_string(),
+            error_kind: Some(format!("{error:?}")),
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: None,
+            remote_name: Some(remote_name),
         },
         TransferEvent::Completed {
             operation_id,
@@ -1612,6 +1651,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
                 total: 0,
                 received_bytes: 0,
                 message: None,
+                remote_name: None,
             }
         }
     }
@@ -1656,6 +1696,9 @@ fn spawn_progress_relay<W: std::io::Write + Send + 'static>(
 struct FetchRemoteParams {
     repo_path: String,
     remote_name: String,
+    /// `null`/absent = git config decides (`remote.<name>.prune`, then `fetch.prune`).
+    #[serde(default)]
+    prune: Option<bool>,
 }
 
 fn fetch_remote(
@@ -1667,8 +1710,87 @@ fn fetch_remote(
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.fetch_remote(
+        params.remote_name,
+        params.prune,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchAllRemotesParams {
+    repo_path: String,
+    #[serde(default)]
+    prune: Option<bool>,
+}
+
+fn fetch_all_remotes(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: FetchAllRemotesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id =
-        worker_handle(repos, &params.repo_path)?.fetch_remote(params.remote_name, event_tx)?;
+        worker_handle(repos, &params.repo_path)?.fetch_all_remotes(params.prune, event_tx)?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushBranchParams {
+    repo_path: String,
+    remote_name: String,
+    local_branch: String,
+    remote_branch: String,
+    set_upstream: bool,
+}
+
+fn push_branch(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: PushBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.push_branch(
+        params.remote_name,
+        params.local_branch,
+        params.remote_branch,
+        params.set_upstream,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteRemoteBranchParams {
+    repo_path: String,
+    remote_name: String,
+    branch_name: String,
+}
+
+fn delete_remote_branch(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: DeleteRemoteBranchParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
+        params.remote_name,
+        params.branch_name,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -2756,6 +2878,28 @@ mod tests {
                 .count(),
             200
         );
+    }
+
+    #[test]
+    fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
+        let failed = serde_json::to_value(transfer_progress_dto(TransferEvent::RemoteFailed {
+            operation_id: "fetch-all-7".into(),
+            remote_name: "backup".into(),
+            error: TransferErrorKind::TransferFailed,
+        }))
+        .unwrap();
+        assert_eq!(failed["phase"], "RemoteFailed");
+        assert_eq!(failed["operation"], "FetchAll");
+        assert_eq!(failed["remoteName"], "backup");
+        assert_eq!(failed["errorKind"], "TransferFailed");
+
+        let completed = serde_json::to_value(transfer_progress_dto(TransferEvent::Completed {
+            operation_id: "fetch-all-7".into(),
+            operation: TransferOperation::FetchAll,
+            error: None,
+        }))
+        .unwrap();
+        assert!(!completed.as_object().unwrap().contains_key("remoteName"));
     }
 
     #[test]

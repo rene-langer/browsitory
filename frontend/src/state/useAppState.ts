@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   BranchInfo,
   CreatePullRequest,
@@ -26,6 +26,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { readFetchPrune } from "../lib/fetchPrune";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
 import { useHistoryActions } from "./useHistoryActions";
@@ -87,6 +88,13 @@ export interface AppState {
   forcePushOffer: { remoteName: string } | null;
   // Non-null while the force-push confirm dialog is open.
   forcePushConfirm: { remoteName: string } | null;
+  // The Prune choice for every fetch in this repo (localStorage, see `lib/fetchPrune.ts`);
+  // `null` = never set, so git config decides per remote.
+  fetchPrune: boolean | null;
+  // Non-null while the "Push to…" dialog is open for that local branch.
+  pushDialog: { localBranch: string } | null;
+  // Non-null while the delete-remote-branch dialog is open; both null = palette picker mode.
+  deleteRemoteBranchDialog: { remoteName: string | null; branchName: string | null } | null;
   // CommitBox amend toggle.
   amendMode: boolean;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
@@ -181,6 +189,14 @@ export interface UseAppStateResult {
   requestForcePush(remoteName: string): void;
   cancelForcePush(): void;
   forcePushCurrentBranch(remoteName: string): Promise<void>;
+  fetchAllRemotes(): Promise<void>;
+  setFetchPrune(prune: boolean): void;
+  pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean): Promise<void>;
+  openPushDialog(localBranch: string): void;
+  closePushDialog(): void;
+  deleteRemoteBranch(remoteName: string, branchName: string): Promise<void>;
+  openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
+  closeDeleteRemoteBranchDialog(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(): Promise<void>;
@@ -254,6 +270,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
     forcePushOffer: null,
     forcePushConfirm: null,
+    fetchPrune: readFetchPrune(repoPath),
+    pushDialog: null,
+    deleteRemoteBranchDialog: null,
     amendMode: false,
     rebaseProgress: null,
     rebaseOnto: null,
@@ -396,6 +415,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     commit,
   } = useStagingActions(client, repoPath, runMutation, runOptimisticMutation, setState);
 
+  const branchNames = useMemo(() => state.branches.map((branch) => branch.name), [state.branches]);
+  const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+
   const {
     createBranch,
     switchBranch,
@@ -412,6 +434,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutation,
     runOptimisticMutationWithMessage,
     setState,
+    state.graphBranchSelection,
+    branchNames,
   );
   const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
     client,
@@ -455,6 +479,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,
+    fetchAllRemotes,
+    setFetchPrune,
+    pushBranch,
+    openPushDialog,
+    closePushDialog,
+    deleteRemoteBranch,
+    openDeleteRemoteBranchDialog,
+    closeDeleteRemoteBranchDialog,
   } = useRemoteTransferActions(
     client,
     repoPath,
@@ -467,6 +499,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithOutcome,
     setState,
     state.upstream,
+    state.fetchPrune,
+    currentBranch,
   );
 
   const { saveStash, applyStash, dropStash } = useStashActions(
@@ -550,6 +584,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,
+    fetchAllRemotes,
+    setFetchPrune,
+    pushBranch,
+    openPushDialog,
+    closePushDialog,
+    deleteRemoteBranch,
+    openDeleteRemoteBranchDialog,
+    closeDeleteRemoteBranchDialog,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

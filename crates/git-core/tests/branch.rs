@@ -244,3 +244,67 @@ fn delete_branch_fails_when_deleting_the_current_branch_even_with_force() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn list_branches_reports_no_upstream_or_counts_without_upstream_config() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "content");
+    commit_all(&repo, "initial commit");
+
+    let branch = git_core::branch::list_branches(&repo).unwrap().remove(0);
+
+    assert_eq!(branch.upstream, None);
+    assert_eq!((branch.ahead, branch.behind), (None, None));
+}
+
+#[test]
+fn list_branches_reports_the_upstream_but_no_counts_before_the_first_fetch() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "content");
+    commit_all(&repo, "initial commit");
+    let name = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::remote::add_remote(&repo, "origin", "file:///tmp/never-fetched.git", None).unwrap();
+    git_core::remote::set_current_upstream(&repo, "origin", "trunk").unwrap();
+
+    let branch = git_core::branch::list_branches(&repo)
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.name == name)
+        .unwrap();
+
+    assert_eq!(branch.upstream.as_deref(), Some("origin/trunk"));
+    assert_eq!((branch.ahead, branch.behind), (None, None));
+}
+
+#[test]
+fn list_branches_counts_commits_ahead_and_behind_the_tracking_ref() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "1");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap();
+    write_file(dir.path(), "file.txt", "remote");
+    commit_all(&repo, "remote only");
+    let remote_tip = repo.head().unwrap().target().unwrap();
+    let head_ref = repo.head().unwrap().name().unwrap().to_string();
+    let name = repo.head().unwrap().shorthand().unwrap().to_string();
+    repo.reference(&head_ref, base, true, "rewind").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "file.txt", "local 1");
+    commit_all(&repo, "local 1");
+    write_file(dir.path(), "file.txt", "local 2");
+    commit_all(&repo, "local 2");
+    git_core::remote::add_remote(&repo, "origin", "file:///tmp/origin.git", None).unwrap();
+    repo.reference("refs/remotes/origin/main", remote_tip, true, "test")
+        .unwrap();
+    git_core::remote::set_current_upstream(&repo, "origin", "main").unwrap();
+
+    let branch = git_core::branch::list_branches(&repo)
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.name == name)
+        .unwrap();
+
+    assert_eq!(branch.upstream.as_deref(), Some("origin/main"));
+    assert_eq!((branch.ahead, branch.behind), (Some(2), Some(1)));
+}

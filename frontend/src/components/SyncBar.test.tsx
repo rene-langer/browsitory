@@ -22,6 +22,10 @@ function renderBar(overrides: Partial<React.ComponentProps<typeof SyncBar>> = {}
     onFetch: vi.fn(),
     onPull: vi.fn(),
     onPush: vi.fn(),
+    prune: false,
+    onFetchAll: vi.fn(),
+    onTogglePrune: vi.fn(),
+    onPublish: vi.fn(),
     ...overrides,
   };
   render(<SyncBar {...props} />);
@@ -54,20 +58,79 @@ describe("SyncBar", () => {
     expect(props.onPush).toHaveBeenCalledWith("origin");
   });
 
-  it("fetches the only remote when there is no upstream, but disables Pull and Push", () => {
+  it("fetches the only remote when there is no upstream, disables Pull, and offers to publish", () => {
     const props = renderBar({ upstream: null });
 
     fireEvent.click(screen.getByRole("button", { name: /Fetch/ }));
 
     expect(props.onFetch).toHaveBeenCalledWith("origin");
     expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Push/ })).toBeEnabled();
   });
 
   it("disables everything with no remotes", () => {
     renderBar({ remotes: [], upstream: null });
 
     expect(screen.getByRole("button", { name: /Fetch/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Push/ })).toHaveAttribute("title", "No remote configured.");
+  });
+
+  it("opens fetch actions: Fetch all remotes and the Prune checkbox", () => {
+    const props = renderBar({ prune: true });
+    const chevron = screen.getByRole("button", { name: "More fetch actions" });
+    expect(chevron).toHaveAttribute("aria-haspopup", "menu");
+    expect(chevron).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(chevron);
+    expect(chevron).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fetch all remotes" }));
+    expect(props.onFetchAll).toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "More fetch actions" }));
+    const prune = screen.getByRole("menuitemcheckbox", { name: "Prune" });
+    expect(prune).toHaveAttribute("aria-checked", "true");
+    expect(prune).toHaveAttribute("title", "Remove remote-tracking branches that were deleted on the remote");
+    fireEvent.click(prune);
+    expect(props.onTogglePrune).toHaveBeenCalledWith(false);
+  });
+
+  it("disables fetch actions exactly when Fetch is disabled", () => {
+    renderBar({ remotes: [], upstream: null });
+    expect(screen.getByRole("button", { name: "More fetch actions" })).toBeDisabled();
+  });
+
+  it("disables fetch actions while another operation runs", () => {
+    renderBar({ operationDisabled: true, operationDisabledReason: "Busy." });
+    expect(screen.getByRole("button", { name: "More fetch actions" })).toBeDisabled();
+  });
+
+  it("publishes through the push dialog when the branch has no upstream", () => {
+    const props = renderBar({ upstream: null });
+    const push = screen.getByRole("button", { name: "Push" });
+    expect(push).toBeEnabled();
+    expect(push).toHaveAttribute("title", "Push this branch to a remote and set its upstream…");
+    fireEvent.click(push);
+    expect(props.onPublish).toHaveBeenCalled();
+    expect(props.onPush).not.toHaveBeenCalled();
+  });
+
+  it("names the push target, or says Push will ask when push.default does not choose one", () => {
+    renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: "feature-x" } });
+    expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("title", "Push to origin/feature-x");
+  });
+
+  it("asks where to push when push.default does not choose a target", () => {
+    const props = renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: null } });
+    const push = screen.getByRole("button", { name: "Push" });
+    expect(push).toHaveAttribute("title", "Choose where to push fx on origin…");
+    fireEvent.click(push);
+    expect(props.onPush).toHaveBeenCalledWith("origin");
+  });
+
+  it("keeps Push disabled without upstream on a detached HEAD", () => {
+    renderBar({ upstream: null, detachedAt: "abc1234" });
+    expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
   });
 
   it("disables all actions while another operation runs, with the reason as a tooltip", () => {

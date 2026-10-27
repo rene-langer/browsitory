@@ -68,6 +68,9 @@ pub struct TransferProgressDto {
     pub total: usize,
     pub received_bytes: usize,
     pub message: Option<String>,
+    /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_name: Option<String>,
 }
 
 impl From<git_core::remote::TransferProgress> for TransferProgressDto {
@@ -83,6 +86,7 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
             // Sideband and reference-update text comes from the remote. It is not safe to
             // expose over IPC, even when it looks like ordinary progress output.
             message: None,
+            remote_name: None,
         }
     }
 }
@@ -103,11 +107,31 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                 total: 0,
                 received_bytes: 0,
                 message: None,
+                remote_name: None,
             },
         ),
         TransferEvent::Progress(progress) => {
             ("transfer-progress", TransferProgressDto::from(progress))
         }
+        TransferEvent::RemoteFailed {
+            operation_id,
+            remote_name,
+            error,
+        } => (
+            "transfer-progress",
+            TransferProgressDto {
+                operation_id,
+                // Only Fetch all reports per-remote failures.
+                operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
+                phase: "RemoteFailed".to_string(),
+                error_kind: Some(format!("{error:?}")),
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+                remote_name: Some(remote_name),
+            },
+        ),
         TransferEvent::Completed {
             operation_id,
             operation,
@@ -125,6 +149,7 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                     total: 0,
                     received_bytes: 0,
                     message: None,
+                    remote_name: None,
                 },
             )
         }
@@ -153,6 +178,10 @@ pub struct StatusEntryDto {
 pub struct BranchInfoDto {
     pub name: String,
     pub is_current: bool,
+    // Nulls are part of the wire contract: no `skip_serializing_if`.
+    pub upstream: Option<String>,
+    pub ahead: Option<usize>,
+    pub behind: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -284,6 +313,8 @@ pub struct RemoteInfoDto {
     pub push_url: Option<String>,
     pub auth_mode: Option<RemoteAuthModeDto>,
     pub auth_username: Option<String>,
+    /// Effective git-config prune default for this remote (the UI's Prune toggle fallback).
+    pub prune: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -343,6 +374,7 @@ impl
             push_url: remote.push_url,
             auth_mode,
             auth_username,
+            prune: remote.prune,
         }
     }
 }
@@ -355,6 +387,8 @@ pub struct UpstreamInfoDto {
     pub remote_branch: String,
     pub ahead: Option<usize>,
     pub behind: Option<usize>,
+    /// Where Push lands under `push.default`; null = ask with the Push to… dialog.
+    pub push_branch: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -387,6 +421,7 @@ impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
             remote_branch: upstream.remote_branch,
             ahead: upstream.ahead,
             behind: upstream.behind,
+            push_branch: upstream.push_branch,
         }
     }
 }
@@ -396,6 +431,9 @@ impl From<git_core::branch::BranchInfo> for BranchInfoDto {
         BranchInfoDto {
             name: b.name,
             is_current: b.is_current,
+            upstream: b.upstream,
+            ahead: b.ahead,
+            behind: b.behind,
         }
     }
 }
@@ -454,6 +492,7 @@ pub struct GraphCommitDto {
     pub parent_ids: Vec<String>,
     pub branch_refs: Vec<String>,
     pub remote_branch_refs: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -468,6 +507,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             parent_ids: c.parent_ids,
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
+            tags: c.tags,
         }
     }
 }
@@ -1227,11 +1267,11 @@ mod tests {
     use repo_service::worker::TransferEvent;
 
     use super::{
-        transfer_event_payload, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
+        transfer_event_payload, BranchInfoDto, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
         FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
         OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto, WorkspaceDto,
-        WorktreeInfoDto,
+        RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
+        UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
 
     #[test]
@@ -1317,6 +1357,94 @@ mod tests {
     }
 
     #[test]
+    fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
+        let (event, failed) = transfer_event_payload(TransferEvent::RemoteFailed {
+            operation_id: "fetch-all-7".into(),
+            remote_name: "backup".into(),
+            error: TransferErrorKind::MissingCredential,
+        });
+        assert_eq!(event, "transfer-progress");
+        let json = serde_json::to_value(failed).unwrap();
+        assert_eq!(json["phase"], "RemoteFailed");
+        assert_eq!(json["operation"], "FetchAll");
+        assert_eq!(json["operationId"], "fetch-all-7");
+        assert_eq!(json["remoteName"], "backup");
+        assert_eq!(json["errorKind"], "MissingCredential");
+
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-all-7".into(),
+            operation: TransferOperation::FetchAll,
+            error: None,
+        });
+        let json = serde_json::to_value(completed).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("remoteName"));
+        assert_eq!(json["operation"], "FetchAll");
+    }
+
+    #[test]
+    fn upstream_info_dto_serializes_the_push_branch_including_null() {
+        let upstream = |push_branch: Option<&str>| {
+            serde_json::to_value(UpstreamInfoDto::from(git_core::remote::UpstreamInfo {
+                local_branch: "fx".into(),
+                remote_name: "origin".into(),
+                remote_branch: "feature-x".into(),
+                ahead: None,
+                behind: None,
+                push_branch: push_branch.map(str::to_string),
+            }))
+            .unwrap()
+        };
+        assert_eq!(upstream(Some("feature-x"))["pushBranch"], "feature-x");
+        let json = upstream(None);
+        assert!(json.as_object().unwrap().contains_key("pushBranch"));
+        assert_eq!(json["pushBranch"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn remote_info_dto_serializes_the_prune_default() {
+        let json = serde_json::to_value(RemoteInfoDto::from((
+            git_core::remote::RemoteInfo {
+                name: "origin".into(),
+                fetch_url: "https://example.com/repo.git".into(),
+                push_url: None,
+                prune: true,
+            },
+            None,
+        )))
+        .unwrap();
+        assert_eq!(json["prune"], true);
+        assert_eq!(json["fetchUrl"], "https://example.com/repo.git");
+    }
+
+    #[test]
+    fn branch_info_dto_serializes_upstream_and_counts_including_nulls() {
+        let tracked = serde_json::to_value(BranchInfoDto::from(git_core::branch::BranchInfo {
+            name: "main".into(),
+            is_current: true,
+            upstream: Some("origin/main".into()),
+            ahead: Some(2),
+            behind: Some(0),
+        }))
+        .unwrap();
+        assert_eq!(tracked["isCurrent"], true);
+        assert_eq!(tracked["upstream"], "origin/main");
+        assert_eq!(tracked["ahead"], 2);
+        assert_eq!(tracked["behind"], 0);
+
+        let untracked = serde_json::to_value(BranchInfoDto::from(git_core::branch::BranchInfo {
+            name: "topic".into(),
+            is_current: false,
+            upstream: None,
+            ahead: None,
+            behind: None,
+        }))
+        .unwrap();
+        let object = untracked.as_object().unwrap();
+        assert_eq!(object["upstream"], serde_json::Value::Null);
+        assert!(object.contains_key("ahead") && object.contains_key("behind"));
+    }
+
+    #[test]
     fn graph_commit_dto_serializes_camel_case_fields() {
         let dto = GraphCommitDto::from(GraphCommit {
             id: "abc123".into(),
@@ -1328,6 +1456,7 @@ mod tests {
             parent_ids: vec!["def456".into()],
             branch_refs: vec!["main".into()],
             remote_branch_refs: vec!["origin/main".into()],
+            tags: vec!["v1.0".into()],
         });
 
         assert_eq!(
@@ -1342,6 +1471,7 @@ mod tests {
                 "parentIds": ["def456"],
                 "branchRefs": ["main"],
                 "remoteBranchRefs": ["origin/main"],
+                "tags": ["v1.0"],
             })
         );
     }
@@ -1358,6 +1488,7 @@ mod tests {
             parent_ids: vec![],
             branch_refs: vec![],
             remote_branch_refs: vec![],
+            tags: vec![],
         };
         let plain = FileHistoryEntryDto::from(git_core::history::FileHistoryEntry {
             commit: commit.clone(),
@@ -1390,6 +1521,7 @@ mod tests {
             parent_ids: vec![],
             branch_refs: vec![],
             remote_branch_refs: vec![],
+            tags: vec![],
         };
         let done = serde_json::to_value(SearchPageDto::from(git_core::search::SearchPage {
             commits: vec![commit.clone()],

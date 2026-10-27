@@ -2,12 +2,13 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_tag, fetch_remote, force_push_current_branch, list_remote_branches, list_remotes,
-    list_tags, pull_after_fetch, push_current_branch, push_tags, remote_upstreams, remove_remote,
-    remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
-    set_remote_auth_profile, update_remote_urls, CredentialProvider, PullOutcome, RemoteAuthMode,
-    RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
-    TransferReporter,
+    delete_remote_branch, delete_tag, fetch_all, fetch_remote, force_push_current_branch,
+    list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_branch,
+    push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
+    remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_branch_upstream,
+    set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
+    FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind,
+    TransferOperation, TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -477,6 +478,7 @@ fn fetch_updates_tracking_ref_and_reports_owned_progress() {
     fetch_remote(
         &local,
         "origin",
+        None,
         "fetch-42".to_string(),
         &mut NoCredentials,
         &mut events,
@@ -528,6 +530,7 @@ fn a_fetch_aborts_when_the_cancel_flag_is_set_before_the_first_progress_tick() {
     let result = fetch_remote(
         &local,
         "origin",
+        None,
         "fetch-cancelled".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -633,6 +636,7 @@ fn a_cancelled_fetch_is_not_reported_as_a_generic_transfer_failure() {
     let result = fetch_remote(
         &repo,
         "origin",
+        None,
         "fetch-failed".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -660,6 +664,7 @@ fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
     let result = fetch_remote(
         &repo,
         "origin",
+        None,
         "fetch-unreachable".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -1140,4 +1145,1149 @@ fn force_push_refuses_a_detached_head() {
         ),
         Err(RemoteError::DetachedHead)
     ));
+}
+
+fn quiet() -> (NoCredentials, VecReporter) {
+    (NoCredentials, VecReporter::default())
+}
+
+#[test]
+fn pushing_a_non_current_branch_without_upstream_creates_only_the_remote_branch() {
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("topic", &head, false).unwrap();
+    let main_before = fixture.bare_tip("main");
+    let (mut credentials, mut reporter) = quiet();
+
+    push_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        "topic",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("topic"), Some(head.id()));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert_eq!(fixture.local.head().unwrap().shorthand().unwrap(), "main");
+    assert!(fixture
+        .local
+        .config()
+        .unwrap()
+        .get_string("branch.topic.remote")
+        .is_err());
+}
+
+#[test]
+fn pushing_with_set_upstream_records_the_upstream_under_the_chosen_name() {
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("topic", &head, false).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    push_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        "published",
+        true,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("published"), Some(head.id()));
+    assert_eq!(fixture.bare_tip("topic"), None);
+    let config = fixture.local.config().unwrap();
+    assert_eq!(config.get_string("branch.topic.remote").unwrap(), "origin");
+    assert_eq!(
+        config.get_string("branch.topic.merge").unwrap(),
+        "refs/heads/published"
+    );
+    let topic = git_core::branch::list_branches(&fixture.local)
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.name == "topic")
+        .unwrap();
+    assert_eq!(topic.upstream.as_deref(), Some("origin/published"));
+    assert_eq!((topic.ahead, topic.behind), (Some(0), Some(0)));
+}
+
+#[test]
+fn a_rejected_push_with_set_upstream_leaves_the_upstream_unset() {
+    let fixture = local_and_bare_remote();
+    let old = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("old", &old, false).unwrap();
+    fixture.remote_commit("remote moves on");
+    let main_before = fixture.bare_tip("main");
+    // `old` lacks the remote's new commit, so pushing it onto main is not a fast-forward.
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = push_branch(
+        &fixture.local,
+        "origin",
+        "old",
+        "main",
+        true,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::NonFastForward)));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert!(fixture
+        .local
+        .config()
+        .unwrap()
+        .get_string("branch.old.remote")
+        .is_err());
+}
+
+#[test]
+fn an_invalid_remote_branch_name_is_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+
+    for name in ["bad name", "", "HEAD", "-x", "a..b"] {
+        let result = push_branch(
+            &fixture.local,
+            "origin",
+            "main",
+            name,
+            false,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(matches!(result, Err(RemoteError::Git(_))), "{name:?}");
+    }
+    assert!(reporter.events.is_empty());
+    assert_eq!(fixture.bare_tip("bad name"), None);
+}
+
+#[test]
+fn pushing_a_missing_local_branch_is_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = push_branch(
+        &fixture.local,
+        "origin",
+        "nope",
+        "nope",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert!(reporter.events.is_empty());
+    assert_eq!(fixture.bare_tip("nope"), None);
+}
+
+#[test]
+fn push_current_branch_under_push_default_upstream_targets_the_upstream_branch_name() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local work");
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let main_before = fixture.bare_tip("main");
+    set_current_upstream(&fixture.local, "origin", "renamed").unwrap();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("renamed"), Some(local_tip));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+}
+
+#[test]
+fn push_current_branch_to_another_remote_keeps_the_local_name() {
+    let fixture = local_and_bare_remote();
+    let other_dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init_bare(other_dir.path()).unwrap();
+    fixture
+        .local
+        .remote("other", other_dir.path().to_str().unwrap())
+        .unwrap();
+    set_current_upstream(&fixture.local, "origin", "renamed").unwrap();
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    push_current_branch(
+        &fixture.local,
+        "other",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    let other = git2::Repository::open_bare(other_dir.path()).unwrap();
+    assert_eq!(
+        other.find_reference("refs/heads/main").unwrap().target(),
+        Some(local_tip)
+    );
+    assert!(other.find_reference("refs/heads/renamed").is_err());
+}
+
+#[test]
+fn force_push_under_push_default_upstream_overwrites_the_differently_named_upstream() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
+    fixture.local_commit("a");
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "renamed",
+        true,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    let base = fixture
+        .local
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .parent(0)
+        .unwrap();
+    fixture
+        .local
+        .reset(base.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+    fixture.write_local("local.txt", "b");
+    common::commit_all(&fixture.local, "b");
+    let rewritten = fixture.local.head().unwrap().target().unwrap();
+    let main_before = fixture.bare_tip("main");
+
+    force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("renamed"), Some(rewritten));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+}
+
+#[test]
+fn force_push_under_push_default_upstream_leases_the_differently_named_upstream() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "upstream")
+        .unwrap();
+    fixture.local_commit("a");
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "renamed",
+        true,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    let published = fixture.bare_tip("renamed");
+    // Someone else moves `renamed` on the remote; our tracking ref for it is now stale. `main`
+    // on the remote is untouched, so a lease against `origin/main` would wrongly pass.
+    {
+        let bare = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+        let main = bare
+            .find_reference("refs/heads/main")
+            .unwrap()
+            .target()
+            .unwrap();
+        bare.reference("refs/heads/renamed", main, true, "someone else")
+            .unwrap();
+    }
+    let moved = fixture.bare_tip("renamed");
+    assert_ne!(moved, published);
+    fixture.local_commit("b");
+
+    let result = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::StaleLease)));
+    assert_eq!(fixture.bare_tip("renamed"), moved);
+}
+
+#[test]
+fn deleting_a_remote_branch_removes_the_remote_ref_and_the_tracking_ref() {
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("doomed", &head, false).unwrap();
+    fixture.local.branch("doomed-too", &head, false).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        "doomed",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed-too",
+        "doomed-too",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert!(fixture.bare_tip("doomed").is_some());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/doomed")
+        .is_ok());
+    let main_before = fixture.bare_tip("main");
+    let mut events = VecReporter::default();
+
+    delete_remote_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        &mut credentials,
+        &mut events,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("doomed"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/doomed")
+        .is_err());
+    assert!(fixture
+        .local
+        .find_branch("doomed", git2::BranchType::Local)
+        .is_ok());
+    // Exactly that ref: siblings (including a name it prefixes) and main are untouched.
+    assert_eq!(fixture.bare_tip("doomed-too"), Some(head.id()));
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/doomed-too")
+        .is_ok());
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .is_ok());
+    assert!(events
+        .events
+        .iter()
+        .all(|event| event.operation == TransferOperation::DeleteRemoteBranch));
+}
+
+#[test]
+fn deleting_a_remote_branch_keeps_the_upstream_config_of_branches_tracking_it() {
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("topic", &head, false).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        "topic",
+        true,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    delete_remote_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    let topic = git_core::branch::list_branches(&fixture.local)
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.name == "topic")
+        .unwrap();
+    assert_eq!(topic.upstream.as_deref(), Some("origin/topic"));
+    assert_eq!((topic.ahead, topic.behind), (None, None));
+}
+
+#[test]
+fn a_remote_branch_delete_cancelled_at_negotiation_leaves_both_refs() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = delete_remote_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        &mut credentials,
+        &mut reporter,
+        &|| true,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)));
+    assert!(fixture.bare_tip("main").is_some());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .is_ok());
+}
+
+#[test]
+fn deleting_head_or_an_invalid_name_is_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+
+    for name in ["HEAD", "", "bad name", "-x", "main:other", "+main"] {
+        let result = delete_remote_branch(
+            &fixture.local,
+            "origin",
+            name,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(matches!(result, Err(RemoteError::Git(_))), "{name:?}");
+    }
+    assert!(reporter.events.is_empty());
+    assert!(fixture.bare_tip("main").is_some());
+}
+
+fn no_credentials_for(_remote: &str) -> Result<Box<dyn CredentialProvider>, RemoteError> {
+    Ok(Box::new(NoCredentials))
+}
+
+/// Publishes `branch` from the source repo, fetches it into `local`, then deletes it on the
+/// remote, leaving `refs/remotes/origin/<branch>` stale in `local`.
+fn stale_tracking_ref(fixture: &RemoteFixture, branch: &str) {
+    let head = fixture.source.head().unwrap().peel_to_commit().unwrap();
+    fixture.source.branch(branch, &head, false).unwrap();
+    let mut origin = fixture.source.find_remote("origin").unwrap();
+    origin
+        .push(&[format!("refs/heads/{branch}:refs/heads/{branch}")], None)
+        .unwrap();
+    fixture
+        .local
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    assert!(fixture
+        .local
+        .find_reference(&format!("refs/remotes/origin/{branch}"))
+        .is_ok());
+    origin
+        .push(&[format!(":refs/heads/{branch}")], None)
+        .unwrap();
+}
+
+#[test]
+fn fetch_with_prune_removes_a_remote_deleted_branch_and_without_keeps_it() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    let mut reporter = VecReporter::default();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(false),
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_ok());
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(true),
+        "f-2".into(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_err());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .is_ok());
+}
+
+#[test]
+fn fetch_with_unspecified_prune_follows_fetch_prune_config() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_bool("fetch.prune", true)
+        .unwrap();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_err());
+}
+
+#[test]
+fn fetch_with_explicit_no_prune_overrides_fetch_prune_config() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_bool("fetch.prune", true)
+        .unwrap();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(false),
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_ok());
+}
+
+#[test]
+fn remote_info_prune_prefers_the_remote_setting_over_fetch_prune() {
+    let (_dir, repo) = common::init_repo();
+    add_remote(&repo, "a", "file:///tmp/a.git", None).unwrap();
+    add_remote(&repo, "b", "file:///tmp/b.git", None).unwrap();
+    // Repo-local, so a developer's global `fetch.prune` cannot leak in.
+    repo.config()
+        .unwrap()
+        .set_bool("fetch.prune", false)
+        .unwrap();
+    assert!(list_remotes(&repo)
+        .unwrap()
+        .iter()
+        .all(|remote| !remote.prune));
+    let mut config = repo.config().unwrap();
+    config.set_bool("fetch.prune", true).unwrap();
+    config.set_bool("remote.b.prune", false).unwrap();
+
+    let remotes = list_remotes(&repo).unwrap();
+
+    assert!(
+        remotes
+            .iter()
+            .find(|remote| remote.name == "a")
+            .unwrap()
+            .prune
+    );
+    assert!(
+        !remotes
+            .iter()
+            .find(|remote| remote.name == "b")
+            .unwrap()
+            .prune
+    );
+}
+
+#[test]
+fn fetch_all_records_an_unreachable_remote_and_fetches_the_rest() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let missing = tempfile::TempDir::new().unwrap();
+    fixture
+        .local
+        .remote("broken", missing.path().join("nope").to_str().unwrap())
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    let outcome = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome.fetched, vec!["origin".to_string()]);
+    assert_eq!(
+        outcome.failed,
+        vec![("broken".to_string(), TransferErrorKind::TransferFailed)]
+    );
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(fixture.remote_tip())
+    );
+    assert!(!reporter.events.is_empty());
+    assert!(reporter.events.iter().all(|event| {
+        event.operation_id == "all-1" && event.operation == TransferOperation::FetchAll
+    }));
+}
+
+#[test]
+fn fetch_all_records_a_remote_whose_credentials_cannot_be_built_and_fetches_the_rest() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let other_dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init_bare(other_dir.path()).unwrap();
+    // "aaa" sorts first, so a failure there must not stop origin from being fetched.
+    fixture
+        .local
+        .remote("aaa", other_dir.path().to_str().unwrap())
+        .unwrap();
+    let mut credentials_for = |remote: &str| -> Result<Box<dyn CredentialProvider>, RemoteError> {
+        if remote == "aaa" {
+            Err(git2::Error::from_str("missing credential for remote").into())
+        } else {
+            Ok(Box::new(NoCredentials))
+        }
+    };
+
+    let outcome = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut credentials_for,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome.fetched, vec!["origin".to_string()]);
+    assert_eq!(
+        outcome.failed,
+        vec![("aaa".to_string(), TransferErrorKind::MissingCredential)]
+    );
+}
+
+#[test]
+fn fetch_all_without_remotes_is_an_empty_success() {
+    let (_dir, repo) = common::init_repo();
+
+    let outcome = fetch_all(
+        &repo,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome, FetchAllOutcome::default());
+}
+
+#[test]
+fn fetch_all_cancelled_before_the_first_remote_fetches_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let before = fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .target();
+
+    let result = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut VecReporter::default(),
+        &|| true,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)));
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        before
+    );
+}
+
+fn target(remote: &str, branch: &str) -> PushTarget {
+    PushTarget::Branch {
+        remote: remote.into(),
+        branch: branch.into(),
+    }
+}
+
+fn choice(remote: &str, local: &str) -> PushTarget {
+    PushTarget::NeedsChoice {
+        remote: remote.into(),
+        local_branch: local.into(),
+    }
+}
+
+#[test]
+fn push_default_decides_the_target_of_a_differently_named_upstream() {
+    let renamed = Some(("origin", "feature-x"));
+    // Unset push.default is git's default, `simple`.
+    for mode in [None, Some("simple"), Some("matching")] {
+        assert_eq!(
+            resolve_push_target(mode, "fx", "origin", renamed),
+            choice("origin", "fx"),
+            "{mode:?}"
+        );
+    }
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "fx", "origin", renamed),
+        choice("origin", "fx")
+    );
+    assert_eq!(
+        resolve_push_target(Some("upstream"), "fx", "origin", renamed),
+        target("origin", "feature-x")
+    );
+    assert_eq!(
+        resolve_push_target(Some("tracking"), "fx", "origin", renamed),
+        target("origin", "feature-x")
+    );
+    assert_eq!(
+        resolve_push_target(Some("current"), "fx", "origin", renamed),
+        target("origin", "fx")
+    );
+}
+
+#[test]
+fn push_default_pushes_a_same_named_upstream_and_other_remotes_under_the_local_name() {
+    let same = Some(("origin", "main"));
+    for mode in [
+        None,
+        Some("simple"),
+        Some("matching"),
+        Some("upstream"),
+        Some("current"),
+    ] {
+        assert_eq!(
+            resolve_push_target(mode, "main", "origin", same),
+            target("origin", "main"),
+            "{mode:?}"
+        );
+        // An explicitly chosen remote that is not the upstream's (or no upstream at all).
+        assert_eq!(
+            resolve_push_target(mode, "main", "backup", same),
+            target("backup", "main"),
+            "{mode:?}"
+        );
+        assert_eq!(
+            resolve_push_target(mode, "main", "origin", None),
+            target("origin", "main"),
+            "{mode:?}"
+        );
+    }
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "main", "origin", same),
+        choice("origin", "main")
+    );
+    assert_eq!(
+        resolve_push_target(Some("nothing"), "main", "backup", None),
+        choice("backup", "main")
+    );
+}
+
+#[test]
+fn push_target_reads_push_default_and_the_upstream_config() {
+    let fixture = local_and_bare_remote();
+    set_current_upstream(&fixture.local, "origin", "feature-x").unwrap();
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "simple").unwrap();
+    assert_eq!(
+        push_target(&fixture.local, "main", "origin").unwrap(),
+        choice("origin", "main")
+    );
+    assert_eq!(
+        current_upstream(&fixture.local)
+            .unwrap()
+            .unwrap()
+            .push_branch,
+        None
+    );
+    config.set_str("push.default", "upstream").unwrap();
+    assert_eq!(
+        push_target(&fixture.local, "main", "origin").unwrap(),
+        target("origin", "feature-x")
+    );
+    let upstream = current_upstream(&fixture.local).unwrap().unwrap();
+    assert_eq!(upstream.push_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn push_current_branch_with_a_differently_named_upstream_needs_a_choice_by_default() {
+    // A branch created from origin/main tracks origin/main; `simple` must never push it there.
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "simple")
+        .unwrap();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("feat", &head, false).unwrap();
+    fixture.local.set_head("refs/heads/feat").unwrap();
+    set_current_upstream(&fixture.local, "origin", "main").unwrap();
+    fixture.local_commit("feature work");
+    let main_before = fixture.bare_tip("main");
+    let (mut credentials, mut reporter) = quiet();
+
+    let pushed = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+    let forced = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    for result in [pushed, forced] {
+        assert!(matches!(
+            result,
+            Err(RemoteError::PushTargetNeedsChoice { .. })
+        ));
+    }
+    assert!(reporter.events.is_empty());
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert_eq!(fixture.bare_tip("feat"), None);
+}
+
+#[test]
+fn push_current_branch_under_push_default_current_pushes_the_same_name() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "current")
+        .unwrap();
+    set_current_upstream(&fixture.local, "origin", "renamed").unwrap();
+    fixture.local_commit("local work");
+    let local_tip = fixture.local.head().unwrap().target().unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("main"), Some(local_tip));
+    assert_eq!(fixture.bare_tip("renamed"), None);
+}
+
+#[test]
+fn push_current_branch_under_push_default_nothing_needs_a_choice() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("push.default", "nothing")
+        .unwrap();
+    let main_before = fixture.bare_tip("main");
+    fixture.local_commit("local work");
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(
+        result,
+        Err(RemoteError::PushTargetNeedsChoice { .. })
+    ));
+    assert_eq!(fixture.bare_tip("main"), main_before);
+}
+
+#[test]
+fn force_push_validates_the_resolved_target_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "upstream").unwrap();
+    config
+        .set_str("branch.main.merge", "refs/heads/bad name")
+        .unwrap();
+    let (mut credentials, mut reporter) = quiet();
+
+    let result = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert!(reporter.events.is_empty());
+}
+
+#[test]
+fn setting_an_upstream_is_not_fooled_by_a_local_branch_named_like_the_remote_branch() {
+    // libgit2's Branch::set_upstream resolves "origin/topic" as a LOCAL branch first, which wrote
+    // `remote = .` and `merge = refs/heads/origin/topic`.
+    let fixture = local_and_bare_remote();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("origin/topic", &head, false).unwrap();
+    fixture.local.branch("other", &head, false).unwrap();
+    fixture
+        .local
+        .reference("refs/remotes/origin/topic", head.id(), true, "test")
+        .unwrap();
+
+    set_branch_upstream(&fixture.local, "other", "origin", "topic").unwrap();
+    set_current_upstream(&fixture.local, "origin", "topic").unwrap();
+
+    let config = fixture.local.config().unwrap();
+    for branch in ["other", "main"] {
+        assert_eq!(
+            config
+                .get_string(&format!("branch.{branch}.remote"))
+                .unwrap(),
+            "origin"
+        );
+        assert_eq!(
+            config
+                .get_string(&format!("branch.{branch}.merge"))
+                .unwrap(),
+            "refs/heads/topic"
+        );
+    }
+}
+
+#[test]
+fn setting_an_upstream_rejects_a_missing_local_branch_or_remote() {
+    let fixture = local_and_bare_remote();
+    assert!(set_branch_upstream(&fixture.local, "nope", "origin", "topic").is_err());
+    assert!(set_branch_upstream(&fixture.local, "main", "nope", "topic").is_err());
+}
+
+#[test]
+fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to() {
+    let fixture = local_and_bare_remote();
+    let url = fixture.remote_dir.path().to_str().unwrap().to_string();
+    fixture
+        .local
+        .remote_with_fetch("mirror", &url, "+refs/heads/*:refs/remotes/mirror-ns/*")
+        .unwrap();
+    fixture
+        .local
+        .remote_with_fetch("narrow", &url, "+refs/heads/main:refs/remotes/narrow/main")
+        .unwrap();
+    let head = fixture.local.head().unwrap().peel_to_commit().unwrap();
+    fixture.local.branch("doomed", &head, false).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        "doomed",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    fixture
+        .local
+        .find_remote("mirror")
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror-ns/doomed")
+        .is_ok());
+    // Decoys at the conventional `refs/remotes/<remote>/<branch>` path, which no refspec maps to.
+    for decoy in ["refs/remotes/mirror/doomed", "refs/remotes/narrow/doomed"] {
+        fixture
+            .local
+            .reference(decoy, head.id(), true, "decoy")
+            .unwrap();
+    }
+
+    delete_remote_branch(
+        &fixture.local,
+        "mirror",
+        "doomed",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(fixture.bare_tip("doomed"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror-ns/doomed")
+        .is_err());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/mirror/doomed")
+        .is_ok());
+
+    // A remote whose fetch refspec does not cover the branch: no local tracking ref is touched.
+    push_branch(
+        &fixture.local,
+        "origin",
+        "doomed",
+        "doomed",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    delete_remote_branch(
+        &fixture.local,
+        "narrow",
+        "doomed",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(fixture.bare_tip("doomed"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/narrow/doomed")
+        .is_ok());
+}
+
+#[test]
+fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+    for name in ["@", "refs/heads/main", "refs/x"] {
+        let pushed = push_branch(
+            &fixture.local,
+            "origin",
+            "main",
+            name,
+            false,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(matches!(pushed, Err(RemoteError::Git(_))), "push {name:?}");
+        let deleted = delete_remote_branch(
+            &fixture.local,
+            "origin",
+            name,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(
+            matches!(deleted, Err(RemoteError::Git(_))),
+            "delete {name:?}"
+        );
+    }
+    let mut config = fixture.local.config().unwrap();
+    config.set_str("push.default", "upstream").unwrap();
+    config.set_str("branch.main.merge", "refs/heads/@").unwrap();
+    let forced = force_push_current_branch(
+        &fixture.local,
+        "origin",
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    );
+    assert!(matches!(forced, Err(RemoteError::Git(_))));
+    assert!(reporter.events.is_empty());
+    assert!(fixture.bare_tip("main").is_some());
 }

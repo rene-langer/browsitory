@@ -31,8 +31,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A slow search (`path:`, `contents:`) works in short slices, so committing or staging while it
   runs is not held up; a row you pick while results load keeps its selection.
 
+### Refs and remotes
+
+- Tags show as outlined badges on commit graph rows (and in file history and search results).
+  Right-click one on the graph to push it to a remote, check it out (detached), or delete it.
+- **Push to…** on any local branch pushes it to any remote under any name, optionally setting
+  that remote branch as its upstream. **Push** in the sync bar opens the same dialog when the
+  current branch has no upstream yet.
+- Remote branches have **Delete <remote>/<branch>…**, which deletes the branch on the remote and
+  its remote-tracking branch. Local branches that tracked it keep their upstream setting.
+- **Fetch** in the sync bar has a menu with **Fetch all remotes** and a **Prune** toggle
+  (remembered per repository; until you set it, your git `fetch.prune` /
+  `remote.<name>.prune` config decides). Fetch all keeps going past a remote that fails and names
+  it afterwards.
+- Local branches with an upstream show `↑n ↓m` in the branch tree.
+- An open remote folder in the branch tree now updates after any fetch, push or remote branch
+  delete, not only after its own Fetch.
+- Palette: "Fetch all remotes", "Push branch to…", "Delete remote branch…".
+
 ### Fixed
 
+- A saved graph branch selection naming a deleted or renamed branch no longer breaks the whole
+  refresh; deleting or renaming a branch in the app now updates the selection, and deleting the
+  only isolated branch shows all branches again (#97).
+- Push and force push follow `push.default` (unset = `simple`). A branch whose upstream has a
+  different name (e.g. `feat` created from `origin/main`) is no longer pushed onto that
+  branch: under `simple` Push opens **Push to…** with the remote and the branch's own name;
+  with `push.default=upstream` it updates the upstream branch, with `current` the same-named one.
 - Sidebar menus (e.g. the Branches "Add" menu) are no longer clipped by their section while it
   is opening: the section open animation now fades only, without the transform that confined
   fixed-position menus to the section body (#98).

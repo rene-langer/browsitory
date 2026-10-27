@@ -193,6 +193,25 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   newer search or `cancel_search` stops an older one without going through the command queue
   (same reasoning as `CancelRegistry`).
 
+## Fetch all
+
+- `git-core::remote::fetch_all` fetches every remote in `repo.remotes()` order under one
+  operation id (`TransferOperation::FetchAll`), building each remote's credential provider
+  through a `credentials_for` callback. A failing remote is recorded, not fatal; a cancel stops
+  the loop.
+- The worker turns each failure into `TransferEvent::RemoteFailed` (wire: phase `RemoteFailed`
+  plus `remoteName`) before `Completed`, which fails only when no remote succeeded.
+- `prune: Option<bool>`: `None` is `FetchPrune::Unspecified`, so libgit2 applies
+  `remote.<name>.prune` then `fetch.prune` itself. The UI's Prune toggle is a per-repo
+  `localStorage` preference; unset, every fetch sends `null`.
+- Push and force push of the current branch go where `git-core::remote::push_target` resolves
+  from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
+  `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.
+  An undecided target is `PushTarget::NeedsChoice`: the backend refuses before connecting and the
+  UI opens "Push to…" instead (`UpstreamInfo.push_branch` = null). The force-push lease reads the
+  same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
+  push whose target equals that resolution.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

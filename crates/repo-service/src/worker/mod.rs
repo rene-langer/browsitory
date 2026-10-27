@@ -53,6 +53,12 @@ pub enum TransferEvent {
         operation: TransferOperation,
     },
     Progress(git_core::remote::TransferProgress),
+    /// One remote of a Fetch all failed; sent before the operation's `Completed`.
+    RemoteFailed {
+        operation_id: String,
+        remote_name: String,
+        error: TransferErrorKind,
+    },
     Completed {
         operation_id: String,
         operation: TransferOperation,
@@ -410,6 +416,7 @@ pub(crate) enum Command {
     },
     FetchRemote {
         remote_name: String,
+        prune: Option<bool>,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -458,6 +465,28 @@ pub(crate) enum Command {
     PushTags {
         remote_name: String,
         names: Vec<String>,
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
+    },
+    FetchAllRemotes {
+        prune: Option<bool>,
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
+    },
+    PushBranch {
+        remote_name: String,
+        local_branch: String,
+        remote_branch: String,
+        set_upstream: bool,
+        operation_id: String,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
+    },
+    DeleteRemoteBranch {
+        remote_name: String,
+        branch_name: String,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -966,6 +995,7 @@ impl Worker {
                     Command::GetRebaseProgress { reply } => rebase::progress(&rebase_state, reply),
                     Command::FetchRemote {
                         remote_name,
+                        prune,
                         operation_id,
                         events,
                         reply,
@@ -973,6 +1003,7 @@ impl Worker {
                         &repo,
                         &credential_service,
                         remote_name,
+                        prune,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -999,7 +1030,7 @@ impl Worker {
                         operation_id,
                         events,
                         reply,
-                    } => remote::push_branch(
+                    } => remote::push_current(
                         &repo,
                         &credential_service,
                         remote_name,
@@ -1021,6 +1052,64 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         names,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
+                    Command::FetchAllRemotes {
+                        prune,
+                        operation_id,
+                        events,
+                        reply,
+                    } => remote::fetch_all(
+                        &repo,
+                        &credential_service,
+                        prune,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
+                    Command::PushBranch {
+                        remote_name,
+                        local_branch,
+                        remote_branch,
+                        set_upstream,
+                        operation_id,
+                        events,
+                        reply,
+                    } => remote::push_branch(
+                        &repo,
+                        &credential_service,
+                        remote::PushTarget {
+                            remote_name,
+                            local_branch,
+                            remote_branch,
+                            set_upstream,
+                        },
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
+                    Command::DeleteRemoteBranch {
+                        remote_name,
+                        branch_name,
+                        operation_id,
+                        events,
+                        reply,
+                    } => remote::delete_remote_branch(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        branch_name,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -2021,6 +2110,10 @@ mod tests {
         config
             .set_str("branch.topic.merge", "refs/heads/topic")
             .unwrap();
+        // Repo-local, so a developer's global `fetch.prune` cannot leak into `prune` below.
+        config.set_bool("fetch.prune", false).unwrap();
+        // Makes `push_branch` independent of whether the init default branch is main or master.
+        config.set_str("push.default", "upstream").unwrap();
         drop(config);
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
@@ -2035,6 +2128,7 @@ mod tests {
                 name: "origin".into(),
                 fetch_url: "https://example.com/owner/repo.git".into(),
                 push_url: None,
+                prune: false,
             }]
         );
         assert_eq!(
@@ -2045,6 +2139,7 @@ mod tests {
                 remote_branch: "main".into(),
                 ahead: None,
                 behind: None,
+                push_branch: Some("main".into()),
             })
         );
 
@@ -2079,7 +2174,7 @@ mod tests {
 
         let operation_id = worker
             .handle()
-            .fetch_remote("origin".into(), event_tx)
+            .fetch_remote("origin".into(), None, event_tx)
             .expect("start fetch");
         let events: Vec<_> = event_rx.iter().collect();
 
@@ -2112,7 +2207,7 @@ mod tests {
 
         let operation_id = worker
             .handle()
-            .fetch_remote("missing-remote".into(), event_tx)
+            .fetch_remote("missing-remote".into(), None, event_tx)
             .expect("start fetch");
         let events: Vec<_> = event_rx.iter().collect();
 
@@ -2144,6 +2239,7 @@ mod tests {
             .tx
             .send(Command::FetchRemote {
                 remote_name: "origin".into(),
+                prune: None,
                 operation_id: "fetch-cancel-test".into(),
                 events: event_tx,
                 reply: reply_tx,
@@ -2201,7 +2297,7 @@ mod tests {
         let handle = worker.handle();
         let (event_tx, event_rx) = mpsc::channel();
         handle
-            .fetch_remote("origin".into(), event_tx)
+            .fetch_remote("origin".into(), None, event_tx)
             .expect("start fetch");
         let _events: Vec<_> = event_rx.iter().collect();
 
@@ -2236,6 +2332,233 @@ mod tests {
                 error: Some(TransferErrorKind::NonFastForward),
             }) if id == &operation_id
         ));
+    }
+
+    fn completed(events: &[TransferEvent]) -> (TransferOperation, Option<TransferErrorKind>) {
+        match events.last() {
+            Some(TransferEvent::Completed {
+                operation, error, ..
+            }) => (*operation, *error),
+            other => panic!("expected a Completed event last, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fetch_all_remotes_reports_each_unreachable_remote_and_completes() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let missing = TempDir::new().expect("missing dir");
+        Repository::open(local_dir.path())
+            .expect("open local")
+            .remote(
+                "broken",
+                missing.path().join("nope").to_str().expect("path"),
+            )
+            .expect("add broken remote");
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        let operation_id = worker
+            .handle()
+            .fetch_all_remotes(None, event_tx)
+            .expect("start fetch all");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert!(operation_id.starts_with("fetch-all-"));
+        assert!(matches!(
+            events.first(),
+            Some(TransferEvent::Started {
+                operation: TransferOperation::FetchAll,
+                ..
+            })
+        ));
+        let failed: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                TransferEvent::RemoteFailed {
+                    operation_id: id,
+                    remote_name,
+                    error,
+                } => {
+                    assert_eq!(id, &operation_id);
+                    Some((remote_name.clone(), *error))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            failed,
+            vec![("broken".to_string(), TransferErrorKind::TransferFailed)]
+        );
+        assert_eq!(completed(&events), (TransferOperation::FetchAll, None));
+        let local = Repository::open(local_dir.path()).expect("reopen local");
+        assert!(
+            local
+                .branches(Some(git2::BranchType::Remote))
+                .expect("branches")
+                .count()
+                > 0
+        );
+    }
+
+    #[test]
+    fn fetch_all_remotes_fails_when_every_remote_fails() {
+        let (local_dir, repo) = init_repo();
+        let missing = TempDir::new().expect("missing dir");
+        repo.remote(
+            "broken",
+            missing.path().join("nope").to_str().expect("path"),
+        )
+        .expect("add broken remote");
+        drop(repo);
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        worker
+            .handle()
+            .fetch_all_remotes(Some(true), event_tx)
+            .expect("start fetch all");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert_eq!(
+            completed(&events),
+            (
+                TransferOperation::FetchAll,
+                Some(TransferErrorKind::TransferFailed)
+            )
+        );
+    }
+
+    #[test]
+    fn fetch_all_remotes_without_remotes_completes() {
+        let (local_dir, _repo) = init_repo();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let (event_tx, event_rx) = mpsc::channel();
+
+        worker
+            .handle()
+            .fetch_all_remotes(None, event_tx)
+            .expect("start fetch all");
+        let events: Vec<_> = event_rx.iter().collect();
+
+        assert_eq!(completed(&events), (TransferOperation::FetchAll, None));
+    }
+
+    #[test]
+    fn push_branch_publishes_with_upstream_and_delete_remote_branch_removes_it() {
+        let (_source_dir, remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).expect("open local");
+        write_file(local_dir.path(), "local.txt", "local\n");
+        commit_all(&local, "local root");
+        let head = local
+            .head()
+            .expect("head")
+            .peel_to_commit()
+            .expect("commit");
+        local.branch("topic", &head, false).expect("create topic");
+        drop(head);
+        drop(local);
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+        let bare_has = |name: &str| {
+            Repository::open_bare(remote_dir.path())
+                .expect("open bare")
+                .find_reference(&format!("refs/heads/{name}"))
+                .is_ok()
+        };
+        assert!(bare_has("main") || bare_has("master"));
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let push_id = handle
+            .push_branch(
+                "origin".into(),
+                "topic".into(),
+                "topic".into(),
+                true,
+                event_tx,
+            )
+            .expect("start push");
+        let events: Vec<_> = event_rx.iter().collect();
+        assert!(push_id.starts_with("push-"));
+        assert_eq!(completed(&events), (TransferOperation::PushBranch, None));
+        assert!(bare_has("topic"));
+        let topic = handle
+            .list_branches()
+            .expect("list branches")
+            .into_iter()
+            .find(|branch| branch.name == "topic")
+            .expect("topic listed");
+        assert_eq!(topic.upstream.as_deref(), Some("origin/topic"));
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let delete_id = handle
+            .delete_remote_branch("origin".into(), "topic".into(), event_tx)
+            .expect("start delete");
+        let events: Vec<_> = event_rx.iter().collect();
+        assert!(delete_id.starts_with("delete-remote-"));
+        assert_eq!(
+            completed(&events),
+            (TransferOperation::DeleteRemoteBranch, None)
+        );
+        assert!(!bare_has("topic"));
+        // Only that branch: the remote's default branch is untouched.
+        assert!(bare_has("main") || bare_has("master"));
+        assert!(handle.get_undo_state().expect("undo state").undo.is_none());
+    }
+
+    #[test]
+    fn push_and_force_push_refuse_up_front_when_push_default_needs_a_choice() {
+        let (_source_dir, remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).expect("open local");
+        write_file(local_dir.path(), "local.txt", "local\n");
+        commit_all(&local, "local root");
+        let mut config = local.config().expect("config");
+        config
+            .set_str("push.default", "simple")
+            .expect("push.default");
+        config
+            .set_str("branch.feat.remote", "origin")
+            .expect("remote");
+        config
+            .set_str("branch.feat.merge", "refs/heads/main")
+            .expect("merge");
+        drop(config);
+        let head = local
+            .head()
+            .expect("head")
+            .peel_to_commit()
+            .expect("commit");
+        local.branch("feat", &head, false).expect("create feat");
+        local.set_head("refs/heads/feat").expect("checkout feat");
+        drop(head);
+        drop(local);
+        let bare_main = || {
+            Repository::open_bare(remote_dir.path())
+                .expect("open bare")
+                .find_reference("refs/heads/main")
+                .ok()
+                .and_then(|reference| reference.target())
+        };
+        let before = bare_main();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+        let handle = worker.handle();
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let pushed = handle.push_current_branch("origin".into(), event_tx);
+        assert!(event_rx.iter().next().is_none());
+        let (event_tx, event_rx) = mpsc::channel();
+        let forced = handle.force_push_current_branch("origin".into(), event_tx);
+        assert!(event_rx.iter().next().is_none());
+
+        for result in [pushed, forced] {
+            let message = result.expect_err("must not start a transfer");
+            assert!(message.contains("Push to…"), "{message}");
+        }
+        assert_eq!(bare_main(), before);
+        let upstream = handle
+            .get_current_upstream()
+            .expect("upstream")
+            .expect("set");
+        assert_eq!(upstream.push_branch, None);
     }
 
     #[test]
@@ -2283,6 +2606,9 @@ mod tests {
         ));
         assert!(events.iter().all(|event| match event {
             TransferEvent::Started {
+                operation_id: id, ..
+            }
+            | TransferEvent::RemoteFailed {
                 operation_id: id, ..
             }
             | TransferEvent::Completed {
