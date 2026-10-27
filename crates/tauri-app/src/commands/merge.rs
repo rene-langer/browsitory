@@ -7,7 +7,8 @@ pub async fn start_merge(
     state: State<'_, AppState>,
 ) -> Result<MergeOutcomeDto, String> {
     Ok(MergeOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.start_merge(branch_name)?,
+        worker_handle(&state, &repo_path)?
+            .start_merge(branch_name, git_core::merge::MergeOptions::default())?,
     ))
 }
 #[tauri::command]

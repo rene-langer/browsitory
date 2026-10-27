@@ -45,6 +45,22 @@ pub struct GraphRemoteBranchSelection {
     pub selected_branches: Vec<String>,
 }
 
+/// The merge dialog's fast-forward choice, as remembered per repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MergeFastForward {
+    Allow,
+    Never,
+    Only,
+}
+
+/// The last confirmed "Merge into current branch" options for one repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergePreference {
+    pub repo_path: PathBuf,
+    pub fast_forward: MergeFastForward,
+    pub squash: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenRepoEntry {
     pub path: PathBuf,
@@ -154,6 +170,8 @@ struct ConfigFile {
     graph_branch_selections: Vec<GraphBranchSelection>,
     #[serde(default)]
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
+    #[serde(default)]
+    merge_preferences: Vec<MergePreference>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -437,4 +455,45 @@ fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {
     std::io::Write::write_all(&mut tmp, toml::to_string_pretty(config)?.as_bytes())?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+pub fn get_merge_preference(repo_path: &Path) -> Result<Option<MergePreference>, ConfigError> {
+    get_merge_preference_at(&config_file_path()?, repo_path)
+}
+
+pub fn set_merge_preference(
+    repo_path: &Path,
+    fast_forward: MergeFastForward,
+    squash: bool,
+) -> Result<(), ConfigError> {
+    set_merge_preference_at(&config_file_path()?, repo_path, fast_forward, squash)
+}
+
+pub fn get_merge_preference_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<Option<MergePreference>, ConfigError> {
+    let config = read_config(config_file)?;
+    Ok(config
+        .merge_preferences
+        .into_iter()
+        .find(|p| p.repo_path == repo_path))
+}
+
+pub fn set_merge_preference_at(
+    config_file: &Path,
+    repo_path: &Path,
+    fast_forward: MergeFastForward,
+    squash: bool,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config
+        .merge_preferences
+        .retain(|p| p.repo_path != repo_path);
+    config.merge_preferences.push(MergePreference {
+        repo_path: repo_path.to_path_buf(),
+        fast_forward,
+        squash,
+    });
+    write_config(config_file, &config)
 }

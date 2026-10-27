@@ -13,7 +13,7 @@ pub async fn list_stashes(
 
 #[tauri::command]
 pub async fn save_stash(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.save_stash()
+    worker_handle(&state, &repo_path)?.save_stash(git_core::stash::StashOptions::default())
 }
 
 #[tauri::command]
@@ -22,7 +22,9 @@ pub async fn apply_stash(
     index: usize,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.apply_stash(index)
+    worker_handle(&state, &repo_path)?
+        .apply_stash(index, false)
+        .map(|_| ())
 }
 
 #[tauri::command]

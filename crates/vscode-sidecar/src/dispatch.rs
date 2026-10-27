@@ -2175,7 +2175,7 @@ fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
 fn save_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.save_stash()?;
+    worker_handle(repos, &params.repo_path)?.save_stash(git_core::stash::StashOptions::default())?;
     Ok(Value::Null)
 }
 
@@ -2189,7 +2189,7 @@ struct StashIndexParams {
 fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashIndexParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.apply_stash(params.index)?;
+    worker_handle(repos, &params.repo_path)?.apply_stash(params.index, false)?;
     Ok(Value::Null)
 }
 
@@ -2275,7 +2275,8 @@ struct StartMergeParams {
 fn start_merge(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StartMergeParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.start_merge(params.branch_name)?;
+    let outcome = worker_handle(repos, &params.repo_path)?
+        .start_merge(params.branch_name, git_core::merge::MergeOptions::default())?;
     serde_json::to_value(MergeOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
