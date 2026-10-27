@@ -22,21 +22,27 @@ const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 // workspace's (about-to-unmount) copy from the new one's, and a reference captured before the
 // switch goes stale. This polls until a displayed match exists after the switch, and returns it.
 async function activeElement(selector: string, timeout = 10000) {
+  // Keep the match found *inside* the poll: re-querying afterwards raced a remount (the element
+  // seen displayed could be gone by the second `$$`), which surfaced as a spurious failure.
+  let found: WebdriverIO.Element | null = null;
   await browser.waitUntil(
     async () => {
-      const candidates = await $$(selector);
-      for (const candidate of candidates) {
-        if (await candidate.isDisplayed()) return true;
+      for (const candidate of await $$(selector)) {
+        try {
+          if (await candidate.isDisplayed()) {
+            found = candidate;
+            return true;
+          }
+        } catch {
+          // Detached between the query and the check; poll again.
+        }
       }
       return false;
     },
     { timeout, timeoutMsg: `expected a visible match for ${selector}` },
   );
-  const candidates = await $$(selector);
-  for (const candidate of candidates) {
-    if (await candidate.isDisplayed()) return candidate;
-  }
-  throw new Error(`unreachable: activeElement's own waitUntil already confirmed a visible match for ${selector}`);
+  if (found === null) throw new Error(`expected a visible match for ${selector}`);
+  return found as WebdriverIO.Element;
 }
 
 // BranchTree has no separate switcher control — the current branch is just the row in the Local
