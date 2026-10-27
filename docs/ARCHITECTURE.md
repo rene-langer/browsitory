@@ -239,7 +239,9 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 
 - `git-core::hooks` finds a hook in `core.hooksPath` (relative to the worktree root) or
   `<common dir>/hooks` and runs it through `git-core::process::run_captured`, a generic
-  captured-run helper: stdout and stderr share one `std::io::pipe` (true `2>&1` order), the last
+  captured-run helper, with cwd = worktree root and `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/
+  `GIT_PREFIX` removed from the environment (git sets none of them for hooks; a pinned `GIT_DIR`
+  breaks hooks that `cd` into a subdirectory; commit hooks get `GIT_INDEX_FILE` back): stdout and stderr share one `std::io::pipe` (true `2>&1` order), the last
   64 KiB are kept (ANSI escapes and `\r` redraws stripped), the child is polled every 20 ms for
   exit, cancel and a 10-minute deadline, and it is always reaped. On Unix it leads its own
   process group and timeout/cancel run `kill -s KILL -- -<pgid>`, so its children die too; after

@@ -73,12 +73,12 @@ fn a_missing_hook_is_not_installed_and_a_non_executable_one_is_not_run() {
 }
 
 #[test]
-fn a_hook_runs_in_the_worktree_root_with_git_dir_and_args() {
+fn a_hook_runs_in_the_worktree_root_without_git_dir_and_with_args() {
     let (dir, repo) = common::init_repo();
     common::install_hook(
         &hooks_dir(&repo).unwrap(),
         "post-checkout",
-        r#"pwd; echo "$GIT_DIR"; echo "$@""#,
+        r#"pwd; echo "[${GIT_DIR-unset}] [${GIT_WORK_TREE-unset}]"; echo "$@""#,
     );
     let HookOutcome::Ran(result) = run(&repo, "post-checkout", &["a", "b", "1"]) else {
         panic!("hook did not run");
@@ -89,10 +89,8 @@ fn a_hook_runs_in_the_worktree_root_with_git_dir_and_args() {
         std::fs::canonicalize(lines[0]).unwrap(),
         std::fs::canonicalize(dir.path()).unwrap()
     );
-    assert_eq!(
-        std::fs::canonicalize(lines[1]).unwrap(),
-        std::fs::canonicalize(repo.path()).unwrap()
-    );
+    // Like git: no GIT_DIR, so a hook that cd's into a subdirectory still finds the repo there.
+    assert_eq!(lines[1], "[unset] [unset]");
     assert_eq!(lines[2], "a b 1");
 }
 
@@ -212,6 +210,29 @@ fn pre_commit_that_stages_a_file_gets_it_committed() {
     let tree = repo.head().unwrap().peel_to_tree().unwrap();
     assert!(tree.get_name("generated.txt").is_some());
     assert!(tree.get_name("a.txt").is_some());
+}
+
+#[test]
+fn pre_commit_that_stages_from_a_subdirectory_stages_the_subdirectory_file() {
+    // husky monorepo shape: `cd frontend && npx lint-staged`.
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (dir, mut repo) = common::init_repo();
+    stage(dir.path(), &repo, "a.txt", "a");
+    common::write_file(dir.path(), "sub/x.txt", "in sub");
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "pre-commit",
+        "cd sub && git add x.txt",
+    );
+
+    commit(&mut repo, "add a", HookOptions::default()).unwrap();
+
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree.get_path(std::path::Path::new("sub/x.txt")).is_ok());
+    assert!(tree.get_name("x.txt").is_none());
 }
 
 #[test]

@@ -179,11 +179,18 @@ fn hook_command(path: &Path) -> Option<Command> {
     Some(command)
 }
 
+/// Variables that pin git to one repository/index/prefix. Git leaves `GIT_DIR` and friends unset
+/// for hooks (the hook finds the repository from its working directory), so a hook that `cd`s
+/// into a subdirectory and runs `git add` there (monorepo lint-staged) stages that
+/// subdirectory's files. Inherited values (Browsitory itself launched from a git hook or alias)
+/// are removed for the same reason; commit hooks set `GIT_INDEX_FILE` again on purpose.
+const REPO_PINNING_ENV: [&str; 4] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"];
+
 fn configure(command: &mut Command, repo: &Repository, invocation: &HookInvocation<'_>) {
-    command
-        .args(invocation.args)
-        .current_dir(run_dir(repo))
-        .env("GIT_DIR", repo.path());
+    command.args(invocation.args).current_dir(run_dir(repo));
+    for key in REPO_PINNING_ENV {
+        command.env_remove(key);
+    }
     for (key, value) in invocation.env {
         command.env(key, value);
     }
@@ -209,7 +216,7 @@ fn captured_outcome(
     }
 }
 
-/// Runs hook `invocation.name` if it is installed: cwd = worktree root, `GIT_DIR` set, combined
+/// Runs hook `invocation.name` if it is installed: cwd = worktree root (no `GIT_DIR`), combined
 /// output capped at `OUTPUT_LIMIT`, killed after `timeout` or when `cancel` returns true.
 pub fn run_hook(
     repo: &Repository,

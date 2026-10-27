@@ -160,7 +160,9 @@ Browsitory runs your repository's client-side git hooks the way git does:
 | `post-merge` | merge a branch (also a squash merge) or pull with a fast-forward |
 
 Hooks come from `core.hooksPath` (a relative path is relative to the repository root) or
-`.git/hooks`, and get the same arguments, standard input and `GIT_DIR` git gives them. On macOS
+`.git/hooks`. They run in the repository root with the same arguments and standard input git
+gives them, and like git Browsitory does not set `GIT_DIR`, so a hook can `cd` into a
+subdirectory (for example `cd frontend && npx lint-staged`) and run git there. On macOS
 and Linux a hook must be executable. Hook managers such as husky, pre-commit or lefthook work
 through the hook scripts they install. Files a `pre-commit` hook stages (formatters,
 lint-staged) are part of the commit. `pre-push` runs after Browsitory has contacted the remote

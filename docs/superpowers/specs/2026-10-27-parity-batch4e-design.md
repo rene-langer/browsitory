@@ -90,7 +90,9 @@ VSCode extension) through `RepoClient`. Refines section 4e of
   hook.`, so the dialog offers "Commit/Push without hooks". *(Open question 2 — recommendation
   used here.)*
 - **Hook environment, like git.** Working directory = worktree root (git dir for a bare repo).
-  `GIT_DIR` = `repo.path()` (absolute). Commit hooks additionally get
+  `GIT_DIR` is **not** set, as in git (≥ 2.x): the hook finds the repository from its working
+  directory, so `cd sub && git add x` stages `sub/x`. Inherited `GIT_DIR`, `GIT_WORK_TREE`,
+  `GIT_INDEX_FILE` and `GIT_PREFIX` are removed. Commit hooks then get
   `GIT_INDEX_FILE=<git dir>/index` and `GIT_EDITOR=:`. The rest of the environment is inherited
   unchanged; the macOS "GUI apps don't see your shell PATH" caveat is documented exactly as it is
   for signing, with no login-shell PATH resolution.
@@ -390,7 +392,7 @@ subscribeHookProgress(listener: (event: HookProgress) => void): () => void;
   `mingw64\bin\git.exe` layouts (all platforms).
 - `git-core` `tests/hooks.rs` (`#![cfg(unix)]`, real temp repos, shell-script hooks):
   `hooks_dir` default and relative `core.hooksPath`; non-executable hook not run; hook runs in
-  the worktree root with `GIT_DIR`; failing pre-commit blocks the commit (HEAD unchanged) and
+  the worktree root without `GIT_DIR`; a pre-commit that `cd`s into a subdirectory stages there; failing pre-commit blocks the commit (HEAD unchanged) and
   returns combined output; pre-commit that stages a file gets it committed (skipped without a
   `git` CLI); commit-msg rewriting the message; prepare-commit-msg sees `message` / `merge`;
   `no_verify` skips pre-commit and commit-msg but runs prepare-commit-msg; message emptied by a
