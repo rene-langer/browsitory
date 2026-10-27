@@ -20,6 +20,7 @@ import type {
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
+  MergeOptions,
   MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
@@ -32,7 +33,10 @@ import type {
   RemoteInfo,
   RemoteAuthMode,
   RepoClient,
+  StashApplyOutcome,
   StashEntry,
+  StashFiles,
+  StashOptions,
   StatusEntry,
   SubmoduleInfo,
   TagInfo,
@@ -258,13 +262,22 @@ export const tauriRepoClient: RepoClient = {
     };
   },
   listStashes: (repoPath: string) => loggedInvoke<StashEntry[]>("list_stashes", { repoPath }),
-  saveStash: (repoPath: string) => loggedInvoke("save_stash", { repoPath }),
-  applyStash: (repoPath: string, index: number) => loggedInvoke("apply_stash", { repoPath, index }),
-  dropStash: (repoPath: string, index: number) => loggedInvoke("drop_stash", { repoPath, index }),
+  saveStash: (repoPath: string, options: StashOptions) => loggedInvoke("save_stash", { repoPath, options }),
+  applyStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    loggedInvoke<StashApplyOutcome>("apply_stash", { repoPath, index, commitId, restoreIndex }),
+  popStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    loggedInvoke<StashApplyOutcome>("pop_stash", { repoPath, index, commitId, restoreIndex }),
+  getStashFiles: (repoPath: string, commitId: string) =>
+    loggedInvoke<StashFiles>("get_stash_files", { repoPath, commitId }),
+  dropStash: (repoPath: string, index: number, commitId: string) =>
+    loggedInvoke("drop_stash", { repoPath, index, commitId }),
   getBlame: (repoPath: string, commitId: string, path: string) =>
     loggedInvoke<BlameLine[]>("get_blame", { repoPath, commitId, path }),
-  mergeBranch: (repoPath: string, branchName: string) =>
-    loggedInvoke<MergeOutcome>("start_merge", { repoPath, branchName }),
+  mergeBranch: (repoPath: string, branchName: string, options: MergeOptions) =>
+    loggedInvoke<MergeOutcome>("start_merge", { repoPath, branchName, options }),
+  getMergeOptions: (repoPath: string) => loggedInvoke<MergeOptions>("get_merge_options", { repoPath }),
+  setMergeOptions: (repoPath: string, options: MergeOptions) =>
+    loggedInvoke("set_merge_options", { repoPath, options }),
   getConflictHunks: (repoPath: string, path: string) =>
     loggedInvoke<ConflictSegment[]>("get_conflict_hunks", { repoPath, path }),
   resolveConflict: (repoPath: string, path: string, resolvedContent: string) =>

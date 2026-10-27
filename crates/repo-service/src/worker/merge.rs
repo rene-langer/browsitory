@@ -1,13 +1,19 @@
 use super::{Command, WorkerHandle};
-use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
+use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOptions, MergeOutcome};
 use std::sync::mpsc::Sender;
 pub(super) fn start(
     repo: &git2::Repository,
     branch_name: String,
+    options: MergeOptions,
     reply: Sender<Result<MergeOutcome, String>>,
 ) {
-    let _ = reply
-        .send(git_core::merge::start_merge(repo, &branch_name).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::merge::start_merge(repo, &branch_name, options)
+            .map_err(|error| error.to_string()),
+    );
+}
+pub(super) fn defaults(repo: &git2::Repository, reply: Sender<Result<MergeOptions, String>>) {
+    let _ = reply.send(Ok(git_core::merge::merge_defaults(repo)));
 }
 pub(super) fn conflict_hunks(
     repo: &git2::Repository,
@@ -46,14 +52,28 @@ pub(super) fn resolve_add_delete(
     );
 }
 impl WorkerHandle {
-    #[allow(dead_code)]
-    pub fn start_merge(&self, branch_name: String) -> Result<MergeOutcome, String> {
+    /// Merges `branch_name` (a local branch name or a full ref) with `options`.
+    pub fn start_merge(
+        &self,
+        branch_name: String,
+        options: MergeOptions,
+    ) -> Result<MergeOutcome, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::StartMerge {
                 branch_name,
+                options,
                 reply: tx,
             })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+    /// The merge dialog's default options, from `merge.ff`.
+    pub fn merge_defaults(&self) -> Result<MergeOptions, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetMergeDefaults { reply: tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?

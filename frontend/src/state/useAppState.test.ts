@@ -132,6 +132,10 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     listStashes: async () => [],
     saveStash: async () => unimplemented(),
     applyStash: async () => unimplemented(),
+    popStash: async () => unimplemented(),
+    getStashFiles: async () => unimplemented(),
+    getMergeOptions: async () => unimplemented(),
+    setMergeOptions: async () => unimplemented(),
     dropStash: async () => unimplemented(),
     getBlame: async () => unimplemented(),
     mergeBranch: async () => unimplemented(),
@@ -139,7 +143,7 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: async () => unimplemented(),
     abortMerge: async () => unimplemented(),
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -1141,6 +1145,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1148,7 +1156,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1225,6 +1233,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1232,7 +1244,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1309,6 +1321,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1316,7 +1332,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1813,6 +1829,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1820,7 +1840,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1894,6 +1914,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1901,7 +1925,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1971,6 +1995,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -1978,7 +2006,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2048,6 +2076,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2055,7 +2087,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2131,6 +2163,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2138,7 +2174,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2210,6 +2246,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2217,7 +2257,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2408,6 +2448,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2415,7 +2459,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2486,6 +2530,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2493,7 +2541,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2563,6 +2611,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2570,7 +2622,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2638,6 +2690,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2645,7 +2701,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2716,6 +2772,10 @@ describe("useAppState", () => {
       listStashes: async () => [stash],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2723,7 +2783,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2799,6 +2859,10 @@ describe("useAppState", () => {
         saveStashCalls += 1;
       },
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2806,7 +2870,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2875,11 +2939,17 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
+      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0" }],
       saveStash: async () => unimplemented(),
-      applyStash: async (_repoPath: string, index: number) => {
+      applyStash: async (_repoPath: string, index: number, commitId: string) => {
         applyStashArg = index;
+        expect(commitId).toBe("s0");
+        return { kind: "Applied" as const };
       },
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2887,7 +2957,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2953,11 +3023,16 @@ describe("useAppState", () => {
       switchBranch: async () => unimplemented(),
       deleteBranch: async () => unimplemented(),
       renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
+      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0" }],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
-      dropStash: async (_repoPath: string, index: number) => {
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
+      dropStash: async (_repoPath: string, index: number, commitId: string) => {
         dropStashArg = index;
+        expect(commitId).toBe("s0");
       },
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -2965,7 +3040,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3081,6 +3156,10 @@ describe("useAppState", () => {
       },
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => {},
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -3088,7 +3167,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3159,6 +3238,10 @@ describe("useAppState", () => {
       listStashes: async () => [stash],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => {},
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -3166,7 +3249,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3236,6 +3319,10 @@ describe("useAppState", () => {
       listStashes: async () => [],
       saveStash: async () => unimplemented(),
       applyStash: async () => unimplemented(),
+      popStash: async () => unimplemented(),
+      getStashFiles: async () => unimplemented(),
+      getMergeOptions: async () => unimplemented(),
+      setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
       getBlame: async () => unimplemented(),
       mergeBranch: async () => unimplemented(),
@@ -3243,7 +3330,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3389,7 +3476,7 @@ describe("useAppState pull requests", () => {
 
 describe("history actions", () => {
   it("loads headInfo on refresh", async () => {
-    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null };
+    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, squashMessage: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
     expect(result.current.state.headInfo).toEqual(info);
@@ -4074,5 +4161,193 @@ describe("useAppState — refs and remotes (4b)", () => {
     await act(() => result.current.renameBranch("topic", "feature"));
 
     expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["feature"]);
+  });
+});
+
+describe("useAppState merge and stash options", () => {
+  const defaultStash = { message: null, keepIndex: false, includeUntracked: true, paths: [] };
+
+  it("merge with options persists them, merges with them and records the outcome", async () => {
+    const calls: string[] = [];
+    const setMergeOptions = vi.fn(async () => {
+      calls.push("set");
+    });
+    const mergeBranch = vi.fn(async () => {
+      calls.push("merge");
+      return { kind: "Merged" as const };
+    });
+    const client = transferClient({ setMergeOptions, mergeBranch });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    const options = { fastForward: "Never", squash: false } as const;
+
+    act(() => result.current.openMergeDialog("feature"));
+    expect(result.current.state.mergeDialog).toEqual({ branchName: "feature" });
+    await act(() => result.current.mergeBranch("feature", options));
+
+    expect(setMergeOptions).toHaveBeenCalledWith(TEST_REPO_PATH, options);
+    expect(mergeBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "feature", options);
+    expect(calls).toEqual(["set", "merge"]);
+    expect(result.current.state.mergeDialog).toBeNull();
+    expect(result.current.state.mergeOutcome).toEqual({ branchName: "feature", outcome: { kind: "Merged" } });
+  });
+
+  it("still merges when remembering the options fails", async () => {
+    const mergeBranch = vi.fn(async () => ({ kind: "Squashed" as const }));
+    const client = transferClient({
+      setMergeOptions: async () => {
+        throw new Error("disk full");
+      },
+      mergeBranch,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.mergeBranch("feature", { fastForward: "Allow", squash: true }));
+
+    expect(mergeBranch).toHaveBeenCalled();
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.mergeOutcome?.outcome).toEqual({ kind: "Squashed" });
+  });
+
+  it("a failed merge records no outcome and closes the dialog", async () => {
+    const client = transferClient({
+      setMergeOptions: async () => {},
+      mergeBranch: async () => {
+        throw new Error("Can't fast-forward: 'feature' has diverged from the current branch.");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    act(() => result.current.openMergeDialog("feature"));
+
+    await act(() => result.current.mergeBranch("feature", { fastForward: "Only", squash: false }));
+
+    expect(result.current.state.mergeOutcome).toBeNull();
+    expect(result.current.state.mergeDialog).toBeNull();
+    expect(result.current.state.error).toBe("Can't fast-forward: 'feature' has diverged from the current branch.");
+  });
+
+  it("closeMergeDialog closes it and getMergeOptions reads the client", async () => {
+    const options = { fastForward: "Only", squash: false } as const;
+    const client = transferClient({ getMergeOptions: async () => options });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    act(() => result.current.openMergeDialog("feature"));
+    act(() => result.current.closeMergeDialog());
+
+    expect(result.current.state.mergeDialog).toBeNull();
+    await expect(result.current.getMergeOptions()).resolves.toEqual(options);
+  });
+
+  it("pull merge passes the full upstream ref with Allow", async () => {
+    const setMergeOptions = vi.fn(async () => {});
+    const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+    const client = transferClient({ setMergeOptions, mergeBranch });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.mergePull("refs/remotes/origin/main"));
+
+    expect(mergeBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "refs/remotes/origin/main", {
+      fastForward: "Allow",
+      squash: false,
+    });
+    expect(setMergeOptions).not.toHaveBeenCalled();
+  });
+
+  it("saveStash defaults to stashing everything", async () => {
+    const saveStash = vi.fn(async () => {});
+    const client = transferClient({ saveStash });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.saveStash());
+
+    expect(saveStash).toHaveBeenCalledWith(TEST_REPO_PATH, defaultStash);
+  });
+
+  it("saveStash passes dialog options and closes the dialog", async () => {
+    const saveStash = vi.fn(async () => {});
+    const client = transferClient({ saveStash });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    const options = { message: "wip", keepIndex: true, includeUntracked: false, paths: ["a.txt"] };
+
+    act(() => result.current.openStashDialog(["a.txt"]));
+    expect(result.current.state.stashDialog).toEqual({ paths: ["a.txt"] });
+    await act(() => result.current.saveStash(options));
+
+    expect(saveStash).toHaveBeenCalledWith(TEST_REPO_PATH, options);
+    expect(result.current.state.stashDialog).toBeNull();
+    act(() => result.current.openStashDialog([]));
+    act(() => result.current.closeStashDialog());
+    expect(result.current.state.stashDialog).toBeNull();
+  });
+
+  it("pop uses the restore-index setting and resets a popped selected stash", async () => {
+    const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+    const popStash = vi.fn(async () => ({ kind: "Applied" as const }));
+    const client = transferClient({ listStashes: async () => [stash], popStash });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    expect(result.current.state.stashRestoreIndex).toBe(true);
+    act(() => result.current.selectRow({ commitId: "s0" }));
+    act(() => result.current.setStashRestoreIndex(false));
+    await act(() => result.current.popStash(0));
+
+    expect(popStash).toHaveBeenCalledWith(TEST_REPO_PATH, 0, "s0", false);
+    expect(result.current.state.selectedRow).toBe("uncommitted");
+    expect(result.current.state.stashOutcome).toEqual({ action: "pop", outcome: { kind: "Applied" } });
+  });
+
+  it("a conflicted pop keeps the stash selected", async () => {
+    const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+    const client = transferClient({
+      listStashes: async () => [stash],
+      popStash: async () => ({ kind: "Conflicted" as const, files: ["a.txt"] }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    act(() => result.current.selectRow({ commitId: "s0" }));
+
+    await act(() => result.current.popStash(0));
+
+    expect(result.current.state.selectedRow).toEqual({ commitId: "s0" });
+    expect(result.current.state.stashOutcome).toEqual({
+      action: "pop",
+      outcome: { kind: "Conflicted", files: ["a.txt"] },
+    });
+  });
+
+  it("apply uses the restore-index setting and records the outcome", async () => {
+    const applyStash = vi.fn(async () => ({ kind: "Applied" as const }));
+    const client = transferClient({
+      applyStash,
+      listStashes: async () => [
+        { index: 0, message: "top", commitId: "s0" },
+        { index: 1, message: "older", commitId: "s1" },
+      ],
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.applyStash(1));
+
+    expect(applyStash).toHaveBeenCalledWith(TEST_REPO_PATH, 1, "s1", true);
+    expect(result.current.state.stashOutcome).toEqual({ action: "apply", outcome: { kind: "Applied" } });
+  });
+
+  it("refuses a stash index missing from the listed stashes without calling the backend", async () => {
+    const applyStash = vi.fn(async () => ({ kind: "Applied" as const }));
+    const popStash = vi.fn(async () => ({ kind: "Applied" as const }));
+    const dropStash = vi.fn(async () => {});
+    const client = transferClient({ applyStash, popStash, dropStash, listStashes: async () => [] });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.applyStash(0));
+    expect(result.current.state.error).toBe("The stash list changed; refresh and try again.");
+    await act(() => result.current.popStash(0));
+    await act(() => result.current.dropStash(0));
+
+    expect(applyStash).not.toHaveBeenCalled();
+    expect(popStash).not.toHaveBeenCalled();
+    expect(dropStash).not.toHaveBeenCalled();
   });
 });

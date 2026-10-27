@@ -23,6 +23,8 @@ import type {
   GraphCommit,
   HeadInfo,
   RepoClient,
+  StashEntry,
+  StashFiles,
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
@@ -30,6 +32,8 @@ import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
+import { SplitButton } from "./primitives/SplitButton";
+import { Toolbar } from "./primitives/Toolbar";
 import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
@@ -101,6 +105,7 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict,
   onRequestDiscardFile,
   onIgnorePath,
+  onStashFile,
   onOpenFileHistory,
   sectionRef,
 }: {
@@ -130,12 +135,13 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   onRequestDiscardFile: (path: string) => void;
   onIgnorePath: (pattern: string) => void;
+  onStashFile: (path: string) => void;
   onOpenFileHistory?: (path: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  // Discard/ignore apply to unstaged, non-conflicted entries only.
-  const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
+  // Conflicted entries have no actions; staged ones only "Stash file…" (see `fileMenuItems`).
+  const hasFileActions = entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
@@ -386,7 +392,13 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? onRequestDiscardFile(entry.path) : onIgnorePath(a.pattern)))}
+          items={fileMenuItems(entry, (a) =>
+            a.kind === "discard"
+              ? onRequestDiscardFile(entry.path)
+              : a.kind === "stash"
+                ? onStashFile(entry.path)
+                : onIgnorePath(a.pattern),
+          )}
           onClose={() => setMenu(null)}
         />
       )}
@@ -394,7 +406,7 @@ function UncommittedFileSection({
   );
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null };
 const noop = () => {};
 
 export function DiffPane({
@@ -417,6 +429,7 @@ export function DiffPane({
   onIgnorePath,
   onCommit,
   onSaveStash,
+  onOpenStashDialog = noop,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
@@ -440,7 +453,13 @@ export function DiffPane({
   onCurrentFileChange,
   fileHistoryFocus,
   onOpenFileHistory,
+  stashes = [],
+  stashActions,
 }: {
+  // The stash list: a selected commit id that is a stash's renders the stash view instead of
+  // the commit view.
+  stashes?: StashEntry[];
+  stashActions?: StashActions;
   // Set while the graph shows a file's history: the commit view shows only that file.
   fileHistoryFocus?: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
@@ -482,6 +501,8 @@ export function DiffPane({
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
+  onOpenStashDialog?: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -518,6 +539,7 @@ export function DiffPane({
         onIgnorePath={onIgnorePath}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
+        onOpenStashDialog={onOpenStashDialog}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
@@ -542,6 +564,19 @@ export function DiffPane({
       />
     );
   }
+  const stash = stashes.find((entry) => entry.commitId === selectedRow.commitId);
+  if (stash !== undefined && stashActions !== undefined) {
+    return (
+      <StashDiffPane
+        key={stash.commitId}
+        repoPath={repoPath}
+        client={client}
+        stash={stash}
+        actions={stashActions}
+        onSelectRow={onSelectRow}
+      />
+    );
+  }
   return (
     <CommitDiffPane
       key={selectedRow.commitId}
@@ -554,6 +589,17 @@ export function DiffPane({
       focus={fileHistoryFocus ?? null}
     />
   );
+}
+
+/** The stash view's actions; Apply/Pop use `restoreIndex`. */
+export interface StashActions {
+  onApply: (index: number) => void;
+  onPop: (index: number) => void;
+  onDrop: (index: number) => void;
+  restoreIndex: boolean;
+  onSetRestoreIndex: (on: boolean) => void;
+  // Why Apply/Pop can't run now (staged changes, conflicts, a running operation), else `null`.
+  disabledReason: string | null;
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
@@ -585,6 +631,7 @@ function UncommittedDiffPane({
   onIgnorePath,
   onCommit,
   onSaveStash,
+  onOpenStashDialog,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
@@ -635,6 +682,7 @@ function UncommittedDiffPane({
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  onOpenStashDialog: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -884,6 +932,7 @@ function UncommittedDiffPane({
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onIgnorePath={onIgnorePath}
+        onStashFile={(path) => onOpenStashDialog([path])}
         onOpenFileHistory={onOpenFileHistory}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
@@ -982,9 +1031,16 @@ function UncommittedDiffPane({
             resolved/amended content lives in the working tree, so stashing it away and continuing
             lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
             `BranchSwitcher`'s ref-mutating actions. */}
-        <button onClick={onSaveStash} disabled={status.length === 0 || rebaseProgress !== null}>
-          Stash
-        </button>
+        <SplitButton
+          label="Stash"
+          onClick={onSaveStash}
+          disabled={status.length === 0 || rebaseProgress !== null}
+          menuLabel="More stash options"
+          items={[
+            { label: "Stash all", onSelect: () => onSaveStash() },
+            { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
+          ]}
+        />
         {rebaseProgress !== null ? (
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
@@ -1007,7 +1063,9 @@ function UncommittedDiffPane({
                   ? "Abort revert"
                   : "Abort merge"
             }
-            initialMessage={mergeMessage ?? undefined}
+            // A pending squash merge pre-fills the message too, but there is no merge to abort.
+            initialMessage={mergeMessage ?? headInfo.squashMessage ?? undefined}
+            showAbort={mergeMessage !== null}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}
             focusMessage={focusCommitMessage}
@@ -1296,5 +1354,170 @@ function CommitDiffPane({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * A selected stash: its message, `stash@{n}`, Apply / Pop / Drop… with "Restore staged changes",
+ * then its tracked changes (diffed against the HEAD it was made on) and its untracked files
+ * (diffed as whole-file adds through the parentless untracked-files commit).
+ */
+function StashDiffPane({
+  repoPath,
+  client,
+  stash,
+  actions,
+  onSelectRow,
+}: {
+  repoPath: string;
+  client: RepoClient;
+  stash: StashEntry;
+  actions: StashActions;
+  onSelectRow: (row: SelectedRow) => void;
+}) {
+  const [files, setFiles] = useState<StashFiles | null>(null);
+  const [error, setError] = useState<DescribedError | null>(null);
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const [confirmingDrop, setConfirmingDrop] = useState(false);
+
+  const loadFiles = () => {
+    let ignore = false;
+    client
+      .getStashFiles(repoPath, stash.commitId)
+      .then((next) => {
+        if (!ignore) {
+          setFiles(next);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(describeError(err));
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  };
+
+  useEffect(() => {
+    return loadFiles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoPath, client, stash.commitId]);
+
+  const toggleCollapse = (key: string) => {
+    setCollapsedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const applyTitle = actions.disabledReason ?? undefined;
+  const untrackedCommitId = files?.untrackedCommitId ?? null;
+
+  return (
+    <section aria-label="Stash details" className={styles.stashDetails}>
+      <div className={styles.stashHeader}>
+        <h2 className={styles.stashMessage}>{stash.message}</h2>
+        <span className={styles.stashRef}>
+          stash@{"{"}
+          {stash.index}
+          {"}"} · {stash.commitId.slice(0, 7)}
+        </span>
+        <Toolbar aria-label="Stash actions">
+          <button
+            type="button"
+            disabled={actions.disabledReason !== null}
+            title={applyTitle}
+            onClick={() => actions.onApply(stash.index)}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            disabled={actions.disabledReason !== null}
+            title={applyTitle}
+            onClick={() => actions.onPop(stash.index)}
+          >
+            Pop
+          </button>
+          <button type="button" onClick={() => setConfirmingDrop(true)}>
+            Drop…
+          </button>
+          <label className={styles.restoreIndex}>
+            <input
+              type="checkbox"
+              checked={actions.restoreIndex}
+              onChange={(event) => actions.onSetRestoreIndex(event.target.checked)}
+            />
+            Restore staged changes
+          </label>
+        </Toolbar>
+      </div>
+      {error !== null ? (
+        <InlineError message={error.message} hint={error.hint} onDismiss={() => setError(null)} onRetry={loadFiles} />
+      ) : files === null ? null : files.tracked.length === 0 && files.untracked.length === 0 ? (
+        <p className={styles.stashEmpty}>This stash has no file changes.</p>
+      ) : (
+        <>
+          {files.tracked.length > 0 && (
+            <>
+              <div className={styles.groupHeading}>
+                <span>Changes ({files.tracked.length})</span>
+              </div>
+              <ul className={styles.fileList}>
+                {files.tracked.map((path) => (
+                  <CommitFileSection
+                    key={path}
+                    repoPath={repoPath}
+                    client={client}
+                    commitId={stash.commitId}
+                    path={path}
+                    collapsed={collapsedPaths.has(`t:${path}`)}
+                    onToggleCollapse={() => toggleCollapse(`t:${path}`)}
+                    onSelectRow={onSelectRow}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
+          {files.untracked.length > 0 && untrackedCommitId !== null && (
+            <>
+              <div className={styles.groupHeading}>
+                <span>Untracked ({files.untracked.length})</span>
+              </div>
+              <ul className={styles.fileList}>
+                {files.untracked.map((path) => (
+                  <CommitFileSection
+                    key={path}
+                    repoPath={repoPath}
+                    client={client}
+                    commitId={untrackedCommitId}
+                    path={path}
+                    collapsed={collapsedPaths.has(`u:${path}`)}
+                    onToggleCollapse={() => toggleCollapse(`u:${path}`)}
+                    onSelectRow={onSelectRow}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+      {confirmingDrop && (
+        <ConfirmDialog
+          ariaLabel={`Drop stash ${stash.message}`}
+          message={<p>Drop "{stash.message}"? This cannot be undone.</p>}
+          confirmLabel="Drop stash"
+          onConfirm={() => {
+            setConfirmingDrop(false);
+            actions.onDrop(stash.index);
+          }}
+          onCancel={() => setConfirmingDrop(false)}
+        />
+      )}
+    </section>
   );
 }

@@ -35,7 +35,9 @@ import { TagPanel } from "./components/TagPanel";
 import { SubmodulePanel } from "./components/SubmodulePanel";
 import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
+import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
+import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
@@ -285,6 +287,15 @@ function RepoWorkspace({
         : appState.state.rebaseProgress !== null
           ? "A rebase is in progress."
           : null;
+  // Stash Apply/Pop: libgit2 refuses while the index differs from HEAD or has conflicts, so say
+  // what to do instead of letting the backend error.
+  const stashApplyDisabledReason: string | null = appState.state.status.some((entry) => entry.kind === "Conflicted")
+    ? "Resolve conflicts first."
+    : appState.state.status.some((entry) => entry.staged)
+      ? "Unstage or commit staged changes first."
+      : repositoryOperationDisabled
+        ? operationDisabledReason
+        : null;
 
   // Positive feedback (AUD-2026-09-20-FB-003). The mutation runner swallows failures into
   // `state.error`, so success is detected as "pending fell back to false with no error" after a
@@ -320,6 +331,27 @@ function RepoWorkspace({
     if (pullOutcome.kind === "UpToDate") pushToast("Already up to date");
     else if (pullOutcome.kind === "FastForwarded") pushToast(`Pulled ${pullOutcome.upstreamRef}`);
   }, [pullOutcome, pushToast]);
+  const mergeOutcome = appState.state.mergeOutcome;
+  useEffect(() => {
+    if (mergeOutcome === null) return;
+    const { branchName, outcome } = mergeOutcome;
+    if (outcome.kind === "UpToDate") pushToast("Already up to date");
+    else if (outcome.kind === "FastForwarded") pushToast(`Fast-forwarded to ${branchName}`);
+    else if (outcome.kind === "Squashed") pushToast(`Squashed ${branchName}. Review and commit.`);
+  }, [mergeOutcome, pushToast]);
+  const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
+  const stashOutcome = appState.state.stashOutcome;
+  useEffect(() => {
+    if (stashOutcome === null) return;
+    const { action, outcome } = stashOutcome;
+    if (outcome.kind === "Applied") pushToast(action === "pop" ? "Stash popped" : "Stash applied");
+    else
+      pushToast(
+        action === "pop"
+          ? "Stash applied with conflicts; the stash was kept. Resolve the files, then drop it."
+          : "Stash applied with conflicts. Resolve the files.",
+      );
+  }, [stashOutcome, pushToast]);
 
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
@@ -394,6 +426,28 @@ function RepoWorkspace({
             void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
           }
           onCancel={appState.cancelForcePush}
+        />
+      )}
+      {active && mergeDialogBranch !== null && (
+        <MergeDialog
+          branchName={mergeDialogBranch}
+          currentBranchName={currentBranchName}
+          loadOptions={appState.getMergeOptions}
+          onMerge={(options) => void appState.mergeBranch(mergeDialogBranch, options)}
+          onCancel={appState.closeMergeDialog}
+        />
+      )}
+      {active && appState.state.stashDialog !== null && (
+        <StashDialog
+          paths={appState.state.stashDialog.paths}
+          untrackedOnly={
+            appState.state.stashDialog.paths.length > 0 &&
+            appState.state.stashDialog.paths.every((path) =>
+              appState.state.status.some((entry) => entry.path === path && !entry.staged && entry.kind === "New"),
+            )
+          }
+          onStash={(options) => void announce("Changes stashed", appState.saveStash)(options)}
+          onCancel={appState.closeStashDialog}
         />
       )}
       {active && pushDialogBranch !== null && (
@@ -512,7 +566,7 @@ function RepoWorkspace({
               onRenameBranch={appState.renameBranch}
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-              onMergeBranch={appState.mergeBranch}
+              onMergeBranch={appState.openMergeDialog}
               isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
@@ -542,7 +596,7 @@ function RepoWorkspace({
               pullOutcome={appState.state.pullOutcome}
               onMergePull={async (upstreamRef) => {
                 appState.clearPendingPull();
-                await appState.mergeBranch(upstreamRef);
+                await appState.mergePull(upstreamRef);
               }}
               onRebasePull={(upstreamRef) => {
                 appState.clearPendingPull();
@@ -561,7 +615,11 @@ function RepoWorkspace({
                 stashes={appState.state.stashes}
                 onSelectRow={appState.selectRow}
                 onApplyStash={appState.applyStash}
+                onPopStash={appState.popStash}
                 onDropStash={appState.dropStash}
+                restoreIndex={appState.state.stashRestoreIndex}
+                onSetRestoreIndex={appState.setStashRestoreIndex}
+                applyDisabledReason={stashApplyDisabledReason}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />
@@ -730,6 +788,15 @@ function RepoWorkspace({
                 selectedRow={appState.state.selectedRow}
                 commits={diffPaneCommits}
                 fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
+                stashes={appState.state.stashes}
+                stashActions={{
+                  onApply: appState.applyStash,
+                  onPop: appState.popStash,
+                  onDrop: appState.dropStash,
+                  restoreIndex: appState.state.stashRestoreIndex,
+                  onSetRestoreIndex: appState.setStashRestoreIndex,
+                  disabledReason: stashApplyDisabledReason,
+                }}
                 onOpenFileHistory={fileHistory.open}
                 status={appState.state.status}
                 refreshGeneration={appState.state.refreshGeneration}
@@ -752,7 +819,8 @@ function RepoWorkspace({
                 onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
                 onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
                 onCommit={announce("Committed", appState.commit)}
-                onSaveStash={announce("Changes stashed", appState.saveStash)}
+                onSaveStash={announce("Changes stashed", () => appState.saveStash())}
+                onOpenStashDialog={appState.openStashDialog}
                 onSelectRow={appState.selectRow}
                 onResolveConflict={appState.resolveConflict}
                 onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}

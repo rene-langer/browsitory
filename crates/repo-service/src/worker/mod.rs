@@ -352,20 +352,37 @@ pub(crate) enum Command {
         reply: Sender<Result<Vec<StashEntry>, String>>,
     },
     SaveStash {
+        options: git_core::stash::StashOptions,
         reply: Sender<Result<(), String>>,
     },
     ApplyStash {
         index: usize,
-        reply: Sender<Result<(), String>>,
+        commit_id: String,
+        restore_index: bool,
+        reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
+    },
+    PopStash {
+        index: usize,
+        commit_id: String,
+        restore_index: bool,
+        reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
+    },
+    GetStashFiles {
+        commit_id: String,
+        reply: Sender<Result<git_core::stash::StashFiles, String>>,
     },
     DropStash {
         index: usize,
+        commit_id: String,
         reply: Sender<Result<(), String>>,
     },
-    #[allow(dead_code)]
     StartMerge {
         branch_name: String,
+        options: git_core::merge::MergeOptions,
         reply: Sender<Result<MergeOutcome, String>>,
+    },
+    GetMergeDefaults {
+        reply: Sender<Result<git_core::merge::MergeOptions, String>>,
     },
     #[allow(dead_code)]
     GetConflictHunks {
@@ -925,12 +942,33 @@ impl Worker {
                     } => tag::create(&repo, name, message, reply),
                     Command::DeleteTag { name, reply } => tag::delete(&repo, name, reply),
                     Command::ListStashes { reply } => stash::list(&mut repo, reply),
-                    Command::SaveStash { reply } => stash::save(&mut repo, reply),
-                    Command::ApplyStash { index, reply } => stash::apply(&mut repo, index, reply),
-                    Command::DropStash { index, reply } => stash::drop(&mut repo, index, reply),
-                    Command::StartMerge { branch_name, reply } => {
-                        merge::start(&repo, branch_name, reply)
+                    Command::SaveStash { options, reply } => stash::save(&mut repo, options, reply),
+                    Command::ApplyStash {
+                        index,
+                        commit_id,
+                        restore_index,
+                        reply,
+                    } => stash::apply(&mut repo, index, &commit_id, restore_index, reply),
+                    Command::PopStash {
+                        index,
+                        commit_id,
+                        restore_index,
+                        reply,
+                    } => stash::pop(&mut repo, index, &commit_id, restore_index, reply),
+                    Command::GetStashFiles { commit_id, reply } => {
+                        stash::files(&mut repo, commit_id, reply)
                     }
+                    Command::DropStash {
+                        index,
+                        commit_id,
+                        reply,
+                    } => stash::drop(&mut repo, index, &commit_id, reply),
+                    Command::StartMerge {
+                        branch_name,
+                        options,
+                        reply,
+                    } => merge::start(&repo, branch_name, options, reply),
+                    Command::GetMergeDefaults { reply } => merge::defaults(&repo, reply),
                     Command::GetConflictHunks { path, reply } => {
                         merge::conflict_hunks(&repo, path, reply)
                     }
@@ -2090,7 +2128,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.save_stash().unwrap();
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
 
         let stashes = handle.list_stashes().unwrap();
         assert_eq!(stashes.len(), 1);
@@ -2699,14 +2739,179 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.save_stash().unwrap();
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
+        let id = handle.list_stashes().unwrap()[0].commit_id.clone();
 
-        handle.apply_stash(0).unwrap();
+        assert_eq!(
+            handle.apply_stash(0, id.clone(), false).unwrap(),
+            git_core::stash::StashApplyOutcome::Applied
+        );
         let contents = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
         assert_eq!(contents, "v2");
 
-        handle.drop_stash(0).unwrap();
+        handle.drop_stash(0, id).unwrap();
         assert!(handle.list_stashes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stash_commands_refuse_a_stale_stash_id_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "file.txt", "v2");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
+        let stale = handle.list_stashes().unwrap()[0].commit_id.clone();
+        write_file(dir.path(), "file.txt", "v3");
+        handle
+            .save_stash(git_core::stash::StashOptions::default())
+            .unwrap();
+
+        let expected = "The stash list changed; refresh and try again.".to_string();
+        assert_eq!(
+            handle.apply_stash(0, stale.clone(), true),
+            Err(expected.clone())
+        );
+        assert_eq!(
+            handle.pop_stash(0, stale.clone(), true),
+            Err(expected.clone())
+        );
+        assert_eq!(handle.drop_stash(0, stale), Err(expected));
+        assert_eq!(handle.list_stashes().unwrap().len(), 2);
+    }
+
+    fn diverged_feature_repo() -> (tempfile::TempDir, git2::Repository) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "v1\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "feature.txt", "new\n");
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "main.txt", "new\n");
+        commit_all(&repo, "main commit");
+        (dir, repo)
+    }
+
+    #[test]
+    fn squash_merge_round_trips_and_is_undoable_and_labelled() {
+        let (dir, _repo) = diverged_feature_repo();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let outcome = handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions {
+                    fast_forward: git_core::merge::FastForward::Allow,
+                    squash: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(outcome, git_core::merge::MergeOutcome::Squashed);
+        assert!(handle.get_head_info().unwrap().squash_message.is_some());
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo.as_deref(),
+            Some("Squash merge feature")
+        );
+        handle.undo().unwrap();
+        assert!(handle.get_status().unwrap().is_empty());
+        assert!(!dir.path().join("feature.txt").exists());
+        assert!(handle.get_head_info().unwrap().squash_message.is_none());
+    }
+
+    #[test]
+    fn no_ff_merge_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "v1\n");
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "feature.txt", "new\n");
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let outcome = handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions {
+                    fast_forward: git_core::merge::FastForward::Never,
+                    squash: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(outcome, git_core::merge::MergeOutcome::Merged);
+        assert!(handle.get_merge_message().unwrap().is_some());
+    }
+
+    #[test]
+    fn stash_options_pop_and_files_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "v1");
+        write_file(dir.path(), "b.txt", "v1");
+        commit_all(&repo, "initial commit");
+        write_file(dir.path(), "a.txt", "mine");
+        write_file(dir.path(), "b.txt", "other");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle
+            .save_stash(git_core::stash::StashOptions {
+                message: Some("only a".into()),
+                paths: vec!["a.txt".into()],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let stashes = handle.list_stashes().unwrap();
+        assert!(stashes[0].message.ends_with(": only a"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("b.txt")).unwrap(),
+            "other"
+        );
+        let files = handle
+            .get_stash_files(stashes[0].commit_id.clone())
+            .unwrap();
+        assert_eq!(files.tracked, vec!["a.txt".to_string()]);
+        assert_eq!(files.untracked_commit_id, None);
+        assert_eq!(
+            handle
+                .pop_stash(0, stashes[0].commit_id.clone(), true)
+                .unwrap(),
+            git_core::stash::StashApplyOutcome::Applied
+        );
+        assert!(handle.list_stashes().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "mine"
+        );
+    }
+
+    #[test]
+    fn merge_defaults_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        // Set in the repo's own config so a global `merge.ff` cannot leak in (issue #111).
+        repo.config().unwrap().set_str("merge.ff", "only").unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        let defaults = worker.handle().merge_defaults().unwrap();
+
+        assert_eq!(defaults.fast_forward, git_core::merge::FastForward::Only);
+        assert!(!defaults.squash);
     }
 
     #[test]
@@ -2772,7 +2977,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        let outcome = handle.start_merge("feature".into()).unwrap();
+        let outcome = handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
 
         assert!(matches!(
             outcome,
@@ -2803,7 +3010,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.start_merge("feature".into()).unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
 
         let segments = handle.get_conflict_hunks("shared.txt".into()).unwrap();
         assert!(!segments.is_empty());
@@ -2840,7 +3049,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.start_merge("feature".into()).unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
 
         handle.abort_merge().unwrap();
 
@@ -2867,7 +3078,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.start_merge("feature".into()).unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
 
         handle
             .resolve_add_delete_conflict(
@@ -3357,7 +3570,9 @@ mod tests {
         let (dir, _repo) = conflicting_branches();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        let outcome = handle.start_merge("feature".into()).unwrap();
+        let outcome = handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
         assert!(matches!(outcome, MergeOutcome::Conflicted { .. }));
         // A recordable command while the merge is paused must not become its own entry.
         write_file(dir.path(), "b.txt", "unrelated\n");
@@ -3400,7 +3615,9 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.start_merge("feature".into()).unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();

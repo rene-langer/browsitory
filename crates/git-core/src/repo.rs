@@ -55,6 +55,8 @@ pub struct HeadInfo {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<OperationKind>,
+    /// A pending squash merge's message (`SQUASH_MSG`), which pre-fills the commit box.
+    pub squash_message: Option<String>,
 }
 
 /// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. Rebase
@@ -77,6 +79,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 detached_at: None,
                 head_pushed: false,
                 operation,
+                squash_message: crate::merge::squash_message(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -90,6 +93,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         detached_at,
         head_pushed,
         operation,
+        squash_message: crate::merge::squash_message(repo),
     })
 }
 

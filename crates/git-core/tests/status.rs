@@ -153,7 +153,8 @@ fn reports_a_conflicted_file_as_conflicted() {
     write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
     commit_all(&repo, "main commit");
 
-    git_core::merge::start_merge(&repo, "feature").unwrap();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
 
     let entries = git_core::status::status(&repo).unwrap();
 

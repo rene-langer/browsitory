@@ -101,13 +101,13 @@ describe("BranchTree — local branches", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeInTheDocument();
   });
 
   it("does not offer Merge from the current branch's context menu", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    expect(screen.queryByRole("menuitem", { name: "Merge into current branch" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Merge into current branch…" })).not.toBeInTheDocument();
   });
 
   it("Delete calls onDeleteBranch with force=false, then confirming Force Delete calls it again with force=true", async () => {
@@ -153,7 +153,7 @@ describe("BranchTree — local branches", () => {
   it("Merge into current branch calls onMergeBranch with that branch's name", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch…" }));
     expect(props.onMergeBranch).toHaveBeenCalledWith("feat/foo");
   });
 
@@ -162,7 +162,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
   });
 
   it("with no saved graph selection, every branch's graph swatch is pressed (shown) by default", () => {
@@ -332,7 +332,7 @@ describe("BranchTree — local branches", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
-    expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
   });
 
   it("disables the merge action while another repository operation is pending", () => {
@@ -340,7 +340,7 @@ describe("BranchTree — local branches", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
-    expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
@@ -349,7 +349,7 @@ describe("BranchTree — local branches", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
-    expect(screen.getByRole("menuitem", { name: "Merge into current branch" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toHaveAttribute(
       "title",
       "A rebase is in progress.",
     );

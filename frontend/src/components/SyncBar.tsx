@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { upstreamPushBranch } from "../lib/pushTarget";
-import { ContextMenu } from "./primitives/ContextMenu";
+import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SyncBar.module.css";
 
@@ -45,7 +44,6 @@ export function SyncBar({
   onPublish: () => void;
   leading?: ReactNode;
 }) {
-  const [fetchMenu, setFetchMenu] = useState<{ x: number; y: number } | null>(null);
   const fetchRemote = upstream?.remoteName ?? remotes[0]?.name ?? null;
   const busyTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
   const fetchTitle = busyTitle ?? (fetchRemote === null ? "No remote configured." : `Fetch from ${fetchRemote}`);
@@ -70,31 +68,24 @@ export function SyncBar({
     <div className={styles.bar}>
       {leading}
       <Toolbar aria-label="Sync">
-        <span className={styles.splitGroup}>
-          <button
-            type="button"
-            disabled={fetchDisabled}
-            title={fetchTitle}
-            onClick={() => fetchRemote !== null && void onFetch(fetchRemote)}
-          >
-            Fetch
-          </button>
-          <button
-            type="button"
-            className={styles.split}
-            aria-label="More fetch actions"
-            aria-haspopup="menu"
-            aria-expanded={fetchMenu !== null}
-            disabled={fetchDisabled}
-            title={busyTitle}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setFetchMenu({ x: rect.left, y: rect.bottom });
-            }}
-          >
-            <ChevronDown size={12} aria-hidden="true" />
-          </button>
-        </span>
+        <SplitButton
+          label="Fetch"
+          disabled={fetchDisabled}
+          title={fetchTitle}
+          menuTitle={busyTitle}
+          onClick={() => fetchRemote !== null && void onFetch(fetchRemote)}
+          menuLabel="More fetch actions"
+          chevronClassName={styles.split}
+          items={[
+            { label: "Fetch all remotes", onSelect: () => void onFetchAll() },
+            {
+              label: "Prune",
+              checked: prune,
+              title: "Remove remote-tracking branches that were deleted on the remote",
+              onSelect: () => onTogglePrune(!prune),
+            },
+          ]}
+        />
         <button
           type="button"
           disabled={operationDisabled || detached || upstream === null}
@@ -112,22 +103,6 @@ export function SyncBar({
           Push
         </button>
       </Toolbar>
-      {fetchMenu !== null && (
-        <ContextMenu
-          x={fetchMenu.x}
-          y={fetchMenu.y}
-          onClose={() => setFetchMenu(null)}
-          items={[
-            { label: "Fetch all remotes", onSelect: () => void onFetchAll() },
-            {
-              label: "Prune",
-              checked: prune,
-              title: "Remove remote-tracking branches that were deleted on the remote",
-              onSelect: () => onTogglePrune(!prune),
-            },
-          ]}
-        />
-      )}
       {detached && <span>HEAD detached at {detachedAt}</span>}
       {showCounts && (
         <span

@@ -242,15 +242,31 @@ export function buildCommands(
       run: () => void appState.pullCurrentUpstream(),
     });
   }
-  // DiffPane's real "Save stash" button is only disabled by
+  // DiffPane's real Stash button is only disabled by
   // `status.length === 0 || rebaseProgress !== null` — it does not carry the
   // full repositoryOperationDisabled guard, so this command stays unconditional.
+  // The id stays "save-stash" so recents recorded under the old label keep working.
   commands.push({
     id: "save-stash",
-    label: "Save stash",
-    keywords: ["stash", "save"],
+    label: "Stash all changes",
+    keywords: ["stash", "save", "all"],
     run: () => void appState.saveStash(),
   });
+  commands.push({
+    id: "stash-with-options",
+    label: "Stash…",
+    keywords: ["stash", "save", "message", "untracked", "keep", "index", "options"],
+    run: () => appState.openStashDialog([]),
+  });
+  const stashFile = diffCommands?.currentFile ?? null;
+  if (stashFile !== null) {
+    commands.push({
+      id: "stash-current-file",
+      label: `Stash ${stashFile}…`,
+      keywords: ["stash", "file", "save", stashFile],
+      run: () => appState.openStashDialog([stashFile]),
+    });
+  }
   if (!repositoryOperationDisabled) {
     commands.push({
       id: "prune-worktrees",
@@ -358,6 +374,12 @@ export function buildCommands(
         keywords: ["branch", "switch", "checkout", branch.name],
         run: () => void appState.switchBranch(branch.name),
       });
+      commands.push({
+        id: `merge-branch:${branch.name}`,
+        label: `Merge ${branch.name} into current branch…`,
+        keywords: ["branch", "merge", "squash", branch.name],
+        run: () => appState.openMergeDialog(branch.name),
+      });
     }
 
     if (state.remotes.length > 0) {
@@ -444,16 +466,33 @@ export function buildCommands(
     if (panelVisibility.stash) {
       for (const stash of state.stashes) {
         commands.push({
+          id: `show-stash:${stash.index}`,
+          label: `Show stash: ${stash.message}`,
+          keywords: ["stash", "show", "view", "diff"],
+          run: () => appState.selectRow({ commitId: stash.commitId }),
+        });
+        commands.push({
           id: `apply-stash:${stash.index}`,
           label: `Apply stash: ${stash.message}`,
           keywords: ["stash", "apply"],
           run: () => void appState.applyStash(stash.index),
         });
         commands.push({
+          id: `pop-stash:${stash.index}`,
+          label: `Pop stash: ${stash.message}`,
+          keywords: ["stash", "pop", "apply"],
+          run: () => void appState.popStash(stash.index),
+        });
+        // Dropping has a confirmation in the Stashes panel and the stash view; like "Delete
+        // tag", the palette only shows the stash and opens the section, never drops directly.
+        commands.push({
           id: `drop-stash:${stash.index}`,
           label: `Drop stash: ${stash.message}`,
           keywords: ["stash", "drop", "delete"],
-          run: () => void appState.dropStash(stash.index),
+          run: () => {
+            appState.selectRow({ commitId: stash.commitId });
+            goToSidebarSection("Stashes");
+          },
         });
       }
     }
@@ -602,7 +641,7 @@ export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 /** Derives a command's display group from its id; unknown ids fall into "General". */
 export function commandGroup(id: string): CommandGroup {
-  if (id.startsWith("switch-branch:")) return "Branches";
+  if (id.startsWith("switch-branch:") || id.startsWith("merge-branch:")) return "Branches";
   if (
     id.startsWith("fetch-remote:") ||
     id.startsWith("push-branch:") ||
@@ -613,7 +652,17 @@ export function commandGroup(id: string): CommandGroup {
   ) {
     return "Remotes";
   }
-  if (id === "save-stash" || id.startsWith("apply-stash:") || id.startsWith("drop-stash:")) return "Stash";
+  if (
+    id === "save-stash" ||
+    id === "stash-with-options" ||
+    id === "stash-current-file" ||
+    id.startsWith("show-stash:") ||
+    id.startsWith("apply-stash:") ||
+    id.startsWith("pop-stash:") ||
+    id.startsWith("drop-stash:")
+  ) {
+    return "Stash";
+  }
   if (
     id === "toggle-ignore-whitespace" ||
     id === "increase-context-lines" ||

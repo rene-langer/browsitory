@@ -71,3 +71,17 @@ fn reset_refuses_during_a_paused_operation() {
         Err(ResetError::OperationInProgress)
     ));
 }
+
+#[test]
+fn reset_clears_a_leftover_squash_message() {
+    let (_dir, repo, first) = three_commits();
+    std::fs::write(
+        repo.path().join("SQUASH_MSG"),
+        "Squashed commit of the following:\n",
+    )
+    .unwrap();
+
+    reset_to(&repo, &first.to_string(), ResetMode::Mixed).unwrap();
+
+    assert!(!repo.path().join("SQUASH_MSG").exists());
+}

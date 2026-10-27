@@ -152,9 +152,13 @@ pub fn dispatch(
         "list_stashes" => list_stashes(params, repos),
         "save_stash" => save_stash(params, repos),
         "apply_stash" => apply_stash(params, repos),
+        "pop_stash" => pop_stash(params, repos),
+        "get_stash_files" => get_stash_files(params, repos),
         "drop_stash" => drop_stash(params, repos),
         "get_blame" => get_blame(params, repos),
         "start_merge" => start_merge(params, repos),
+        "get_merge_options" => get_merge_options(params, repos),
+        "set_merge_options" => set_merge_options(params),
         "get_conflict_hunks" => get_conflict_hunks(params, repos),
         "resolve_conflict" => resolve_conflict(params, repos),
         "abort_merge" => abort_merge(params, repos),
@@ -1849,6 +1853,7 @@ struct HeadInfoDto {
     detached_at: Option<String>,
     head_pushed: bool,
     operation: Option<&'static str>,
+    squash_message: Option<String>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -1863,6 +1868,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 OperationKind::CherryPick => "CherryPick",
                 OperationKind::Revert => "Revert",
             }),
+            squash_message: info.squash_message,
         }
     }
 }
@@ -2172,31 +2178,128 @@ fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(stashes).map_err(|error| error.to_string())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StashOptionsDto {
+    message: Option<String>,
+    keep_index: bool,
+    include_untracked: bool,
+    paths: Vec<String>,
+}
+
+impl From<StashOptionsDto> for git_core::stash::StashOptions {
+    fn from(dto: StashOptionsDto) -> Self {
+        Self {
+            message: dto.message,
+            keep_index: dto.keep_index,
+            include_untracked: dto.include_untracked,
+            paths: dto.paths,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveStashParams {
+    repo_path: String,
+    options: StashOptionsDto,
+}
+
 fn save_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
+    let params: SaveStashParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.save_stash()?;
+    worker_handle(repos, &params.repo_path)?.save_stash(params.options.into())?;
     Ok(Value::Null)
 }
 
+/// A stash by list index plus the commit id the client listed there; the backend refuses with
+/// "The stash list changed" when `stash@{index}` is now another stash.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StashIndexParams {
     repo_path: String,
     index: usize,
+    commit_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StashApplyParams {
+    repo_path: String,
+    index: usize,
+    commit_id: String,
+    restore_index: bool,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum StashApplyOutcomeDto {
+    Applied,
+    Conflicted { files: Vec<String> },
+}
+
+impl From<git_core::stash::StashApplyOutcome> for StashApplyOutcomeDto {
+    fn from(outcome: git_core::stash::StashApplyOutcome) -> Self {
+        match outcome {
+            git_core::stash::StashApplyOutcome::Applied => Self::Applied,
+            git_core::stash::StashApplyOutcome::Conflicted { files } => Self::Conflicted { files },
+        }
+    }
 }
 
 fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StashIndexParams =
+    let params: StashApplyParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.apply_stash(params.index)?;
-    Ok(Value::Null)
+    let outcome = worker_handle(repos, &params.repo_path)?.apply_stash(
+        params.index,
+        params.commit_id,
+        params.restore_index,
+    )?;
+    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn pop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: StashApplyParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.pop_stash(
+        params.index,
+        params.commit_id,
+        params.restore_index,
+    )?;
+    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StashFilesParams {
+    repo_path: String,
+    commit_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StashFilesDto {
+    tracked: Vec<String>,
+    untracked: Vec<String>,
+    untracked_commit_id: Option<String>,
+}
+
+fn get_stash_files(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: StashFilesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let files = worker_handle(repos, &params.repo_path)?.get_stash_files(params.commit_id)?;
+    serde_json::to_value(StashFilesDto {
+        tracked: files.tracked,
+        untracked: files.untracked,
+        untracked_commit_id: files.untracked_commit_id,
+    })
+    .map_err(|error| error.to_string())
 }
 
 fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashIndexParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.drop_stash(params.index)?;
+    worker_handle(repos, &params.repo_path)?.drop_stash(params.index, params.commit_id)?;
     Ok(Value::Null)
 }
 
@@ -2249,6 +2352,7 @@ enum MergeOutcomeDto {
     UpToDate,
     FastForwarded,
     Merged,
+    Squashed,
     Conflicted { files: Vec<String> },
 }
 
@@ -2258,7 +2362,50 @@ impl From<MergeOutcome> for MergeOutcomeDto {
             MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
             MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
             MergeOutcome::Merged => MergeOutcomeDto::Merged,
+            MergeOutcome::Squashed => MergeOutcomeDto::Squashed,
             MergeOutcome::Conflicted { files } => MergeOutcomeDto::Conflicted { files },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum FastForwardDto {
+    Allow,
+    Never,
+    Only,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeOptionsDto {
+    fast_forward: FastForwardDto,
+    squash: bool,
+}
+
+impl From<MergeOptionsDto> for git_core::merge::MergeOptions {
+    fn from(dto: MergeOptionsDto) -> Self {
+        use git_core::merge::FastForward;
+        Self {
+            fast_forward: match dto.fast_forward {
+                FastForwardDto::Allow => FastForward::Allow,
+                FastForwardDto::Never => FastForward::Never,
+                FastForwardDto::Only => FastForward::Only,
+            },
+            squash: dto.squash,
+        }
+    }
+}
+
+impl From<git_core::merge::MergeOptions> for MergeOptionsDto {
+    fn from(options: git_core::merge::MergeOptions) -> Self {
+        use git_core::merge::FastForward;
+        Self {
+            fast_forward: match options.fast_forward {
+                FastForward::Allow => FastForwardDto::Allow,
+                FastForward::Never => FastForwardDto::Never,
+                FastForward::Only => FastForwardDto::Only,
+            },
+            squash: options.squash,
         }
     }
 }
@@ -2268,13 +2415,59 @@ impl From<MergeOutcome> for MergeOutcomeDto {
 struct StartMergeParams {
     repo_path: String,
     branch_name: String,
+    options: MergeOptionsDto,
 }
 
 fn start_merge(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StartMergeParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.start_merge(params.branch_name)?;
+    let outcome = worker_handle(repos, &params.repo_path)?
+        .start_merge(params.branch_name, params.options.into())?;
     serde_json::to_value(MergeOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+/// The remembered merge options for the repo, else the defaults from its `merge.ff`.
+fn get_merge_options(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let options = match config::get_merge_preference(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?
+    {
+        Some(preference) => MergeOptionsDto {
+            fast_forward: match preference.fast_forward {
+                config::MergeFastForward::Allow => FastForwardDto::Allow,
+                config::MergeFastForward::Never => FastForwardDto::Never,
+                config::MergeFastForward::Only => FastForwardDto::Only,
+            },
+            squash: preference.squash,
+        },
+        None => MergeOptionsDto::from(worker_handle(repos, &params.repo_path)?.merge_defaults()?),
+    };
+    serde_json::to_value(options).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetMergeOptionsParams {
+    repo_path: String,
+    options: MergeOptionsDto,
+}
+
+fn set_merge_options(params: Value) -> Result<Value, String> {
+    let params: SetMergeOptionsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let fast_forward = match params.options.fast_forward {
+        FastForwardDto::Allow => config::MergeFastForward::Allow,
+        FastForwardDto::Never => config::MergeFastForward::Never,
+        FastForwardDto::Only => config::MergeFastForward::Only,
+    };
+    config::set_merge_preference(
+        Path::new(&params.repo_path),
+        fast_forward,
+        params.options.squash,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
 }
 
 #[derive(Serialize)]

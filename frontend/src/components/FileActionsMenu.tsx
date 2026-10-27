@@ -1,7 +1,7 @@
 import type { StatusEntry } from "../ipc/RepoClient";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
-export type FileAction = { kind: "discard" } | { kind: "ignore"; pattern: string };
+export type FileAction = { kind: "discard" } | { kind: "ignore"; pattern: string } | { kind: "stash" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
@@ -21,9 +21,17 @@ export function ignorePatterns(path: string): Array<{ label: string; pattern: st
   return out;
 }
 
+/**
+ * The per-file actions menu. Conflicted files have none; staged files only "Stash file…";
+ * unstaged files also discard, and untracked ones ignore.
+ */
 export function fileMenuItems(entry: StatusEntry, onPick: (action: FileAction) => void): ContextMenuItem[] {
+  if (entry.kind === "Conflicted") return [];
+  const stash: ContextMenuItem = { label: "Stash file…", onSelect: () => onPick({ kind: "stash" }) };
+  if (entry.staged) return [stash];
   const items: ContextMenuItem[] = [
     { label: "Discard changes…", destructive: true, onSelect: () => onPick({ kind: "discard" }) },
+    stash,
   ];
   if (isUntracked(entry)) {
     for (const { label, pattern } of ignorePatterns(entry.path)) {

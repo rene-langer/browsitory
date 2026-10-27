@@ -262,6 +262,17 @@ remote. The toggle is remembered per repository; until you set it, your git conf
 all (unreachable, missing credentials), the others are still fetched and the error names the
 ones that failed.
 
+**Merge options.** **Merge into current branch…** opens a dialog naming both branches. Choose
+**Fast-forward if possible** (move the branch when nothing diverged, else create a merge
+commit), **Always create a merge commit** (even when a fast-forward was possible; the commit box
+is pre-filled and the commit gets two parents), or **Fast-forward only** (refuse, changing
+nothing, when the branches have diverged). **Squash** stages the combined changes of the branch
+without committing and without recording a merge: HEAD does not move, the commit box is
+pre-filled with the squashed commits' messages, and the commit you make has a single parent.
+**Undo** reverts a squash. The dialog remembers your last choice per repository; until then it
+follows your git `merge.ff` (`false` = always a merge commit, `only` = fast-forward only). The
+**Merge** button of the "Pull has diverged" prompt always allows a fast-forward and does not ask.
+
 **Deleting a remote branch** deletes it on the remote and removes its remote-tracking branch.
 Like every network operation, it can't be undone with **Undo**. Local branches that tracked it
 keep their upstream setting (git shows such an upstream as "gone").
@@ -272,9 +283,26 @@ keep their upstream setting (git shows such an upstream as "gone").
 
 ## Stashes
 
-Expand **Stashes** to see everything set aside with **Stash**. Apply one
-back onto your working directory, or drop it for good — dropping asks for
-confirmation first, since it can't be undone.
+**Stash** in the commit dock sets every change aside, untracked files included. Its chevron
+opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep staged changes**
+(stash them but also leave them staged) and **Include untracked files** (on by default).
+**Stash file…** in a changed file's menu (staged or not) opens the same dialog for just that
+file; every other change stays where it is, and "Restore staged changes" later restages only
+that file. For an untracked file, untracked files are always included. One file at a time: the
+change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
+
+Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
+(diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
+or from the panel you can **Apply** it (keep the stash), **Pop** it (apply, then drop it) or
+**Drop…** it. **Restore staged changes** (on by default) brings back staged work as staged;
+turn it off to get everything back unstaged.
+
+Apply and Pop need nothing staged and no unresolved conflicts; the buttons are disabled with the
+reason until then. A stash that conflicts with your current files applies anyway and opens the
+files in the conflict pane; a conflicting **Pop** keeps the stash, so drop it yourself once the
+files are resolved. If the stash list changed since you looked (another tool stashed or
+dropped), Apply, Pop and Drop stop and ask you to refresh. Dropping asks for confirmation first, since it can't be undone, and stash
+operations are not part of **Undo**.
 
 ## Tags
 

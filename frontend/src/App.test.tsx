@@ -101,6 +101,10 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listStashes: unused,
     saveStash: unused,
     applyStash: unused,
+    popStash: unused,
+    getStashFiles: unused,
+    getMergeOptions: unused,
+    setMergeOptions: unused,
     dropStash: unused,
     getBlame: unused,
     mergeBranch: unused,
@@ -108,7 +112,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -633,6 +637,193 @@ describe("App", () => {
     await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic"));
     expect(screen.queryByRole("dialog", { name: "Delete remote branch" })).toBeNull();
     localStorage.clear();
+  });
+
+  describe("merge options", () => {
+    function mergeClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => [],
+        listBranches: async () => [
+          { name: "main", isCurrent: true },
+          { name: "feature", isCurrent: false },
+        ],
+        listStashes: async () => [],
+        getMergeOptions: async () => ({ fastForward: "Allow", squash: false }),
+        setMergeOptions: async () => {},
+        ...overrides,
+      });
+    }
+
+    async function mergeFromMenu() {
+      fireEvent.contextMenu(await screen.findByRole("button", { name: "feature" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Merge feature" });
+      expect(within(dialog).getByRole("heading")).toHaveTextContent("Merge feature into main");
+      const merge = within(dialog).getByRole("button", { name: "Merge" });
+      await waitFor(() => expect(merge).toBeEnabled());
+      return { dialog, merge };
+    }
+
+    it("opens the merge dialog from the branch menu and merges with the chosen options", async () => {
+      const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+      const setMergeOptions = vi.fn(async () => {});
+      render(<App client={mergeClient({ mergeBranch, setMergeOptions })} />);
+
+      const { dialog, merge } = await mergeFromMenu();
+      fireEvent.click(within(dialog).getByRole("radio", { name: "Always create a merge commit" }));
+      fireEvent.click(merge);
+
+      const options = { fastForward: "Never", squash: false };
+      await waitFor(() => expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "feature", options));
+      expect(setMergeOptions).toHaveBeenCalledWith("/repos/a", options);
+      expect(screen.queryByRole("dialog", { name: "Merge feature" })).toBeNull();
+    });
+
+    it.each([
+      [{ kind: "Squashed" as const }, "Squashed feature. Review and commit."],
+      [{ kind: "UpToDate" as const }, "Already up to date"],
+      [{ kind: "FastForwarded" as const }, "Fast-forwarded to feature"],
+    ])("shows a toast for a %o merge", async (outcome, toast) => {
+      render(<App client={mergeClient({ mergeBranch: async () => outcome })} />);
+
+      const { merge } = await mergeFromMenu();
+      fireEvent.click(merge);
+
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+    });
+  });
+
+  describe("stash options", () => {
+    function stashClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+        getWorkingDiff: async () => [],
+        getCommitGraph: async () => [],
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listStashes: async () => [],
+        ...overrides,
+      });
+    }
+
+    it.each([
+      ["Pop", { kind: "Applied" as const }, "Stash popped"],
+      ["Apply", { kind: "Applied" as const }, "Stash applied"],
+      ["Pop", { kind: "Conflicted" as const, files: ["a.txt"] }, "Stash applied with conflicts; the stash was kept. Resolve the files, then drop it."],
+      ["Apply", { kind: "Conflicted" as const, files: ["a.txt"] }, "Stash applied with conflicts. Resolve the files."],
+    ])("%s from the Stashes panel shows its outcome toast (%o)", async (button, outcome, toast) => {
+      localStorage.clear();
+      const popStash = vi.fn(async () => outcome);
+      const applyStash = vi.fn(async () => outcome);
+      render(
+        <App
+          client={stashClient({
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+            popStash,
+            applyStash,
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
+      const row = (await screen.findByText("On main: wip")).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: button }));
+
+      expect(await screen.findByText(toast)).toBeInTheDocument();
+      expect(button === "Pop" ? popStash : applyStash).toHaveBeenCalledWith("/repos/a", 0, "s0", true);
+      localStorage.clear();
+    });
+
+    it("disables stash Apply and Pop while something is staged", async () => {
+      localStorage.clear();
+      render(
+        <App
+          client={stashClient({
+            getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
+      const row = (await screen.findByText("On main: wip")).closest("li")!;
+      await waitFor(() => expect(within(row).getByRole("button", { name: "Pop" })).toBeDisabled());
+      expect(within(row).getByRole("button", { name: "Apply" })).toHaveAttribute(
+        "title",
+        "Unstage or commit staged changes first.",
+      );
+      localStorage.clear();
+    });
+
+    it("stashes an untracked file without offering to leave untracked files out", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(
+        <App
+          client={stashClient({ saveStash, getStatus: async () => [{ path: "new.txt", staged: false, kind: "New" }] })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Actions for new.txt" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Stash changes" });
+      expect(within(dialog).queryByRole("checkbox", { name: "Include untracked files" })).toBeNull();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stash" }));
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: null,
+          keepIndex: false,
+          includeUntracked: true,
+          paths: ["new.txt"],
+        }),
+      );
+    });
+
+    it("stashes everything from the Stash button", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(<App client={stashClient({ saveStash })} />);
+
+      const stash = await screen.findByRole("button", { name: "Stash" });
+      await waitFor(() => expect(stash).toBeEnabled());
+      fireEvent.click(stash);
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: null,
+          keepIndex: false,
+          includeUntracked: true,
+          paths: [],
+        }),
+      );
+    });
+
+    it("stashes one file with a message through the stash dialog", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(<App client={stashClient({ saveStash })} />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Actions for a.txt" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Stash changes" });
+      expect(dialog).toHaveTextContent("Only: a.txt");
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "Stash message" }), { target: { value: "half" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stash" }));
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: "half",
+          keepIndex: false,
+          includeUntracked: true,
+          paths: ["a.txt"],
+        }),
+      );
+      expect(screen.queryByRole("dialog", { name: "Stash changes" })).toBeNull();
+    });
   });
 
   it("opens a working-tree file's history in place of the graph and closes it again", async () => {

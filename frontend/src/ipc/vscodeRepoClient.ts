@@ -13,6 +13,7 @@ import type {
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
+  MergeOptions,
   MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
@@ -25,7 +26,10 @@ import type {
   RemoteAuthMode,
   RemoteInfo,
   RepoClient,
+  StashApplyOutcome,
   StashEntry,
+  StashFiles,
+  StashOptions,
   StatusEntry,
   SubmoduleInfo,
   TagInfo,
@@ -347,13 +351,22 @@ export const vscodeRepoClient: RepoClient = {
     };
   },
   listStashes: (repoPath: string) => call<StashEntry[]>("list_stashes", { repoPath }),
-  saveStash: (repoPath: string) => call<void>("save_stash", { repoPath }),
-  applyStash: (repoPath: string, index: number) => call<void>("apply_stash", { repoPath, index }),
-  dropStash: (repoPath: string, index: number) => call<void>("drop_stash", { repoPath, index }),
+  saveStash: (repoPath: string, options: StashOptions) => call<void>("save_stash", { repoPath, options }),
+  applyStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    call<StashApplyOutcome>("apply_stash", { repoPath, index, commitId, restoreIndex }),
+  popStash: (repoPath: string, index: number, commitId: string, restoreIndex: boolean) =>
+    call<StashApplyOutcome>("pop_stash", { repoPath, index, commitId, restoreIndex }),
+  getStashFiles: (repoPath: string, commitId: string) =>
+    call<StashFiles>("get_stash_files", { repoPath, commitId }),
+  dropStash: (repoPath: string, index: number, commitId: string) =>
+    call<void>("drop_stash", { repoPath, index, commitId }),
   getBlame: (repoPath: string, commitId: string, path: string) =>
     call<BlameLine[]>("get_blame", { repoPath, commitId, path }),
-  mergeBranch: (repoPath: string, branchName: string) =>
-    call<MergeOutcome>("start_merge", { repoPath, branchName }),
+  mergeBranch: (repoPath: string, branchName: string, options: MergeOptions) =>
+    call<MergeOutcome>("start_merge", { repoPath, branchName, options }),
+  getMergeOptions: (repoPath: string) => call<MergeOptions>("get_merge_options", { repoPath }),
+  setMergeOptions: (repoPath: string, options: MergeOptions) =>
+    call<void>("set_merge_options", { repoPath, options }),
   getConflictHunks: (repoPath: string, path: string) =>
     call<ConflictSegment[]>("get_conflict_hunks", { repoPath, path }),
   resolveConflict: (repoPath: string, path: string, resolvedContent: string) =>

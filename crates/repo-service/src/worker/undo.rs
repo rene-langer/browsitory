@@ -71,7 +71,22 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
             (format!("Cherry-pick {}", short(commit_id)), Full)
         }
         Command::RevertCommit { commit_id, .. } => (format!("Revert {}", short(commit_id)), Full),
-        Command::StartMerge { branch_name, .. } => (fit(format!("Merge {branch_name}")), Full),
+        Command::StartMerge {
+            branch_name,
+            options,
+            ..
+        } => {
+            let verb = if options.squash {
+                "Squash merge"
+            } else {
+                "Merge"
+            };
+            let name = branch_name
+                .strip_prefix("refs/heads/")
+                .or_else(|| branch_name.strip_prefix("refs/remotes/"))
+                .unwrap_or(branch_name);
+            (fit(format!("{verb} {name}")), Full)
+        }
         Command::StartRebase { onto, .. } => (fit(format!("Rebase onto {onto}")), Full),
         Command::PullCurrentUpstream { .. } => ("Pull".to_string(), Full),
         Command::RestoreReflogEntry {
@@ -576,11 +591,58 @@ mod tests {
     }
 
     #[test]
+    fn merge_labels_name_squash_and_strip_ref_prefixes() {
+        let merge = |branch_name: &str, squash: bool| {
+            let (tx, _rx) = channel();
+            label(Command::StartMerge {
+                branch_name: branch_name.into(),
+                options: git_core::merge::MergeOptions {
+                    squash,
+                    ..Default::default()
+                },
+                reply: tx,
+            })
+        };
+        assert_eq!(
+            merge("feature", false),
+            Some(("Merge feature".into(), SnapshotScope::Full))
+        );
+        assert_eq!(
+            merge("feature", true),
+            Some(("Squash merge feature".into(), SnapshotScope::Full))
+        );
+        assert_eq!(
+            merge("refs/remotes/origin/main", false),
+            Some(("Merge origin/main".into(), SnapshotScope::Full))
+        );
+        assert_eq!(
+            merge("refs/heads/topic", false),
+            Some(("Merge topic".into(), SnapshotScope::Full))
+        );
+    }
+
+    #[test]
     fn read_and_transfer_commands_are_not_recorded() {
         let (tx, _rx) = channel();
         assert_eq!(label(Command::GetStatus { reply: tx }), None);
         let (tx, _rx) = channel();
-        assert_eq!(label(Command::SaveStash { reply: tx }), None);
+        assert_eq!(
+            label(Command::SaveStash {
+                options: git_core::stash::StashOptions::default(),
+                reply: tx
+            }),
+            None
+        );
+        let (tx, _rx) = channel();
+        assert_eq!(
+            label(Command::PopStash {
+                index: 0,
+                commit_id: "abc".into(),
+                restore_index: true,
+                reply: tx
+            }),
+            None
+        );
     }
 
     #[test]
@@ -708,7 +770,10 @@ mod tests {
         });
         assert_held!(CherryPick { commit_id: s() });
         assert_held!(RevertCommit { commit_id: s() });
-        assert_held!(StartMerge { branch_name: s() });
+        assert_held!(StartMerge {
+            branch_name: s(),
+            options: git_core::merge::MergeOptions::default()
+        });
         assert_held!(StartRebase {
             onto: s(),
             plan: vec![]

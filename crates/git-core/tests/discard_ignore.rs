@@ -160,7 +160,8 @@ fn discard_all_still_skips_conflicted_entries() {
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
     common::write_file(dir.path(), "shared.txt", "one\nmain\n");
     common::commit_all(&repo, "main");
-    git_core::merge::start_merge(&repo, "feature").unwrap();
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
     let conflicted = read(dir.path(), "shared.txt");
     assert!(conflicted.contains("<<<<<<<"), "{conflicted}");
 

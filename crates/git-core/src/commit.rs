@@ -10,6 +10,8 @@ pub enum CommitError {
     OperationInProgress,
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Commits the current index. Author/committer come from `repo.signature()` (reads
@@ -95,6 +97,8 @@ pub fn commit(repo: &mut git2::Repository, message: &str) -> Result<String, Comm
     if is_merging || finishes_pick {
         repo.cleanup_state()?;
     }
+    // A squash merge's message has been used (or replaced) by this commit.
+    crate::merge::clear_squash_message(repo)?;
 
     Ok(oid.to_string())
 }

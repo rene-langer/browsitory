@@ -1,17 +1,30 @@
 import { useCallback } from "react";
 import type {
   FileConflictChoice,
+  MergeOptions,
   MergeOutcome,
   RebasePlanEntry,
   RebaseStepResult,
   RepoClient,
 } from "../ipc/RepoClient";
+import { logFailure } from "../lib/logger";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
 import type { RunMutation } from "./useMutationRunner";
 
 export interface MergeRebaseActions {
-  mergeBranch(branchName: string): Promise<void>;
+  /** Opens the merge options dialog for `branchName` (BranchTree menu, palette). */
+  openMergeDialog(branchName: string): void;
+  closeMergeDialog(): void;
+  /** The dialog's preselection: remembered per repo, else from `merge.ff`. */
+  getMergeOptions(): Promise<MergeOptions>;
+  /**
+   * Remembers `options` for this repo, closes the dialog and merges `branchName` with them,
+   * recording the outcome in `state.mergeOutcome` for the toast.
+   */
+  mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
+  /** "Pull has diverged → Merge": merges the upstream ref, allowing fast-forward, no dialog. */
+  mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   abortMerge(): Promise<void>;
@@ -29,13 +42,41 @@ export function useMergeRebaseActions(
   runMutation: RunMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): MergeRebaseActions {
-  const mergeBranch = useCallback(
-    (branchName: string): Promise<void> =>
+  const openMergeDialog = useCallback(
+    (branchName: string) => {
+      setState((prev) => ({ ...prev, mergeDialog: { branchName }, mergeOutcome: null }));
+    },
+    [setState],
+  );
+  const closeMergeDialog = useCallback(() => {
+    setState((prev) => ({ ...prev, mergeDialog: null }));
+  }, [setState]);
+  const getMergeOptions = useCallback(() => client.getMergeOptions(repoPath), [client, repoPath]);
+  const runMerge = useCallback(
+    (branchName: string, options: MergeOptions): Promise<void> =>
       runMutation(async () => {
-        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName);
-        void outcome;
+        setState((prev) => ({ ...prev, mergeDialog: null, mergeOutcome: null }));
+        const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, options);
+        setState((prev) => ({ ...prev, mergeOutcome: { branchName, outcome } }));
       }),
-    [client, runMutation, repoPath],
+    [client, runMutation, repoPath, setState],
+  );
+  const mergeBranch = useCallback(
+    async (branchName: string, options: MergeOptions): Promise<void> => {
+      // Remembered before merging, so a merge that fails still keeps the choice. Failing to
+      // remember must not block the merge itself.
+      try {
+        await client.setMergeOptions(repoPath, options);
+      } catch (error) {
+        logFailure("Remembering merge options failed", error);
+      }
+      await runMerge(branchName, options);
+    },
+    [client, repoPath, runMerge],
+  );
+  const mergePull = useCallback(
+    (upstreamRef: string) => runMerge(upstreamRef, { fastForward: "Allow", squash: false }),
+    [runMerge],
   );
   const resolveConflict = useCallback(
     (path: string, resolvedContent: string) =>
@@ -91,7 +132,11 @@ export function useMergeRebaseActions(
   );
 
   return {
+    openMergeDialog,
+    closeMergeDialog,
+    getMergeOptions,
     mergeBranch,
+    mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
     abortMerge,

@@ -60,13 +60,18 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       fetchPrune: null,
       pushDialog: null,
       deleteRemoteBranchDialog: null,
-      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null },
+      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null },
       amendMode: false,
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
       pendingPull: null,
       pullOutcome: null,
+      mergeDialog: null,
+      mergeOutcome: null,
+      stashDialog: null,
+      stashRestoreIndex: true,
+      stashOutcome: null,
       transfer: null,
       error: null,
       pending: false,
@@ -140,9 +145,17 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openDeleteRemoteBranchDialog: vi.fn(),
     closeDeleteRemoteBranchDialog: vi.fn(),
     saveStash: vi.fn(),
+    openStashDialog: vi.fn(),
+    closeStashDialog: vi.fn(),
     applyStash: vi.fn(),
+    popStash: vi.fn(),
+    setStashRestoreIndex: vi.fn(),
     dropStash: vi.fn(),
+    openMergeDialog: vi.fn(),
+    closeMergeDialog: vi.fn(),
+    getMergeOptions: vi.fn(),
     mergeBranch: vi.fn(),
+    mergePull: vi.fn(),
     resolveConflict: vi.fn(),
     resolveAddDeleteConflict: vi.fn(),
     abortMerge: vi.fn(),
@@ -190,7 +203,7 @@ describe("buildCommands", () => {
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
-      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null },
+      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null },
     });
     expect(detached).not.toContain("Push branch to…");
     expect(detached).toContain("Fetch all remotes");
@@ -384,9 +397,53 @@ describe("buildCommands", () => {
     applyCmd?.run();
     expect(appState.applyStash).toHaveBeenCalledWith(0);
 
-    const dropCmd = commands.find((c) => c.id === "drop-stash:0");
-    dropCmd?.run();
-    expect(appState.dropStash).toHaveBeenCalledWith(0);
+    expect(commands.some((c) => c.id === "drop-stash:0")).toBe(true);
+  });
+
+  it("offers merge-branch per non-current local branch and omits it while an operation runs", () => {
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
+    const merge = commands.find((c) => c.id === "merge-branch:feature");
+    expect(merge?.label).toBe("Merge feature into current branch…");
+    expect(commands.some((c) => c.id === "merge-branch:main")).toBe(false);
+    merge?.run();
+    expect(appState.openMergeDialog).toHaveBeenCalledWith("feature");
+
+    const merging = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
+    expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
+  });
+
+  it("offers stash all and stash with options", () => {
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
+    const all = commands.find((c) => c.id === "save-stash");
+    expect(all?.label).toBe("Stash all changes");
+    all?.run();
+    expect(appState.saveStash).toHaveBeenCalledWith();
+    const withOptions = commands.find((c) => c.id === "stash-with-options");
+    expect(withOptions?.label).toBe("Stash…");
+    withOptions?.run();
+    expect(appState.openStashDialog).toHaveBeenCalledWith([]);
+  });
+
+  it("offers show and pop per stash", () => {
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
+    const show = commands.find((c) => c.id === "show-stash:0");
+    expect(show?.label).toBe("Show stash: WIP");
+    show?.run();
+    expect(appState.selectRow).toHaveBeenCalledWith({ commitId: "ccc" });
+    const pop = commands.find((c) => c.id === "pop-stash:0");
+    expect(pop?.label).toBe("Pop stash: WIP");
+    pop?.run();
+    expect(appState.popStash).toHaveBeenCalledWith(0);
+  });
+
+  it("groups merge and stash commands", () => {
+    expect(commandGroup("merge-branch:x")).toBe("Branches");
+    for (const id of ["stash-with-options", "stash-current-file", "show-stash:0", "pop-stash:0"]) {
+      expect(commandGroup(id)).toBe("Stash");
+    }
   });
 
   it("excludes the main worktree from open/remove commands", () => {
@@ -505,6 +562,18 @@ describe("buildCommands", () => {
       deleteTagCmd?.run();
       expect(button.getAttribute("aria-expanded")).toBe("true");
       expect(appState.deleteTag).not.toHaveBeenCalled();
+    });
+
+    it("drop-stash selects the stash and expands the Stashes section instead of dropping", () => {
+      const button = mountSection("Stashes");
+      const appState = makeAppState();
+      const commands = buildCommands(appState);
+      const dropCmd = commands.find((c) => c.id === "drop-stash:0");
+      expect(dropCmd?.label).toBe("Drop stash: WIP");
+      dropCmd?.run();
+      expect(appState.dropStash).not.toHaveBeenCalled();
+      expect(appState.selectRow).toHaveBeenCalledWith({ commitId: "ccc" });
+      expect(button.getAttribute("aria-expanded")).toBe("true");
     });
 
     it("remove-worktree expands the Worktrees section instead of calling removeWorktree", () => {
@@ -788,7 +857,7 @@ describe("history commands", () => {
   const historyState: Partial<AppState> = {
     selectedRow: { commitId: "c2" },
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
-    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null },
+    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null },
   };
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
@@ -806,7 +875,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         selectedRow: { commitId: "c1" },
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("cherry-pick-selected");
@@ -829,7 +898,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         branches: [{ name: "main", isCurrent: false }],
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("reset-selected");
@@ -855,6 +924,16 @@ describe("diff option and discard commands", () => {
     };
     return { diffCommands, commands: buildCommands(state, undefined, [], undefined, undefined, undefined, undefined, diffCommands) };
   };
+
+  it("offers stashing the current file only when there is one", () => {
+    const state = makeAppState();
+    expect(build(state).commands.some((c) => c.id === "stash-current-file")).toBe(false);
+    const { commands } = build(state, { currentFile: "src/a.ts" });
+    const command = commands.find((c) => c.id === "stash-current-file");
+    expect(command?.label).toBe("Stash src/a.ts…");
+    command!.run();
+    expect(state.openStashDialog).toHaveBeenCalledWith(["src/a.ts"]);
+  });
 
   it("offers file history of the current file, even while an operation is running", () => {
     const state = makeAppState({ pending: true, status: [{ path: "a.txt", staged: false, kind: "Modified" }] });

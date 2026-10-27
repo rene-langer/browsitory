@@ -388,7 +388,9 @@ fn failed_signing_during_a_merge_keeps_the_merge_in_progress() {
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
 
-    let outcome = git_core::merge::start_merge(&repo, "feature").unwrap();
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
     assert_eq!(outcome, git_core::merge::MergeOutcome::Merged);
     let before = head_oid(&repo);
     repo.config()
