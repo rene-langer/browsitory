@@ -89,7 +89,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   merging and a fast-forward pull run `post-merge`. `core.hooksPath` is honored.
 - A failing hook stops the commit or push and shows its output, with **Commit without hooks** /
   **Amend without hooks** / **Push without hooks** to retry (`--no-verify`). A **Skip hooks**
-  checkbox under the commit message (shown when a commit hook is installed) or "Skip hooks for
+  checkbox under the commit message (shown when a `pre-commit` or `commit-msg` hook is installed) or "Skip hooks for
   the next commit" in the palette skips them for the next commit.
 - While a hook runs, "Running pre-commit hook…" (or "Running pre-push hook…" in the transfer
   panel) shows with a Cancel button; a hook is stopped after 10 minutes. On Windows hooks run
