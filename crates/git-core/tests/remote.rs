@@ -2,13 +2,13 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_remote_branch, delete_tag, fetch_remote, force_push_current_branch,
+    delete_remote_branch, delete_tag, fetch_all, fetch_remote, force_push_current_branch,
     list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_branch,
     push_current_branch, push_tags, remote_upstreams, remove_remote,
     remove_remote_and_clear_upstreams, rename_remote, set_current_upstream,
-    set_remote_auth_profile, update_remote_urls, CredentialProvider, PullOutcome, RemoteAuthMode,
-    RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
-    TransferReporter,
+    set_remote_auth_profile, update_remote_urls, CredentialProvider, FetchAllOutcome, PullOutcome,
+    RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
+    TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -478,6 +478,7 @@ fn fetch_updates_tracking_ref_and_reports_owned_progress() {
     fetch_remote(
         &local,
         "origin",
+        None,
         "fetch-42".to_string(),
         &mut NoCredentials,
         &mut events,
@@ -529,6 +530,7 @@ fn a_fetch_aborts_when_the_cancel_flag_is_set_before_the_first_progress_tick() {
     let result = fetch_remote(
         &local,
         "origin",
+        None,
         "fetch-cancelled".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -634,6 +636,7 @@ fn a_cancelled_fetch_is_not_reported_as_a_generic_transfer_failure() {
     let result = fetch_remote(
         &repo,
         "origin",
+        None,
         "fetch-failed".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -661,6 +664,7 @@ fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
     let result = fetch_remote(
         &repo,
         "origin",
+        None,
         "fetch-unreachable".to_string(),
         &mut NoCredentials,
         &mut reporter,
@@ -1581,4 +1585,288 @@ fn deleting_head_or_an_invalid_name_is_rejected_before_connecting() {
     }
     assert!(reporter.events.is_empty());
     assert!(fixture.bare_tip("main").is_some());
+}
+
+fn no_credentials_for(_remote: &str) -> Result<Box<dyn CredentialProvider>, RemoteError> {
+    Ok(Box::new(NoCredentials))
+}
+
+/// Publishes `branch` from the source repo, fetches it into `local`, then deletes it on the
+/// remote, leaving `refs/remotes/origin/<branch>` stale in `local`.
+fn stale_tracking_ref(fixture: &RemoteFixture, branch: &str) {
+    let head = fixture.source.head().unwrap().peel_to_commit().unwrap();
+    fixture.source.branch(branch, &head, false).unwrap();
+    let mut origin = fixture.source.find_remote("origin").unwrap();
+    origin
+        .push(&[format!("refs/heads/{branch}:refs/heads/{branch}")], None)
+        .unwrap();
+    fixture
+        .local
+        .find_remote("origin")
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    assert!(fixture
+        .local
+        .find_reference(&format!("refs/remotes/origin/{branch}"))
+        .is_ok());
+    origin
+        .push(&[format!(":refs/heads/{branch}")], None)
+        .unwrap();
+}
+
+#[test]
+fn fetch_with_prune_removes_a_remote_deleted_branch_and_without_keeps_it() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    let mut reporter = VecReporter::default();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(false),
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_ok());
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(true),
+        "f-2".into(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_err());
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .is_ok());
+}
+
+#[test]
+fn fetch_with_unspecified_prune_follows_fetch_prune_config() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_bool("fetch.prune", true)
+        .unwrap();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_err());
+}
+
+#[test]
+fn fetch_with_explicit_no_prune_overrides_fetch_prune_config() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_bool("fetch.prune", true)
+        .unwrap();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        Some(false),
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_ok());
+}
+
+#[test]
+fn remote_info_prune_prefers_the_remote_setting_over_fetch_prune() {
+    let (_dir, repo) = common::init_repo();
+    add_remote(&repo, "a", "file:///tmp/a.git", None).unwrap();
+    add_remote(&repo, "b", "file:///tmp/b.git", None).unwrap();
+    // Repo-local, so a developer's global `fetch.prune` cannot leak in.
+    repo.config()
+        .unwrap()
+        .set_bool("fetch.prune", false)
+        .unwrap();
+    assert!(list_remotes(&repo)
+        .unwrap()
+        .iter()
+        .all(|remote| !remote.prune));
+    let mut config = repo.config().unwrap();
+    config.set_bool("fetch.prune", true).unwrap();
+    config.set_bool("remote.b.prune", false).unwrap();
+
+    let remotes = list_remotes(&repo).unwrap();
+
+    assert!(
+        remotes
+            .iter()
+            .find(|remote| remote.name == "a")
+            .unwrap()
+            .prune
+    );
+    assert!(
+        !remotes
+            .iter()
+            .find(|remote| remote.name == "b")
+            .unwrap()
+            .prune
+    );
+}
+
+#[test]
+fn fetch_all_records_an_unreachable_remote_and_fetches_the_rest() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let missing = tempfile::TempDir::new().unwrap();
+    fixture
+        .local
+        .remote("broken", missing.path().join("nope").to_str().unwrap())
+        .unwrap();
+    let mut reporter = VecReporter::default();
+
+    let outcome = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome.fetched, vec!["origin".to_string()]);
+    assert_eq!(
+        outcome.failed,
+        vec![("broken".to_string(), TransferErrorKind::TransferFailed)]
+    );
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(fixture.remote_tip())
+    );
+    assert!(!reporter.events.is_empty());
+    assert!(reporter.events.iter().all(|event| {
+        event.operation_id == "all-1" && event.operation == TransferOperation::FetchAll
+    }));
+}
+
+#[test]
+fn fetch_all_records_a_remote_whose_credentials_cannot_be_built_and_fetches_the_rest() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let other_dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init_bare(other_dir.path()).unwrap();
+    // "aaa" sorts first, so a failure there must not stop origin from being fetched.
+    fixture
+        .local
+        .remote("aaa", other_dir.path().to_str().unwrap())
+        .unwrap();
+    let mut credentials_for = |remote: &str| -> Result<Box<dyn CredentialProvider>, RemoteError> {
+        if remote == "aaa" {
+            Err(git2::Error::from_str("missing credential for remote").into())
+        } else {
+            Ok(Box::new(NoCredentials))
+        }
+    };
+
+    let outcome = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut credentials_for,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome.fetched, vec!["origin".to_string()]);
+    assert_eq!(
+        outcome.failed,
+        vec![("aaa".to_string(), TransferErrorKind::MissingCredential)]
+    );
+}
+
+#[test]
+fn fetch_all_without_remotes_is_an_empty_success() {
+    let (_dir, repo) = common::init_repo();
+
+    let outcome = fetch_all(
+        &repo,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome, FetchAllOutcome::default());
+}
+
+#[test]
+fn fetch_all_cancelled_before_the_first_remote_fetches_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let before = fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .target();
+
+    let result = fetch_all(
+        &fixture.local,
+        None,
+        "all-1".into(),
+        &mut no_credentials_for,
+        &mut VecReporter::default(),
+        &|| true,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)));
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        before
+    );
 }

@@ -272,6 +272,7 @@ pub(super) fn fetch<S: CredentialStore>(
         git_core::remote::fetch_remote(
             repo,
             &remote_name,
+            None,
             op.id.clone(),
             &mut provider,
             &mut reporter,
@@ -304,6 +305,7 @@ pub(super) fn pull<S: CredentialStore>(
         git_core::remote::fetch_remote(
             repo,
             &upstream.remote_name,
+            None,
             op.id.clone(),
             &mut provider,
             &mut reporter,

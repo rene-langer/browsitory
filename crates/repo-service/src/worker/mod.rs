@@ -2021,6 +2021,8 @@ mod tests {
         config
             .set_str("branch.topic.merge", "refs/heads/topic")
             .unwrap();
+        // Repo-local, so a developer's global `fetch.prune` cannot leak into `prune` below.
+        config.set_bool("fetch.prune", false).unwrap();
         drop(config);
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
@@ -2035,6 +2037,7 @@ mod tests {
                 name: "origin".into(),
                 fetch_url: "https://example.com/owner/repo.git".into(),
                 push_url: None,
+                prune: false,
             }]
         );
         assert_eq!(

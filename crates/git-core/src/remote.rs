@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 
 use git2::{
-    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, PushOptions,
-    RemoteCallbacks, Repository, StatusOptions, Tag,
+    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, FetchPrune,
+    PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
 };
 use thiserror::Error;
 use url::Url;
@@ -23,6 +23,7 @@ mod tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferOperation {
     Fetch,
+    FetchAll,
     Pull,
     PushBranch,
     ForcePushBranch,
@@ -96,6 +97,35 @@ pub struct RemoteInfo {
     pub name: String,
     pub fetch_url: String,
     pub push_url: Option<String>,
+    /// Effective prune default: `remote.<name>.prune`, else `fetch.prune`, else `false`.
+    pub prune: bool,
+}
+
+/// A per-remote credential provider built by `fetch_all`'s `credentials_for` callback.
+pub type BoxedCredentialProvider<'c> = Box<dyn CredentialProvider + 'c>;
+
+/// Result of `fetch_all`: remotes fetched, and the ones that failed with why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FetchAllOutcome {
+    pub fetched: Vec<String>,
+    pub failed: Vec<(String, TransferErrorKind)>,
+}
+
+/// `None` leaves pruning to git config (`remote.<name>.prune`, then `fetch.prune`).
+fn fetch_prune(prune: Option<bool>) -> FetchPrune {
+    match prune {
+        None => FetchPrune::Unspecified,
+        Some(true) => FetchPrune::On,
+        Some(false) => FetchPrune::Off,
+    }
+}
+
+fn config_bool(config: &git2::Config, key: &str) -> Result<Option<bool>, git2::Error> {
+    match config.get_bool(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,7 +266,76 @@ impl RemoteError {
 pub fn fetch_remote(
     repo: &Repository,
     remote_name: &str,
+    prune: Option<bool>,
     operation_id: String,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), RemoteError> {
+    fetch_with(
+        repo,
+        remote_name,
+        prune,
+        TransferOperation::Fetch,
+        &operation_id,
+        credentials,
+        reporter,
+        cancel,
+    )
+}
+
+/// Fetches every remote in `repo.remotes()` order under one `operation_id`, reporting progress
+/// as `TransferOperation::FetchAll`. A remote that fails (transport, credentials) is recorded in
+/// `failed` and the next one is tried; a cancel stops the loop with `Cancelled` (remotes fetched
+/// so far stay fetched). `credentials_for` builds each remote's credential provider.
+pub fn fetch_all<'c>(
+    repo: &Repository,
+    prune: Option<bool>,
+    operation_id: String,
+    credentials_for: &mut dyn FnMut(&str) -> Result<BoxedCredentialProvider<'c>, RemoteError>,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<FetchAllOutcome, RemoteError> {
+    let names: Vec<String> = repo
+        .remotes()?
+        .iter()
+        .flatten()
+        .flatten()
+        .map(str::to_string)
+        .collect();
+    let mut outcome = FetchAllOutcome::default();
+    for name in names {
+        if cancel() {
+            return Err(RemoteError::Cancelled);
+        }
+        let result = credentials_for(&name).and_then(|mut provider| {
+            fetch_with(
+                repo,
+                &name,
+                prune,
+                TransferOperation::FetchAll,
+                &operation_id,
+                provider.as_mut(),
+                reporter,
+                cancel,
+            )
+        });
+        match result {
+            Ok(()) => outcome.fetched.push(name),
+            Err(RemoteError::Cancelled) => return Err(RemoteError::Cancelled),
+            Err(error) => outcome.failed.push((name, error.transfer_error_kind())),
+        }
+    }
+    Ok(outcome)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fetch_with(
+    repo: &Repository,
+    remote_name: &str,
+    prune: Option<bool>,
+    operation: TransferOperation,
+    operation_id: &str,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -254,8 +353,8 @@ pub fn fetch_remote(
             return false;
         }
         reporter.borrow_mut().report(TransferProgress {
-            operation_id: operation_id.clone(),
-            operation: TransferOperation::Fetch,
+            operation_id: operation_id.to_string(),
+            operation,
             phase: TransferPhase::Receiving,
             current: progress.received_objects(),
             total: progress.total_objects(),
@@ -269,8 +368,8 @@ pub fn fetch_remote(
             return false;
         }
         reporter.borrow_mut().report(TransferProgress {
-            operation_id: operation_id.clone(),
-            operation: TransferOperation::Fetch,
+            operation_id: operation_id.to_string(),
+            operation,
             phase: TransferPhase::Receiving,
             current: 0,
             total: 0,
@@ -284,8 +383,8 @@ pub fn fetch_remote(
             return false;
         }
         reporter.borrow_mut().report(TransferProgress {
-            operation_id: operation_id.clone(),
-            operation: TransferOperation::Fetch,
+            operation_id: operation_id.to_string(),
+            operation,
             phase: TransferPhase::Updating,
             current: 0,
             total: 0,
@@ -297,6 +396,7 @@ pub fn fetch_remote(
 
     let mut options = FetchOptions::new();
     options.remote_callbacks(callbacks);
+    options.prune(fetch_prune(prune));
     match remote.fetch(&[] as &[&str], Some(&mut options), None) {
         Ok(()) => Ok(()),
         Err(error) => Err(cancellation_or(cancel, error)),
@@ -627,6 +727,7 @@ pub fn pull_after_fetch(
 }
 
 pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
+    let config = repo.config()?;
     let mut remotes = Vec::new();
     for name in repo.remotes()?.iter().flatten().flatten() {
         let remote = repo.find_remote(name)?;
@@ -641,6 +742,10 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
             name: name.to_string(),
             fetch_url: fetch_url.to_string(),
             push_url: push_url.map(str::to_string),
+            prune: match config_bool(&config, &format!("remote.{name}.prune"))? {
+                Some(prune) => prune,
+                None => config_bool(&config, "fetch.prune")?.unwrap_or(false),
+            },
         });
     }
     Ok(remotes)
