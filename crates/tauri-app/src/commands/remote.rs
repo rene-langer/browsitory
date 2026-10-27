@@ -160,7 +160,8 @@ pub async fn fetch_remote(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.fetch_remote(remote_name, event_tx)?;
+    let operation_id =
+        worker_handle(&state, &repo_path)?.fetch_remote(remote_name, None, event_tx)?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }

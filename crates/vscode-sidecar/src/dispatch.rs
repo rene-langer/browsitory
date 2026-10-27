@@ -1576,6 +1576,9 @@ struct TransferProgressDto {
     total: usize,
     received_bytes: usize,
     message: Option<String>,
+    /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_name: Option<String>,
 }
 
 fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
@@ -1592,6 +1595,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             total: 0,
             received_bytes: 0,
             message: None,
+            remote_name: None,
         },
         TransferEvent::Progress(progress) => TransferProgressDto {
             operation_id: progress.operation_id,
@@ -1605,6 +1609,23 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             // over IPC, even when it looks like ordinary progress output. Same redaction
             // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
             message: None,
+            remote_name: None,
+        },
+        TransferEvent::RemoteFailed {
+            operation_id,
+            remote_name,
+            error,
+        } => TransferProgressDto {
+            operation_id,
+            // Only Fetch all reports per-remote failures.
+            operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
+            phase: "RemoteFailed".to_string(),
+            error_kind: Some(format!("{error:?}")),
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: None,
+            remote_name: Some(remote_name),
         },
         TransferEvent::Completed {
             operation_id,
@@ -1621,6 +1642,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
                 total: 0,
                 received_bytes: 0,
                 message: None,
+                remote_name: None,
             }
         }
     }
@@ -1676,8 +1698,11 @@ fn fetch_remote(
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
-    let operation_id =
-        worker_handle(repos, &params.repo_path)?.fetch_remote(params.remote_name, event_tx)?;
+    let operation_id = worker_handle(repos, &params.repo_path)?.fetch_remote(
+        params.remote_name,
+        None,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -2765,6 +2790,28 @@ mod tests {
                 .count(),
             200
         );
+    }
+
+    #[test]
+    fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
+        let failed = serde_json::to_value(transfer_progress_dto(TransferEvent::RemoteFailed {
+            operation_id: "fetch-all-7".into(),
+            remote_name: "backup".into(),
+            error: TransferErrorKind::TransferFailed,
+        }))
+        .unwrap();
+        assert_eq!(failed["phase"], "RemoteFailed");
+        assert_eq!(failed["operation"], "FetchAll");
+        assert_eq!(failed["remoteName"], "backup");
+        assert_eq!(failed["errorKind"], "TransferFailed");
+
+        let completed = serde_json::to_value(transfer_progress_dto(TransferEvent::Completed {
+            operation_id: "fetch-all-7".into(),
+            operation: TransferOperation::FetchAll,
+            error: None,
+        }))
+        .unwrap();
+        assert!(!completed.as_object().unwrap().contains_key("remoteName"));
     }
 
     #[test]

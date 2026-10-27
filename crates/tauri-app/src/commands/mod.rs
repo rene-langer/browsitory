@@ -68,6 +68,9 @@ pub struct TransferProgressDto {
     pub total: usize,
     pub received_bytes: usize,
     pub message: Option<String>,
+    /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_name: Option<String>,
 }
 
 impl From<git_core::remote::TransferProgress> for TransferProgressDto {
@@ -83,6 +86,7 @@ impl From<git_core::remote::TransferProgress> for TransferProgressDto {
             // Sideband and reference-update text comes from the remote. It is not safe to
             // expose over IPC, even when it looks like ordinary progress output.
             message: None,
+            remote_name: None,
         }
     }
 }
@@ -103,11 +107,31 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                 total: 0,
                 received_bytes: 0,
                 message: None,
+                remote_name: None,
             },
         ),
         TransferEvent::Progress(progress) => {
             ("transfer-progress", TransferProgressDto::from(progress))
         }
+        TransferEvent::RemoteFailed {
+            operation_id,
+            remote_name,
+            error,
+        } => (
+            "transfer-progress",
+            TransferProgressDto {
+                operation_id,
+                // Only Fetch all reports per-remote failures.
+                operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
+                phase: "RemoteFailed".to_string(),
+                error_kind: Some(format!("{error:?}")),
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+                remote_name: Some(remote_name),
+            },
+        ),
         TransferEvent::Completed {
             operation_id,
             operation,
@@ -125,6 +149,7 @@ fn transfer_event_payload(event: TransferEvent) -> (&'static str, TransferProgre
                     total: 0,
                     received_bytes: 0,
                     message: None,
+                    remote_name: None,
                 },
             )
         }
@@ -1323,6 +1348,31 @@ mod tests {
 
         assert_eq!(input.path, "/repos/suite/api");
         assert_eq!(input.workspace_id, Some("workspace-1".into()));
+    }
+
+    #[test]
+    fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
+        let (event, failed) = transfer_event_payload(TransferEvent::RemoteFailed {
+            operation_id: "fetch-all-7".into(),
+            remote_name: "backup".into(),
+            error: TransferErrorKind::MissingCredential,
+        });
+        assert_eq!(event, "transfer-progress");
+        let json = serde_json::to_value(failed).unwrap();
+        assert_eq!(json["phase"], "RemoteFailed");
+        assert_eq!(json["operation"], "FetchAll");
+        assert_eq!(json["operationId"], "fetch-all-7");
+        assert_eq!(json["remoteName"], "backup");
+        assert_eq!(json["errorKind"], "MissingCredential");
+
+        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
+            operation_id: "fetch-all-7".into(),
+            operation: TransferOperation::FetchAll,
+            error: None,
+        });
+        let json = serde_json::to_value(completed).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("remoteName"));
+        assert_eq!(json["operation"], "FetchAll");
     }
 
     #[test]

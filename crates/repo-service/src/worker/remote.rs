@@ -253,6 +253,7 @@ pub(super) fn fetch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
+    prune: Option<bool>,
     op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
@@ -272,7 +273,7 @@ pub(super) fn fetch<S: CredentialStore>(
         git_core::remote::fetch_remote(
             repo,
             &remote_name,
-            None,
+            prune,
             op.id.clone(),
             &mut provider,
             &mut reporter,
@@ -335,7 +336,7 @@ pub(super) fn pull<S: CredentialStore>(
         error,
     });
 }
-pub(super) fn push_branch<S: CredentialStore>(
+pub(super) fn push_current<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
@@ -428,10 +429,151 @@ pub(super) fn push_tags<S: CredentialStore>(
     complete(&events, op, TransferOperation::PushTags, result);
 }
 
+/// What a `PushBranch` command pushes, grouped to keep the handler at a readable arity.
+pub(super) struct PushTarget {
+    pub(super) remote_name: String,
+    pub(super) local_branch: String,
+    pub(super) remote_branch: String,
+    pub(super) set_upstream: bool,
+}
+
+/// Builds the credential provider for one remote of a Fetch all from its auth profile.
+fn credential_provider<'a, S: CredentialStore>(
+    repo: &git2::Repository,
+    credentials: &'a CredentialService<S>,
+    remote_name: &str,
+) -> Result<git_core::remote::BoxedCredentialProvider<'a>, git_core::remote::RemoteError> {
+    let profile = git_core::remote::remote_auth_profile(repo, remote_name)?;
+    Ok(Box::new(crate::credentials::RemoteCredentialProvider::new(
+        credentials,
+        profile,
+    )))
+}
+
+pub(super) fn fetch_all<S: CredentialStore>(
+    repo: &git2::Repository,
+    credentials: &CredentialService<S>,
+    prune: Option<bool>,
+    op: TransferOp<'_>,
+    events: Sender<TransferEvent>,
+    reply: Sender<Result<String, String>>,
+) {
+    let _ = events.send(TransferEvent::Started {
+        operation_id: op.id.clone(),
+        operation: TransferOperation::FetchAll,
+    });
+    let _ = reply.send(Ok(op.id.clone()));
+    let mut reporter = ChannelReporter {
+        events: events.clone(),
+        operation_id: op.id.clone(),
+    };
+    let cancel = op.cancel_check();
+    let result = git_core::remote::fetch_all(
+        repo,
+        prune,
+        op.id.clone(),
+        &mut |remote_name| credential_provider(repo, credentials, remote_name),
+        &mut reporter,
+        &cancel,
+    );
+    let error = match &result {
+        Ok(outcome) => {
+            for (remote_name, kind) in &outcome.failed {
+                let _ = events.send(TransferEvent::RemoteFailed {
+                    operation_id: op.id.clone(),
+                    remote_name: remote_name.clone(),
+                    error: *kind,
+                });
+            }
+            // Only a Fetch all where nothing succeeded fails as a whole.
+            if outcome.fetched.is_empty() {
+                outcome.failed.first().map(|(_, kind)| *kind)
+            } else {
+                None
+            }
+        }
+        Err(error) => Some(error.transfer_error_kind()),
+    };
+    op.clear();
+    let _ = events.send(TransferEvent::Completed {
+        operation_id: op.id,
+        operation: TransferOperation::FetchAll,
+        error,
+    });
+}
+pub(super) fn push_branch<S: CredentialStore>(
+    repo: &git2::Repository,
+    credentials: &CredentialService<S>,
+    target: PushTarget,
+    op: TransferOp<'_>,
+    events: Sender<TransferEvent>,
+    reply: Sender<Result<String, String>>,
+) {
+    let _ = events.send(TransferEvent::Started {
+        operation_id: op.id.clone(),
+        operation: TransferOperation::PushBranch,
+    });
+    let _ = reply.send(Ok(op.id.clone()));
+    let mut reporter = ChannelReporter {
+        events: events.clone(),
+        operation_id: op.id.clone(),
+    };
+    let cancel = op.cancel_check();
+    let result =
+        git_core::remote::remote_auth_profile(repo, &target.remote_name).and_then(|profile| {
+            let mut provider =
+                crate::credentials::RemoteCredentialProvider::new(credentials, profile);
+            git_core::remote::push_branch(
+                repo,
+                &target.remote_name,
+                &target.local_branch,
+                &target.remote_branch,
+                target.set_upstream,
+                &mut provider,
+                &mut reporter,
+                &cancel,
+            )
+        });
+    complete(&events, op, TransferOperation::PushBranch, result);
+}
+pub(super) fn delete_remote_branch<S: CredentialStore>(
+    repo: &git2::Repository,
+    credentials: &CredentialService<S>,
+    remote_name: String,
+    branch_name: String,
+    op: TransferOp<'_>,
+    events: Sender<TransferEvent>,
+    reply: Sender<Result<String, String>>,
+) {
+    let _ = events.send(TransferEvent::Started {
+        operation_id: op.id.clone(),
+        operation: TransferOperation::DeleteRemoteBranch,
+    });
+    let _ = reply.send(Ok(op.id.clone()));
+    let mut reporter = ChannelReporter {
+        events: events.clone(),
+        operation_id: op.id.clone(),
+    };
+    let cancel = op.cancel_check();
+    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
+        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
+        git_core::remote::delete_remote_branch(
+            repo,
+            &remote_name,
+            &branch_name,
+            &mut provider,
+            &mut reporter,
+            &cancel,
+        )
+    });
+    complete(&events, op, TransferOperation::DeleteRemoteBranch, result);
+}
+
 impl WorkerHandle {
     pub fn fetch_remote(
         &self,
         remote_name: String,
+        prune: Option<bool>,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -439,6 +581,75 @@ impl WorkerHandle {
         self.tx
             .send(Command::FetchRemote {
                 remote_name,
+                prune,
+                operation_id,
+                events,
+                reply,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+    pub fn fetch_all_remotes(
+        &self,
+        prune: Option<bool>,
+        events: Sender<TransferEvent>,
+    ) -> Result<String, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        let operation_id = format!(
+            "fetch-all-{}",
+            NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
+        );
+        self.tx
+            .send(Command::FetchAllRemotes {
+                prune,
+                operation_id,
+                events,
+                reply,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+    pub fn push_branch(
+        &self,
+        remote_name: String,
+        local_branch: String,
+        remote_branch: String,
+        set_upstream: bool,
+        events: Sender<TransferEvent>,
+    ) -> Result<String, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        self.tx
+            .send(Command::PushBranch {
+                remote_name,
+                local_branch,
+                remote_branch,
+                set_upstream,
+                operation_id,
+                events,
+                reply,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+    pub fn delete_remote_branch(
+        &self,
+        remote_name: String,
+        branch_name: String,
+        events: Sender<TransferEvent>,
+    ) -> Result<String, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        let operation_id = format!(
+            "delete-remote-{}",
+            NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
+        );
+        self.tx
+            .send(Command::DeleteRemoteBranch {
+                remote_name,
+                branch_name,
                 operation_id,
                 events,
                 reply,
