@@ -30,6 +30,7 @@ import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
+import { SplitButton } from "./primitives/SplitButton";
 import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
@@ -101,6 +102,7 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict,
   onRequestDiscardFile,
   onIgnorePath,
+  onStashFile,
   onOpenFileHistory,
   sectionRef,
 }: {
@@ -130,12 +132,13 @@ function UncommittedFileSection({
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   onRequestDiscardFile: (path: string) => void;
   onIgnorePath: (pattern: string) => void;
+  onStashFile: (path: string) => void;
   onOpenFileHistory?: (path: string) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  // Discard/ignore apply to unstaged, non-conflicted entries only.
-  const hasFileActions = !entry.staged && entry.kind !== "Conflicted";
+  // Conflicted entries have no actions; staged ones only "Stash file…" (see `fileMenuItems`).
+  const hasFileActions = entry.kind !== "Conflicted";
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
@@ -386,7 +389,13 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={fileMenuItems(entry, (a) => (a.kind === "discard" ? onRequestDiscardFile(entry.path) : onIgnorePath(a.pattern)))}
+          items={fileMenuItems(entry, (a) =>
+            a.kind === "discard"
+              ? onRequestDiscardFile(entry.path)
+              : a.kind === "stash"
+                ? onStashFile(entry.path)
+                : onIgnorePath(a.pattern),
+          )}
           onClose={() => setMenu(null)}
         />
       )}
@@ -417,6 +426,7 @@ export function DiffPane({
   onIgnorePath,
   onCommit,
   onSaveStash,
+  onOpenStashDialog = noop,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
@@ -482,6 +492,8 @@ export function DiffPane({
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
+  onOpenStashDialog?: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -518,6 +530,7 @@ export function DiffPane({
         onIgnorePath={onIgnorePath}
         onCommit={onCommit}
         onSaveStash={onSaveStash}
+        onOpenStashDialog={onOpenStashDialog}
         onSelectRow={onSelectRow}
         onResolveConflict={onResolveConflict}
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
@@ -585,6 +598,7 @@ function UncommittedDiffPane({
   onIgnorePath,
   onCommit,
   onSaveStash,
+  onOpenStashDialog,
   onSelectRow,
   onResolveConflict,
   onResolveAddDeleteConflict,
@@ -635,6 +649,7 @@ function UncommittedDiffPane({
   onIgnorePath: (pattern: string) => void;
   onCommit: (message: string) => void;
   onSaveStash: () => void;
+  onOpenStashDialog: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -884,6 +899,7 @@ function UncommittedDiffPane({
         onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onIgnorePath={onIgnorePath}
+        onStashFile={(path) => onOpenStashDialog([path])}
         onOpenFileHistory={onOpenFileHistory}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
@@ -982,9 +998,16 @@ function UncommittedDiffPane({
             resolved/amended content lives in the working tree, so stashing it away and continuing
             lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
             `BranchSwitcher`'s ref-mutating actions. */}
-        <button onClick={onSaveStash} disabled={status.length === 0 || rebaseProgress !== null}>
-          Stash
-        </button>
+        <SplitButton
+          label="Stash"
+          onClick={onSaveStash}
+          disabled={status.length === 0 || rebaseProgress !== null}
+          menuLabel="More stash options"
+          items={[
+            { label: "Stash all", onSelect: () => onSaveStash() },
+            { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
+          ]}
+        />
         {rebaseProgress !== null ? (
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
@@ -1007,7 +1030,9 @@ function UncommittedDiffPane({
                   ? "Abort revert"
                   : "Abort merge"
             }
-            initialMessage={mergeMessage ?? undefined}
+            // A pending squash merge pre-fills the message too, but there is no merge to abort.
+            initialMessage={mergeMessage ?? headInfo.squashMessage ?? undefined}
+            showAbort={mergeMessage !== null}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}
             focusMessage={focusCommitMessage}

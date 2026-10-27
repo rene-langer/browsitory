@@ -24,6 +24,7 @@ export function CommitBox({
   onAbortMerge,
   abortLabel = "Abort merge",
   initialMessage,
+  showAbort = initialMessage !== undefined,
   initialDraft,
   onDraftChange,
   amend,
@@ -37,6 +38,8 @@ export function CommitBox({
   onAbortMerge: () => void;
   abortLabel?: string;
   initialMessage?: string;
+  /** Whether to offer `abortLabel`; defaults to "a message was seeded" (a merge/pick/revert). */
+  showAbort?: boolean;
   /**
    * Draft to start from on mount (read once, like `useState`'s initial value). `App` keeps one per
    * repo so switching tabs — which unmounts the inactive tab's whole workspace (PERF-001) — or
@@ -189,7 +192,7 @@ export function CommitBox({
         >
           {amendOn ? "Amend" : "Commit"}
         </button>
-        {initialMessage !== undefined && <button onClick={onAbortMerge}>{abortLabel}</button>}
+        {showAbort && <button onClick={onAbortMerge}>{abortLabel}</button>}
       </Toolbar>
     </div>
   );

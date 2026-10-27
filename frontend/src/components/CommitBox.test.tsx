@@ -398,3 +398,20 @@ describe("amend draft safety", () => {
     expect(screen.getByLabelText("Commit message")).toHaveValue("");
   });
 });
+
+describe("CommitBox showAbort", () => {
+  it("hides the abort button for a seeded message when showAbort is false", () => {
+    render(
+      <CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} initialMessage="Squashed commit" showAbort={false} />,
+    );
+
+    expect(screen.getByPlaceholderText("Commit message")).toHaveValue("Squashed commit");
+    expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
+  });
+
+  it("shows the abort button for a seeded message by default", () => {
+    render(<CommitBox onCommit={vi.fn()} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch" />);
+
+    expect(screen.getByRole("button", { name: "Abort merge" })).toBeInTheDocument();
+  });
+});

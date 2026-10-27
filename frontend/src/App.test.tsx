@@ -697,6 +697,62 @@ describe("App", () => {
     });
   });
 
+  describe("stash options", () => {
+    function stashClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+        getWorkingDiff: async () => [],
+        getCommitGraph: async () => [],
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listStashes: async () => [],
+        ...overrides,
+      });
+    }
+
+    it("stashes everything from the Stash button", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(<App client={stashClient({ saveStash })} />);
+
+      const stash = await screen.findByRole("button", { name: "Stash" });
+      await waitFor(() => expect(stash).toBeEnabled());
+      fireEvent.click(stash);
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: null,
+          keepIndex: false,
+          includeUntracked: true,
+          paths: [],
+        }),
+      );
+    });
+
+    it("stashes one file with a message through the stash dialog", async () => {
+      const saveStash = vi.fn(async () => {});
+      render(<App client={stashClient({ saveStash })} />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Actions for a.txt" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Stash changes" });
+      expect(dialog).toHaveTextContent("Only: a.txt");
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "Stash message" }), { target: { value: "half" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stash" }));
+
+      await waitFor(() =>
+        expect(saveStash).toHaveBeenCalledWith("/repos/a", {
+          message: "half",
+          keepIndex: false,
+          includeUntracked: true,
+          paths: ["a.txt"],
+        }),
+      );
+      expect(screen.queryByRole("dialog", { name: "Stash changes" })).toBeNull();
+    });
+  });
+
   it("opens a working-tree file's history in place of the graph and closes it again", async () => {
     const graphCommit = {
       id: "c2",

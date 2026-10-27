@@ -156,6 +156,7 @@ const noopHandlers = {
   onDiscardLines: vi.fn(),
   onCommit: vi.fn(),
   onSaveStash: vi.fn(),
+  onOpenStashDialog: vi.fn(),
   onSelectRow: vi.fn(),
   onResolveConflict: vi.fn(),
   onResolveAddDeleteConflict: vi.fn(),
@@ -499,6 +500,16 @@ describe("DiffPane", () => {
         expect(screen.getByText("Delete file")).toBeInTheDocument();
       });
 
+      it("stashes an unstaged file from its actions menu", () => {
+        const onOpenStashDialog = vi.fn();
+        render({ onOpenStashDialog });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+
+        expect(onOpenStashDialog).toHaveBeenCalledWith(["src/a.ts"]);
+      });
+
       it("gives conflicted files no actions button", () => {
         render();
 
@@ -700,6 +711,55 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       expect(screen.getByText("Stash")).toBeDisabled();
+    });
+
+    it("opens the stash dialog or stashes all from the Stash chevron menu", () => {
+      const onSaveStash = vi.fn();
+      const onOpenStashDialog = vi.fn();
+      renderUncommitted(fakeClient({}), status, { onSaveStash, onOpenStashDialog });
+
+      fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash…" }));
+      expect(onOpenStashDialog).toHaveBeenCalledWith([]);
+
+      fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash all" }));
+      expect(onSaveStash).toHaveBeenCalled();
+    });
+
+    it("disables the Stash chevron with the main button", () => {
+      renderUncommitted(fakeClient({}), []);
+
+      expect(screen.getByRole("button", { name: "More stash options" })).toBeDisabled();
+    });
+
+    it("offers Stash file… on a staged row's actions menu", () => {
+      const onOpenStashDialog = vi.fn();
+      renderUncommitted(fakeClient({}), [{ path: "src/s.ts", staged: true, kind: "Modified" }], {
+        onOpenStashDialog,
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Actions for src/s.ts" }));
+      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Stash file…"]);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Stash file…" }));
+
+      expect(onOpenStashDialog).toHaveBeenCalledWith(["src/s.ts"]);
+    });
+
+    it("pre-fills a pending squash message without offering Abort merge", () => {
+      renderUncommitted(fakeClient({}), status, {
+        mergeMessage: null,
+        headInfo: {
+          headId: "abc",
+          detachedAt: null,
+          headPushed: false,
+          operation: null,
+          squashMessage: "Squashed commit of the following:\n",
+        },
+      });
+
+      expect(screen.getByPlaceholderText("Commit message")).toHaveValue("Squashed commit of the following:\n");
+      expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
     });
 
     it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {

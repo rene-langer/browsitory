@@ -5,14 +5,23 @@ const tracked = { path: "src/a.ts", staged: false, kind: "Modified" as const };
 const untracked = { path: "logs/run.log", staged: false, kind: "New" as const };
 
 describe("FileActionsMenu", () => {
-  it("offers only discard for tracked files", () => {
-    expect(fileMenuItems(tracked, vi.fn()).map((i) => i.label)).toEqual(["Discard changes…"]);
+  it("offers discard and stash for tracked files", () => {
+    expect(fileMenuItems(tracked, vi.fn()).map((i) => i.label)).toEqual(["Discard changes…", "Stash file…"]);
   });
 
   it("offers ignore options for untracked files", () => {
     expect(fileMenuItems(untracked, vi.fn()).map((i) => i.label)).toEqual([
-      "Discard changes…", "Ignore file", "Ignore all *.log", "Ignore folder logs/",
+      "Discard changes…", "Stash file…", "Ignore file", "Ignore all *.log", "Ignore folder logs/",
     ]);
+  });
+
+  it("offers only stash for staged files and nothing for conflicted ones", () => {
+    const onPick = vi.fn();
+    const items = fileMenuItems({ path: "src/a.ts", staged: true, kind: "Modified" }, onPick);
+    expect(items.map((i) => i.label)).toEqual(["Stash file…"]);
+    items[0].onSelect();
+    expect(onPick).toHaveBeenCalledWith({ kind: "stash" });
+    expect(fileMenuItems({ path: "c.txt", staged: false, kind: "Conflicted" }, vi.fn())).toEqual([]);
   });
 
   it("builds root-anchored ignore patterns", () => {
@@ -28,7 +37,7 @@ describe("FileActionsMenu", () => {
     const onPick = vi.fn();
     const items = fileMenuItems(untracked, onPick);
     expect(items[0].destructive).toBe(true);
-    items[2].onSelect();
+    items[3].onSelect();
     expect(onPick).toHaveBeenCalledWith({ kind: "ignore", pattern: "*.log" });
   });
 

@@ -37,6 +37,7 @@ import { TransferPanel } from "./components/TransferPanel";
 import { WorktreePanel } from "./components/WorktreePanel";
 import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
+import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
@@ -415,6 +416,13 @@ function RepoWorkspace({
           onCancel={appState.closeMergeDialog}
         />
       )}
+      {active && appState.state.stashDialog !== null && (
+        <StashDialog
+          paths={appState.state.stashDialog.paths}
+          onStash={(options) => void announce("Changes stashed", appState.saveStash)(options)}
+          onCancel={appState.closeStashDialog}
+        />
+      )}
       {active && pushDialogBranch !== null && (
         <PushBranchDialog
           localBranch={pushDialogBranch}
@@ -771,7 +779,8 @@ function RepoWorkspace({
                 onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
                 onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
                 onCommit={announce("Committed", appState.commit)}
-                onSaveStash={announce("Changes stashed", appState.saveStash)}
+                onSaveStash={announce("Changes stashed", () => appState.saveStash())}
+                onOpenStashDialog={appState.openStashDialog}
                 onSelectRow={appState.selectRow}
                 onResolveConflict={appState.resolveConflict}
                 onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}

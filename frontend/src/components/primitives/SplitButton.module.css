@@ -1,0 +1,12 @@
+/* The main button and its chevron read as one split button. */
+.group {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 4px;
+  padding-right: 4px;
+}
