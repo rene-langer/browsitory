@@ -23,6 +23,12 @@ pub enum StashError {
     BeyondSymlink(String),
     #[error("The stash list changed; refresh and try again.")]
     StashListChanged,
+    /// A selected tracked path is a real directory now but a symlink, file or submodule in
+    /// HEAD (or the index, with keep-index). Reverting it would make the checkout replace the
+    /// directory and silently delete anything in it the stash does not hold (ignored files,
+    /// untracked files when they are left out). git refuses this too.
+    #[error("Can't stash '{path}': it was {was} and is now a directory. Commit or move its contents first.")]
+    DirectoryReplacedNonDirectory { path: String, was: &'static str },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
 }
@@ -207,6 +213,34 @@ fn save_path_limited_stash(
     }
     if tracked.is_empty() && untracked.is_empty() {
         return Err(StashError::NothingToStash);
+    }
+    // A tracked path that is now a real directory but not a tree in what the revert restores
+    // would have its directory (and whatever the stash does not hold in it) replaced.
+    for path in &tracked {
+        let full = workdir.join(path);
+        if !std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir()) {
+            continue;
+        }
+        let restored_mode = if opts.keep_index {
+            repo.index()?
+                .get_path(std::path::Path::new(path), 0)
+                .map(|entry| entry.mode)
+        } else {
+            base.tree()?
+                .get_path(std::path::Path::new(path))
+                .ok()
+                .map(|entry| entry.filemode() as u32)
+        };
+        let was = match restored_mode {
+            Some(0o120000) => "a symbolic link",
+            Some(0o160000) => "a submodule",
+            Some(0o040000) | None => continue,
+            Some(_) => "a file",
+        };
+        return Err(StashError::DirectoryReplacedNonDirectory {
+            path: path.clone(),
+            was,
+        });
     }
     // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
     // possibly outside the repository. Refuse before anything is written, like git does.

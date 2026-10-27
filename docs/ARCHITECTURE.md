@@ -110,9 +110,20 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   path below a symlinked directory. `save_path_limited_stash` refuses a path with a symlinked
   ancestor ("'d/f' is beyond a symbolic link.") before writing anything, and removes a selected
   symlink before its checkout (the link is in the stash; Pop restores it). The revert removes
-  untracked files *before* checking out tracked paths (a checkout can turn a directory back into
-  HEAD's symlink, after which `l/f` resolves into the link's target), and every removal re-checks
-  for a symlinked ancestor at that moment and skips rather than follows.
+  untracked files *before* checking out tracked paths (a checkout turning a directory back into
+  HEAD's symlink would make `l/f` resolve into the link's target; that case is now refused up
+  front, see below), and every removal re-checks for a symlinked ancestor at that moment and
+  skips rather than follows.
+- A selected tracked path that is now a real directory but a symlink, file or submodule in HEAD
+  (or the index, with keep-index) makes `save_stash` refuse before writing anything
+  (`StashError::DirectoryReplacedNonDirectory`, like git's "could not write file 'l' with mode
+  120000: directory not empty"): the forced checkout would replace the directory and silently
+  delete what the stash does not hold, such as ignored files or untracked files left out. The
+  untracked-first revert order stays as a second safety net.
+- Known libgit2 stash-apply quirks, not handled: an apply can leave a `<path>~Updated upstream`
+  file next to a conflicted path, and a failed apply over a directory that replaced a symlink can
+  remove HEAD's symlink from the worktree (it is still in HEAD and recoverable with a checkout,
+  and the stash is kept).
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
   file whose directory is a symlink in HEAD; `apply_stash` maps it to
   `StashError::SymlinkReplacedByDirectory` (nothing is written, the stash is kept).

@@ -875,54 +875,51 @@ fn symlink_replaced_by_directory(
     (dir, repo)
 }
 
+/// Asserts a stash of `l` was refused because `l` went from symlink to directory, and that
+/// nothing was written: no stash, `l` still a directory holding `l/f`, the status unchanged.
 #[cfg(unix)]
-fn assert_l_is_heads_symlink(dir: &std::path::Path, target: &std::path::Path) {
-    let meta = std::fs::symlink_metadata(dir.join("l")).unwrap();
-    assert!(meta.file_type().is_symlink(), "l is HEAD's symlink again");
-    assert_eq!(std::fs::read_link(dir.join("l")).unwrap(), target);
+fn assert_directory_over_symlink_refused(
+    repo: &mut git2::Repository,
+    dir: &std::path::Path,
+    result: Result<(), StashError>,
+    status_before: &[git_core::status::StatusEntry],
+) {
+    let error = result.unwrap_err();
+    assert!(
+        matches!(error, StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "l"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Can't stash 'l': it was a symbolic link and is now a directory. Commit or move its contents first."
+    );
+    assert!(git_core::stash::list_stashes(repo).unwrap().is_empty());
+    assert!(repo.find_reference("refs/stash").is_err());
+    assert!(std::fs::symlink_metadata(dir.join("l")).unwrap().is_dir());
+    assert_eq!(read(dir, "l/f"), "mine\n");
+    assert_eq!(git_core::status::status(repo).unwrap(), status_before);
 }
 
 #[cfg(unix)]
 #[test]
-fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_outside() {
+fn stashing_a_directory_that_replaced_a_symlink_is_refused_outside_target() {
     let outside = tempfile::TempDir::new().unwrap();
     std::fs::write(outside.path().join("f"), "outside, unsaved\n").unwrap();
     let (dir, mut repo) = symlink_replaced_by_directory(outside.path());
+    let status_before = git_core::status::status(&repo).unwrap();
 
-    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()])).unwrap();
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()]));
 
+    assert_directory_over_symlink_refused(&mut repo, dir.path(), result, &status_before);
     assert_eq!(
         std::fs::read_to_string(outside.path().join("f")).unwrap(),
         "outside, unsaved\n"
     );
-    assert_l_is_heads_symlink(dir.path(), outside.path());
-
-    let result = git_core::stash::pop_stash(&mut repo, 0, None, false);
-    assert_eq!(
-        std::fs::read_to_string(outside.path().join("f")).unwrap(),
-        "outside, unsaved\n"
-    );
-    match result {
-        Ok(StashApplyOutcome::Applied) => {
-            assert!(std::fs::symlink_metadata(dir.path().join("l"))
-                .unwrap()
-                .is_dir());
-            assert_eq!(read(dir.path(), "l/f"), "mine\n");
-            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
-        }
-        other => {
-            assert!(
-                matches!(other, Err(StashError::SymlinkReplacedByDirectory)),
-                "{other:?}"
-            );
-            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
-        }
-    }
 }
 
 #[cfg(unix)]
 #[test]
-fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_in_repo() {
+fn stashing_a_directory_that_replaced_a_symlink_is_refused_in_repo_target() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "real/f", "committed\n");
     std::os::unix::fs::symlink("real", dir.path().join("l")).unwrap();
@@ -930,29 +927,51 @@ fn stashing_a_directory_that_replaced_a_symlink_never_deletes_the_links_target_i
     write_file(dir.path(), "real/f", "unsaved edits\n");
     std::fs::remove_file(dir.path().join("l")).unwrap();
     write_file(dir.path(), "l/f", "mine\n");
+    let status_before = git_core::status::status(&repo).unwrap();
 
-    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()])).unwrap();
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()]));
 
+    assert_directory_over_symlink_refused(&mut repo, dir.path(), result, &status_before);
     assert_eq!(read(dir.path(), "real/f"), "unsaved edits\n");
-    assert_l_is_heads_symlink(dir.path(), std::path::Path::new("real"));
+}
 
-    let result = git_core::stash::pop_stash(&mut repo, 0, None, false);
-    assert_eq!(read(dir.path(), "real/f"), "unsaved edits\n");
-    match result {
-        Ok(StashApplyOutcome::Applied) => {
-            assert!(std::fs::symlink_metadata(dir.path().join("l"))
-                .unwrap()
-                .is_dir());
-            assert_eq!(read(dir.path(), "l/f"), "mine\n");
-        }
-        other => {
-            assert!(
-                matches!(other, Err(StashError::SymlinkReplacedByDirectory)),
-                "{other:?}"
-            );
-            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
-        }
-    }
+#[cfg(unix)]
+#[test]
+fn stashing_a_directory_over_a_symlink_without_untracked_files_is_refused() {
+    // U1: with untracked files left out, the checkout would delete `l/f` for good.
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, mut repo) = symlink_replaced_by_directory(outside.path());
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(
+        &mut repo,
+        &with(|o| {
+            o.paths = vec!["l".into()];
+            o.include_untracked = false;
+        }),
+    );
+
+    assert_directory_over_symlink_refused(&mut repo, dir.path(), result, &status_before);
+}
+
+#[cfg(unix)]
+#[test]
+fn stashing_a_directory_over_a_symlink_holding_ignored_files_is_refused() {
+    // I1: ignored files are never stashed, so the checkout would delete `l/build.log` for good.
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), ".gitignore", "l/*.log\n");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("l")).unwrap();
+    commit_all(&repo, "initial");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    write_file(dir.path(), "l/f", "mine\n");
+    write_file(dir.path(), "l/build.log", "ignored output\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["l".into()]));
+
+    assert_directory_over_symlink_refused(&mut repo, dir.path(), result, &status_before);
+    assert_eq!(read(dir.path(), "l/build.log"), "ignored output\n");
 }
 
 #[cfg(unix)]
