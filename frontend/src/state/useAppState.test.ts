@@ -3603,6 +3603,82 @@ function progress(
 }
 
 describe("useAppState — refs and remotes (4b)", () => {
+  it("opens Push to… instead of pushing when push.default does not choose a target", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const client = transferClient({
+      listBranches: async () => [{ name: "fx", isCurrent: true }],
+      getCurrentUpstream: async () => ({ localBranch: "fx", remoteName: "origin", remoteBranch: "feature-x", pushBranch: null }),
+      pushCurrentBranch,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.pushCurrentBranch("origin"));
+
+    expect(pushCurrentBranch).not.toHaveBeenCalled();
+    expect(result.current.state.pushDialog).toEqual({ localBranch: "fx" });
+  });
+
+  it("treats an upstream without pushBranch like push.default=simple", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const client = transferClient({
+      listBranches: async () => [{ name: "fx", isCurrent: true }],
+      getCurrentUpstream: async () => ({ localBranch: "fx", remoteName: "origin", remoteBranch: "feature-x" }),
+      pushCurrentBranch,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.pushCurrentBranch("origin"));
+
+    expect(pushCurrentBranch).not.toHaveBeenCalled();
+    expect(result.current.state.pushDialog).toEqual({ localBranch: "fx" });
+  });
+
+  it("pushes when push.default resolves the differently named upstream", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const client = transferClient({
+      listBranches: async () => [{ name: "fx", isCurrent: true }],
+      getCurrentUpstream: async () => ({
+        localBranch: "fx",
+        remoteName: "origin",
+        remoteBranch: "feature-x",
+        pushBranch: "feature-x",
+      }),
+      pushCurrentBranch,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.pushCurrentBranch("origin"));
+
+    expect(pushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin");
+    expect(result.current.state.pushDialog).toBeNull();
+  });
+
+  it("offers no force push for a rejected push to an upstream push.default does not resolve", async () => {
+    let listener: ((p: TransferProgress) => void) | null = null;
+    const client = transferClient({
+      listBranches: async () => [{ name: "fx", isCurrent: true }],
+      getCurrentUpstream: async () => ({ localBranch: "fx", remoteName: "origin", remoteBranch: "feature-x", pushBranch: null }),
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pushBranch: async () => {
+        listener?.(progress("push-12", "PushBranch", "Starting"));
+        listener?.(progress("push-12", "PushBranch", "Failed", { errorKind: "NonFastForward" }));
+        return "push-12";
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.pushBranch("origin", "fx", "feature-x", false));
+
+    expect(result.current.state.forcePushOffer).toBeNull();
+  });
+
   it("names the failed remotes after a partial fetch all, once the refresh lands", async () => {
     let listener: ((p: TransferProgress) => void) | null = null;
     const client = transferClient({
@@ -3816,7 +3892,12 @@ describe("useAppState — refs and remotes (4b)", () => {
     let listener: ((p: TransferProgress) => void) | null = null;
     const client = transferClient({
       listBranches: async () => [{ name: "fx", isCurrent: true }],
-      getCurrentUpstream: async () => ({ localBranch: "fx", remoteName: "origin", remoteBranch: "feature-x" }),
+      getCurrentUpstream: async () => ({
+        localBranch: "fx",
+        remoteName: "origin",
+        remoteBranch: "feature-x",
+        pushBranch: "feature-x",
+      }),
       subscribeTransferProgress: (next) => {
         listener = next;
         return () => {};

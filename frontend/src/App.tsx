@@ -41,6 +41,7 @@ import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
+import { upstreamPushBranch } from "./lib/pushTarget";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
@@ -307,10 +308,11 @@ function RepoWorkspace({
     [dismissError],
   );
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
-  // The branch `force_push_current_branch` overwrites on `remoteName`: the upstream's branch when
-  // the upstream lives there, else the current branch's own name.
+  // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
+  // for the upstream's remote, else the current branch's own name.
   const forcePushTargetBranch = (remoteName: string) =>
-    appState.state.upstream?.remoteName === remoteName ? appState.state.upstream.remoteBranch : currentBranchName;
+    (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
+    currentBranchName;
   const pushDialogBranch = appState.state.pushDialog?.localBranch ?? null;
   const pullOutcome = appState.state.pullOutcome;
   useEffect(() => {

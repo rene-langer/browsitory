@@ -244,6 +244,13 @@ branch name (the local name by default) and **Set as upstream**, which is on by 
 a branch that has no upstream yet. The sync bar's **Push** opens the same dialog when the
 current branch has no upstream, so a new branch is published in one step.
 
+**Where Push goes** follows your git `push.default` (unset means `simple`). With `simple`, a
+branch whose upstream has a different name — say `feat`, created from `origin/main` and so
+tracking it — is not pushed onto `main`: **Push** opens **Push to…** with that remote and the
+branch's own name instead. Set `push.default=upstream` to push to the upstream branch, or
+`current` to push to the same name. With `nothing`, Push always asks. Force push follows the same
+rule.
+
 **Ahead/behind.** A local branch with an upstream shows `↑n` (commits to push) and `↓m`
 (commits to pull) next to its name, counted against the last fetch. Nothing is shown when the
 branch is in sync, or when its upstream has never been fetched.

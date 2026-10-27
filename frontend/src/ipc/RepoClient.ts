@@ -92,6 +92,12 @@ export interface UpstreamInfo {
   // Commits ahead of / behind the remote-tracking ref; null when that ref was never fetched.
   ahead?: number | null;
   behind?: number | null;
+  /**
+   * Where Push lands on `remoteName` under `push.default`; null when it does not choose (e.g.
+   * `simple` with a differently named upstream) and the UI must ask. Always sent by the backend;
+   * see `lib/pushTarget.ts` for how a missing value is read.
+   */
+  pushBranch?: string | null;
 }
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";

@@ -90,17 +90,34 @@ Show ahead/behind counts per local branch. Both frontends (Tauri app, VSCode ext
   helper is `set_current_upstream`'s body, generalized to any local branch:
   `Branch::set_upstream`, with a raw config write when the tracking ref is missing. A failed push
   leaves the config alone.
-- **`push_current_branch` pushes to the upstream's branch name when the upstream is on that
-  remote. This fixes a bug.** The wrapper resolves the target. If `branch.<current>.remote` equals
-  `remote_name`, it pushes to the upstream's `merge` branch. Otherwise, the target keeps the local
-  name. `force_push_current_branch` uses the same resolution for both its refspec and its lease
-  (`refs/remotes/<remote>/<target>`), so the force-push offer after a rejected push targets the
-  branch that rejected it. Same-name upstreams (the normal case) behave exactly as before.
+- **Push honors `push.default` (user decision, after review).** Pushing to the upstream's
+  branch name unconditionally would push a branch `feat` created from `origin/main` (so it tracks
+  `origin/main`) straight onto `origin/main`. One git-core rule, `resolve_push_target` /
+  `push_target(repo, local, remote) -> PushTarget::{Branch { remote, branch }, NeedsChoice
+  { remote, local_branch }}`, decides where a current-branch push lands. `push.default` unset
+  means `simple`. On the upstream's remote:
+  - `upstream` / `tracking`: the upstream's branch name.
+  - `current`: the local name.
+  - `simple` and `matching`: the local name when it equals the upstream's branch name, else
+    `NeedsChoice`. (`matching` pushes every same-named branch in git; the app only pushes one
+    branch, so it applies the `simple` check.)
+  - `nothing`: always `NeedsChoice`.
+
+  To an explicitly chosen remote that is not the upstream's (or with no upstream), every mode but
+  `nothing` pushes under the local name, and `nothing` asks. `push_current_branch` and
+  `force_push_current_branch` refuse `NeedsChoice` with `RemoteError::PushTargetNeedsChoice`
+  before connecting (the worker replies with that message and starts no transfer). Force push
+  and its lease (`refs/remotes/<remote>/<target>`) use the same target, so a force push never
+  goes to a differently named upstream unless `push.default=upstream`, and the target is
+  validated like `push_branch`'s. `UpstreamInfo.push_branch` carries the resolved branch (null =
+  ask) to the frontend. There, Push (sync bar, branch menu, remote folder, palette) opens "Push
+  to…" prefilled with that remote and the local name instead of pushing when it is null. A
+  missing `pushBranch` (old fixtures) reads as `simple`.
 - **The force-push offer only follows a push of the current branch.** After a rejected
   `pushBranch` of any other local branch, the frontend offers no force push, because
   `forcePushCurrentBranch` would overwrite a different branch. The offer also needs the target
-  (remote branch) to equal what `force_push_current_branch` resolves: the upstream branch when
-  pushing to the upstream's remote, else the local name.
+  (remote branch) to equal what `force_push_current_branch` resolves: `UpstreamInfo.pushBranch`
+  when pushing to the upstream's remote (no offer when that is null), else the local name.
 - **`delete_remote_branch` pushes `:refs/heads/<branch>` through `push_refs`.** It has
   negotiation-time cancel and the same rejection mapping. A refusal (protected branch, server
   hook) is `RejectedRemoteRef`. On success it deletes `refs/remotes/<remote>/<branch>` if it is
@@ -406,7 +423,8 @@ deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string): Pr
   - push under a different remote branch name
   - invalid remote branch name rejected before connecting
   - a push that fails leaves the upstream config unset
-  - `push_current_branch` targets the upstream's branch name
+  - `push.default`: unset/`simple`/`matching` refuse a differently named upstream (`NeedsChoice`,
+    remote untouched), `upstream` pushes to it, `current` pushes the local name, `nothing` asks
   - force push with a differently named upstream leases that branch
   - fetch all with one unreachable remote: one in `fetched`, one in `failed` with `TransferFailed`,
     and the good remote's tracking ref updated
@@ -460,7 +478,7 @@ deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string): Pr
     remote branch, Fetch all and Prune
   - extend "Tags": graph badges and their menu
 - `CHANGELOG.md` under Unreleased: "### Refs and remotes", including the #97 fix and the
-  upstream push-target fix.
+  `push.default` push-target behaviour.
 - `docs/ARCHITECTURE.md`: a short "Fetch all" note (one operation id, `RemoteFailed` events,
   prune `None` = git config).
 - No `docs/LICENSE_COMPLIANCE.md` change.

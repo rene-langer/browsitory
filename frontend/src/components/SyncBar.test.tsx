@@ -115,6 +115,19 @@ describe("SyncBar", () => {
     expect(props.onPush).not.toHaveBeenCalled();
   });
 
+  it("names the push target, or says Push will ask when push.default does not choose one", () => {
+    renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: "feature-x" } });
+    expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("title", "Push to origin/feature-x");
+  });
+
+  it("asks where to push when push.default does not choose a target", () => {
+    const props = renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: null } });
+    const push = screen.getByRole("button", { name: "Push" });
+    expect(push).toHaveAttribute("title", "Choose where to push fx on origin…");
+    fireEvent.click(push);
+    expect(props.onPush).toHaveBeenCalledWith("origin");
+  });
+
   it("keeps Push disabled without upstream on a detached HEAD", () => {
     renderBar({ upstream: null, detachedAt: "abc1234" });
     expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();

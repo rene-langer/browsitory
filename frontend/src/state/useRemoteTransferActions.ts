@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { PullOutcome, RemoteAuthMode, RepoClient, TransferProgress } from "../ipc/RepoClient";
 import { writeFetchPrune } from "../lib/fetchPrune";
+import { upstreamPushBranch } from "../lib/pushTarget";
 import { credentialFailureMessage } from "./useMutationRunner";
 import type {
   RunMutation,
@@ -370,11 +371,20 @@ export function useRemoteTransferActions(
     [client, runOptimisticMutation, repoPath],
   );
   const pushCurrentBranch = useCallback(
-    (remoteName: string) => {
+    async (remoteName: string) => {
+      // push.default does not choose where the current branch goes on its upstream's remote
+      // (e.g. `simple` with a differently named upstream): ask with Push to… (prefilled with
+      // that remote and the local name) instead of pushing. The backend refuses such a push too.
+      const upstream = upstreamRef.current;
+      if (upstream !== null && upstream.remoteName === remoteName && upstreamPushBranch(upstream) === null) {
+        const localBranch = currentBranchRef.current ?? upstream.localBranch;
+        setState((prev) => ({ ...prev, pushDialog: { localBranch } }));
+        return;
+      }
       lastPushRemote.current = remoteName;
       return startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName));
     },
-    [client, startTransfer, repoPath],
+    [client, startTransfer, repoPath, setState],
   );
   const requestForcePush = useCallback(
     (remoteName: string) => setState((prev) => ({ ...prev, forcePushConfirm: { remoteName } })),
@@ -386,10 +396,10 @@ export function useRemoteTransferActions(
   );
   const forcePushCurrentBranch = useCallback(
     (remoteName: string) => {
-      // The lease targets what `force_push_current_branch` resolves: the upstream's branch when
-      // the upstream lives on this remote, else the current branch's own name.
+      // The lease targets what `force_push_current_branch` resolves under push.default (see
+      // `lib/pushTarget.ts`), else the current branch's own name.
       const upstream = upstreamRef.current;
-      const leased = upstream !== null && upstream.remoteName === remoteName ? upstream.remoteBranch : null;
+      const leased = upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : null;
       forcePushTarget.current = { remoteName, branch: leased ?? upstream?.localBranch ?? currentBranchRef.current };
       setState((prev) => {
         const branch = prev.branches.find((candidate) => candidate.isCurrent)?.name;
@@ -410,9 +420,12 @@ export function useRemoteTransferActions(
       // The force-push offer force-pushes the *current* branch to where force_push_current_branch
       // resolves it: only offer it when that is exactly what this push targeted.
       const upstream = upstreamRef.current;
-      const forceTarget = upstream !== null && upstream.remoteName === remoteName ? upstream.remoteBranch : localBranch;
+      const forceTarget =
+        upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : localBranch;
       lastPushRemote.current =
-        localBranch === currentBranchRef.current && remoteBranch === forceTarget ? remoteName : null;
+        forceTarget !== null && localBranch === currentBranchRef.current && remoteBranch === forceTarget
+          ? remoteName
+          : null;
       setState((prev) => ({ ...prev, pushDialog: null }));
       return startTransfer("PushBranch", () =>
         client.pushBranch(repoPath, remoteName, localBranch, remoteBranch, setUpstream),

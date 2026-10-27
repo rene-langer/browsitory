@@ -204,10 +204,13 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 - `prune: Option<bool>`: `None` is `FetchPrune::Unspecified`, so libgit2 applies
   `remote.<name>.prune` then `fetch.prune` itself. The UI's Prune toggle is a per-repo
   `localStorage` preference; unset, every fetch sends `null`.
-- Push and force push of the current branch target its upstream's branch name when the upstream
-  lives on the remote being pushed to (`current_push_target`), else the local name; the
-  force-push lease reads the same target's tracking ref. The UI only offers "Force push (with
-  lease)" after a rejected push whose target equals that resolution.
+- Push and force push of the current branch go where `git-core::remote::push_target` resolves
+  from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
+  `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.
+  An undecided target is `PushTarget::NeedsChoice`: the backend refuses before connecting and the
+  UI opens "Push to…" instead (`UpstreamInfo.push_branch` = null). The force-push lease reads the
+  same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
+  push whose target equals that resolution.
 
 ## Error handling
 

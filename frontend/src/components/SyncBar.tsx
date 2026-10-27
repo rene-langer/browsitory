@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import { upstreamPushBranch } from "../lib/pushTarget";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SyncBar.module.css";
@@ -10,7 +11,8 @@ import styles from "./SyncBar.module.css";
  * branch's ahead/behind counts against its (last fetched) upstream. Fetch falls back to the
  * only/first remote when the branch has no upstream; its chevron menu adds "Fetch all remotes"
  * and the Prune toggle. Pull needs an upstream; Push without one opens the Push dialog to
- * publish the branch (`onPublish`).
+ * publish the branch (`onPublish`). Push with an upstream goes where `push.default` resolves;
+ * when it resolves nothing, `onPush` opens the Push dialog instead (see `pushCurrentBranch`).
  */
 export function SyncBar({
   remotes,
@@ -54,10 +56,14 @@ export function SyncBar({
   const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
   const fetchDisabled = operationDisabled || fetchRemote === null;
   const canPublish = !detached && upstream === null && remotes.length > 0;
+  const pushBranch = upstream === null ? null : upstreamPushBranch(upstream);
   const pushTitle = detached
     ? detachedTitle
     : upstream !== null
-      ? upstreamTitle("Push to")
+      ? (busyTitle ??
+        (pushBranch === null
+          ? `Choose where to push ${upstream.localBranch} on ${upstream.remoteName}…`
+          : `Push to ${upstream.remoteName}/${pushBranch}`))
       : (busyTitle ?? (canPublish ? "Push this branch to a remote and set its upstream…" : "No remote configured."));
 
   return (

@@ -54,8 +54,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A saved graph branch selection naming a deleted or renamed branch no longer breaks the whole
   refresh; deleting or renaming a branch in the app now updates the selection, and deleting the
   only isolated branch shows all branches again (#97).
-- Push and force push of a branch whose upstream has a different name now update that upstream
-  branch instead of creating a new remote branch with the local name.
+- Push and force push follow `push.default` (unset = `simple`). A branch whose upstream has a
+  different name (e.g. `feat` created from `origin/main`) is no longer pushed onto that
+  branch: under `simple` Push opens **Push to…** with the remote and the branch's own name;
+  with `push.default=upstream` it updates the upstream branch, with `current` the same-named one.
 - Sidebar menus (e.g. the Branches "Add" menu) are no longer clipped by their section while it
   is opening: the section open animation now fades only, without the transform that confined
   fixed-position menus to the section body (#98).

@@ -245,8 +245,8 @@ describe("Browsitory remote transfer", () => {
       cwd: E2E_REPO_PATH,
       encoding: "utf8",
     }).trim();
-    // Push targets the upstream's branch name when the upstream lives on the pushed-to remote
-    // (the earlier fast-forward test set `transfer-origin/main` as upstream), else the same name.
+    // Pin git's default push.default so the host's config cannot change the flow below.
+    execFileSync("git", ["config", "--local", "push.default", "simple"], { cwd: E2E_REPO_PATH, stdio: "ignore" });
     const configured = (key: string) => {
       try {
         return execFileSync("git", ["config", key], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
@@ -254,10 +254,14 @@ describe("Browsitory remote transfer", () => {
         return null;
       }
     };
-    const pushTarget =
+    // The earlier fast-forward test made `transfer-origin/main` the upstream. When the current
+    // branch has another name (e.g. `master`), `simple` must not push onto `main`: Push opens
+    // "Push to…" prefilled with the remote and the local name instead.
+    const upstreamBranch =
       configured(`branch.${currentBranch}.remote`) === "transfer-origin"
-        ? (configured(`branch.${currentBranch}.merge`) ?? `refs/heads/${currentBranch}`).replace(/^refs\/heads\//, "")
-        : currentBranch;
+        ? (configured(`branch.${currentBranch}.merge`) ?? "").replace(/^refs\/heads\//, "")
+        : null;
+    const needsChoice = upstreamBranch !== null && upstreamBranch !== currentBranch;
     const bareTip = (branch: string) => {
       try {
         return execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
@@ -268,8 +272,8 @@ describe("Browsitory remote transfer", () => {
         return null;
       }
     };
-    const remoteHeadBeforePush = bareTip(pushTarget);
-    const sameNameBeforePush = bareTip(currentBranch);
+    const remoteHeadBeforePush = bareTip(currentBranch);
+    const upstreamBeforePush = upstreamBranch === null ? null : bareTip(upstreamBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, BRANCH_PUSH_FILE), "branch push\n");
     execFileSync("git", ["add", BRANCH_PUSH_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["commit", "-m", "e2e: branch push change"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
@@ -277,12 +281,20 @@ describe("Browsitory remote transfer", () => {
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
     await clickRemoteContextItem("transfer-origin", "Push current branch here");
-    await browser.waitUntil(() => bareTip(pushTarget) === localHead, {
+    if (needsChoice) {
+      const dialog = await $(`dialog[aria-label="Push ${currentBranch}"]`);
+      await dialog.waitForExist({ timeout: 10000 });
+      await expect(await dialog.$("select")).toHaveValue("transfer-origin");
+      await expect(await dialog.$("input:not([type='checkbox'])")).toHaveValue(currentBranch);
+      await expect(await dialog.$("input[type='checkbox']")).not.toBeSelected();
+      await (await dialog.$("button=Push")).click();
+    }
+    await browser.waitUntil(() => bareTip(currentBranch) === localHead, {
       timeout: 10000,
       timeoutMsg: "expected Push to advance the remote branch",
     });
-    // A differently named upstream is the target; the same-name remote branch is left alone.
-    if (pushTarget !== currentBranch) expect(bareTip(currentBranch)).toBe(sameNameBeforePush);
+    // The differently named upstream branch is never the silent target.
+    if (needsChoice) expect(bareTip(upstreamBranch)).toBe(upstreamBeforePush);
 
     const createTagButton = await $("button=Create tag");
     await createTagButton.waitForEnabled({ timeout: 10000 });
