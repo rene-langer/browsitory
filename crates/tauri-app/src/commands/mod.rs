@@ -2226,12 +2226,17 @@ mod tests {
         match phase {
             TransferPhase::Receiving => "Receiving",
             TransferPhase::Updating => "Updating",
+            TransferPhase::RunningHook => "RunningHook",
         }
     }
 
     #[test]
     fn transfer_phase_wire_values_match_the_typescript_union() {
-        for phase in [TransferPhase::Receiving, TransferPhase::Updating] {
+        for phase in [
+            TransferPhase::Receiving,
+            TransferPhase::Updating,
+            TransferPhase::RunningHook,
+        ] {
             let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
                 operation_id: "fetch-42".into(),
                 operation: TransferOperation::Fetch,

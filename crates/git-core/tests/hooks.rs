@@ -421,3 +421,295 @@ fn prepare_commit_msg_source_is_merge_while_finishing_a_merge() {
 
     assert_eq!(head_message(&repo), "merge\n[merge]\n");
 }
+
+// ---- pre-push ------------------------------------------------------------------------------
+
+use git_core::remote::{
+    delete_remote_branch, push_branch, push_current_branch, push_tags, CredentialProvider,
+    RemoteError, TransferPhase, TransferProgress, TransferReporter,
+};
+
+#[derive(Default)]
+struct Phases(Vec<TransferPhase>);
+impl TransferReporter for Phases {
+    fn report(&mut self, event: TransferProgress) {
+        self.0.push(event.phase);
+    }
+}
+
+struct NoCredentials;
+impl CredentialProvider for NoCredentials {
+    fn credential(
+        &mut self,
+        _: &str,
+        _: Option<&str>,
+        _: git2::CredentialType,
+    ) -> Result<git2::Cred, git2::Error> {
+        Err(git2::Error::from_str("no credentials for a local remote"))
+    }
+}
+
+struct Pushable {
+    local_dir: tempfile::TempDir,
+    _remote_dir: tempfile::TempDir,
+    remote_path: std::path::PathBuf,
+    local: git2::Repository,
+}
+
+/// A local repo with one pushed commit on `main` and one more local commit to push.
+fn pushable() -> Pushable {
+    let (local_dir, local) = common::init_repo();
+    local.set_head("refs/heads/main").unwrap();
+    common::write_file(local_dir.path(), "a.txt", "a");
+    common::commit_all(&local, "first");
+    let remote_dir = tempfile::TempDir::new().unwrap();
+    git2::Repository::init_bare(remote_dir.path()).unwrap();
+    local
+        .remote("origin", remote_dir.path().to_str().unwrap())
+        .unwrap();
+    local
+        .find_remote("origin")
+        .unwrap()
+        .push(&["refs/heads/main:refs/heads/main"], None)
+        .unwrap();
+    common::write_file(local_dir.path(), "b.txt", "b");
+    common::commit_all(&local, "second");
+    let remote_path = remote_dir.path().to_path_buf();
+    Pushable {
+        local_dir,
+        _remote_dir: remote_dir,
+        remote_path,
+        local,
+    }
+}
+
+fn remote_ref(path: &std::path::Path, name: &str) -> Option<git2::Oid> {
+    git2::Repository::open_bare(path)
+        .unwrap()
+        .refname_to_id(name)
+        .ok()
+}
+
+fn remote_main(path: &std::path::Path) -> git2::Oid {
+    remote_ref(path, "refs/heads/main").unwrap()
+}
+
+fn push_main(fixture: &Pushable, no_verify: bool, phases: &mut Phases) -> Result<(), RemoteError> {
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        no_verify,
+        &mut NoCredentials,
+        phases,
+        &|| false,
+    )
+}
+
+#[test]
+fn failing_pre_push_blocks_the_push() {
+    let fixture = pushable();
+    let before = remote_main(&fixture.remote_path);
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        "echo 'tests failed' >&2; exit 1",
+    );
+
+    let error = push_main(&fixture, false, &mut Phases::default()).unwrap_err();
+
+    match &error {
+        RemoteError::HookFailed { hook, output } => {
+            assert_eq!(hook, "pre-push");
+            assert_eq!(output, "tests failed\n");
+        }
+        other => panic!("expected HookFailed, got {other:?}"),
+    }
+    assert_eq!(
+        error.transfer_error_kind(),
+        git_core::remote::TransferErrorKind::HookFailed
+    );
+    assert_eq!(remote_main(&fixture.remote_path), before);
+}
+
+#[test]
+fn pre_push_receives_args_and_ref_lines() {
+    let fixture = pushable();
+    let old = remote_main(&fixture.remote_path);
+    let new = fixture.local.head().unwrap().target().unwrap();
+    let record = fixture.local_dir.path().join("pre-push.txt");
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        &format!(r#"echo "$1 $2" > '{0}'; cat >> '{0}'"#, record.display()),
+    );
+    let mut phases = Phases::default();
+
+    push_main(&fixture, false, &mut phases).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        format!(
+            "origin {}\nrefs/heads/main {new} refs/heads/main {old}\n",
+            fixture.remote_path.to_str().unwrap()
+        )
+    );
+    assert!(phases.0.contains(&TransferPhase::RunningHook));
+    assert_eq!(remote_main(&fixture.remote_path), new);
+}
+
+#[test]
+fn up_to_date_refs_are_not_listed() {
+    let fixture = pushable();
+    push_main(&fixture, false, &mut Phases::default()).unwrap();
+    let record = fixture.local_dir.path().join("pre-push.txt");
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        &format!("cat > '{}'", record.display()),
+    );
+
+    push_main(&fixture, false, &mut Phases::default()).unwrap();
+
+    // libgit2 may skip negotiation entirely when nothing changes; either way no line is listed.
+    let recorded = std::fs::read_to_string(&record).unwrap_or_default();
+    assert_eq!(recorded, "");
+}
+
+#[test]
+fn no_verify_skips_pre_push() {
+    let fixture = pushable();
+    common::install_hook(&hooks_dir(&fixture.local).unwrap(), "pre-push", "exit 1");
+    let mut phases = Phases::default();
+
+    push_main(&fixture, true, &mut phases).unwrap();
+
+    assert!(!phases.0.contains(&TransferPhase::RunningHook));
+    assert_eq!(
+        remote_main(&fixture.remote_path),
+        fixture.local.head().unwrap().target().unwrap()
+    );
+}
+
+#[test]
+fn cancel_during_pre_push_is_a_cancellation() {
+    let fixture = pushable();
+    let before = remote_main(&fixture.remote_path);
+    let flag = fixture.local_dir.path().join("hook-started");
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        &format!("touch '{}'; sleep 30", flag.display()),
+    );
+    // Cancel only once the hook is running, so the pre-negotiation check passes.
+    let cancel = || flag.exists();
+
+    let error = push_current_branch(
+        &fixture.local,
+        "origin",
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &cancel,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RemoteError::Cancelled), "{error:?}");
+    assert_eq!(remote_main(&fixture.remote_path), before);
+}
+
+#[test]
+fn pushing_tags_runs_pre_push() {
+    let fixture = pushable();
+    git_core::remote::create_tag(&fixture.local, "v1", None).unwrap();
+    common::install_hook(&hooks_dir(&fixture.local).unwrap(), "pre-push", "exit 1");
+
+    let error = push_tags(
+        &fixture.local,
+        "origin",
+        &["v1".to_string()],
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RemoteError::HookFailed { .. }));
+    assert_eq!(remote_ref(&fixture.remote_path, "refs/tags/v1"), None);
+}
+
+#[test]
+fn push_branch_and_delete_remote_branch_run_pre_push() {
+    let fixture = pushable();
+    let record = fixture.local_dir.path().join("pre-push.txt");
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        &format!("cat >> '{}'", record.display()),
+    );
+    let head = fixture.local.head().unwrap().target().unwrap();
+    let zero = git2::Oid::ZERO_SHA1;
+
+    push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "topic",
+        false,
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap();
+    delete_remote_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        format!(
+            "refs/heads/main {head} refs/heads/topic {zero}\n(delete) {zero} refs/heads/topic {head}\n"
+        )
+    );
+    assert_eq!(remote_ref(&fixture.remote_path, "refs/heads/topic"), None);
+}
+
+#[test]
+fn a_failing_pre_push_blocks_a_remote_branch_delete() {
+    let fixture = pushable();
+    push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "topic",
+        false,
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap();
+    common::install_hook(&hooks_dir(&fixture.local).unwrap(), "pre-push", "exit 1");
+
+    let error = delete_remote_branch(
+        &fixture.local,
+        "origin",
+        "topic",
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RemoteError::HookFailed { .. }));
+    assert!(remote_ref(&fixture.remote_path, "refs/heads/topic").is_some());
+}

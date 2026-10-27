@@ -224,6 +224,7 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
     push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -233,6 +234,7 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
         &fixture.local,
         "origin",
         &["v1.0.0".to_string()],
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -282,6 +284,7 @@ fn pushes_all_local_tags_without_using_the_configured_push_refspec() {
         &fixture.local,
         "origin",
         &[],
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -315,6 +318,7 @@ fn pushing_all_tags_is_a_no_op_when_there_are_no_local_tags() {
         &fixture.local,
         "origin",
         &[],
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -340,6 +344,7 @@ fn branch_push_rejects_non_fast_forward_updates() {
         push_current_branch(
             &fixture.local,
             "origin",
+            false,
             &mut NoCredentials,
             &mut reporter,
             &|| false
@@ -558,6 +563,7 @@ fn a_push_cancelled_before_negotiation_is_reported_cancelled_and_leaves_the_remo
     let result = push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| true,
@@ -593,6 +599,7 @@ fn a_push_cancelled_after_negotiation_completes_and_reports_its_real_outcome() {
     let result = push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1,
@@ -687,9 +694,14 @@ fn push_to_an_unreachable_remote_fails_without_moving_local_head() {
     let local_head = repo.head().unwrap().target();
     let mut reporter = VecReporter::default();
 
-    let result = push_current_branch(&repo, "origin", &mut NoCredentials, &mut reporter, &|| {
-        false
-    });
+    let result = push_current_branch(
+        &repo,
+        "origin",
+        false,
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    );
 
     assert!(matches!(result, Err(RemoteError::Git(_))));
     assert_eq!(repo.head().unwrap().target(), local_head);
@@ -1029,6 +1041,7 @@ fn force_push_overwrites_the_remote_when_the_lease_matches() {
     force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -1062,6 +1075,7 @@ fn force_push_refuses_a_stale_lease_and_leaves_the_remote_untouched() {
     let result = force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -1087,6 +1101,7 @@ fn force_push_of_a_branch_new_to_the_remote_succeeds() {
     force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut NoCredentials,
         &mut reporter,
         &|| false,
@@ -1121,6 +1136,7 @@ fn force_push_refuses_when_remote_has_the_branch_but_it_was_never_fetched() {
         force_push_current_branch(
             &fixture.local,
             "origin",
+            false,
             &mut NoCredentials,
             &mut reporter,
             &|| false
@@ -1139,6 +1155,7 @@ fn force_push_refuses_a_detached_head() {
         force_push_current_branch(
             &fixture.local,
             "origin",
+            false,
             &mut NoCredentials,
             &mut reporter,
             &|| false
@@ -1164,6 +1181,7 @@ fn pushing_a_non_current_branch_without_upstream_creates_only_the_remote_branch(
         "origin",
         "topic",
         "topic",
+        false,
         false,
         &mut credentials,
         &mut reporter,
@@ -1195,6 +1213,7 @@ fn pushing_with_set_upstream_records_the_upstream_under_the_chosen_name() {
         "topic",
         "published",
         true,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1234,6 +1253,7 @@ fn a_rejected_push_with_set_upstream_leaves_the_upstream_unset() {
         "old",
         "main",
         true,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1261,6 +1281,7 @@ fn an_invalid_remote_branch_name_is_rejected_before_connecting() {
             "main",
             name,
             false,
+            false,
             &mut credentials,
             &mut reporter,
             &|| false,
@@ -1281,6 +1302,7 @@ fn pushing_a_missing_local_branch_is_rejected_before_connecting() {
         "origin",
         "nope",
         "nope",
+        false,
         false,
         &mut credentials,
         &mut reporter,
@@ -1310,6 +1332,7 @@ fn push_current_branch_under_push_default_upstream_targets_the_upstream_branch_n
     push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1336,6 +1359,7 @@ fn push_current_branch_to_another_remote_keeps_the_local_name() {
     push_current_branch(
         &fixture.local,
         "other",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1367,6 +1391,7 @@ fn force_push_under_push_default_upstream_overwrites_the_differently_named_upstr
         "main",
         "renamed",
         true,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1392,6 +1417,7 @@ fn force_push_under_push_default_upstream_overwrites_the_differently_named_upstr
     force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1419,6 +1445,7 @@ fn force_push_under_push_default_upstream_leases_the_differently_named_upstream(
         "main",
         "renamed",
         true,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1444,6 +1471,7 @@ fn force_push_under_push_default_upstream_leases_the_differently_named_upstream(
     let result = force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1466,6 +1494,7 @@ fn deleting_a_remote_branch_removes_the_remote_ref_and_the_tracking_ref() {
         "doomed",
         "doomed",
         false,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1476,6 +1505,7 @@ fn deleting_a_remote_branch_removes_the_remote_ref_and_the_tracking_ref() {
         "origin",
         "doomed-too",
         "doomed-too",
+        false,
         false,
         &mut credentials,
         &mut reporter,
@@ -1494,6 +1524,7 @@ fn deleting_a_remote_branch_removes_the_remote_ref_and_the_tracking_ref() {
         &fixture.local,
         "origin",
         "doomed",
+        false,
         &mut credentials,
         &mut events,
         &|| false,
@@ -1538,6 +1569,7 @@ fn deleting_a_remote_branch_keeps_the_upstream_config_of_branches_tracking_it() 
         "topic",
         "topic",
         true,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1548,6 +1580,7 @@ fn deleting_a_remote_branch_keeps_the_upstream_config_of_branches_tracking_it() 
         &fixture.local,
         "origin",
         "topic",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -1572,6 +1605,7 @@ fn a_remote_branch_delete_cancelled_at_negotiation_leaves_both_refs() {
         &fixture.local,
         "origin",
         "main",
+        false,
         &mut credentials,
         &mut reporter,
         &|| true,
@@ -1595,6 +1629,7 @@ fn deleting_head_or_an_invalid_name_is_rejected_before_connecting() {
             &fixture.local,
             "origin",
             name,
+            false,
             &mut credentials,
             &mut reporter,
             &|| false,
@@ -2016,6 +2051,7 @@ fn push_current_branch_with_a_differently_named_upstream_needs_a_choice_by_defau
     let pushed = push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2023,6 +2059,7 @@ fn push_current_branch_with_a_differently_named_upstream_needs_a_choice_by_defau
     let forced = force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2056,6 +2093,7 @@ fn push_current_branch_under_push_default_current_pushes_the_same_name() {
     push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2082,6 +2120,7 @@ fn push_current_branch_under_push_default_nothing_needs_a_choice() {
     let result = push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2107,6 +2146,7 @@ fn force_push_validates_the_resolved_target_before_connecting() {
     let result = force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2177,6 +2217,7 @@ fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to()
         "doomed",
         "doomed",
         false,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2204,6 +2245,7 @@ fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to()
         &fixture.local,
         "mirror",
         "doomed",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2227,6 +2269,7 @@ fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to()
         "doomed",
         "doomed",
         false,
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2236,6 +2279,7 @@ fn deleting_a_remote_branch_removes_the_tracking_ref_its_fetch_refspec_maps_to()
         &fixture.local,
         "narrow",
         "doomed",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
@@ -2259,6 +2303,7 @@ fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
             "main",
             name,
             false,
+            false,
             &mut credentials,
             &mut reporter,
             &|| false,
@@ -2268,6 +2313,7 @@ fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
             &fixture.local,
             "origin",
             name,
+            false,
             &mut credentials,
             &mut reporter,
             &|| false,
@@ -2283,6 +2329,7 @@ fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
     let forced = force_push_current_branch(
         &fixture.local,
         "origin",
+        false,
         &mut credentials,
         &mut reporter,
         &|| false,
