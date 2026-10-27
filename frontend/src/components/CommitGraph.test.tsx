@@ -564,6 +564,47 @@ describe("CommitGraph", () => {
 
   const row = (name: string) => screen.getByText(new RegExp(`^${name} `)).closest("li")!;
 
+  it("offers Compare these commits only with exactly two selected", () => {
+    const onCompareCommits = vi.fn();
+    renderChain({ onCompareCommits });
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Compare these commits" })).toBeEnabled();
+
+    fireEvent.click(row("C"), { ctrlKey: true });
+    expect(screen.queryByRole("button", { name: "Compare these commits" })).toBeNull();
+  });
+
+  it("orders the two commits older..newer whatever the click order", () => {
+    const onCompareCommits = vi.fn();
+    renderChain({ onCompareCommits });
+
+    fireEvent.click(row("B"));
+    fireEvent.click(row("D"), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Compare these commits" }));
+    expect(onCompareCommits).toHaveBeenLastCalledWith("B", "D");
+
+    fireEvent.contextMenu(row("D"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compare these commits" }));
+    expect(onCompareCommits).toHaveBeenLastCalledWith("B", "D");
+  });
+
+  it("keeps Compare these commits enabled while an operation is pending", () => {
+    renderChain({ pending: true, onCompareCommits: vi.fn() });
+    fireEvent.click(row("C"));
+    fireEvent.click(row("B"), { shiftKey: true });
+    expect(screen.getByRole("button", { name: "Compare these commits" })).toBeEnabled();
+  });
+
+  it("offers Diff against working tree on a single commit", () => {
+    const onCompareWithWorkingTree = vi.fn();
+    renderChain({ pending: true, onCompareWithWorkingTree });
+    fireEvent.contextMenu(row("C"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Diff against working tree" }));
+    expect(onCompareWithWorkingTree).toHaveBeenCalledWith("C");
+  });
+
   it("shift-clicking a second commit and right-clicking within the range shows the multi-select menu", () => {
     renderChain();
 
