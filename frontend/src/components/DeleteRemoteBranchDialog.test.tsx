@@ -44,8 +44,13 @@ describe("DeleteRemoteBranchDialog", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByLabelText("Branch")).toHaveValue("main"));
+    await waitFor(() => expect(screen.getByLabelText("Branch")).toBeEnabled());
+    // Nothing is preselected: a destructive action needs an explicit choice.
+    expect(screen.getByLabelText("Branch")).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Choose a branch…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete remote branch" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "topic" } });
+    expect(screen.getByRole("button", { name: "Delete remote branch" })).toBeEnabled();
     expect(screen.getByRole("dialog", { name: "Delete remote branch" })).toHaveTextContent(
       "Delete origin/topic on the remote? This can't be undone.",
     );
@@ -53,7 +58,9 @@ describe("DeleteRemoteBranchDialog", () => {
     expect(onDelete).toHaveBeenCalledWith("origin", "topic");
 
     fireEvent.change(screen.getByLabelText("Remote"), { target: { value: "backup" } });
-    await waitFor(() => expect(screen.getByLabelText("Branch")).toHaveValue("mirror-only"));
+    await waitFor(() => expect(screen.getByRole("option", { name: "mirror-only" })).toBeInTheDocument());
+    expect(screen.getByLabelText("Branch")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Delete remote branch" })).toBeDisabled();
   });
 
   it("shows a load failure and keeps Delete disabled", async () => {

@@ -39,7 +39,8 @@ export function DeleteRemoteBranchDialog({
       (names) => {
         if (cancelled) return;
         setOptions(names);
-        setBranchName(names[0] ?? "");
+        // Never preselect a branch to delete: the user picks one explicitly.
+        setBranchName("");
         setLoadError(null);
       },
       () => {
@@ -86,6 +87,7 @@ export function DeleteRemoteBranchDialog({
                   disabled={options === null}
                   onChange={(event) => setBranchName(event.target.value)}
                 >
+                  <option value="">Choose a branch…</option>
                   {(options ?? []).map((name) => (
                     <option key={name} value={name}>
                       {name}
