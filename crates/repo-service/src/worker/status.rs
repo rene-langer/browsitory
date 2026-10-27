@@ -276,7 +276,10 @@ pub(super) fn commit(
     message: String,
     reply: Sender<Result<String, String>>,
 ) {
-    let _ = reply.send(git_core::commit::commit(repo, &message).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::commit::commit(repo, &message, git_core::hooks::HookOptions::default())
+            .map_err(|error| error.to_string()),
+    );
 }
 
 impl WorkerHandle {

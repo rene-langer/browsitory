@@ -350,7 +350,12 @@ fn a_commit_made_after_resolving_a_conflict_has_two_parents() {
         .unwrap();
 
     let mut repo = repo;
-    let oid = git_core::commit::commit(&mut repo, "merge feature into base").unwrap();
+    let oid = git_core::commit::commit(
+        &mut repo,
+        "merge feature into base",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let commit = repo
         .find_commit(git2::Oid::from_str(&oid).unwrap())
@@ -374,7 +379,12 @@ fn make_delete_modify_conflict() -> (tempfile::TempDir, git2::Repository) {
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
     std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
     git_core::stage::stage_file(&repo, "shared.txt").unwrap();
-    git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "main commit deletes",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
         .unwrap();
@@ -449,7 +459,12 @@ fn resolve_add_delete_conflict_then_commit_has_two_parents() {
         .unwrap();
 
     let mut repo = repo;
-    let oid = git_core::commit::commit(&mut repo, "merge feature into main").unwrap();
+    let oid = git_core::commit::commit(
+        &mut repo,
+        "merge feature into main",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let commit = repo
         .find_commit(git2::Oid::from_str(&oid).unwrap())
@@ -514,7 +529,12 @@ fn never_creates_a_merge_commit_even_when_fast_forward_is_possible() {
         repo.head().unwrap().peel_to_commit().unwrap().id(),
         head_before
     );
-    git_core::commit::commit(&mut repo, "Merge feature").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "Merge feature",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     let merge = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(
         merge.parent_ids().collect::<Vec<_>>(),
@@ -755,7 +775,12 @@ fn commit_after_squash_has_one_parent_and_clears_squash_msg() {
     let head_before = repo.head().unwrap().peel_to_commit().unwrap().id();
     git_core::merge::start_merge(&repo, "feature", squash()).unwrap();
 
-    git_core::commit::commit(&mut repo, "Squash feature").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "Squash feature",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_ids().collect::<Vec<_>>(), vec![head_before]);

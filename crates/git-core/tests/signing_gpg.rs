@@ -73,7 +73,12 @@ fn commit_file(dir: &std::path::Path, repo: &mut git2::Repository, name: &str) -
     let mut index = repo.index().unwrap();
     index.add_path(std::path::Path::new(name)).unwrap();
     index.write().unwrap();
-    git_core::commit::commit(repo, &format!("add {name}")).unwrap()
+    git_core::commit::commit(
+        repo,
+        &format!("add {name}"),
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap()
 }
 
 #[test]

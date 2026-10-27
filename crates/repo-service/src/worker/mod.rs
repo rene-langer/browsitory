@@ -3214,7 +3214,12 @@ mod tests {
         git_core::branch::switch_branch(&repo, &main_branch).unwrap();
         std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
         git_core::stage::stage_file(&repo, "shared.txt").unwrap();
-        git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
+        git_core::commit::commit(
+            &mut repo,
+            "main commit deletes",
+            git_core::hooks::HookOptions::default(),
+        )
+        .unwrap();
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();

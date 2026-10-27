@@ -255,7 +255,8 @@ fn commit_and_amend_are_signed_with_unchanged_reflog() {
     };
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let oid = git_core::commit::commit(&mut repo, "add a").unwrap();
+    let oid = git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
+        .unwrap();
     let oid = git2::Oid::from_str(&oid).unwrap();
     assert!(is_ssh_signed(&repo, oid));
     assert_eq!(
@@ -269,7 +270,12 @@ fn commit_and_amend_are_signed_with_unchanged_reflog() {
         Some("commit: add a")
     );
 
-    let amended = git_core::commit::amend_head(&repo, "add a, amended").unwrap();
+    let amended = git_core::commit::amend_head(
+        &repo,
+        "add a, amended",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     let amended = git2::Oid::from_str(&amended).unwrap();
     assert!(is_ssh_signed(&repo, amended));
     assert_eq!(head_oid(&repo), amended);
@@ -300,7 +306,9 @@ fn cherry_pick_and_revert_are_signed() {
     let base = head_oid(&repo);
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let picked = git_core::commit::commit(&mut repo, "add a").unwrap();
+    let picked =
+        git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
+            .unwrap();
 
     let reverted = match git_core::pick::revert(&repo, &picked).unwrap() {
         git_core::pick::PickOutcome::Committed { commit_id } => commit_id,
@@ -332,7 +340,14 @@ fn rebase_steps_and_squash_collapse_are_signed() {
     for name in ["a", "b", "c"] {
         write_file(dir.path(), &format!("{name}.txt"), "x\n");
         stage(&repo, &format!("{name}.txt"));
-        ids.push(git_core::commit::commit(&mut repo, &format!("add {name}")).unwrap());
+        ids.push(
+            git_core::commit::commit(
+                &mut repo,
+                &format!("add {name}"),
+                git_core::hooks::HookOptions::default(),
+            )
+            .unwrap(),
+        );
     }
     let plan = vec![
         RebasePlanEntry {
@@ -377,13 +392,23 @@ fn failed_signing_during_a_merge_keeps_the_merge_in_progress() {
     }
     write_file(dir.path(), "main.txt", "m\n");
     stage(&repo, "main.txt");
-    git_core::commit::commit(&mut repo, "on main").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "on main",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     repo.set_head("refs/heads/feature").unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
     write_file(dir.path(), "feature.txt", "f\n");
     stage(&repo, "feature.txt");
-    git_core::commit::commit(&mut repo, "on feature").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "on feature",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     repo.set_head(&format!("refs/heads/{branch}")).unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
@@ -398,7 +423,12 @@ fn failed_signing_during_a_merge_keeps_the_merge_in_progress() {
         .set_str("user.signingKey", "/nonexistent/key")
         .unwrap();
 
-    let err = git_core::commit::commit(&mut repo, "merge feature").unwrap_err();
+    let err = git_core::commit::commit(
+        &mut repo,
+        "merge feature",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
 
     assert!(err.to_string().starts_with("Signing failed: "), "{err}");
     assert_eq!(head_oid(&repo), before);
@@ -410,7 +440,8 @@ fn signing_off_by_default_keeps_commits_unsigned() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let oid = git_core::commit::commit(&mut repo, "plain").unwrap();
+    let oid = git_core::commit::commit(&mut repo, "plain", git_core::hooks::HookOptions::default())
+        .unwrap();
     assert!(!is_ssh_signed(&repo, git2::Oid::from_str(&oid).unwrap()));
     assert!(repo
         .extract_signature(&git2::Oid::from_str(&oid).unwrap(), None)
@@ -422,7 +453,7 @@ use git_core::signing::{verify_commit, SignatureFormat, SignatureStatus};
 fn signed_head(dir: &std::path::Path, repo: &mut git2::Repository) -> String {
     write_file(dir, "v.txt", "v\n");
     stage(repo, "v.txt");
-    git_core::commit::commit(repo, "verify me").unwrap()
+    git_core::commit::commit(repo, "verify me", git_core::hooks::HookOptions::default()).unwrap()
 }
 
 #[test]
@@ -513,7 +544,8 @@ fn unsigned_commit_reports_unsigned() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let id = git_core::commit::commit(&mut repo, "plain").unwrap();
+    let id = git_core::commit::commit(&mut repo, "plain", git_core::hooks::HookOptions::default())
+        .unwrap();
     let result = verify_commit(&repo, &id).unwrap();
     assert_eq!(result.status, SignatureStatus::Unsigned);
     assert_eq!(result.format, None);
@@ -561,7 +593,14 @@ fn rebase_continue_can_be_retried_after_the_squash_collapse_fails_to_sign() {
     for name in ["a", "b"] {
         write_file(dir.path(), &format!("{name}.txt"), "x\n");
         stage(&repo, &format!("{name}.txt"));
-        ids.push(git_core::commit::commit(&mut repo, &format!("add {name}")).unwrap());
+        ids.push(
+            git_core::commit::commit(
+                &mut repo,
+                &format!("add {name}"),
+                git_core::hooks::HookOptions::default(),
+            )
+            .unwrap(),
+        );
     }
     let plan = vec![
         RebasePlanEntry {
@@ -625,7 +664,9 @@ fn cherry_pick_with_unsupported_signing_config_touches_nothing() {
     let base = head_oid(&repo);
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let picked = git_core::commit::commit(&mut repo, "add a").unwrap();
+    let picked =
+        git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
+            .unwrap();
     repo.set_head_detached(base).unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
@@ -650,7 +691,9 @@ fn cherry_pick_signer_failure_leaves_a_pick_in_progress_that_can_be_committed() 
     let base = head_oid(&repo);
     write_file(dir.path(), "a.txt", "a\n");
     stage(&repo, "a.txt");
-    let picked = git_core::commit::commit(&mut repo, "add a").unwrap();
+    let picked =
+        git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
+            .unwrap();
     repo.set_head_detached(base).unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
@@ -677,7 +720,9 @@ fn cherry_pick_signer_failure_leaves_a_pick_in_progress_that_can_be_committed() 
         .unwrap()
         .set_str("user.signingKey", &good_key)
         .unwrap();
-    let committed = git_core::commit::commit(&mut repo, "add a").unwrap();
+    let committed =
+        git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
+            .unwrap();
     assert!(is_ssh_signed(
         &repo,
         git2::Oid::from_str(&committed).unwrap()

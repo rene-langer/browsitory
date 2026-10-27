@@ -1984,6 +1984,7 @@ mod tests {
             head_pushed: true,
             operation: Some(git_core::repo::OperationKind::CherryPick),
             squash_message: None,
+            commit_hooks: vec![],
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
@@ -1995,6 +1996,7 @@ mod tests {
             head_pushed: false,
             operation: None,
             squash_message: Some("Squashed commit of the following:\n".into()),
+            commit_hooks: vec![],
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],

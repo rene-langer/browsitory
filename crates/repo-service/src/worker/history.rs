@@ -9,7 +9,7 @@ pub(super) fn head_info(repo: &git2::Repository, reply: Sender<Result<HeadInfo, 
 }
 pub(super) fn amend(repo: &git2::Repository, message: String, reply: Sender<Result<(), String>>) {
     let _ = reply.send(
-        git_core::commit::amend_head(repo, &message)
+        git_core::commit::amend_head(repo, &message, git_core::hooks::HookOptions::default())
             .map(|_| ())
             .map_err(|error| error.to_string()),
     );
