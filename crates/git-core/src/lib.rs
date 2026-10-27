@@ -6,10 +6,10 @@ pub mod diff;
 pub mod forge;
 pub mod graph;
 pub mod history;
+pub mod hooks;
 mod line_patch;
 pub mod merge;
 pub mod pick;
-#[allow(dead_code)] // used by `hooks` (next commit)
 mod process;
 pub mod rebase;
 pub mod reflog;
