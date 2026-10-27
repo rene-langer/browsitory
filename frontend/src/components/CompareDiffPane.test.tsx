@@ -152,4 +152,21 @@ describe("CompareDiffPane", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     expect(await screen.findByText("1 file changed")).toBeInTheDocument();
   });
+
+  it("drops the old file list when the range changes, and never diffs an old path in the new range", async () => {
+    const C = "c".repeat(40);
+    const getRangeFiles = vi.fn(async (_repo: string, from: string): Promise<ChangedFile[]> =>
+      from === A ? [{ path: "old-range.txt", oldPath: null }] : new Promise<ChangedFile[]>(() => {}),
+    );
+    const getRangeDiff = vi.fn(async () => []);
+    const c = client({ getRangeFiles, getRangeDiff });
+    const { rerender, props } = renderPane({ client: c });
+    expect(await screen.findByText("old-range.txt")).toBeInTheDocument();
+
+    const next: CompareState = { target: { kind: "commits", fromId: C, toId: B }, range: { fromId: C, toId: B }, error: null };
+    rerender(<CompareDiffPane {...props} client={c} compare={next} />);
+    expect(screen.queryByText("old-range.txt")).toBeNull();
+    await waitFor(() => expect(getRangeFiles).toHaveBeenCalledWith("/repo", C, B));
+    expect(getRangeDiff).not.toHaveBeenCalledWith("/repo", C, B, "old-range.txt", null, expect.anything());
+  });
 });

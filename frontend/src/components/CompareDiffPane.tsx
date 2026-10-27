@@ -45,12 +45,24 @@ export function CompareDiffPane({
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const [retryToken, setRetryToken] = useState(0);
   const collapseInitializedFor = useRef<string | null>(null);
 
-  const loadFiles = () => {
+  // A new range (swap, a moved branch) drops the old list in the same render, so no section
+  // diffs an old path against the new ends. Adjusted during render, not in an effect:
+  // `react-hooks/set-state-in-effect` forbids a synchronous setState there.
+  const [shownFor, setShownFor] = useState(rangeKey);
+  if (shownFor !== rangeKey) {
+    setShownFor(rangeKey);
+    setFiles(null);
+    setError(null);
+  }
+
+  useEffect(() => {
     if (fromId === null) return;
     let ignore = false;
-    const request = toId === null ? client.getWorkingTreeCompareFiles(repoPath, fromId) : client.getRangeFiles(repoPath, fromId, toId);
+    const request =
+      toId === null ? client.getWorkingTreeCompareFiles(repoPath, fromId) : client.getRangeFiles(repoPath, fromId, toId);
     request.then(
       (next) => {
         if (ignore) return;
@@ -68,12 +80,7 @@ export function CompareDiffPane({
     return () => {
       ignore = true;
     };
-  };
-
-  useEffect(() => {
-    return loadFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, fromId, toId, reloadKey]);
+  }, [repoPath, client, fromId, toId, rangeKey, reloadKey, retryToken]);
 
   const short = (id: string) => commits.find((c) => c.id === id)?.shortId ?? id.slice(0, 7);
   const described = (id: string) => {
@@ -106,7 +113,7 @@ export function CompareDiffPane({
   } else if (fromId === null) {
     body = <p className={styles.status}>{`Finding where ${target.kind === "branch" ? target.label : "it"} diverged…`}</p>;
   } else if (error !== null) {
-    body = <InlineError message={error.message} hint={error.hint} onRetry={loadFiles} onDismiss={onClose} />;
+    body = <InlineError message={error.message} hint={error.hint} onRetry={() => setRetryToken((token) => token + 1)} onDismiss={onClose} />;
   } else if (files === null) {
     body = null;
   } else if (files.length === 0) {
