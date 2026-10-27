@@ -70,6 +70,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Palette: "Merge <branch> into current branch…", "Stash all changes" (was "Save stash"),
   "Stash…", "Stash <file>…", "Show stash: …", "Pop stash: …".
 
+### Compare
+
+- **Compare these commits** (two selected commits, from the selection bar or the right-click
+  menu) shows every file that differs between them in the diff pane, oldest first, with
+  **Swap**. Renames are followed.
+- **Compare with current branch** on a branch (local or remote-tracking) shows what it changed
+  since it diverged; **Diff against working tree** on a commit compares it with your files on
+  disk, untracked files included.
+- Compare views are read-only, with Blame and History on each file.
+
 ### Fixed
 
 - Merge in the "Pull has diverged" dialog failed with "reference not found" (#104).
