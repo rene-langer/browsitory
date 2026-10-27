@@ -360,6 +360,30 @@ export function buildCommands(
       });
     }
 
+    if (state.remotes.length > 0) {
+      commands.push({
+        id: "fetch-all-remotes",
+        label: "Fetch all remotes",
+        keywords: ["fetch", "all", "remotes", "prune"],
+        run: () => void appState.fetchAllRemotes(),
+      });
+      const current = state.branches.find((branch) => branch.isCurrent);
+      if (current !== undefined && state.headInfo.detachedAt === null) {
+        commands.push({
+          id: "push-branch-to",
+          label: "Push branch to…",
+          keywords: ["push", "publish", "upstream", "remote", "branch"],
+          run: () => appState.openPushDialog(current.name),
+        });
+      }
+      commands.push({
+        id: "delete-remote-branch",
+        label: "Delete remote branch…",
+        keywords: ["delete", "remove", "remote", "branch"],
+        run: () => appState.openDeleteRemoteBranchDialog(null, null),
+      });
+    }
+
     for (const remote of state.remotes) {
       commands.push({
         id: `fetch-remote:${remote.name}`,

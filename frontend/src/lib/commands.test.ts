@@ -169,6 +169,40 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
 }
 
 describe("buildCommands", () => {
+  it("offers Fetch all remotes, Push branch to… and Delete remote branch… when a remote exists", () => {
+    const appState = makeAppState();
+    const commands = buildCommands(appState);
+    const fetchAll = commands.find((command) => command.label === "Fetch all remotes")!;
+    expect(fetchAll.keywords).toEqual(expect.arrayContaining(["fetch", "all", "remotes", "prune"]));
+    fetchAll.run();
+    commands.find((command) => command.label === "Push branch to…")!.run();
+    commands.find((command) => command.label === "Delete remote branch…")!.run();
+    expect(appState.fetchAllRemotes).toHaveBeenCalled();
+    expect(appState.openPushDialog).toHaveBeenCalledWith("main");
+    expect(appState.openDeleteRemoteBranchDialog).toHaveBeenCalledWith(null, null);
+  });
+
+  it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
+    const labels = (overrides: Parameters<typeof makeAppState>[0]) =>
+      buildCommands(makeAppState(overrides)).map((command) => command.label);
+    expect(labels({ remotes: [] })).not.toContain("Fetch all remotes");
+    expect(labels({ remotes: [] })).not.toContain("Push branch to…");
+    expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
+    const detached = labels({
+      branches: [],
+      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null },
+    });
+    expect(detached).not.toContain("Push branch to…");
+    expect(detached).toContain("Fetch all remotes");
+  });
+
+  it("hides the new remote commands while a repository operation runs", () => {
+    const labels = buildCommands(makeAppState({ pending: true })).map((command) => command.label);
+    expect(labels).not.toContain("Fetch all remotes");
+    expect(labels).not.toContain("Push branch to…");
+    expect(labels).not.toContain("Delete remote branch…");
+  });
+
   it("includes a shortcuts command only when a handler is supplied", () => {
     const onShow = vi.fn();
     expect(buildCommands(makeAppState()).some((c) => c.id === "show-shortcuts")).toBe(false);
