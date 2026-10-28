@@ -73,6 +73,11 @@ describe("SidecarBridge with the real vscode-sidecar", () => {
       showOpenDialog: async () => undefined,
       openExternal: async () => true,
       appendLine: (message) => diagnostics.push(message),
+      openFile: async () => undefined,
+      revealInOS: async () => undefined,
+      createTerminal: () => {},
+      openDiff: async () => undefined,
+      openMergeEditor: async () => true,
     });
 
     async function request(id: number, method: string, params: Record<string, unknown>) {

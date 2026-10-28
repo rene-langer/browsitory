@@ -13,7 +13,9 @@ use std::time::Duration;
 use git2::Repository;
 use thiserror::Error;
 
-use crate::process::{run_captured, Captured, RunError};
+#[cfg(windows)]
+use crate::process::find_sh;
+use crate::process::{run_captured, Captured, RunError, REPO_PINNING_ENV};
 
 /// A hook still running after this long is killed (with its process group on Unix).
 pub const HOOK_TIMEOUT: Duration = Duration::from_secs(600);
@@ -153,21 +155,6 @@ pub fn sh_candidates(git_exe: &Path) -> Vec<PathBuf> {
     candidates
 }
 
-#[cfg(windows)]
-fn find_on_path(file: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths)
-        .map(|dir| dir.join(file))
-        .find(|path| path.is_file())
-}
-
-#[cfg(windows)]
-fn find_sh() -> Option<PathBuf> {
-    find_on_path("git.exe")
-        .and_then(|git| sh_candidates(&git).into_iter().find(|path| path.is_file()))
-        .or_else(|| find_on_path("sh.exe"))
-}
-
 #[cfg(unix)]
 fn hook_command(path: &Path) -> Option<Command> {
     Some(Command::new(path))
@@ -179,13 +166,6 @@ fn hook_command(path: &Path) -> Option<Command> {
     command.arg(path.to_string_lossy().replace('\\', "/"));
     Some(command)
 }
-
-/// Variables that pin git to one repository/index/prefix. Git leaves `GIT_DIR` and friends unset
-/// for hooks (the hook finds the repository from its working directory), so a hook that `cd`s
-/// into a subdirectory and runs `git add` there (monorepo lint-staged) stages that
-/// subdirectory's files. Inherited values (Browsitory itself launched from a git hook or alias)
-/// are removed for the same reason; commit hooks set `GIT_INDEX_FILE` again on purpose.
-const REPO_PINNING_ENV: [&str; 4] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"];
 
 fn configure(command: &mut Command, repo: &Repository, invocation: &HookInvocation<'_>) {
     command.args(invocation.args).current_dir(run_dir(repo));

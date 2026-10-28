@@ -3,6 +3,7 @@ import type {
   BranchInfo,
   CreatePullRequest,
   FileConflictChoice,
+  MarkResolvedOutcome,
   ForgeProvider,
   ForgeRepository,
   GraphCommit,
@@ -250,6 +251,8 @@ export interface UseAppStateResult {
   mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
+  /** See `MergeRebaseActions.markResolved`. */
+  markResolved(path: string, force: boolean): Promise<MarkResolvedOutcome | null>;
   abortMerge(): Promise<void>;
   openRebasePlanner(commitId: string): void;
   openRebaseSelection(onto: string, preset: ReadonlyMap<string, PresetAction>): void;
@@ -592,6 +595,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    markResolved,
     abortMerge,
     openRebasePlanner,
     openRebaseSelection,
@@ -712,6 +716,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    markResolved,
     abortMerge,
     openRebasePlanner,
     openRebaseSelection,

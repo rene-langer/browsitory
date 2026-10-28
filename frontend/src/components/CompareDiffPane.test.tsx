@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChangedFile, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { CompareState } from "../state/useCompare";
+import type { ExternalToolsApi } from "../state/useExternalTools";
 import { CompareDiffPane } from "./CompareDiffPane";
 
 const A = "a".repeat(40);
@@ -168,5 +169,60 @@ describe("CompareDiffPane", () => {
     expect(screen.queryByText("old-range.txt")).toBeNull();
     await waitFor(() => expect(getRangeFiles).toHaveBeenCalledWith("/repo", C, B));
     expect(getRangeDiff).not.toHaveBeenCalledWith("/repo", C, B, "old-range.txt", null, expect.anything());
+  });
+});
+
+describe("CompareDiffPane external tools", () => {
+  function tools(): ExternalToolsApi {
+    return {
+      openInEditor: vi.fn(),
+      reveal: vi.fn(),
+      openTerminal: vi.fn(),
+      openDiffTool: vi.fn(),
+      openMergeTool: vi.fn(),
+      mergeToolRunning: new Set(),
+      mergeToolResults: new Map(),
+      dismissMergeToolResult: vi.fn(),
+      error: null,
+      dismissError: vi.fn(),
+    };
+  }
+  const pick = (path: string, label: string) => {
+    fireEvent.click(screen.getByRole("button", { name: `Actions for ${path}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  };
+
+  it("compare file sections open the range in the diff tool", async () => {
+    const externalTools = tools();
+    renderPane({
+      externalTools,
+      client: client({ getRangeFiles: vi.fn(async () => [{ path: "new.txt", oldPath: "old.txt" }]) }),
+    });
+    await screen.findByText("1 file changed");
+
+    pick("new.txt", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("new.txt", { kind: "Range", fromId: A, toId: B, oldPath: "old.txt" });
+    pick("new.txt", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("new.txt", null);
+  });
+
+  it("a working-tree compare passes a null toId", async () => {
+    const externalTools = tools();
+    const compare: CompareState = { target: { kind: "workingTree", commitId: A }, range: { fromId: A, toId: null }, error: null };
+    renderPane({
+      externalTools,
+      compare,
+      client: client({ getWorkingTreeCompareFiles: vi.fn(async () => [{ path: "a.txt", oldPath: null }]) }),
+    });
+    await screen.findByText("1 file changed");
+
+    pick("a.txt", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.txt", { kind: "Range", fromId: A, toId: null, oldPath: null });
+  });
+
+  it("has no actions menu without externalTools", async () => {
+    renderPane({ client: client({ getRangeFiles: vi.fn(async () => [{ path: "a.txt", oldPath: null }]) }) });
+    await screen.findByText("1 file changed");
+    expect(screen.queryByRole("button", { name: "Actions for a.txt" })).toBeNull();
   });
 });

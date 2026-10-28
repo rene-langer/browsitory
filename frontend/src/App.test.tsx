@@ -140,6 +140,15 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listPullRequests: unused,
     createPullRequest: unused,
     openExternalUrl: unused,
+    openInEditor: unused,
+    revealInFileManager: unused,
+    openTerminal: unused,
+    openDiffTool: unused,
+    openMergeTool: unused,
+    markResolved: unused,
+    getExternalToolSettings: async () => ({ editor: null, terminal: null }),
+    setExternalToolSettings: async () => {},
+    getGitTools: async () => ({ diffTool: null, mergeTool: null }),
     logFrontendError: unused,
     ...overrides,
   };
@@ -1249,5 +1258,90 @@ describe("App", () => {
       window.dispatchEvent(new Event("focus"));
       await waitFor(() => expect(getUndoState.mock.calls.length).toBe(calls + 1));
     });
+  });
+});
+
+describe("App external tools", () => {
+  function toolsClient(overrides: Partial<RepoClient> = {}) {
+    return fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      ...overrides,
+    });
+  }
+
+  it("the header gear opens Preferences with the active repo's git tools", async () => {
+    const getExternalToolSettings = vi.fn(async () => ({ editor: "code", terminal: null }));
+    const getGitTools = vi.fn(async () => ({ diffTool: null, mergeTool: null }));
+    render(<App client={toolsClient({ getExternalToolSettings, getGitTools })} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    expect(screen.getByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Editor command")).toHaveValue("code"));
+    expect(getExternalToolSettings).toHaveBeenCalled();
+    expect(getGitTools).toHaveBeenCalledWith("/repos/a");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Preferences" })).toBeNull();
+  });
+
+  it("the palette opens Preferences…", async () => {
+    render(<App client={toolsClient()} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
+    fireEvent.change(input, { target: { value: "Preferences" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Preferences…" }));
+    expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
+  });
+
+  it("shows only the VSCode note in VSCode", async () => {
+    render(<App client={toolsClient()} toolHost="vscode" />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    expect(screen.getByText("In VSCode, files, diffs, merges and terminals open in VSCode itself.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Editor command")).toBeNull();
+  });
+
+  it("the repo tab menu opens a terminal in that repo and reveals it", async () => {
+    const openTerminal = vi.fn(async () => {});
+    const revealInFileManager = vi.fn(async () => {});
+    render(<App client={toolsClient({ openTerminal, revealInFileManager })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open terminal here" }));
+    expect(openTerminal).toHaveBeenCalledWith("/repos/a");
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reveal repository" }));
+    expect(revealInFileManager).toHaveBeenCalledWith("/repos/a", null);
+  });
+
+  it("a failed tab action shows its error", async () => {
+    const openTerminal = vi.fn(async () => {
+      throw new Error("No terminal found. Set a terminal command in Preferences.");
+    });
+    render(<App client={toolsClient({ openTerminal })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open terminal here" }));
+    expect(await screen.findByText("No terminal found. Set a terminal command in Preferences.")).toBeInTheDocument();
+  });
+
+  it("the palette opens a terminal for the workspace and shows a tool failure in it", async () => {
+    const openTerminal = vi.fn(async () => {
+      throw new Error("Couldn't find the program 'kitty'.");
+    });
+    render(<App client={toolsClient({ openTerminal })} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
+    fireEvent.change(input, { target: { value: "Open terminal here" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Open terminal here" }));
+    expect(await screen.findByText("Couldn't find the program 'kitty'.")).toBeInTheDocument();
+    expect(openTerminal).toHaveBeenCalledWith("/repos/a");
   });
 });

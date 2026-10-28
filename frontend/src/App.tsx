@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Moon, Sparkles, Sun } from "lucide-react";
+import { Moon, Settings, Sparkles, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import type { CommitDraft } from "./components/CommitBox";
@@ -45,6 +45,8 @@ import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog"
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
+import { ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
+import { useExternalTools } from "./state/useExternalTools";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { upstreamPushBranch } from "./lib/pushTarget";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
@@ -119,6 +121,11 @@ function RepoWorkspace({
     appState.selectRow,
   );
   const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
+  const conflictedPaths = useMemo(
+    () => appState.state.status.filter((entry) => entry.kind === "Conflicted").map((entry) => entry.path),
+    [appState.state.status],
+  );
+  const externalTools = useExternalTools(client, repoPath, conflictedPaths, appState.refresh);
   // A click on a row closes an open compare even when it is the row already selected (the
   // compare otherwise only closes when `selectedRow` changes), so clicking a stash or commit
   // always shows it.
@@ -461,6 +468,11 @@ function RepoWorkspace({
         onAbortMerge={appState.abortMerge}
         onAbortRebase={appState.abortRebase}
       />
+      {externalTools.error !== null && (
+        <div className={styles.errorLayer}>
+          <InlineError message={externalTools.error} onDismiss={externalTools.dismissError} />
+        </div>
+      )}
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
@@ -602,6 +614,16 @@ function RepoWorkspace({
                 onRedo: handleRedo,
               },
               { onSearchCommits: requestSearchFocus },
+              {
+                onOpenTerminal: externalTools.openTerminal,
+                onRevealRepository: () => externalTools.reveal(null),
+                onOpenCurrentFileInEditor: () => {
+                  if (currentFile !== null) externalTools.openInEditor(currentFile, null);
+                },
+                onOpenCurrentFileInDiffTool: () => {
+                  if (currentFile !== null) externalTools.openDiffTool(currentFile, { kind: "Unstaged" });
+                },
+              },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -871,6 +893,7 @@ function RepoWorkspace({
                   onRetry={compare.retry}
                   onSelectRow={selectRowClosingCompare}
                   onOpenFileHistory={fileHistory.open}
+                  externalTools={externalTools}
                 />
               ) : (
                 <DiffPane
@@ -889,6 +912,8 @@ function RepoWorkspace({
                     disabledReason: stashApplyDisabledReason,
                   }}
                   onOpenFileHistory={fileHistory.open}
+                  externalTools={externalTools}
+                  onMarkResolved={appState.markResolved}
                   status={appState.state.status}
                   refreshGeneration={appState.state.refreshGeneration}
                   discardRequest={discardRequest}
@@ -959,7 +984,12 @@ function RepoWorkspace({
   );
 }
 
-export default function App(props: { client: RepoClient; updateBanner?: ReactNode }) {
+export default function App(props: {
+  client: RepoClient;
+  updateBanner?: ReactNode;
+  /** Which host launches external tools; VSCode opens them in VSCode itself. */
+  toolHost?: "desktop" | "vscode";
+}) {
   return (
     <DiffSettingsProvider client={props.client}>
       <AppContent {...props} />
@@ -970,10 +1000,16 @@ export default function App(props: { client: RepoClient; updateBanner?: ReactNod
 function AppContent({
   client,
   updateBanner = null,
+  toolHost = "desktop",
 }: {
   client: RepoClient;
   updateBanner?: ReactNode;
+  toolHost?: "desktop" | "vscode";
 }) {
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  // Failures of the repo tab menu's actions (terminal, reveal); workspace tool errors show in
+  // that workspace.
+  const [tabToolError, setTabToolError] = useState<string | null>(null);
   const openRepos = useOpenRepos(client);
   const workspaces = useWorkspaces(client);
   const workspaceNames = useMemo(
@@ -1059,9 +1095,26 @@ function AppContent({
       (error: unknown) => setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
     );
   }, [client, openRepoTab, pushAppToast]);
-  const appCommands = useMemo(
-    () => (client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : undefined),
-    [client.supportsCloneAndInit, startClone, startNewRepository],
+  const openPreferences = useCallback(() => setPreferencesOpen(true), []);
+  const appCommands = useMemo<AppCommands>(
+    () =>
+      client.supportsCloneAndInit
+        ? { onCloneRepository: startClone, onNewRepository: startNewRepository, onOpenPreferences: openPreferences }
+        : { onOpenPreferences: openPreferences },
+    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences],
+  );
+  const tabMenuItems = useCallback(
+    (path: string) => {
+      const run = (action: () => Promise<void>) => {
+        setTabToolError(null);
+        action().catch((error: unknown) => setTabToolError(error instanceof Error ? error.message : String(error)));
+      };
+      return [
+        { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
+        { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+      ];
+    },
+    [client],
   );
 
   const [releaseNotesView, setReleaseNotesView] = useState<
@@ -1202,10 +1255,20 @@ function AppContent({
           onClose={openRepos.closeRepo}
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
+          tabMenuItems={tabMenuItems}
         />
         {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
         {openRepos.openRepos.length > 0 && <ShortcutHint />}
         {themeToggle}
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Preferences"
+          title="Preferences"
+          onClick={openPreferences}
+        >
+          <Settings size={16} aria-hidden="true" />
+        </button>
         <button
           type="button"
           className={styles.iconButton}
@@ -1220,6 +1283,16 @@ function AppContent({
         <div className={styles.errorLayer}>
           <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
         </div>
+      )}
+      {tabToolError !== null && (
+        <div className={styles.errorLayer}>
+          <InlineError message={tabToolError} onDismiss={() => setTabToolError(null)} />
+        </div>
+      )}
+      {preferencesOpen && (
+        <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
+          <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
+        </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (
         <div className={styles.errorLayer}>

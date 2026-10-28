@@ -42,6 +42,7 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod tools;
 mod undo;
 mod undo_store;
 mod worktree;
@@ -445,6 +446,32 @@ pub(crate) enum Command {
         choice: FileConflictChoice,
         reply: Sender<Result<(), String>>,
     },
+    MarkResolved {
+        path: String,
+        force: bool,
+        reply: Sender<Result<git_core::merge::MarkResolvedOutcome, String>>,
+    },
+    PrepareDiffTool {
+        path: String,
+        source: git_core::tools::DiffSource,
+        reply: Sender<Result<git_core::tools::PreparedDiffTool, String>>,
+    },
+    PrepareMergeTool {
+        path: String,
+        reply: Sender<Result<git_core::tools::PreparedMergeTool, String>>,
+    },
+    GetGitTools {
+        reply: Sender<Result<git_core::tools::GitTools, String>>,
+    },
+    CheckMergeTarget {
+        path: String,
+        reply: Sender<Result<(), String>>,
+    },
+    ReadFileVersion {
+        path: String,
+        version: git_core::tools::FileVersion,
+        reply: Sender<Result<Option<Vec<u8>>, String>>,
+    },
     #[allow(dead_code)]
     CommitsSince {
         onto: String,
@@ -609,6 +636,7 @@ pub struct Worker {
     tx: Sender<Command>,
     cancelled: CancelRegistry,
     search_generation: SearchGeneration,
+    workdir: Option<PathBuf>,
 }
 
 /// Cheap, cloneable handle to a `Worker`'s command channel.
@@ -622,6 +650,8 @@ pub struct WorkerHandle {
     cancelled: CancelRegistry,
     /// Shared with the worker thread — see `SearchGeneration`.
     search_generation: SearchGeneration,
+    /// The work tree root, captured at spawn (`None` for a bare repository).
+    workdir: Option<PathBuf>,
 }
 
 /// Finds the `ForgeRepository` for a named remote. Returns a secret-free, static error (never
@@ -660,6 +690,7 @@ impl Worker {
     {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
+        let workdir = repo.workdir().map(std::path::Path::to_path_buf);
         let (tx, rx) = mpsc::channel::<Command>();
         let cancelled: CancelRegistry = Arc::new(Mutex::new(HashSet::new()));
         let worker_cancelled = Arc::clone(&cancelled);
@@ -1125,6 +1156,26 @@ impl Worker {
                         choice,
                         reply,
                     } => merge::resolve_add_delete(&repo, path, choice, reply),
+                    Command::MarkResolved { path, force, reply } => {
+                        merge::mark_resolved(&repo, path, force, reply)
+                    }
+                    Command::PrepareDiffTool {
+                        path,
+                        source,
+                        reply,
+                    } => tools::prepare_diff_tool(&repo, path, source, reply),
+                    Command::PrepareMergeTool { path, reply } => {
+                        tools::prepare_merge_tool(&repo, path, reply)
+                    }
+                    Command::GetGitTools { reply } => tools::git_tools(&repo, reply),
+                    Command::CheckMergeTarget { path, reply } => {
+                        tools::check_merge_target(&repo, path, reply)
+                    }
+                    Command::ReadFileVersion {
+                        path,
+                        version,
+                        reply,
+                    } => tools::read_file_version(&repo, path, version, reply),
                     Command::CommitsSince { onto, reply } => {
                         rebase::commits_since(&repo, onto, reply)
                     }
@@ -1329,6 +1380,7 @@ impl Worker {
             tx,
             cancelled,
             search_generation,
+            workdir,
         })
     }
 
@@ -1338,6 +1390,7 @@ impl Worker {
             tx: self.tx.clone(),
             cancelled: Arc::clone(&self.cancelled),
             search_generation: Arc::clone(&self.search_generation),
+            workdir: self.workdir.clone(),
         }
     }
 }
@@ -1930,6 +1983,82 @@ mod tests {
         assert_eq!(
             signature.status,
             git_core::signing::SignatureStatus::Unsigned
+        );
+    }
+
+    #[test]
+    fn workdir_is_the_work_tree_root_even_when_opened_from_a_subdirectory() {
+        let (dir, repo) = init_repo();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        write_file(dir.path(), "sub/a.txt", "a");
+        commit_all(&repo, "initial");
+        let worker = Worker::spawn(dir.path().join("sub")).unwrap();
+        assert_eq!(
+            worker.handle().workdir().unwrap().canonicalize().unwrap(),
+            dir.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn external_tool_commands_round_trip_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "old");
+        commit_all(&repo, "initial");
+        write_file(dir.path(), "a.txt", "new");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(
+            handle
+                .read_file_version("a.txt".into(), git_core::tools::FileVersion::Index)
+                .unwrap(),
+            Some(b"old".to_vec())
+        );
+        // Hermetic error paths: both are checked before any git config is read.
+        assert_eq!(
+            handle
+                .prepare_diff_tool("../a.txt".into(), git_core::tools::DiffSource::Unstaged)
+                .unwrap_err(),
+            "Invalid path."
+        );
+        assert_eq!(
+            handle.prepare_merge_tool("a.txt".into()).unwrap_err(),
+            "no conflict found for path 'a.txt'"
+        );
+        assert!(handle.get_git_tools().is_ok());
+        assert_eq!(
+            handle.check_merge_target("a.txt".into()).unwrap_err(),
+            "no conflict found for path 'a.txt'"
+        );
+    }
+
+    #[test]
+    fn mark_resolved_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let main = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "a.txt", "theirs\n");
+        commit_all(&repo, "feature");
+        git_core::branch::switch_branch(&repo, &main).unwrap();
+        write_file(dir.path(), "a.txt", "ours\n");
+        commit_all(&repo, "main");
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.check_merge_target("a.txt".into()).unwrap();
+        assert_eq!(
+            handle.mark_resolved("a.txt".into(), false).unwrap(),
+            git_core::merge::MarkResolvedOutcome::MarkersRemain
+        );
+        assert_eq!(
+            handle.mark_resolved("a.txt".into(), true).unwrap(),
+            git_core::merge::MarkResolvedOutcome::Resolved
         );
     }
 

@@ -24,6 +24,7 @@ mod stash;
 mod status;
 mod submodule;
 mod tag;
+mod tools;
 mod undo;
 mod worktree;
 
@@ -41,7 +42,7 @@ pub use history::{
     amend_commit, checkout_commit, cherry_pick, get_head_info, reset_to_commit, revert_commit,
 };
 pub use merge::{
-    abort_merge, get_conflict_hunks, get_merge_message, get_merge_options,
+    abort_merge, get_conflict_hunks, get_merge_message, get_merge_options, mark_resolved,
     resolve_add_delete_conflict, resolve_conflict, set_merge_options, start_merge,
 };
 pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
@@ -59,6 +60,10 @@ pub use status::{
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
+pub use tools::{
+    get_external_tool_settings, get_git_tools, open_diff_tool, open_in_editor, open_merge_tool,
+    open_terminal, reveal_in_file_manager, set_external_tool_settings,
+};
 pub use undo::{get_undo_state, redo_last, undo_last};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 
@@ -817,6 +822,167 @@ impl From<ResetModeDto> for git_core::reset::ResetMode {
     }
 }
 
+/// Which two sides "Open in diff tool" compares (`RepoClient`'s `DiffSource`).
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+pub enum DiffSourceDto {
+    Unstaged,
+    Staged,
+    #[serde(rename_all = "camelCase")]
+    Commit {
+        commit_id: String,
+        old_path: Option<String>,
+    },
+    /// `toId: null` is the working tree.
+    #[serde(rename_all = "camelCase")]
+    Range {
+        from_id: String,
+        to_id: Option<String>,
+        old_path: Option<String>,
+    },
+}
+
+impl From<DiffSourceDto> for git_core::tools::DiffSource {
+    fn from(dto: DiffSourceDto) -> Self {
+        match dto {
+            DiffSourceDto::Unstaged => Self::Unstaged,
+            DiffSourceDto::Staged => Self::Staged,
+            DiffSourceDto::Commit {
+                commit_id,
+                old_path,
+            } => Self::Commit {
+                commit_id,
+                old_path,
+            },
+            DiffSourceDto::Range {
+                from_id,
+                to_id,
+                old_path,
+            } => Self::Range {
+                from_id,
+                to_id,
+                old_path,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub enum MergeToolOutcomeDto {
+    Resolved,
+    Unresolved,
+}
+
+impl From<git_core::tools::MergeToolOutcome> for MergeToolOutcomeDto {
+    fn from(outcome: git_core::tools::MergeToolOutcome) -> Self {
+        match outcome {
+            git_core::tools::MergeToolOutcome::Resolved => Self::Resolved,
+            git_core::tools::MergeToolOutcome::Unresolved => Self::Unresolved,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub enum MarkResolvedOutcomeDto {
+    Resolved,
+    MarkersRemain,
+}
+
+impl From<git_core::merge::MarkResolvedOutcome> for MarkResolvedOutcomeDto {
+    fn from(outcome: git_core::merge::MarkResolvedOutcome) -> Self {
+        match outcome {
+            git_core::merge::MarkResolvedOutcome::Resolved => Self::Resolved,
+            git_core::merge::MarkResolvedOutcome::MarkersRemain => Self::MarkersRemain,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ExternalToolSettingsDto {
+    pub editor: Option<String>,
+    pub terminal: Option<String>,
+}
+
+impl From<config::ExternalToolSettings> for ExternalToolSettingsDto {
+    fn from(settings: config::ExternalToolSettings) -> Self {
+        Self {
+            editor: settings.editor,
+            terminal: settings.terminal,
+        }
+    }
+}
+
+impl From<ExternalToolSettingsDto> for config::ExternalToolSettings {
+    fn from(dto: ExternalToolSettingsDto) -> Self {
+        Self {
+            editor: dto.editor,
+            terminal: dto.terminal,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub enum GitConfigSourceDto {
+    System,
+    Xdg,
+    Global,
+    Local,
+    Worktree,
+    Other,
+}
+
+impl From<git_core::tools::ConfigSource> for GitConfigSourceDto {
+    fn from(source: git_core::tools::ConfigSource) -> Self {
+        use git_core::tools::ConfigSource;
+        match source {
+            ConfigSource::System => Self::System,
+            ConfigSource::Xdg => Self::Xdg,
+            ConfigSource::Global => Self::Global,
+            ConfigSource::Local => Self::Local,
+            ConfigSource::Worktree => Self::Worktree,
+            ConfigSource::Other => Self::Other,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitToolDto {
+    name: String,
+    command: Option<String>,
+    source: GitConfigSourceDto,
+    via_merge_tool: bool,
+    problem: Option<String>,
+}
+
+impl From<git_core::tools::GitToolInfo> for GitToolDto {
+    fn from(info: git_core::tools::GitToolInfo) -> Self {
+        Self {
+            name: info.name,
+            command: info.command,
+            source: info.source.into(),
+            via_merge_tool: info.via_merge_tool,
+            problem: info.problem,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitToolsDto {
+    diff_tool: Option<GitToolDto>,
+    merge_tool: Option<GitToolDto>,
+}
+
+impl From<git_core::tools::GitTools> for GitToolsDto {
+    fn from(tools: git_core::tools::GitTools) -> Self {
+        Self {
+            diff_tool: tools.diff_tool.map(Into::into),
+            merge_tool: tools.merge_tool.map(Into::into),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(tag = "kind")]
 pub enum MergeOutcomeDto {
@@ -1521,6 +1687,118 @@ mod tests {
                 ignore_whitespace: true,
                 context_lines: 5
             }
+        );
+    }
+
+    #[test]
+    fn diff_source_dto_parses_every_variant() {
+        use super::DiffSourceDto;
+        use git_core::tools::DiffSource;
+        let parse = |v: serde_json::Value| {
+            DiffSource::from(serde_json::from_value::<DiffSourceDto>(v).unwrap())
+        };
+        assert_eq!(
+            parse(serde_json::json!({"kind": "Unstaged"})),
+            DiffSource::Unstaged
+        );
+        assert_eq!(
+            parse(serde_json::json!({"kind": "Staged"})),
+            DiffSource::Staged
+        );
+        assert_eq!(
+            parse(serde_json::json!({"kind": "Commit", "commitId": "abc", "oldPath": null})),
+            DiffSource::Commit {
+                commit_id: "abc".into(),
+                old_path: None
+            }
+        );
+        assert_eq!(
+            parse(
+                serde_json::json!({"kind": "Range", "fromId": "a", "toId": "b", "oldPath": "old.rs"})
+            ),
+            DiffSource::Range {
+                from_id: "a".into(),
+                to_id: Some("b".into()),
+                old_path: Some("old.rs".into())
+            }
+        );
+        assert_eq!(
+            parse(
+                serde_json::json!({"kind": "Range", "fromId": "a", "toId": null, "oldPath": null})
+            ),
+            DiffSource::Range {
+                from_id: "a".into(),
+                to_id: None,
+                old_path: None
+            }
+        );
+        assert!(
+            serde_json::from_value::<DiffSourceDto>(serde_json::json!({"kind": "Nope"})).is_err()
+        );
+    }
+
+    #[test]
+    fn tool_outcome_and_settings_dtos_serialize_for_the_frontend() {
+        use super::{
+            ExternalToolSettingsDto, GitToolsDto, MarkResolvedOutcomeDto, MergeToolOutcomeDto,
+        };
+        assert_eq!(
+            serde_json::to_value(MergeToolOutcomeDto::from(
+                git_core::tools::MergeToolOutcome::Resolved
+            ))
+            .unwrap(),
+            "Resolved"
+        );
+        assert_eq!(
+            serde_json::to_value(MergeToolOutcomeDto::from(
+                git_core::tools::MergeToolOutcome::Unresolved
+            ))
+            .unwrap(),
+            "Unresolved"
+        );
+        assert_eq!(
+            serde_json::to_value(MarkResolvedOutcomeDto::from(
+                git_core::merge::MarkResolvedOutcome::MarkersRemain
+            ))
+            .unwrap(),
+            "MarkersRemain"
+        );
+        let settings: ExternalToolSettingsDto =
+            serde_json::from_value(serde_json::json!({"editor": "code", "terminal": null}))
+                .unwrap();
+        assert_eq!(
+            config::ExternalToolSettings::from(settings),
+            config::ExternalToolSettings {
+                editor: Some("code".into()),
+                terminal: None
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(ExternalToolSettingsDto::from(
+                config::ExternalToolSettings {
+                    editor: None,
+                    terminal: Some("kitty".into())
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"editor": null, "terminal": "kitty"})
+        );
+        let tools = GitToolsDto::from(git_core::tools::GitTools {
+            diff_tool: Some(git_core::tools::GitToolInfo {
+                name: "meld".into(),
+                command: Some("meld $LOCAL $REMOTE".into()),
+                source: git_core::tools::ConfigSource::Global,
+                via_merge_tool: true,
+                problem: None,
+            }),
+            merge_tool: None,
+        });
+        assert_eq!(
+            serde_json::to_value(tools).unwrap(),
+            serde_json::json!({
+                "diffTool": {"name": "meld", "command": "meld $LOCAL $REMOTE", "source": "Global", "viaMergeTool": true, "problem": null},
+                "mergeTool": null
+            })
         );
     }
 

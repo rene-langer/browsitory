@@ -1,9 +1,10 @@
-import { act, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
+import type { ExternalToolsApi } from "../state/useExternalTools";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
 import styles from "./DiffPane.module.css";
 
@@ -118,6 +119,15 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     listPullRequests: unused,
     createPullRequest: unused,
     openExternalUrl: unused,
+    openInEditor: async () => {},
+    revealInFileManager: async () => {},
+    openTerminal: async () => {},
+    openDiffTool: async () => {},
+    openMergeTool: async () => "Unresolved" as const,
+    markResolved: async () => "Resolved" as const,
+    getExternalToolSettings: async () => ({ editor: null, terminal: null }),
+    setExternalToolSettings: async () => {},
+    getGitTools: async () => ({ diffTool: null, mergeTool: null }),
     getGraphBranchSelection: async () => null,
     setGraphBranchSelection: unused,
     getGraphRemoteBranchSelection: async () => null,
@@ -1783,5 +1793,159 @@ describe("DiffPane stash view", () => {
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
     expect(await screen.findByText("Changes (1)")).toBeInTheDocument();
+  });
+});
+
+describe("DiffPane external tools", () => {
+  function tools(overrides: Partial<ExternalToolsApi> = {}): ExternalToolsApi {
+    return {
+      openInEditor: vi.fn(),
+      reveal: vi.fn(),
+      openTerminal: vi.fn(),
+      openDiffTool: vi.fn(),
+      openMergeTool: vi.fn(),
+      mergeToolRunning: new Set(),
+      mergeToolResults: new Map(),
+      dismissMergeToolResult: vi.fn(),
+      error: null,
+      dismissError: vi.fn(),
+      ...overrides,
+    };
+  }
+  const pick = (path: string, label: string) => {
+    fireEvent.click(screen.getByRole("button", { name: `Actions for ${path}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  };
+  const conflictClient = () => fakeClient({ getConflictHunks: async () => [] });
+
+  it("opens a modified file in the editor at its first hunk line and in the diff tool", async () => {
+    const hunks: DiffHunk[] = [
+      { oldStart: 12, oldLines: 1, newStart: 14, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
+    ];
+    const externalTools = tools();
+    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", staged: false, kind: "Modified" }], {
+      externalTools,
+    });
+    await screen.findByText(/^x$/);
+
+    pick("a.ts", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("a.ts", 14);
+    pick("a.ts", "Reveal in file manager");
+    expect(externalTools.reveal).toHaveBeenCalledWith("a.ts");
+    pick("a.ts", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.ts", { kind: "Unstaged" });
+  });
+
+  it("opens at no particular line when the first hunk starts at line 0 (the file was emptied)", async () => {
+    const hunks: DiffHunk[] = [
+      { oldStart: 1, oldLines: 1, newStart: 0, newLines: 0, lines: [{ origin: "Remove", content: "gone" }] },
+    ];
+    const externalTools = tools();
+    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", staged: false, kind: "Modified" }], {
+      externalTools,
+    });
+    await screen.findByText(/^gone$/);
+    pick("a.ts", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("a.ts", null);
+  });
+
+  it("a staged entry opens the staged diff", () => {
+    const externalTools = tools();
+    renderUncommitted(fakeClient({}), [{ path: "a.ts", staged: true, kind: "Modified" }], { externalTools });
+    pick("a.ts", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.ts", { kind: "Staged" });
+  });
+
+  it("a conflicted entry has a menu with the merge tool, disabled while it runs", () => {
+    const externalTools = tools();
+    const { unmount } = renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      externalTools,
+    });
+    pick("c.txt", "Open in merge tool");
+    expect(externalTools.openMergeTool).toHaveBeenCalledWith("c.txt");
+    unmount();
+
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      externalTools: tools({ mergeToolRunning: new Set(["c.txt"]) }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for c.txt" }));
+    expect(screen.getByRole("menuitem", { name: "Open in merge tool" })).toBeDisabled();
+  });
+
+  it("shows the merge tool result and marks the file resolved", async () => {
+    const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Resolved"]]) });
+    const onMarkResolved = vi.fn(async () => "Resolved" as const);
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      externalTools,
+      onMarkResolved,
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("The merge tool finished.");
+    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    await waitFor(() => expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt"));
+    expect(onMarkResolved).toHaveBeenCalledWith("c.txt", false);
+  });
+
+  it("asks before marking a file with conflict markers resolved", async () => {
+    const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Resolved"]]) });
+    const onMarkResolved = vi
+      .fn<(path: string, force: boolean) => Promise<"Resolved" | "MarkersRemain" | null>>()
+      .mockResolvedValueOnce("MarkersRemain")
+      .mockResolvedValueOnce("Resolved");
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      externalTools,
+      onMarkResolved,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Conflict markers remain in c.txt. Mark it resolved anyway?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
+    await waitFor(() => expect(onMarkResolved).toHaveBeenLastCalledWith("c.txt", true));
+    await waitFor(() => expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("an unresolved merge tool result still offers Mark resolved, guarded by the markers check", async () => {
+    const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Unresolved"]]) });
+    const onMarkResolved = vi.fn(async () => "MarkersRemain" as const);
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      externalTools,
+      onMarkResolved,
+    });
+
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("The merge tool closed without resolving the conflict.");
+    fireEvent.click(within(notice).getByRole("button", { name: "Mark resolved" }));
+    expect(onMarkResolved).toHaveBeenCalledWith("c.txt", false);
+    expect(await screen.findByText("Conflict markers remain in c.txt. Mark it resolved anyway?")).toBeInTheDocument();
+    fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
+    expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt");
+  });
+
+  it("commit file sections have an actions menu with a commit diff source", async () => {
+    const externalTools = tools();
+    renderCommit(fakeClient({ getCommitFiles: async () => ["b.ts"], getCommitDiff: async () => [] }), "abc123", {
+      externalTools,
+    });
+    await screen.findByText("b.ts");
+
+    pick("b.ts", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("b.ts", { kind: "Commit", commitId: "abc123", oldPath: null });
+    pick("b.ts", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("b.ts", null);
+
+    fireEvent.contextMenu(screen.getByText("b.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reveal in file manager" }));
+    expect(externalTools.reveal).toHaveBeenCalledWith("b.ts");
+  });
+
+  it("without externalTools the menus stay as before", async () => {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }]);
+    expect(screen.queryByRole("button", { name: "Actions for c.txt" })).toBeNull();
+    cleanup();
+    renderCommit(fakeClient({ getCommitFiles: async () => ["b.ts"], getCommitDiff: async () => [] }), "abc123");
+    await screen.findByText("b.ts");
+    expect(screen.queryByRole("button", { name: "Actions for b.ts" })).toBeNull();
   });
 });

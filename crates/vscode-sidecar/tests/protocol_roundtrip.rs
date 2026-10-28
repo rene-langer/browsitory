@@ -2238,3 +2238,185 @@ fn a_failing_pre_commit_streams_hook_progress_and_returns_hook_failed() {
         .unwrap()
         .starts_with("commit-"));
 }
+
+impl Sidecar {
+    /// Spawns with `home` as `HOME`/`USERPROFILE`/`XDG_CONFIG_HOME`, so libgit2's global git
+    /// config is `home/.gitconfig` and never the developer's own.
+    fn spawn_with_home(config_dir: &std::path::Path, home: &std::path::Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vscode-sidecar"))
+            .env("BROWSITORY_CONFIG_DIR", config_dir)
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("spawn vscode-sidecar");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+}
+
+#[test]
+fn external_tool_settings_and_git_tools_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::write(home.path().join(".gitconfig"), "[diff]\n\ttool = meld\n").unwrap();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    repo.config()
+        .unwrap()
+        .set_str("merge.tool", "kdiff3")
+        .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_home(&config_dir, home.path());
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let set = sidecar.call(
+        2,
+        "set_external_tool_settings",
+        serde_json::json!({"settings": {"editor": "code", "terminal": null}}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null);
+    let invalid = sidecar.call(
+        30,
+        "set_external_tool_settings",
+        serde_json::json!({"settings": {"editor": "code \"{file}", "terminal": null}}),
+    );
+    assert_eq!(
+        invalid["error"]["message"],
+        "Editor command: The command has an unclosed quote."
+    );
+    let got = sidecar.call(3, "get_external_tool_settings", serde_json::json!({}));
+    assert_eq!(
+        got["result"],
+        serde_json::json!({"editor": "code", "terminal": null})
+    );
+
+    let tools = sidecar.call(
+        4,
+        "get_git_tools",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    let diff = &tools["result"]["diffTool"];
+    assert_eq!(diff["name"], "meld");
+    assert_eq!(diff["source"], "Global");
+    assert_eq!(diff["command"], "meld $LOCAL $REMOTE");
+    assert_eq!(diff["viaMergeTool"], false);
+    // The repository's own merge.tool is reported, but ignored.
+    let merge = &tools["result"]["mergeTool"];
+    assert_eq!(merge["name"], "kdiff3");
+    assert_eq!(merge["source"], "Local");
+    assert_eq!(merge["command"], serde_json::Value::Null);
+    assert!(merge["problem"]
+        .as_str()
+        .unwrap()
+        .contains("only in this repository's git config"));
+}
+
+#[test]
+fn read_file_version_and_repo_workdir_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    write_file(dir.path(), "a.txt", "hello\n");
+    write_file(dir.path(), "sub/b.txt", "b\n");
+    commit_all(&repo, "base");
+    let repo_path = dir.path().join("sub").to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let head = sidecar.call(
+        2,
+        "read_file_version",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt", "version": {"kind": "Head"}}),
+    );
+    assert_eq!(head["result"], serde_json::json!({"text": "hello\n"}));
+    let missing = sidecar.call(
+        3,
+        "read_file_version",
+        serde_json::json!({"repoPath": repo_path, "path": "nope.txt", "version": {"kind": "Index"}}),
+    );
+    assert_eq!(missing["result"], serde_json::json!({"text": null}));
+    let bad_stage = sidecar.call(
+        4,
+        "read_file_version",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt", "version": {"kind": "Stage", "stage": 0}}),
+    );
+    assert_eq!(bad_stage["error"]["message"], "stage must be 1, 2 or 3");
+    let escape = sidecar.call(
+        5,
+        "read_file_version",
+        serde_json::json!({"repoPath": repo_path, "path": "../a.txt", "version": {"kind": "Head"}}),
+    );
+    assert_eq!(escape["error"]["message"], "Invalid path.");
+    let workdir = sidecar.call(
+        6,
+        "repo_workdir",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        std::path::Path::new(workdir["result"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        dir.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn mark_resolved_round_trips_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    let main = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "a.txt", "theirs\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    write_file(dir.path(), "a.txt", "ours\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let check = sidecar.call(
+        20,
+        "check_merge_target",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt"}),
+    );
+    assert_eq!(check["result"], serde_json::Value::Null);
+    let no_conflict = sidecar.call(
+        21,
+        "check_merge_target",
+        serde_json::json!({"repoPath": repo_path, "path": "missing.txt"}),
+    );
+    assert_eq!(
+        no_conflict["error"]["message"],
+        "no conflict found for path 'missing.txt'"
+    );
+    let blocked = sidecar.call(
+        2,
+        "mark_resolved",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt", "force": false}),
+    );
+    assert_eq!(blocked["result"], "MarkersRemain");
+    write_file(dir.path(), "a.txt", "merged\n");
+    let outcome = sidecar.call(
+        3,
+        "mark_resolved",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt", "force": false}),
+    );
+    assert_eq!(outcome["result"], "Resolved");
+}

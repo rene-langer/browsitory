@@ -20,6 +20,7 @@ import type {
   FileConflictChoice,
   GraphCommit,
   HeadInfo,
+  MarkResolvedOutcome,
   RepoClient,
   StashEntry,
   StashFiles,
@@ -28,6 +29,7 @@ import type {
 } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
+import type { ExternalToolsApi } from "../state/useExternalTools";
 import { BlameView } from "./BlameView";
 import { CommitBox, type CommitDraft } from "./CommitBox";
 import { SplitButton } from "./primitives/SplitButton";
@@ -37,7 +39,13 @@ import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
-import { discardAllConfirmMessage, discardConfirmMessage, fileMenuItems, isUntracked } from "./FileActionsMenu";
+import {
+  discardAllConfirmMessage,
+  discardConfirmMessage,
+  fileMenuItems,
+  isUntracked,
+  type FileAction,
+} from "./FileActionsMenu";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -79,6 +87,8 @@ function UncommittedFileSection({
   onIgnorePath,
   onStashFile,
   onOpenFileHistory,
+  externalTools,
+  onMarkResolved,
   sectionRef,
 }: {
   repoPath: string;
@@ -109,13 +119,50 @@ function UncommittedFileSection({
   onIgnorePath: (pattern: string) => void;
   onStashFile: (path: string) => void;
   onOpenFileHistory?: (path: string) => void;
+  externalTools?: ExternalToolsApi;
+  onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  // Conflicted entries have no actions; staged ones only "Stash file…" (see `fileMenuItems`).
-  const hasFileActions = entry.kind !== "Conflicted";
+  const [confirmMarkers, setConfirmMarkers] = useState(false);
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
+  const onPickFileAction = (action: FileAction) => {
+    switch (action.kind) {
+      case "discard":
+        return onRequestDiscardFile(entry.path);
+      case "stash":
+        return onStashFile(entry.path);
+      case "ignore":
+        return onIgnorePath(action.pattern);
+      case "openInEditor": {
+        // A hunk that empties the file starts at line 0, which no editor accepts.
+        const line = hunks?.[0]?.newStart ?? 0;
+        return externalTools?.openInEditor(entry.path, line > 0 ? line : null);
+      }
+      case "reveal":
+        return externalTools?.reveal(entry.path);
+      case "diffTool":
+        return externalTools?.openDiffTool(entry.path, { kind: entry.staged ? "Staged" : "Unstaged" });
+      case "mergeTool":
+        return externalTools?.openMergeTool(entry.path);
+    }
+  };
+  // Without external tools, conflicted entries have no actions and staged ones only "Stash file…"
+  // (see `fileMenuItems`).
+  const menuItems = fileMenuItems(
+    entry,
+    onPickFileAction,
+    externalTools === undefined ? undefined : { mergeToolRunning: externalTools.mergeToolRunning.has(entry.path) },
+  );
+  const hasFileActions = menuItems.length > 0;
+  const markResolved = async (force: boolean) => {
+    if (onMarkResolved === undefined) return;
+    const outcome = await onMarkResolved(entry.path, force);
+    if (outcome === "MarkersRemain") setConfirmMarkers(true);
+    else if (outcome === "Resolved") externalTools?.dismissMergeToolResult(entry.path);
+  };
+  const mergeToolResult = externalTools?.mergeToolResults.get(entry.path);
   // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
   // settings: after a settings change the shown hunks are still the old ones until the refetch
   // lands, and their (oldStart, newStart) only mean something under the options they came from.
@@ -312,6 +359,39 @@ function UncommittedFileSection({
           )}
         </div>
       </div>
+      {isConflicted && externalTools !== undefined && mergeToolResult !== undefined && (
+        // A persistent notice, not a toast: the user is usually still in the tool's window when
+        // a toast would have closed.
+        <div role="status" className={styles.mergeToolNotice}>
+          <span>
+            {mergeToolResult === "Resolved"
+              ? "The merge tool finished."
+              : "The merge tool closed without resolving the conflict."}
+          </span>
+          {/* Offered either way: the tool may have saved a resolution it didn't report, and the
+              conflict-markers check still asks before staging a file that has them. */}
+          {onMarkResolved !== undefined && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void markResolved(false);
+              }}
+            >
+              Mark resolved
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              externalTools.dismissMergeToolResult(entry.path);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {!collapsed && (
         <div className={styles.fileSectionBody} ref={sectionRef}>
           {mode === "blame" ? (
@@ -364,14 +444,20 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={fileMenuItems(entry, (a) =>
-            a.kind === "discard"
-              ? onRequestDiscardFile(entry.path)
-              : a.kind === "stash"
-                ? onStashFile(entry.path)
-                : onIgnorePath(a.pattern),
-          )}
+          items={menuItems}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {confirmMarkers && (
+        <ConfirmDialog
+          ariaLabel="Mark resolved"
+          message={`Conflict markers remain in ${entry.path}. Mark it resolved anyway?`}
+          confirmLabel="Mark resolved"
+          onConfirm={() => {
+            setConfirmMarkers(false);
+            void markResolved(true);
+          }}
+          onCancel={() => setConfirmMarkers(false)}
         />
       )}
     </ListRow>
@@ -439,11 +525,18 @@ export function DiffPane({
   onOpenFileHistory,
   stashes = [],
   stashActions,
+  externalTools,
+  onMarkResolved,
 }: {
   // The stash list: a selected commit id that is a stash's renders the stash view instead of
   // the commit view.
   stashes?: StashEntry[];
   stashActions?: StashActions;
+  // Open-in-editor/file manager/diff tool/merge tool for file sections; omitted, file menus only
+  // hold repo actions.
+  externalTools?: ExternalToolsApi;
+  // "Mark resolved" on a conflicted file's merge tool notice.
+  onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
   // Set while the graph shows a file's history: the commit view shows only that file.
   fileHistoryFocus?: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
@@ -555,6 +648,8 @@ export function DiffPane({
         onDiscardRequestChange={onDiscardRequestChange}
         onCurrentFileChange={onCurrentFileChange}
         onOpenFileHistory={onOpenFileHistory}
+        externalTools={externalTools}
+        onMarkResolved={onMarkResolved}
       />
     );
   }
@@ -581,6 +676,7 @@ export function DiffPane({
       onSelectRow={onSelectRow}
       onOpenFileHistory={onOpenFileHistory}
       focus={fileHistoryFocus ?? null}
+      externalTools={externalTools}
     />
   );
 }
@@ -650,8 +746,12 @@ function UncommittedDiffPane({
   initialCommitDraft,
   onCommitDraftChange,
   onOpenFileHistory,
+  externalTools,
+  onMarkResolved,
 }: {
   onOpenFileHistory?: (path: string) => void;
+  externalTools?: ExternalToolsApi;
+  onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
@@ -938,6 +1038,8 @@ function UncommittedDiffPane({
         onIgnorePath={onIgnorePath}
         onStashFile={(path) => onOpenStashDialog([path])}
         onOpenFileHistory={onOpenFileHistory}
+        externalTools={externalTools}
+        onMarkResolved={onMarkResolved}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -1104,6 +1206,7 @@ function CommitDiffPane({
   onSelectRow,
   focus,
   onOpenFileHistory,
+  externalTools,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -1112,6 +1215,7 @@ function CommitDiffPane({
   onSelectRow: (row: SelectedRow) => void;
   focus: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
+  externalTools?: ExternalToolsApi;
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
@@ -1206,6 +1310,8 @@ function CommitDiffPane({
               collapsed={focusCollapsed}
               onToggleCollapse={() => setFocusCollapsed((c) => !c)}
               onSelectRow={onSelectRow}
+              externalTools={externalTools}
+              toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
             />
           </ul>
           {files.length > 1 && (
@@ -1235,6 +1341,8 @@ function CommitDiffPane({
                 onToggleCollapse={() => toggleCollapse(path)}
                 onSelectRow={onSelectRow}
                 onOpenFileHistory={onOpenFileHistory}
+                externalTools={externalTools}
+                toolSource={{ kind: "Commit", commitId, oldPath: null }}
               />
             ))}
           </ul>

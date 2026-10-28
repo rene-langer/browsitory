@@ -28,6 +28,9 @@ function createHarness() {
   const messageListeners = new Set<(message: unknown) => void>();
   const panelDisposeListeners = new Set<() => void>();
   let openCommand: (() => void) | undefined;
+  let contentProvider:
+    | { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }
+    | undefined;
 
   const webview = {
     cspSource: "vscode-webview:",
@@ -60,6 +63,14 @@ function createHarness() {
         return { dispose: () => { openCommand = undefined; } };
       }),
     },
+    workspace: {
+      registerTextDocumentContentProvider: vi.fn(
+        (_scheme: string, provider: { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }) => {
+          contentProvider = provider;
+          return { dispose: vi.fn() };
+        },
+      ),
+    },
     env: { openExternal: vi.fn(async () => true) },
     Uri: {
       joinPath: (base: Uri, ...parts: string[]) => fakeUri([base.fsPath, ...parts].join("/")),
@@ -85,6 +96,10 @@ function createHarness() {
     panelDisposeListeners,
     vscode,
     context,
+    provideContent: (uri: { path: string; query: string }) => {
+      if (!contentProvider) throw new Error("content provider was not registered");
+      return contentProvider.provideTextDocumentContent(uri);
+    },
     openPanel: () => {
       if (!openCommand) throw new Error("open command was not registered");
       openCommand();
@@ -148,6 +163,32 @@ describe("extension lifecycle", () => {
     expect(harness.messageListeners.size).toBe(0);
     expect(harness.panelDisposeListeners.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("serves browsitory-file URIs through the open panel's sidecar", async () => {
+    activate(harness.context);
+    expect(harness.vscode.workspace.registerTextDocumentContentProvider).toHaveBeenCalledWith(
+      "browsitory-file",
+      expect.anything(),
+    );
+    const query = Buffer.from(
+      JSON.stringify({ repoPath: "/repo", path: "a.ts", version: { kind: "Head" } }),
+      "utf8",
+    ).toString("base64url");
+
+    await expect(harness.provideContent({ path: "/a.ts", query })).rejects.toThrow("Browsitory is not open.");
+
+    harness.openPanel();
+    const content = harness.provideContent({ path: "/a.ts", query });
+    await vi.waitFor(() => expect(harness.child.stdin.write).toHaveBeenCalledTimes(1));
+    const request = JSON.parse(harness.child.stdin.write.mock.calls[0]?.[0] ?? "{}") as { id: number; method: string };
+    expect(request.method).toBe("read_file_version");
+    harness.child.stdout.emit(
+      "data",
+      Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { text: "hi" } })}\n`),
+    );
+    await expect(content).resolves.toBe("hi");
+    await expect(harness.provideContent({ path: "/a.ts", query: "bogus" })).rejects.toThrow();
   });
 
   it("retains the webview context while the panel is hidden", () => {

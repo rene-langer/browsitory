@@ -4,8 +4,23 @@ import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
 
 export interface AppCommands {
-  onCloneRepository: () => void;
-  onNewRepository: () => void;
+  /** Absent where the host can't clone/init (VSCode). */
+  onCloneRepository?: () => void;
+  onNewRepository?: () => void;
+  /** Opens the Preferences dialog ("Preferences…"). */
+  onOpenPreferences?: () => void;
+}
+
+/**
+ * External tools for the active repository. All read-only, so they stay available while an
+ * operation runs.
+ */
+export interface ToolCommands {
+  onOpenTerminal(): void;
+  onRevealRepository(): void;
+  /** Only offered while `DiffCommands.currentFile` is set. */
+  onOpenCurrentFileInEditor(): void;
+  onOpenCurrentFileInDiffTool(): void;
 }
 
 export interface SearchCommands {
@@ -165,6 +180,7 @@ export function buildCommands(
   appCommands?: AppCommands,
   undoCommands?: UndoCommands,
   searchCommands?: SearchCommands,
+  toolCommands?: ToolCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -179,20 +195,30 @@ export function buildCommands(
   }
 
   if (appCommands !== undefined) {
-    commands.push(
-      {
+    if (appCommands.onCloneRepository !== undefined) {
+      commands.push({
         id: "clone-repository",
         label: "Clone repository…",
         keywords: ["clone", "repository", "url", "remote"],
         run: appCommands.onCloneRepository,
-      },
-      {
+      });
+    }
+    if (appCommands.onNewRepository !== undefined) {
+      commands.push({
         id: "new-repository",
         label: "New repository…",
         keywords: ["new", "init", "create", "repository"],
         run: appCommands.onNewRepository,
-      },
-    );
+      });
+    }
+    if (appCommands.onOpenPreferences !== undefined) {
+      commands.push({
+        id: "preferences",
+        label: "Preferences…",
+        keywords: ["preferences", "settings", "options", "editor", "terminal", "tools"],
+        run: appCommands.onOpenPreferences,
+      });
+    }
   }
 
   // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
@@ -213,6 +239,39 @@ export function buildCommands(
       keywords: ["search", "find", "filter", "author", "grep", "log"],
       run: searchCommands.onSearchCommits,
     });
+  }
+
+  if (toolCommands !== undefined) {
+    commands.push(
+      {
+        id: "open-terminal",
+        label: "Open terminal here",
+        keywords: ["terminal", "shell", "console", "cmd"],
+        run: toolCommands.onOpenTerminal,
+      },
+      {
+        id: "reveal-repository",
+        label: "Reveal repository",
+        keywords: ["reveal", "finder", "explorer", "file manager", "folder"],
+        run: toolCommands.onRevealRepository,
+      },
+    );
+    if (diffCommands?.currentFile != null) {
+      commands.push(
+        {
+          id: "open-current-file-in-editor",
+          label: "Open current file in editor",
+          keywords: ["editor", "open", "edit", "file"],
+          run: toolCommands.onOpenCurrentFileInEditor,
+        },
+        {
+          id: "open-current-file-in-diff-tool",
+          label: "Open current file in diff tool",
+          keywords: ["diff", "tool", "difftool", "compare"],
+          run: toolCommands.onOpenCurrentFileInDiffTool,
+        },
+      );
+    }
   }
 
   if (!repositoryOperationDisabled && undoCommands !== undefined) {
@@ -683,12 +742,16 @@ export function commandGroup(id: string): CommandGroup {
     id === "decrease-context-lines" ||
     id === "toggle-syntax-highlighting" ||
     id === "discard-current-file" ||
-    id === "discard-all-unstaged"
+    id === "discard-all-unstaged" ||
+    id === "open-current-file-in-editor" ||
+    id === "open-current-file-in-diff-tool"
   ) {
     return "Diff";
   }
   if (id.startsWith("go-to:")) return "Go to";
-  if (id.startsWith("switch-repo:") || id === "close-tab") return "Repositories";
+  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "open-terminal" || id === "reveal-repository") {
+    return "Repositories";
+  }
   return "General";
 }
 

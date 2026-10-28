@@ -45,6 +45,7 @@ function createBridge(overrides: {
   folder?: Uri[] | undefined;
   externalResult?: boolean;
   spawnResults?: Array<FakeSidecar | Error>;
+  mergeEditorOpened?: boolean;
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -58,6 +59,14 @@ function createBridge(overrides: {
   const showOpenDialog = vi.fn(async () => overrides.folder);
   const openExternal = vi.fn(async () => overrides.externalResult ?? true);
   const appendLine = vi.fn();
+  const openFile = vi.fn(async (_path: string, _line: number | null) => undefined);
+  const revealInOS = vi.fn(async (_path: string) => undefined);
+  const createTerminal = vi.fn((_cwd: string, _name: string) => {});
+  const openDiff = vi.fn(async (_left: string, _right: string, _title: string) => undefined);
+  const openMergeEditor = vi.fn(
+    async (_sides: { base: string; ours: string; theirs: string; output: string }) =>
+      overrides.mergeEditorOpened ?? true,
+  );
   const state = fakeContext();
   const bridge = new SidecarBridge({
     spawn,
@@ -67,6 +76,11 @@ function createBridge(overrides: {
     showOpenDialog,
     openExternal,
     appendLine,
+    openFile,
+    revealInOS,
+    createTerminal,
+    openDiff,
+    openMergeEditor,
   });
   return {
     bridge,
@@ -76,6 +90,11 @@ function createBridge(overrides: {
     showOpenDialog,
     openExternal,
     appendLine,
+    openFile,
+    revealInOS,
+    createTerminal,
+    openDiff,
+    openMergeEditor,
     ...state,
   };
 }
@@ -202,7 +221,7 @@ describe("SidecarBridge", () => {
     expect(postToWebview).not.toHaveBeenCalled();
   });
 
-  it("routes the five VSCode-native methods without spawning the sidecar", async () => {
+  it("routes the native picker, URL and version methods without spawning the sidecar", async () => {
     const folder = { fsPath: "/repos/a" } as Uri;
     const {
       bridge,
@@ -319,6 +338,160 @@ describe("SidecarBridge", () => {
       },
     ]);
   });
+  it("opens files, terminals, diffs and merges through VSCode using the sidecar's work tree root", async () => {
+    const { bridge, child, postToWebview, openFile, revealInOS, createTerminal, openDiff, openMergeEditor } =
+      createBridge({ mergeEditorOpened: false });
+    const answerWorkdir = async (index: number) => {
+      await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(index + 1));
+      const request = writtenRequest(child, index);
+      expect(request).toMatchObject({ method: "repo_workdir", params: { repoPath: "/repos/a/sub" } });
+      child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "/repos/a" })}\n`);
+    };
+
+    const editor = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "open_in_editor",
+      params: { repoPath: "/repos/a/sub", path: "src/x.ts", line: 4 },
+    });
+    await answerWorkdir(0);
+    await editor;
+    expect(openFile).toHaveBeenCalledWith("/repos/a/src/x.ts", 4);
+
+    const reveal = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "reveal_in_file_manager",
+      params: { repoPath: "/repos/a/sub", path: null },
+    });
+    await answerWorkdir(1);
+    await reveal;
+    expect(revealInOS).toHaveBeenCalledWith("/repos/a");
+
+    const terminal = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "open_terminal",
+      params: { repoPath: "/repos/a/sub" },
+    });
+    await answerWorkdir(2);
+    await terminal;
+    expect(createTerminal).toHaveBeenCalledWith("/repos/a", "Browsitory: a");
+
+    const diff = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "open_diff_tool",
+      params: { repoPath: "/repos/a/sub", path: "x.ts", source: { kind: "Unstaged" } },
+    });
+    await answerWorkdir(3);
+    await diff;
+    expect(openDiff).toHaveBeenCalledWith(
+      expect.stringMatching(/^browsitory-file:\/x\.ts\?/),
+      "file:///repos/a/x.ts",
+      "x.ts (Index ↔ Working Tree)",
+    );
+
+    const merge = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "open_merge_tool",
+      params: { repoPath: "/repos/a/sub", path: "x.ts" },
+    });
+    await answerWorkdir(4);
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(6));
+    const check = writtenRequest(child, 5);
+    expect(check).toMatchObject({ method: "check_merge_target", params: { repoPath: "/repos/a/sub", path: "x.ts" } });
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: check.id, result: null })}\n`);
+    await merge;
+    expect(openMergeEditor).toHaveBeenCalledWith(expect.objectContaining({ output: "file:///repos/a/x.ts" }));
+
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: null },
+      { jsonrpc: "2.0", id: 2, result: null },
+      { jsonrpc: "2.0", id: 3, result: null },
+      { jsonrpc: "2.0", id: 4, result: null },
+      // The merge editor fell back to a plain open: still handed off to VSCode.
+      { jsonrpc: "2.0", id: 5, result: "HandedOff" },
+    ]);
+  });
+
+  it("does not open the merge editor when the sidecar refuses the merge target", async () => {
+    const { bridge, child, postToWebview, openMergeEditor } = createBridge();
+    const merge = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "open_merge_tool",
+      params: { repoPath: "/r", path: "link" },
+    });
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(1));
+    const workdir = writtenRequest(child, 0);
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: workdir.id, result: "/r" })}\n`);
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(2));
+    const check = writtenRequest(child, 1);
+    expect(check).toMatchObject({ method: "check_merge_target" });
+    child.stdout.push(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: check.id,
+        error: { code: -32000, message: "link is a symbolic link, which a merge tool can't merge." },
+      })}\n`,
+    );
+    await merge;
+    expect(openMergeEditor).not.toHaveBeenCalled();
+    const reply = postToWebview.mock.calls.at(-1)?.[0] as { id: number; error?: { message: string } };
+    expect(reply.id).toBe(7);
+    expect(reply.error?.message).toContain("is a symbolic link");
+  });
+
+  it("rejects malformed launch params without asking the sidecar", async () => {
+    const { bridge, spawn, postToWebview, openFile, openDiff } = createBridge();
+    const send = (id: number, method: string, params: Record<string, unknown>) =>
+      bridge.handleWebviewMessage({ jsonrpc: "2.0", id, method, params });
+
+    await send(1, "open_in_editor", { repoPath: "/r", path: "../x", line: null });
+    await send(2, "open_in_editor", { repoPath: "/r", path: "/etc/passwd", line: null });
+    await send(3, "open_in_editor", { repoPath: "/r", path: "a", line: "4" });
+    await send(4, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Commit", commitId: "abc" } });
+    await send(5, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Range", fromId: "-x", toId: null, oldPath: null } });
+    await send(6, "open_merge_tool", { repoPath: "/r", path: "a", extra: true });
+    await send(7, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Commit", commitId: "abc", oldPath: "../b" } });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
+    expect(openDiff).not.toHaveBeenCalled();
+    const replies = postToWebview.mock.calls.map(([message]) => message as { id: number; error: { code: number; message: string } });
+    expect(replies.map((r) => [r.id, r.error.code])).toEqual([
+      [1, -32602],
+      [2, -32602],
+      [3, -32602],
+      [4, -32602],
+      [5, -32602],
+      [6, -32602],
+      [7, -32602],
+    ]);
+    expect(replies[0]?.error.message).toBe("Invalid path.");
+  });
+
+  it("serves file versions to the content provider through the sidecar", async () => {
+    const { bridge, child } = createBridge();
+    const text = bridge.readFileVersion({ repoPath: "/r", path: "a.ts", version: { kind: "Head" } });
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(1));
+    const request = writtenRequest(child, 0);
+    expect(request).toMatchObject({
+      method: "read_file_version",
+      params: { repoPath: "/r", path: "a.ts", version: { kind: "Head" } },
+    });
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { text: null } })}\n`);
+    await expect(text).resolves.toBe("");
+
+    const second = bridge.readFileVersion({ repoPath: "/r", path: "a.ts", version: { kind: "Index" } });
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(2));
+    const next = writtenRequest(child, 1);
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: next.id, result: { text: "hello" } })}\n`);
+    await expect(second).resolves.toBe("hello");
+  });
+
   it("resolves development and packaged binaries at isolated paths", () => {
     expect(resolveDevelopmentSidecarPath("/workspace/extension", "linux")).toBe(
       "/workspace/target/debug/vscode-sidecar",

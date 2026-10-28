@@ -1,6 +1,6 @@
 use super::{
-    worker_handle, AppState, ConflictSegmentDto, FileConflictChoiceDto, MergeOptionsDto,
-    MergeOutcomeDto,
+    worker_handle, AppState, ConflictSegmentDto, FileConflictChoiceDto, MarkResolvedOutcomeDto,
+    MergeOptionsDto, MergeOutcomeDto,
 };
 use std::path::Path;
 use tauri::State;
@@ -81,4 +81,18 @@ pub async fn resolve_add_delete_conflict(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     worker_handle(&state, &repo_path)?.resolve_add_delete_conflict(path, choice.into())
+}
+
+/// Stages a conflicted file. Without `force`, a file that still has conflict markers is left
+/// alone and `MarkersRemain` is returned, so the UI can ask first.
+#[tauri::command]
+pub async fn mark_resolved(
+    repo_path: String,
+    path: String,
+    force: bool,
+    state: State<'_, AppState>,
+) -> Result<MarkResolvedOutcomeDto, String> {
+    Ok(worker_handle(&state, &repo_path)?
+        .mark_resolved(path, force)?
+        .into())
 }

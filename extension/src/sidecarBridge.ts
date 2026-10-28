@@ -1,6 +1,14 @@
 import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionContext, OpenDialogOptions, Uri } from "vscode";
+import {
+  diffSides,
+  isSafeRelativePath,
+  mergeSides,
+  resolveRepoFile,
+  type DiffSource,
+  type FileVersionRef,
+} from "./toolUris";
 
 const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
 const NATIVE_METHODS = new Set([
@@ -10,6 +18,12 @@ const NATIVE_METHODS = new Set([
   "get_last_seen_version",
   "set_last_seen_version",
   "log_frontend_error",
+  // External tools open in VSCode itself; the sidecar is only asked for the work tree root.
+  "open_in_editor",
+  "reveal_in_file_manager",
+  "open_terminal",
+  "open_diff_tool",
+  "open_merge_tool",
 ]);
 
 interface SidecarReadable {
@@ -64,6 +78,19 @@ export interface SidecarBridgeDependencies {
   ) => PromiseLike<readonly Uri[] | undefined>;
   readonly openExternal: (url: string) => PromiseLike<boolean>;
   readonly appendLine: (message: string) => void;
+  /** Opens a work tree file in a VSCode editor, at the 1-based `line` when given. */
+  readonly openFile: (path: string, line: number | null) => PromiseLike<unknown>;
+  readonly revealInOS: (path: string) => PromiseLike<unknown>;
+  readonly createTerminal: (cwd: string, name: string) => void;
+  /** `left`/`right` are URI strings (`browsitory-file:` or `file:`). */
+  readonly openDiff: (left: string, right: string, title: string) => PromiseLike<unknown>;
+  /** Resolves `false` when the merge editor wasn't available and the file opened plainly. */
+  readonly openMergeEditor: (sides: {
+    base: string;
+    ours: string;
+    theirs: string;
+    output: string;
+  }) => PromiseLike<boolean>;
 }
 
 class InvalidParamsError extends Error {}
@@ -395,6 +422,35 @@ export class SidecarBridge {
     }
   }
 
+  /** Contents of a repository file version for the `browsitory-file:` content provider. */
+  async readFileVersion(ref: FileVersionRef): Promise<string> {
+    const result = await this.callRunningSidecar("read_file_version", {
+      repoPath: ref.repoPath,
+      path: ref.path,
+      version: ref.version,
+    });
+    if (!isRecord(result) || (typeof result["text"] !== "string" && result["text"] !== null)) {
+      throw new Error("read_file_version returned an invalid result");
+    }
+    return result["text"] ?? "";
+  }
+
+  /** The work tree root of an open repository (its path may be a subdirectory). */
+  private async workdir(repoPath: string): Promise<string> {
+    const result = await this.callRunningSidecar("repo_workdir", { repoPath });
+    if (typeof result !== "string" || result === "") {
+      throw new Error("repo_workdir returned an invalid result");
+    }
+    return result;
+  }
+
+  private async callRunningSidecar(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (this.disposed) throw new Error(DISPOSED_MESSAGE);
+    const sidecar = await this.ensureSidecar();
+    if (!sidecar) throw new Error("Browsitory sidecar is not running");
+    return this.callSidecar(sidecar, method, params);
+  }
+
   private async handleNativeRequest(request: JsonRpcRequest): Promise<void> {
     try {
       let result: unknown;
@@ -440,6 +496,60 @@ export class SidecarBridge {
           const { context, message } = requireLogFrontendErrorParams(request);
           this.dependencies.appendLine(`${context}: ${message}`);
           result = null;
+          break;
+        }
+        case "open_in_editor": {
+          const params = requireParams(request, { repoPath: "string", path: "string", line: "number|null" });
+          const rel = requireRepoPath(params["path"]);
+          const line = params["line"];
+          if (line !== null && (!Number.isSafeInteger(line) || (line as number) < 1)) {
+            throw new InvalidParamsError("open_in_editor requires a positive line");
+          }
+          const file = repoFile(await this.workdir(params["repoPath"] as string), rel);
+          await this.dependencies.openFile(file, line as number | null);
+          result = null;
+          break;
+        }
+        case "reveal_in_file_manager": {
+          const params = requireParams(request, { repoPath: "string", path: "string|null" });
+          const rel = params["path"] === null ? null : requireRepoPath(params["path"]);
+          const workdir = await this.workdir(params["repoPath"] as string);
+          await this.dependencies.revealInOS(rel === null ? workdir : repoFile(workdir, rel));
+          result = null;
+          break;
+        }
+        case "open_terminal": {
+          const params = requireParams(request, { repoPath: "string" });
+          const workdir = await this.workdir(params["repoPath"] as string);
+          const name = path.basename(workdir.replace(/[\\/]+$/, "")) || workdir;
+          this.dependencies.createTerminal(workdir, `Browsitory: ${name}`);
+          result = null;
+          break;
+        }
+        case "open_diff_tool": {
+          const params = requireParams(request, { repoPath: "string", path: "string", source: "object" });
+          const rel = requireRepoPath(params["path"]);
+          const source = requireDiffSource(params["source"]);
+          const repoPath = params["repoPath"] as string;
+          const workdir = await this.workdir(repoPath);
+          repoFile(workdir, rel);
+          const sides = diffSides(repoPath, workdir, rel, source);
+          await this.dependencies.openDiff(sides.left, sides.right, sides.title);
+          result = null;
+          break;
+        }
+        case "open_merge_tool": {
+          const params = requireParams(request, { repoPath: "string", path: "string" });
+          const rel = requireRepoPath(params["path"]);
+          const repoPath = params["repoPath"] as string;
+          const workdir = await this.workdir(repoPath);
+          repoFile(workdir, rel);
+          // The desktop merge tool's guards (a text conflict, no symlink or submodule, a work
+          // tree file inside the tree): the merge editor writes its result to that file.
+          await this.callRunningSidecar("check_merge_target", { repoPath, path: rel });
+          await this.dependencies.openMergeEditor(mergeSides(repoPath, workdir, rel));
+          // VSCode owns the merge from here; Browsitory can't see when it's done.
+          result = "HandedOff";
           break;
         }
         default:
@@ -547,6 +657,90 @@ function requireLogFrontendErrorParams(
     );
   }
   return { context, message };
+}
+
+type ParamType = "string" | "number|null" | "string|null" | "object";
+
+/** Checks that `request.params` has exactly the keys of `shape`, each of the given type. */
+function requireParams(
+  request: JsonRpcRequest,
+  shape: Record<string, ParamType>,
+): Record<string, unknown> {
+  const keys = Object.keys(request.params);
+  const names = Object.keys(shape);
+  const matches =
+    keys.length === names.length &&
+    names.every((name) => {
+      const value = request.params[name];
+      switch (shape[name]) {
+        case "string":
+          return typeof value === "string";
+        case "number|null":
+          return value === null || typeof value === "number";
+        case "string|null":
+          return value === null || typeof value === "string";
+        case "object":
+          return isRecord(value);
+        default:
+          return false;
+      }
+    });
+  if (!matches) {
+    const expected = names.map((name) => `${name}: ${shape[name]}`).join(", ");
+    throw new InvalidParamsError(`${request.method} requires { ${expected} }`);
+  }
+  return request.params;
+}
+
+/** A work-tree-relative path that cannot escape the work tree. */
+function requireRepoPath(value: unknown): string {
+  if (typeof value !== "string" || !isSafeRelativePath(value)) {
+    throw new InvalidParamsError("Invalid path.");
+  }
+  return value;
+}
+
+function repoFile(workdir: string, rel: string): string {
+  try {
+    return resolveRepoFile(workdir, rel);
+  } catch {
+    throw new InvalidParamsError("Invalid path.");
+  }
+}
+
+const COMMIT_ID = /^[0-9a-fA-F]{4,64}$/;
+
+function requireDiffSource(value: unknown): DiffSource {
+  const invalid = () => new InvalidParamsError("open_diff_tool requires a valid source");
+  if (!isRecord(value)) throw invalid();
+  const keys = Object.keys(value).sort().join(",");
+  const commitId = (v: unknown): v is string => typeof v === "string" && COMMIT_ID.test(v);
+  const oldPath = (v: unknown): v is string | null =>
+    v === null || (typeof v === "string" && isSafeRelativePath(v));
+  switch (value["kind"]) {
+    case "Unstaged":
+    case "Staged":
+      if (keys === "kind") return { kind: value["kind"] };
+      break;
+    case "Commit":
+      if (keys === "commitId,kind,oldPath" && commitId(value["commitId"]) && oldPath(value["oldPath"])) {
+        return { kind: "Commit", commitId: value["commitId"], oldPath: value["oldPath"] };
+      }
+      break;
+    case "Range": {
+      const toId = value["toId"];
+      if (
+        keys === "fromId,kind,oldPath,toId" &&
+        commitId(value["fromId"]) &&
+        (toId === null || commitId(toId)) &&
+        oldPath(value["oldPath"])
+      ) {
+        return { kind: "Range", fromId: value["fromId"], toId, oldPath: value["oldPath"] };
+      }
+      break;
+    }
+  }
+  throw invalid();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -3,6 +3,7 @@ import type { ChangedFile, DiffOptions, GraphCommit, RepoClient } from "../ipc/R
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
 import type { CompareState } from "../state/useCompare";
+import type { ExternalToolsApi } from "../state/useExternalTools";
 import { CollapseAllToggle } from "./CollapseToggle";
 import styles from "./CompareDiffPane.module.css";
 import diffStyles from "./DiffPane.module.css";
@@ -23,6 +24,7 @@ export function CompareDiffPane({
   onRetry,
   onSelectRow,
   onOpenFileHistory,
+  externalTools,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -34,6 +36,7 @@ export function CompareDiffPane({
   onRetry: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  externalTools?: ExternalToolsApi;
 }) {
   const { target, range } = compare;
   const fromId = range?.fromId ?? null;
@@ -143,6 +146,8 @@ export function CompareDiffPane({
               onToggleCollapse={() => toggleCollapse(file.path)}
               onSelectRow={onSelectRow}
               onOpenFileHistory={onOpenFileHistory}
+              externalTools={externalTools}
+              toolSource={{ kind: "Range", fromId: fromId as string, toId, oldPath: file.oldPath }}
             />
           ))}
         </ul>
