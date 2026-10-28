@@ -395,7 +395,7 @@ export function useRemoteTransferActions(
           ...prev,
           tags: [
             ...prev.tags,
-            { name, targetId: "", annotated: message !== null, message, taggerName: null, timestamp: null },
+            { name, targetId: "", commitId: null, annotated: message !== null, message, taggerName: null, timestamp: null },
           ],
         }),
         () => client.createTag(repoPath, name, message),

@@ -47,7 +47,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
         },
       ],
       remotes: [{ name: "origin", fetchUrl: "https://example.com/repo.git", pushUrl: null, authMode: null, authUsername: null }],
-      tags: [{ name: "v1.0", targetId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
+      tags: [{ name: "v1.0", targetId: "aaa", commitId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
       upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
       remoteUpstreams: {},
       forgeRepositories: [],
@@ -1200,8 +1200,11 @@ describe("remote and tag palette entries", () => {
     expect(ids.filter((id) => id.startsWith("remove-remote:"))).toHaveLength(2);
   });
 
-  it("checks out a tag's target commit, even with the Tags panel hidden", () => {
-    const tags = [{ name: "v1", targetId: "c1", annotated: true, message: "m", taggerName: "t", timestamp: 1 }];
+  it("checks out the commit a tag peels to, even with the Tags panel hidden", () => {
+    // An annotated tag of a tag targets the inner tag object; `commitId` is the peeled commit.
+    const tags = [
+      { name: "v1", targetId: "tagobj", commitId: "c1", annotated: true, message: "m", taggerName: "t", timestamp: 1 },
+    ];
     const appState = makeAppState({ tags });
     const command = buildCommands(appState, vi.fn(), [], vi.fn(), { ...allVisible, tags: false }).find(
       (c) => c.id === "checkout-tag:v1",
@@ -1210,5 +1213,13 @@ describe("remote and tag palette entries", () => {
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
     expect(commandGroup("checkout-tag:v1")).toBe("Branches");
+  });
+
+  it("offers no checkout for a tag that doesn't peel to a commit", () => {
+    const tags = [
+      { name: "tree", targetId: "t1", commitId: null, annotated: true, message: "m", taggerName: "t", timestamp: 1 },
+    ];
+    const ids = buildCommands(makeAppState({ tags })).map((c) => c.id);
+    expect(ids).not.toContain("checkout-tag:tree");
   });
 });

@@ -564,11 +564,13 @@ export function buildCommands(
     // The keyboard path for the tag badge menu's "Checkout (detached)". Not tied to the Tags
     // panel's visibility: it doesn't navigate there.
     for (const tag of state.tags) {
+      const commitId = tag.commitId;
+      if (commitId === null) continue; // a tag of a tree or blob has nothing to check out
       commands.push({
         id: `checkout-tag:${tag.name}`,
         label: `Check out tag ${tag.name} (detached)`,
         keywords: ["tag", "checkout", "detached", tag.name],
-        run: () => void appState.checkoutCommit(tag.targetId),
+        run: () => void appState.checkoutCommit(commitId),
       });
     }
 

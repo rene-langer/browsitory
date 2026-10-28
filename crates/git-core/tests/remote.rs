@@ -213,6 +213,44 @@ fn tag_crud_preserves_lightweight_and_annotated_tag_metadata() {
 }
 
 #[test]
+fn lists_the_commit_each_tag_peels_to() {
+    // A tag of a tag targets the inner tag object, not a commit; a tag of a tree has no commit.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    let commit = repo.head().unwrap().peel_to_commit().unwrap();
+    let commit_id = commit.id().to_string();
+    let tagger = git2::Signature::now("Test User", "test@example.com").unwrap();
+
+    create_tag(&repo, "light", None).unwrap();
+    create_tag(&repo, "annotated", Some("ship it")).unwrap();
+    let inner = repo.refname_to_id("refs/tags/annotated").unwrap();
+    let inner_object = repo.find_object(inner, None).unwrap();
+    repo.tag("outer", &inner_object, &tagger, "tag of a tag", false)
+        .unwrap();
+    let tree = commit.tree().unwrap().into_object();
+    repo.tag("tree-tag", &tree, &tagger, "a tree", false)
+        .unwrap();
+    repo.tag_lightweight("light-tree", &tree, false).unwrap();
+
+    let tags = list_tags(&repo).unwrap();
+    let commit_of = |name: &str| {
+        tags.iter()
+            .find(|tag| tag.name == name)
+            .unwrap_or_else(|| panic!("tag {name} listed"))
+            .commit_id
+            .clone()
+    };
+    assert_eq!(commit_of("light"), Some(commit_id.clone()));
+    assert_eq!(commit_of("annotated"), Some(commit_id.clone()));
+    assert_eq!(commit_of("outer"), Some(commit_id));
+    assert_eq!(commit_of("tree-tag"), None);
+    assert_eq!(commit_of("light-tree"), None);
+    let outer = tags.iter().find(|tag| tag.name == "outer").unwrap();
+    assert_eq!(outer.target_id, inner.to_string());
+}
+
+#[test]
 fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
     // Omitting either explicit refspec or pushing every local tag must fail this test.
     let fixture = local_and_bare_remote();

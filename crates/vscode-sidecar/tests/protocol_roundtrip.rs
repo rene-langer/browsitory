@@ -1110,6 +1110,8 @@ fn tag_lifecycle_round_trips_through_the_sidecar() {
     assert_eq!(list[0]["name"], "v1.0.0");
     assert_eq!(list[0]["annotated"], true);
     assert_eq!(list[0]["message"], "first release");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    assert_eq!(list[0]["commitId"], head);
 
     let deleted = sidecar.call(
         4,

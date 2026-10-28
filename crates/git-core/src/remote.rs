@@ -304,7 +304,11 @@ pub(crate) fn ahead_behind(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagInfo {
     pub name: String,
+    /// The object the tag points at directly: for an annotated tag its tag object's target,
+    /// which is another tag for a tag of a tag.
     pub target_id: String,
+    /// The commit the tag peels to through any chain of tags; `None` for a tag of a tree or blob.
+    pub commit_id: Option<String>,
     pub annotated: bool,
     pub message: Option<String>,
     pub tagger_name: Option<String>,
@@ -551,11 +555,16 @@ pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>, RemoteError> {
         let target_id = reference
             .target()
             .ok_or_else(|| git2::Error::from_str("tag reference has no direct target"))?;
+        let commit_id = reference
+            .peel_to_commit()
+            .ok()
+            .map(|commit| commit.id().to_string());
         if let Ok(tag) = repo.find_tag(target_id) {
             let tagger = tag.tagger();
             tags.push(TagInfo {
                 name: name.to_string(),
                 target_id: tag.target_id().to_string(),
+                commit_id,
                 annotated: true,
                 message: tag.message()?.map(str::to_string),
                 tagger_name: tagger
@@ -567,6 +576,7 @@ pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>, RemoteError> {
             tags.push(TagInfo {
                 name: name.to_string(),
                 target_id: target_id.to_string(),
+                commit_id,
                 annotated: false,
                 message: None,
                 tagger_name: None,

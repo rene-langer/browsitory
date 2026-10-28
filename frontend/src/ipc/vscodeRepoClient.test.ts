@@ -729,7 +729,7 @@ describe("vscodeRepoClient", () => {
 
     const listPromise = vscodeRepoClient.listTags("/repo");
     respond(2, [
-      { name: "v1.0.0", targetId: "abc", annotated: true, message: "first release", taggerName: "Test User", timestamp: 1_725_000_000 },
+      { name: "v1.0.0", targetId: "abc", commitId: "abc", annotated: true, message: "first release", taggerName: "Test User", timestamp: 1_725_000_000 },
     ]);
     await expect(listPromise).resolves.toHaveLength(1);
 

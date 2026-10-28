@@ -270,7 +270,10 @@ export interface TransferProgress {
 
 export interface TagInfo {
   name: string;
+  /** What the tag points at directly: another tag object for a tag of a tag. */
   targetId: string;
+  /** The commit the tag peels to; `null` for a tag of a tree or blob. */
+  commitId: string | null;
   annotated: boolean;
   message: string | null;
   taggerName: string | null;

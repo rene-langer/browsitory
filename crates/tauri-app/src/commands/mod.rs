@@ -349,6 +349,7 @@ pub enum RemoteAuthModeDto {
 pub struct TagInfoDto {
     pub name: String,
     pub target_id: String,
+    pub commit_id: Option<String>,
     pub annotated: bool,
     pub message: Option<String>,
     pub tagger_name: Option<String>,
@@ -360,6 +361,7 @@ impl From<git_core::remote::TagInfo> for TagInfoDto {
         Self {
             name: tag.name,
             target_id: tag.target_id,
+            commit_id: tag.commit_id,
             annotated: tag.annotated,
             message: tag.message,
             tagger_name: tag.tagger_name,
@@ -1891,6 +1893,24 @@ mod tests {
     use super::{
         MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
     };
+
+    #[test]
+    fn tag_info_dto_serializes_the_peeled_commit_id_in_camel_case() {
+        let tag = |commit_id: Option<&str>| git_core::remote::TagInfo {
+            name: "v1".into(),
+            target_id: "tagobj".into(),
+            commit_id: commit_id.map(str::to_string),
+            annotated: true,
+            message: Some("m".into()),
+            tagger_name: None,
+            timestamp: None,
+        };
+        let json = serde_json::to_value(super::TagInfoDto::from(tag(Some("abc")))).unwrap();
+        assert_eq!(json["targetId"], "tagobj");
+        assert_eq!(json["commitId"], "abc");
+        let json = serde_json::to_value(super::TagInfoDto::from(tag(None))).unwrap();
+        assert_eq!(json["commitId"], serde_json::Value::Null);
+    }
 
     #[test]
     fn file_sides_dto_encodes_base64_sniffs_the_type_and_tags_each_side() {

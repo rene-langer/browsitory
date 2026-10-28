@@ -297,6 +297,7 @@ describe("useAppState", () => {
     const release: TagInfo = {
       name: "v1.0.0",
       targetId: "abc123",
+      commitId: "abc123",
       annotated: true,
       message: "first release",
       taggerName: "Test User",
@@ -1811,7 +1812,7 @@ describe("useAppState", () => {
   });
 
   it("deleteTag removes the tag from state before the backend call resolves, restores it on failure", async () => {
-    const tagA: TagInfo = { name: "v1.0.0", targetId: "abc", annotated: false, message: null, taggerName: null, timestamp: null };
+    const tagA: TagInfo = { name: "v1.0.0", targetId: "abc", commitId: "abc", annotated: false, message: null, taggerName: null, timestamp: null };
     const client = transferClient({
       listTags: async () => [tagA],
       deleteTag: async () => {

@@ -6,6 +6,7 @@ import { TagPanel } from "./TagPanel";
 const tag: TagInfo = {
   name: "v1.0.0",
   targetId: "abc123",
+  commitId: "abc123",
   annotated: false,
   message: null,
   taggerName: null,

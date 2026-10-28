@@ -3764,6 +3764,10 @@ mod tests {
             tags[0].target_id,
             handle.get_commit_graph(1, None).unwrap()[0].id
         );
+        assert_eq!(
+            tags[0].commit_id.as_deref(),
+            Some(handle.get_commit_graph(1, None).unwrap()[0].id.as_str())
+        );
         assert!(tags[0].annotated);
         assert_eq!(tags[0].message.as_deref(), Some("first release"));
         assert_eq!(tags[0].tagger_name.as_deref(), Some("Test User"));
