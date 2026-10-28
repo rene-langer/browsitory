@@ -147,6 +147,30 @@ impl Default for DiffSettings {
 
 const MAX_CONTEXT_LINES: u32 = 20;
 
+/// Commit message editor preferences, persisted as the `[commit_message]` TOML table: the
+/// summary length counter's soft limit and the body ruler column (both clamped to
+/// `COMMIT_MESSAGE_COLUMNS` on write).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CommitMessageSettings {
+    pub summary_limit: u32,
+    pub body_ruler: u32,
+    pub show_ruler: bool,
+}
+
+impl Default for CommitMessageSettings {
+    fn default() -> Self {
+        Self {
+            summary_limit: 50,
+            body_ruler: 72,
+            show_ruler: true,
+        }
+    }
+}
+
+/// The range `summary_limit` and `body_ruler` are clamped to.
+pub const COMMIT_MESSAGE_COLUMNS: std::ops::RangeInclusive<u32> = 10..=200;
+
 /// External editor/terminal commands, persisted as the `[tools]` TOML table. `None` means "use
 /// the system default". Diff/merge tools are not here; they come from the user's git config.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,7 +188,8 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
-    // `diff` and `tools` serialize as TOML tables (`[diff]`, `[tools]`). Tables must follow
+    // `diff`, `tools` and `commit_message` serialize as TOML tables (`[diff]`, `[tools]`,
+    // `[commit_message]`). Tables must follow
     // plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
@@ -173,6 +198,8 @@ struct ConfigFile {
     diff: DiffSettings,
     #[serde(default)]
     tools: ExternalToolSettings,
+    #[serde(default)]
+    commit_message: CommitMessageSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -279,6 +306,40 @@ pub fn set_diff_settings_at(
     config.diff = DiffSettings {
         context_lines: settings.context_lines.min(MAX_CONTEXT_LINES),
         ..*settings
+    };
+    write_config(config_file, &config)
+}
+
+pub fn get_commit_message_settings() -> Result<CommitMessageSettings, ConfigError> {
+    get_commit_message_settings_at(&config_file_path()?)
+}
+
+pub fn set_commit_message_settings(settings: &CommitMessageSettings) -> Result<(), ConfigError> {
+    set_commit_message_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_commit_message_settings_at(
+    config_file: &Path,
+) -> Result<CommitMessageSettings, ConfigError> {
+    Ok(read_config(config_file)?.commit_message)
+}
+
+/// Persists `settings`, clamping both columns to `COMMIT_MESSAGE_COLUMNS` on write.
+pub fn set_commit_message_settings_at(
+    config_file: &Path,
+    settings: &CommitMessageSettings,
+) -> Result<(), ConfigError> {
+    let clamp = |n: u32| {
+        n.clamp(
+            *COMMIT_MESSAGE_COLUMNS.start(),
+            *COMMIT_MESSAGE_COLUMNS.end(),
+        )
+    };
+    let mut config = read_config(config_file)?;
+    config.commit_message = CommitMessageSettings {
+        summary_limit: clamp(settings.summary_limit),
+        body_ruler: clamp(settings.body_ruler),
+        show_ruler: settings.show_ruler,
     };
     write_config(config_file, &config)
 }
