@@ -54,7 +54,7 @@ import {
 } from "./FileActionsMenu";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
-import { isMenuKey, menuAnchor } from "../lib/menuKeys";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
@@ -133,7 +133,7 @@ function UncommittedFileSection({
   onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const [confirmMarkers, setConfirmMarkers] = useState(false);
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
@@ -340,8 +340,12 @@ function UncommittedFileSection({
               aria-haspopup="menu"
               onClick={(event) => {
                 event.stopPropagation();
-                const r = event.currentTarget.getBoundingClientRect();
-                setMenu({ x: r.left, y: r.bottom });
+                // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
+                // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
+                setMenu({
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
+                });
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />
@@ -481,6 +485,7 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
           items={menuItems}
           onClose={() => setMenu(null)}
         />

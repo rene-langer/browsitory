@@ -62,7 +62,7 @@ export function ReadOnlyFileSection({
   const isImage = previewSource !== undefined && imageMimeType(path) !== null;
   const [imageAsText, setImageAsText] = useState(false);
   const showImage = isImage && !imageAsText;
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
   const onPickFileAction = (action: FileAction) => {
     if (tools === null) return;
@@ -139,7 +139,8 @@ export function ReadOnlyFileSection({
                 event.preventDefault();
                 setMenu(menuAnchor(event, event.currentTarget));
               }
-        }        // The Menu key or Shift+F10 on any header control (collapse, Blame, History, "…") opens the
+        }
+        // The Menu key or Shift+F10 on any header control (collapse, Blame, History, "…") opens the
         // file menu at the header; Escape then returns to that control (`ContextMenu`).
         onKeyDown={
           tools === null
@@ -170,8 +171,12 @@ export function ReadOnlyFileSection({
               aria-label={`Actions for ${path}`}
               aria-haspopup="menu"
               onClick={(event) => {
-                const r = event.currentTarget.getBoundingClientRect();
-                setMenu({ x: r.left, y: r.bottom });
+                // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
+                // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
+                setMenu({
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
+                });
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />
@@ -216,7 +221,13 @@ export function ReadOnlyFileSection({
         </div>
       )}
       {menu !== null && (
-        <ContextMenu x={menu.x} y={menu.y} items={commitFileMenuItems(onPickFileAction)} onClose={() => setMenu(null)} />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          items={commitFileMenuItems(onPickFileAction)}
+          onClose={() => setMenu(null)}
+        />
       )}
     </li>
   );

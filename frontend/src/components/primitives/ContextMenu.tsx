@@ -34,18 +34,16 @@ export function ContextMenu({
   const menuRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // The trigger: the element focused when the menu first renders, captured before the mount
-  // effect below moves focus into the menu. Escape, Tab and running an item focus it again
-  // *before* `onSelect`/`onClose`, so a dialog an item opens records it (`useRestoreFocus`) and
-  // returns there too. An outside click leaves focus alone — the user clicked somewhere else.
-  const [capturedTrigger] = useState<HTMLElement | null>(() =>
-    document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-      ? document.activeElement
-      : null,
-  );
-  const trigger = returnFocusTo !== undefined ? returnFocusTo : capturedTrigger;
+  // The trigger: the element focused when the menu mounts, captured by the mount effect below
+  // just before it moves focus into the menu — after the opening commit's unmount cleanups, so
+  // a palette that closed in that commit has already put focus back where it was. Escape, Tab
+  // and running an item focus it again *before* `onSelect`/`onClose`, so a dialog an item opens
+  // records it (`useRestoreFocus`) and returns there too. An outside click leaves focus alone —
+  // the user clicked somewhere else. `preventScroll`: a trigger scrolled out of view stays put.
+  const capturedTrigger = useRef<HTMLElement | null | undefined>(undefined);
   const restoreFocus = () => {
-    if (trigger?.isConnected === true) trigger.focus();
+    const trigger = returnFocusTo !== undefined ? returnFocusTo : capturedTrigger.current;
+    if (trigger?.isConnected === true) trigger.focus({ preventScroll: true });
   };
 
   // Clamp to the viewport once the menu's real size is known, so a menu opened near the right or
@@ -75,13 +73,19 @@ export function ContextMenu({
   // menu pattern's initial-focus expectation.
   const [focusedIndex, setFocusedIndex] = useState<number>(() => enabledIndexes[0] ?? -1);
 
+  // The document listener below reads the latest `restoreFocus` without re-subscribing.
+  const restoreFocusRef = useRef(restoreFocus);
+  useEffect(() => {
+    restoreFocusRef.current = restoreFocus;
+  });
+
   useEffect(() => {
     // Escape with focus outside the menu (e.g. a menu opened by the pointer while focus stayed
     // elsewhere). Escape inside the menu is handled — and stopped — by `handleMenuKeyDown`.
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (menuRef.current !== null && menuRef.current.contains(event.target as Node)) return;
-      if (trigger?.isConnected === true) trigger.focus();
+      restoreFocusRef.current();
       onClose();
     }
     function handleClickOutside(event: MouseEvent) {
@@ -93,13 +97,18 @@ export function ContextMenu({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [onClose, trigger]);
+  }, [onClose]);
 
   // Move actual DOM focus onto the initial item once, when the menu first mounts — a menu opened
   // via keyboard (Enter/Space on a "…" affordance, or Shift+F10/Menu-key) should drop focus
   // straight into it rather than leaving it stranded on the trigger. A menu with no enabled
   // item focuses the menu itself, so Escape/Tab still work and assistive tech enters it.
   useEffect(() => {
+    // Only on the first run: StrictMode's re-run would otherwise capture the menu's own item.
+    if (capturedTrigger.current === undefined) {
+      const active = document.activeElement;
+      capturedTrigger.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    }
     if (focusedIndex >= 0) itemRefs.current[focusedIndex]?.focus();
     else menuRef.current?.focus();
     // Intentionally run once on mount only — subsequent focus moves are driven by arrow keys

@@ -7,7 +7,15 @@ type MenuAnchor = { x: number; y: number };
 // `onContextMenu` (the raw event) and `onOpenMenu` (an anchor, keyboard included) are exclusive.
 type MenuProps =
   | { onContextMenu?: (event: MouseEvent) => void; onOpenMenu?: never }
-  | { onOpenMenu?: (anchor: MenuAnchor) => void; onContextMenu?: never };
+  | {
+      /**
+       * `trigger` is the row for a right-click, where focus should return when the menu closes
+       * (WebKit does not focus on right-click); `undefined` for a key, which leaves focus where
+       * it already is (the row or one of its buttons).
+       */
+      onOpenMenu?: (anchor: MenuAnchor, trigger: HTMLElement | undefined) => void;
+      onContextMenu?: never;
+    };
 
 /**
  * A row inside a list. Which interaction semantics it renders is decided entirely by the props
@@ -92,7 +100,7 @@ export function ListRow({
       // The row's nested buttons (swatch, "…") open the row's menu too; text fields keep the key.
       if ((event.target as HTMLElement).closest("input, textarea, select") !== null) return;
       event.preventDefault();
-      onOpenMenu(rectAnchor(event.currentTarget));
+      onOpenMenu(rectAnchor(event.currentTarget), undefined);
       return;
     }
     if (onClick === undefined) return;
@@ -118,7 +126,6 @@ export function ListRow({
       role={standalone ? "button" : containerOwnsSelection ? "option" : undefined}
       tabIndex={standalone ? 0 : undefined}
       aria-selected={selected}
-      aria-haspopup={onOpenMenu !== undefined ? "menu" : undefined}
       aria-keyshortcuts={onOpenMenu !== undefined && standalone ? "Shift+F10 ContextMenu" : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
@@ -127,7 +134,7 @@ export function ListRow({
         onOpenMenu !== undefined
           ? (event) => {
               event.preventDefault();
-              onOpenMenu(menuAnchor(event, event.currentTarget));
+              onOpenMenu(menuAnchor(event, event.currentTarget), event.currentTarget);
             }
           : onContextMenu
       }

@@ -26,11 +26,28 @@ import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
 
-type RowContextMenu =
-  | { kind: "local-branch"; name: string; x: number; y: number }
-  | { kind: "add"; x: number; y: number }
-  | { kind: "remote-folder"; name: string; x: number; y: number }
-  | { kind: "remote-branch"; remoteName: string; branchName: string; x: number; y: number };
+// `returnFocusTo`: the element the menu was opened from by the pointer, which is not necessarily
+// focused (WebKit focuses neither a clicked button nor a right-clicked row); without it
+// `ContextMenu` returns focus to whatever had focus when it opened (right for a key).
+type RowContextMenu = { x: number; y: number; returnFocusTo?: HTMLElement } & (
+  | { kind: "local-branch"; name: string }
+  | { kind: "add" }
+  | { kind: "remote-folder"; name: string }
+  | { kind: "remote-branch"; remoteName: string; branchName: string }
+);
+
+/** A fresh `ContextMenu` per target, so a menu re-targeted while open never keeps the old one's focus state. */
+function rowMenuKey(menu: RowContextMenu): string {
+  switch (menu.kind) {
+    case "local-branch":
+    case "remote-folder":
+      return `${menu.kind}:${menu.name}`;
+    case "remote-branch":
+      return `${menu.kind}:${menu.remoteName}/${menu.branchName}`;
+    case "add":
+      return menu.kind;
+  }
+}
 
 function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
   if (!existingNames.includes("origin")) return "origin";
@@ -209,8 +226,22 @@ export function BranchTree({
   const [localRemoteDialog, setLocalRemoteDialog] = useState<RemoteDialog | null>(null);
   const remoteDialog = onRemoteDialogChange !== undefined ? (remoteDialogProp ?? null) : localRemoteDialog;
   const setRemoteDialog = onRemoteDialogChange ?? setLocalRemoteDialog;
-  // `undefined` when no dialog is open, or its remote is gone (removed or renamed elsewhere).
-  const dialogRemote = remoteDialog === null ? undefined : remotes.find((r) => r.name === remoteDialog.remoteName);
+  // The open dialog's remote. Kept as a snapshot while the dialog stays open: rename and remove
+  // update `remotes` optimistically, before the request settles (and roll back on failure), and
+  // the dialog must not unmount — losing what the user typed — in between. `undefined` when no
+  // dialog is open, or it was opened for a remote that doesn't exist.
+  const liveDialogRemote = remoteDialog === null ? undefined : remotes.find((r) => r.name === remoteDialog.remoteName);
+  const [dialogSnapshot, setDialogSnapshot] = useState<{ dialog: RemoteDialog; remote: RemoteInfo } | null>(null);
+  if (remoteDialog === null) {
+    if (dialogSnapshot !== null) setDialogSnapshot(null);
+  } else if (
+    liveDialogRemote !== undefined &&
+    (dialogSnapshot?.dialog !== remoteDialog || dialogSnapshot.remote !== liveDialogRemote)
+  ) {
+    setDialogSnapshot({ dialog: remoteDialog, remote: liveDialogRemote });
+  }
+  const dialogRemote =
+    liveDialogRemote ?? (dialogSnapshot !== null && dialogSnapshot.dialog === remoteDialog ? dialogSnapshot.remote : undefined);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
@@ -286,7 +317,10 @@ export function BranchTree({
                 }
           }
           onOpenMenu={
-            isRenaming ? undefined : (anchor) => openRowMenu({ kind: "local-branch", name: branch.name, ...anchor })
+            isRenaming
+              ? undefined
+              : (anchor, trigger) =>
+                  openRowMenu({ kind: "local-branch", name: branch.name, ...anchor, returnFocusTo: trigger })
           }
         >
           <div className={styles.rowInner}>
@@ -342,7 +376,12 @@ export function BranchTree({
                 aria-haspopup="menu"
                 aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
                 onClick={(event) =>
-                  openRowMenu({ kind: "local-branch", name: branch.name, ...rectAnchor(event.currentTarget) })
+                  openRowMenu({
+                    kind: "local-branch",
+                    name: branch.name,
+                    ...rectAnchor(event.currentTarget),
+                    returnFocusTo: event.currentTarget,
+                  })
                 }
               >
                 <MoreHorizontal size={12} aria-hidden="true" />
@@ -389,7 +428,9 @@ export function BranchTree({
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
           }}
-          onOpenMenu={(anchor) => openRowMenu({ kind: "remote-branch", remoteName, branchName, ...anchor })}
+          onOpenMenu={(anchor, trigger) =>
+            openRowMenu({ kind: "remote-branch", remoteName, branchName, ...anchor, returnFocusTo: trigger })
+          }
         >
           <div className={styles.rowInner}>
             <button
@@ -421,7 +462,13 @@ export function BranchTree({
                 rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
               }
               onClick={(event) =>
-                openRowMenu({ kind: "remote-branch", remoteName, branchName, ...rectAnchor(event.currentTarget) })
+                openRowMenu({
+                  kind: "remote-branch",
+                  remoteName,
+                  branchName,
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.currentTarget,
+                })
               }
             >
               <MoreHorizontal size={12} aria-hidden="true" />
@@ -724,7 +771,7 @@ export function BranchTree({
             aria-label="Add"
             aria-haspopup="menu"
             aria-expanded={rowMenu?.kind === "add"}
-            onClick={(event) => openRowMenu({ kind: "add", ...rectAnchor(event.currentTarget) })}
+            onClick={(event) => openRowMenu({ kind: "add", ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget })}
           >
             <Plus size={14} aria-hidden="true" />
           </button>
@@ -910,7 +957,12 @@ export function BranchTree({
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    openRowMenu({ kind: "remote-folder", name: remote.name, ...menuAnchor(event, event.currentTarget) });
+                    openRowMenu({
+                      kind: "remote-folder",
+                      name: remote.name,
+                      ...menuAnchor(event, event.currentTarget),
+                      returnFocusTo: event.currentTarget,
+                    });
                   }}
                 >
                   <ChevronRight
@@ -931,7 +983,12 @@ export function BranchTree({
                   aria-haspopup="menu"
                   aria-expanded={rowMenu?.kind === "remote-folder" && rowMenu.name === remote.name}
                   onClick={(event) =>
-                    openRowMenu({ kind: "remote-folder", name: remote.name, ...rectAnchor(event.currentTarget) })
+                    openRowMenu({
+                      kind: "remote-folder",
+                      name: remote.name,
+                      ...rectAnchor(event.currentTarget),
+                      returnFocusTo: event.currentTarget,
+                    })
                   }
                 >
                   <MoreHorizontal size={12} aria-hidden="true" />
@@ -989,8 +1046,10 @@ export function BranchTree({
             const branch = branches.find((b) => b.name === rowMenu.name);
             return branch !== undefined ? (
               <ContextMenu
+                key={rowMenuKey(rowMenu)}
                 x={rowMenu.x}
                 y={rowMenu.y}
+                returnFocusTo={rowMenu.returnFocusTo}
                 onClose={() => setRowMenu(null)}
                 items={branchContextItems(branch)}
               />
@@ -998,8 +1057,10 @@ export function BranchTree({
           })()}
         {rowMenu !== null && rowMenu.kind === "add" && (
           <ContextMenu
+            key={rowMenuKey(rowMenu)}
             x={rowMenu.x}
             y={rowMenu.y}
+            returnFocusTo={rowMenu.returnFocusTo}
             onClose={() => setRowMenu(null)}
             items={[
               { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
@@ -1018,8 +1079,10 @@ export function BranchTree({
             const remote = remotes.find((r) => r.name === rowMenu.name);
             return remote !== undefined ? (
               <ContextMenu
+                key={rowMenuKey(rowMenu)}
                 x={rowMenu.x}
                 y={rowMenu.y}
+                returnFocusTo={rowMenu.returnFocusTo}
                 onClose={() => setRowMenu(null)}
                 items={remoteFolderItems(remote)}
               />
@@ -1027,8 +1090,10 @@ export function BranchTree({
           })()}
         {rowMenu !== null && rowMenu.kind === "remote-branch" && (
           <ContextMenu
+            key={rowMenuKey(rowMenu)}
             x={rowMenu.x}
             y={rowMenu.y}
+            returnFocusTo={rowMenu.returnFocusTo}
             onClose={() => setRowMenu(null)}
             items={remoteBranchItems(rowMenu.remoteName, rowMenu.branchName)}
           />
@@ -1185,21 +1250,16 @@ export function BranchTree({
       })()}
       {remoteDialog?.kind === "edit" && dialogRemote !== undefined && (
         <EditRemoteDialog
-          key={dialogRemote.name}
+          key={remoteDialog.remoteName}
           remote={dialogRemote}
-          onRename={async (oldName, newName) => {
-            const renamed = await onRenameRemote(oldName, newName);
-            // Follow the rename, so the dialog does not vanish while its URLs are saved.
-            if (renamed) setRemoteDialog({ kind: "edit", remoteName: newName });
-            return renamed;
-          }}
+          onRename={onRenameRemote}
           onUpdateUrls={onUpdateRemoteUrls}
           onClose={() => setRemoteDialog(null)}
         />
       )}
       {remoteDialog?.kind === "credentials" && dialogRemote !== undefined && (
         <RemoteCredentialsDialog
-          key={dialogRemote.name}
+          key={remoteDialog.remoteName}
           remote={dialogRemote}
           onSetAuthMode={onSetRemoteAuthMode}
           onSaveHttpsCredential={onSaveHttpsCredential}

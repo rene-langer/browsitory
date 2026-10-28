@@ -479,6 +479,7 @@ export function CommitGraph({
       ))}
       {contextMenu !== null && (
         <ContextMenu
+          key={contextMenu.commitId}
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => {
@@ -494,6 +495,7 @@ export function CommitGraph({
       )}
       {tagMenu !== null && (
         <ContextMenu
+          key={`${tagMenu.commitId}:${tagMenu.tag}`}
           x={tagMenu.x}
           y={tagMenu.y}
           onClose={() => {

@@ -480,6 +480,15 @@ describe("DiffPane", () => {
         expect(other).toHaveFocus();
       });
 
+      it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {
+        render();
+        screen.getByRole("button", { name: "Stage logs/run.log" }).focus();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+        fireEvent.click(actions, { detail: 1 });
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(actions).toHaveFocus();
+      });
+
       it("keeps list key bindings out of an open menu", () => {
         const onStageFile = vi.fn();
         const onUnstageFile = vi.fn();

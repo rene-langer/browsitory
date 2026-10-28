@@ -67,4 +67,14 @@ describe("ReadOnlyFileSection", () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "Blame" }), { key: "ContextMenu" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
+
+  it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {
+    const externalTools = { openInEditor: vi.fn(), reveal: vi.fn(), openDiffTool: vi.fn() } as unknown as ExternalToolsApi;
+    renderSection({ externalTools, toolSource: { kind: "Commit", commitId: "abc" } as unknown as DiffSource });
+    screen.getByRole("button", { name: "Blame" }).focus();
+    const actions = screen.getByRole("button", { name: "Actions for a.txt" });
+    fireEvent.click(actions, { detail: 1 });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in editor" }), { key: "Escape" });
+    expect(actions).toHaveFocus();
+  });
 });

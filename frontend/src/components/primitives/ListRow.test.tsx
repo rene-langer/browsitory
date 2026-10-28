@@ -193,7 +193,7 @@ describe("ListRow onOpenMenu", () => {
     const { onOpenMenu, row } = renderRow();
     const prevented = !fireEvent.keyDown(row, init);
     expect(prevented).toBe(true);
-    expect(onOpenMenu).toHaveBeenCalledWith({ x: 10, y: 42 });
+    expect(onOpenMenu).toHaveBeenCalledWith({ x: 10, y: 42 }, undefined);
   });
 
   it("opens from a key pressed on a nested button", () => {
@@ -213,13 +213,21 @@ describe("ListRow onOpenMenu", () => {
     const { onOpenMenu, row } = renderRow();
     const allowed = fireEvent.contextMenu(row, { clientX: 50, clientY: 12 });
     expect(allowed).toBe(false);
-    expect(onOpenMenu).toHaveBeenCalledWith({ x: 50, y: 12 });
+    expect(onOpenMenu).toHaveBeenCalledWith({ x: 50, y: 12 }, row);
   });
 
-  it("advertises the menu", () => {
+  it("advertises the menu keys, but is not itself a menu button (Enter activates the row)", () => {
     const { row } = renderRow();
-    expect(row).toHaveAttribute("aria-haspopup", "menu");
+    expect(row).not.toHaveAttribute("aria-haspopup");
     expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10 ContextMenu");
+  });
+
+  it("passes the row as the trigger on right-click only (a key leaves focus where it is)", () => {
+    const { onOpenMenu, row } = renderRow();
+    fireEvent.contextMenu(row);
+    expect(onOpenMenu).toHaveBeenLastCalledWith(expect.anything(), row);
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(onOpenMenu).toHaveBeenLastCalledWith(expect.anything(), undefined);
   });
 
   it("leaves keys to the container on a container-owned row", () => {

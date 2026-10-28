@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -425,5 +425,29 @@ describe("ContextMenu focus and keys", () => {
     expect(fireEvent.keyDown(item, { key: "F10", shiftKey: true })).toBe(false);
     expect(onAncestorKey).not.toHaveBeenCalled();
     expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("takes the trigger after the commit that opens it, e.g. once a closing palette restored focus", () => {
+    // Like the command palette: its input unmounts in the same commit the menu mounts, and its
+    // cleanup puts focus back where it was before the palette opened.
+    function Palette() {
+      useEffect(() => () => document.getElementById("origin")?.focus(), []);
+      return <input aria-label="palette" autoFocus />;
+    }
+    function Host({ menuOpen, paletteOpen }: { menuOpen: boolean; paletteOpen: boolean }) {
+      return (
+        <>
+          <button id="origin">Origin</button>
+          {paletteOpen && <Palette />}
+          {menuOpen && <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />}
+        </>
+      );
+    }
+    const { rerender } = render(<Host menuOpen={false} paletteOpen />);
+    expect(screen.getByRole("textbox", { name: "palette" })).toHaveFocus();
+    // One commit: the palette closes and the menu opens.
+    rerender(<Host menuOpen paletteOpen={false} />);
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Origin" })).toHaveFocus();
   });
 });
