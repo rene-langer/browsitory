@@ -73,6 +73,16 @@ the spec's table). Where plan and code disagreed the code won; deviations, in ta
   (`sidecarBridge.requireDiffSource`, `toolUris.diffSides`); both now accept and use
   `Staged.oldPath` (a bare `{kind:"Staged"}` is still accepted). `DiffPane` passes `oldPath` to
   `getWorkingDiff` only for a staged rename.
+- **Security review (separate agent) fixes:** (1, high) libgit2's *safe* checkouts create a new
+  file through a symlinked tracked folder (overwriting an outside file of that name) — every
+  safe checkout now calls `worktree_guard::refuse_linked_folders` first (D1 applies to forced
+  checkouts; safe ones refuse), with "adds below the folder link" matrix rows (49 rows total);
+  stash pop over a linked folder now reports that refusal instead of `WouldOverwrite`.
+  (2, medium, pre-existing) `stage_file` read an outside file through a linked folder — it now
+  stages the deletion. Also: path filter honours `core.ignorecase`; ancestor helpers walk
+  `Path` components and fail closed; a signer whose stdout never drains is an error.
+  Documented, not fixed: check-then-act races in raw writes/reads, Windows intermediate reparse
+  points followed during `open_beneath`'s open.
 - Pre-existing flake seen once: `signing_ssh::unlisted_ssh_signer_is_good_untrusted` (passed on
   every rerun, before P2 touched signing).
 

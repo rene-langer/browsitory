@@ -345,12 +345,21 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   point, then `GetFinalPathNameByHandleW` on the opened handle must lie under the canonical work
   tree (a junction on the way is caught on the handle itself). Hand-declared `kernel32` import,
   no new dependency.
-- Safe (non-forced) checkouts refuse a typechange already; `tests/symlink_write_through.rs`
-  pins every operation × {file link, folder link}, refusals included, so a future switch to a
-  forced checkout is caught.
-- Residual risk: a concurrent local process can swap a link in between `clear_hazards` and
-  libgit2's write; libgit2 has no `openat`-style checkout. The same threat class as #138
-  (a local writer racing the app).
+- Safe (non-forced) checkouts refuse to *modify* a file below a link but still *create* new
+  ones through it. So every safe checkout (switch, checkout commit, merge incl. squash,
+  cherry-pick/revert steps, sequence rewind, rebase start and steps, stash apply/pop, pull
+  fast-forward) first calls `refuse_linked_folders`: a checkout conflict while a symlink stands
+  where HEAD or the index has a folder. A leaf typechange is refused by libgit2 itself.
+  `tests/symlink_write_through.rs` pins every operation × {file link, folder link, a new file
+  below the folder link}, refusals included, so a future switch to a forced checkout is caught.
+- `stage_file` stages the deletion of a path below a symlinked folder instead of reading it.
+- The forced-checkout path filter follows `core.ignorecase` like libgit2's pathspecs.
+- Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or
+  the refusal check) and libgit2's write; libgit2 has no `openat`-style checkout. Likewise
+  `write_beneath`, undo's raw reads/writes and `clear_hazards` check then act by path. The same
+  threat class as #138 (a local writer racing the app). On Windows `open_beneath` follows
+  intermediate reparse points during the open (a link to an inside folder is allowed; a link to
+  a UNC share is contacted before the refusal); only the final path is checked.
 
 ## Image preview
 

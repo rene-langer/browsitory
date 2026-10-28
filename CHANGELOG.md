@@ -175,8 +175,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   all" stashes a link that replaced a file and then restores the file; while a link replaces a
   tracked folder it refuses ("… is beyond a symbolic link"), as stashing a single file there
   already did.
-- Undo/redo snapshots and their checks no longer read a file through a symbolic link that
-  replaced a folder.
+- Switching branches, checking out a commit, merging, cherry-picking, reverting, rebasing,
+  applying a stash and pulling refuse while a symbolic link stands where the repository has a
+  folder ("'d' is a symbolic link where the repository has a folder…"); git's own safe checkout
+  could otherwise create a new file through the link, overwriting a file outside the repository.
+- Undo/redo snapshots and their checks, and staging a file below a symbolic link that replaced a
+  folder, no longer read the file through the link (staging now stages its deletion, as git
+  shows it).
 - The image preview reads working-tree files without following a folder that is swapped for a
   symbolic link while it reads (#138).
 

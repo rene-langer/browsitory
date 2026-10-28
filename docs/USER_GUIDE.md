@@ -434,7 +434,8 @@ that file. For an untracked file, untracked files are always included. One file 
 change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
-link away first).
+link away first). So do switching branches, merging, cherry-picking, reverting, rebasing,
+applying a stash and pulling, which could otherwise create files through the link.
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
