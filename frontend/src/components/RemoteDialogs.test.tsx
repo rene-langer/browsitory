@@ -176,7 +176,7 @@ describe("RemoteDialogs", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
     // Mid-rename (remotes already renamed optimistically): same dialog, same typed values.
     const list = screen.getByRole("list", { name: "Remotes", hidden: true });
-    await waitFor(() => expect(within(list).getByText("upstream")).toBeInTheDocument());
+    expect(within(list).getByText("upstream")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Edit origin", hidden: true })).toBe(dialog);
     expect(within(dialog).getByLabelText("Fetch URL")).toHaveValue("../new.git");
     if (result) {
@@ -207,7 +207,7 @@ describe("RemoteDialogs", () => {
     fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "upstream" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
     const list = screen.getByRole("list", { name: "Remotes", hidden: true });
-    await waitFor(() => expect(within(list).getByText("upstream")).toBeInTheDocument());
+    expect(within(list).getByText("upstream")).toBeInTheDocument();
     await waitFor(() => expect(within(list).getByText("origin")).toBeInTheDocument());
     // Flush the failed rename's continuation (it runs right after the rollback).
     await new Promise((resolve) => setTimeout(resolve, 0));
