@@ -1574,6 +1574,37 @@ describe("App external tools", () => {
     expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
   });
 
+  it("the palette opens Edit remote while the Branches section is collapsed", async () => {
+    localStorage.setItem("sidebar-branches", "closed");
+    try {
+      const updateRemoteUrls = vi.fn(async () => {});
+      const { container } = render(
+        <App
+          client={toolsClient({
+            listRemotes: async () => [
+              { name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null },
+            ],
+            updateRemoteUrls,
+          })}
+        />,
+      );
+      await screen.findByRole("tab", { name: "a" });
+      await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+      expect(screen.queryByRole("button", { name: "origin" })).toBeNull();
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      const input = await screen.findByRole("combobox", { name: "Command palette" });
+      fireEvent.change(input, { target: { value: "Edit remote origin" } });
+      fireEvent.click(await screen.findByRole("option", { name: "Edit remote origin…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit origin", hidden: true });
+      expect(within(dialog).getByLabelText("Fetch URL")).toHaveValue("https://example.com/r.git");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit origin", hidden: true })).toBeNull());
+      expect(updateRemoteUrls).not.toHaveBeenCalled();
+    } finally {
+      localStorage.removeItem("sidebar-branches");
+    }
+  });
+
   it("shows only the VSCode note in VSCode", async () => {
     render(<App client={toolsClient()} toolHost="vscode" />);
     await screen.findByRole("tab", { name: "a" });

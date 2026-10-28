@@ -734,6 +734,7 @@ describe("buildCommands", () => {
         expect(ids.some((id) => id.startsWith("push-tags:"))).toBe(false);
         expect(ids).not.toContain("pull");
         expect(ids.some((id) => id.startsWith("delete-tag:"))).toBe(false);
+        expect(ids.some((id) => /^(edit-remote|manage-credentials|remove-remote|checkout-tag):/.test(id))).toBe(false);
         expect(ids.some((id) => id.startsWith("open-worktree:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("remove-worktree:"))).toBe(false);
         expect(ids).not.toContain("prune-worktrees");
@@ -1169,5 +1170,45 @@ describe("preferences and external tool commands", () => {
     expect(labels).toEqual(
       expect.arrayContaining(["Open terminal here", "Reveal repository", "Open current file in editor"]),
     );
+  });
+});
+
+describe("remote and tag palette entries", () => {
+  const remotes = [
+    { name: "origin", fetchUrl: "a", pushUrl: null, authMode: null, authUsername: null },
+    { name: "fork", fetchUrl: "b", pushUrl: null, authMode: null, authUsername: null },
+  ];
+  const allVisible = { stash: true, worktree: true, submodule: true, reflog: true, tags: true, pullRequests: true };
+
+  it.each([
+    ["edit-remote:fork", "Edit remote fork…", "edit"],
+    ["manage-credentials:fork", "Manage credentials for fork…", "credentials"],
+    ["remove-remote:fork", "Remove remote fork…", "remove"],
+  ] as const)("%s (%s) opens the dialog for that remote", (id, label, kind) => {
+    const appState = makeAppState({ remotes });
+    const command = buildCommands(appState).find((c) => c.id === id);
+    expect(command?.label).toBe(label);
+    command?.run();
+    expect(appState.openRemoteDialog).toHaveBeenCalledWith(kind, "fork");
+    expect(commandGroup(id)).toBe("Remotes");
+  });
+
+  it("emits one entry per remote", () => {
+    const ids = buildCommands(makeAppState({ remotes })).map((c) => c.id);
+    expect(ids.filter((id) => id.startsWith("edit-remote:"))).toEqual(["edit-remote:origin", "edit-remote:fork"]);
+    expect(ids.filter((id) => id.startsWith("manage-credentials:"))).toHaveLength(2);
+    expect(ids.filter((id) => id.startsWith("remove-remote:"))).toHaveLength(2);
+  });
+
+  it("checks out a tag's target commit, even with the Tags panel hidden", () => {
+    const tags = [{ name: "v1", targetId: "c1", annotated: true, message: "m", taggerName: "t", timestamp: 1 }];
+    const appState = makeAppState({ tags });
+    const command = buildCommands(appState, vi.fn(), [], vi.fn(), { ...allVisible, tags: false }).find(
+      (c) => c.id === "checkout-tag:v1",
+    );
+    expect(command?.label).toBe("Check out tag v1 (detached)");
+    command?.run();
+    expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
+    expect(commandGroup("checkout-tag:v1")).toBe("Branches");
   });
 });
