@@ -19,6 +19,8 @@ pub enum RebaseError {
     Sign(#[from] crate::signing::SignError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,7 +193,11 @@ pub fn start_rebase(
     // the way) leaves the repo exactly as it was — the same safety ordering
     // `branch::switch_branch` and `merge::start_merge`'s fast-forward path already use.
     // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    let onto_tree = onto_commit.tree()?;
+    crate::worktree_guard::refuse_linked_folders::<RebaseError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&onto_tree)],
+    )?;
     repo.checkout_tree(onto_commit.as_object(), None)?;
     repo.set_head_detached(onto_commit.id())?;
 
@@ -272,7 +278,15 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         }
 
         // Safe checkouts create files through a symlinked tracked folder (#114).
-        crate::worktree_guard::refuse_linked_folders(repo)?;
+        // The step writes the picked result; scan that (an untracked link counts too).
+        let head_commit = repo.head()?.peel_to_commit()?;
+        let merged = repo.cherrypick_commit(&commit, &head_commit, 0, None)?;
+        crate::worktree_guard::refuse_linked_folders::<RebaseError>(
+            repo,
+            &[crate::worktree_guard::Incoming::Merge(
+                crate::worktree_guard::GuardSource::Index(&merged),
+            )],
+        )?;
         repo.cherrypick(&commit, None)?;
 
         if repo.index()?.has_conflicts() {

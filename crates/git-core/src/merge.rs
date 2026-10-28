@@ -26,6 +26,28 @@ pub enum MergeError {
     UnsupportedEntry(String),
     #[error("'{0}' is inside a symlinked folder; resolve it with git.")]
     SymlinkedFolder(String),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
+}
+
+/// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
+/// fast-forward checks out `theirs`' tree, any other merge writes the merged index.
+fn refuse_linked_folders(
+    repo: &Repository,
+    theirs: &git2::Commit,
+    fast_forward: bool,
+) -> Result<(), MergeError> {
+    use crate::worktree_guard::{GuardSource, Incoming};
+    if fast_forward {
+        let tree = theirs.tree()?;
+        return crate::worktree_guard::refuse_linked_folders(repo, &[Incoming::Checkout(&tree)]);
+    }
+    let ours = repo.head()?.peel_to_commit()?;
+    let merged = repo.merge_commits(&ours, theirs, None)?;
+    crate::worktree_guard::refuse_linked_folders(
+        repo,
+        &[Incoming::Merge(GuardSource::Index(&merged))],
+    )
 }
 
 /// Refuses a path whose existing parent folders include a symlink, so a resolution can never
@@ -106,8 +128,12 @@ pub fn start_merge(
         return Ok(MergeOutcome::UpToDate);
     }
 
-    // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    // Safe checkouts create files through a symlinked folder (#114).
+    refuse_linked_folders(
+        repo,
+        &their_commit,
+        analysis.is_fast_forward() && !opts.squash && opts.fast_forward != FastForward::Never,
+    )?;
     if opts.squash {
         return squash_merge(repo, &their_annotated, their_commit.id());
     }

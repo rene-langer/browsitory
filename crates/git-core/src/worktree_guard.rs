@@ -184,12 +184,34 @@ pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()
     Ok(())
 }
 
+/// A symlink stands where the repository, or what an operation brings in, has a folder.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("'{0}' is a symbolic link where the repository has a folder. Remove or rename it first.")]
+pub struct LinkedFolder(pub String);
+
+/// `rel` as git spells it: components joined with `/` on every platform.
+fn git_path(rel: &Path) -> String {
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// True when HEAD's tree tracks `rel` as a symlink. A checkout replaces such a link itself (it
+/// unlinks it, never following it), so it is the user's committed state, not a hazard.
+fn tracked_as_link(head_tree: Option<&git2::Tree>, rel: &Path) -> bool {
+    head_tree
+        .and_then(|tree| tree.get_path(rel).ok())
+        .is_some_and(|entry| entry.filemode() as u32 == MODE_LINK)
+}
+
 /// Clears every hazard of a forced checkout in `repo`'s worktree, optionally limited to the
 /// literal `paths`: those of the checkout's `target` and those of the current HEAD tree and
 /// index. The latter matter because a forced checkout also *deletes* what the baseline tracks
 /// and the target lacks (`d/f` through a symlinked `d` would delete a file outside the
-/// repository). Call immediately before the checkout, after anything that must record the
-/// links (a stash).
+/// repository). A link HEAD itself tracks is left to libgit2, which replaces it without following
+/// it (removing it first breaks the checkout). Call immediately before the checkout, after
+/// anything that must record the links (a stash).
 pub(crate) fn prepare_forced_checkout<E, P>(
     repo: &git2::Repository,
     target: Option<&GuardSource>,
@@ -208,14 +230,15 @@ where
         .config()
         .and_then(|config| config.get_bool("core.ignorecase"))
         .unwrap_or(false);
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let mut hazards = BTreeSet::new();
     if let Some(target) = target {
         hazards.extend(scan_with_case(workdir, target, paths, ignore_case)?);
     }
-    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
+    if let Some(head_tree) = &head_tree {
         hazards.extend(scan_with_case(
             workdir,
-            &GuardSource::Tree(&head_tree),
+            &GuardSource::Tree(head_tree),
             paths,
             ignore_case,
         )?);
@@ -227,39 +250,72 @@ where
         paths,
         ignore_case,
     )?);
+    hazards.retain(|hazard| !tracked_as_link(head_tree.as_ref(), hazard.path()));
     clear_hazards(workdir, &hazards.into_iter().collect::<Vec<_>>())?;
     Ok(())
 }
 
-/// Refuses, as a checkout conflict, while a symlink stands where HEAD or the index tracks a
+/// What a safe operation is about to write, for [`refuse_linked_folders`].
+pub(crate) enum Incoming<'a> {
+    /// A tree checkout (switch, checkout, fast-forward, rebase start, rewind). A folder link HEAD
+    /// tracks is skipped: libgit2 replaces it with the folder (a typechange) without following
+    /// it, and refuses when the user changed it.
+    Checkout(&'a git2::Tree<'a>),
+    /// The result of a merge-like operation (merge, cherry-pick, revert, rebase step, stash
+    /// apply). Nothing is skipped: libgit2 merges a file below a folder HEAD tracks as a link
+    /// without a conflict and writes it through the link.
+    Merge(GuardSource<'a>),
+}
+
+/// Refuses while a symlink stands where HEAD, the index or what the operation brings in has a
 /// folder. libgit2's *safe* checkouts (switch, checkout, merge, cherry-pick, revert, rebase,
 /// stash apply, pull) refuse to modify a file below such a link but still *create* new ones
-/// through it, truncating whatever the link's target folder holds under that name. Call it right
-/// before each of them. (A link where nothing tracked a folder already conflicts in libgit2.)
-pub(crate) fn refuse_linked_folders(repo: &git2::Repository) -> Result<(), git2::Error> {
+/// through it, truncating whatever the link's target folder holds under that name; that holds
+/// for a link nothing tracks too, so `incoming` (everything the operation writes) is scanned as
+/// well. Call it right before the operation.
+pub(crate) fn refuse_linked_folders<E>(
+    repo: &git2::Repository,
+    incoming: &[Incoming],
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<LinkedFolder>,
+{
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
     const ALL: Option<&[&str]> = None;
-    let mut hazards = Vec::new();
-    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
-        hazards.extend(scan(workdir, &GuardSource::Tree(&head_tree), ALL)?);
-    }
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let index = repo.index()?;
-    hazards.extend(scan(workdir, &GuardSource::Index(&index), ALL)?);
-    match hazards.into_iter().find_map(|hazard| match hazard {
-        Hazard::Ancestor(dir) => Some(dir),
-        Hazard::Leaf(_) => None,
-    }) {
-        Some(dir) => Err(git2::Error::new(
-            git2::ErrorCode::Conflict,
-            git2::ErrorClass::Checkout,
-            format!(
-                "'{}' is a symbolic link where the repository has a folder. Move the link away or \
-                 restore the folder first.",
-                dir.display()
-            ),
-        )),
+    let mut sources = Vec::new();
+    if let Some(head_tree) = &head_tree {
+        sources.push((GuardSource::Tree(head_tree), false));
+    }
+    sources.push((GuardSource::Index(&index), false));
+    for source in incoming {
+        sources.push(match source {
+            Incoming::Checkout(tree) => (GuardSource::Tree(tree), true),
+            Incoming::Merge(GuardSource::Tree(tree)) => (GuardSource::Tree(tree), false),
+            Incoming::Merge(GuardSource::Index(index)) => (GuardSource::Index(index), false),
+        });
+    }
+    let mut found = None;
+    for (source, skip_head_links) in &sources {
+        found = scan(workdir, source, ALL)?
+            .into_iter()
+            .find_map(|hazard| match hazard {
+                Hazard::Ancestor(dir)
+                    if !(*skip_head_links && tracked_as_link(head_tree.as_ref(), &dir)) =>
+                {
+                    Some(dir)
+                }
+                _ => None,
+            });
+        if found.is_some() {
+            break;
+        }
+    }
+    match found {
+        Some(dir) => Err(LinkedFolder(git_path(&dir)).into()),
         None => Ok(()),
     }
 }

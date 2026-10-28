@@ -33,6 +33,8 @@ pub enum PickError {
     HeadMoved,
     #[error("{0}")]
     Merge(#[from] crate::merge::MergeError),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 #[derive(Clone, Copy)]
@@ -265,7 +267,17 @@ fn step(
     // the caller), so clearing those files restores exactly the prior state without touching
     // user files.
     // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    // The step writes its merged result; scan that (an untracked link counts too).
+    let merged = match kind {
+        Kind::CherryPick => repo.cherrypick_commit(target, head, mainline.unwrap_or(0), None)?,
+        Kind::Revert => repo.revert_commit(target, head, mainline.unwrap_or(0), None)?,
+    };
+    crate::worktree_guard::refuse_linked_folders::<PickError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Merge(
+            crate::worktree_guard::GuardSource::Index(&merged),
+        )],
+    )?;
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();
@@ -671,7 +683,11 @@ pub fn abort_sequence(
     if head_id == state.expected_head && state.expected_head != state.original_head {
         let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
         // Safe checkouts create files through a symlinked tracked folder (#114).
-        crate::worktree_guard::refuse_linked_folders(repo)?;
+        let tree = original.tree()?;
+        crate::worktree_guard::refuse_linked_folders::<PickError>(
+            repo,
+            &[crate::worktree_guard::Incoming::Checkout(&tree)],
+        )?;
         repo.checkout_tree(original.as_object(), None)?;
         let reflog = match state.kind {
             SequenceKind::CherryPick => "cherry-pick: abort",

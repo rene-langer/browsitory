@@ -32,6 +32,8 @@ pub enum StashError {
     DirectoryReplacedNonDirectory { path: String, was: &'static str },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -504,6 +506,23 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
     Ok(entries)
 }
 
+/// The trees of `stash@{index}`: its worktree commit and its index and untracked parents.
+fn stash_trees(repo: &Repository, index: usize) -> Result<Vec<git2::Tree<'_>>, StashError> {
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(Vec::new());
+    };
+    let stash = repo.find_commit(id)?;
+    let mut trees = vec![stash.tree()?];
+    for parent in stash.parents().skip(1) {
+        trees.push(parent.tree()?);
+    }
+    Ok(trees)
+}
+
 /// Applies `stash@{index}`. `restore_index` also restages what was staged (libgit2's
 /// `REINSTATE_INDEX`, `git stash apply --index`). libgit2 refuses outright while the index
 /// differs from HEAD; its errors are mapped to user-facing variants.
@@ -520,8 +539,20 @@ pub fn apply_stash(
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
     }
-    // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    // Safe checkouts create files through a symlinked folder (#114): the stash's worktree,
+    // index and untracked trees are what the apply writes.
+    {
+        let incoming = stash_trees(repo, index)?;
+        let incoming: Vec<_> = incoming
+            .iter()
+            .map(|tree| {
+                crate::worktree_guard::Incoming::Merge(crate::worktree_guard::GuardSource::Tree(
+                    tree,
+                ))
+            })
+            .collect();
+        crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
+    }
     let mut options = git2::StashApplyOptions::new();
     if restore_index {
         options.reinstantiate_index();

@@ -11,6 +11,8 @@ pub enum BranchError {
     CheckedOutInAnotherWorktree(String),
     #[error("worktree operation failed: {0}")]
     Worktree(#[from] crate::worktree::WorktreeError),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,7 +88,11 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     // the target) leaves the repo exactly as it was — HEAD only moves once the working
     // directory update has already succeeded.
     // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    let tree = target.tree()?;
+    crate::worktree_guard::refuse_linked_folders::<BranchError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&tree)],
+    )?;
     repo.checkout_tree(target.as_object(), None)?;
     repo.set_head(&branch_ref)?;
     Ok(())
@@ -98,7 +104,11 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
 pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchError> {
     let target = repo.find_commit(git2::Oid::from_str(commit_id)?)?;
     // Safe checkouts create files through a symlinked tracked folder (#114).
-    crate::worktree_guard::refuse_linked_folders(repo)?;
+    let tree = target.tree()?;
+    crate::worktree_guard::refuse_linked_folders::<BranchError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&tree)],
+    )?;
     repo.checkout_tree(target.as_object(), None)?;
     repo.set_head_detached(target.id())?;
     Ok(())

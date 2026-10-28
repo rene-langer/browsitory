@@ -202,10 +202,13 @@ fn stash_pop_ancestor_is_refused() {
     git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
     f.link_ancestor();
     let result = git_core::stash::pop_stash(&mut f.repo, 0, None, false);
-    assert!(
-        matches!(&result, Err(StashError::Git(e)) if is_checkout_conflict(e)),
-        "{result:?}"
-    );
+    match result {
+        Err(error @ StashError::LinkedFolder(_)) => assert_eq!(
+            error.to_string(),
+            "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
+        ),
+        other => panic!("{other:?}"),
+    }
     assert_eq!(git_core::stash::list_stashes(&mut f.repo).unwrap().len(), 1);
     f.untouched();
 }
@@ -395,10 +398,13 @@ fn switch_branch_ancestor_is_refused() {
     f.side_branch(&[("d/f", "other inner\n")]);
     f.link_ancestor();
     let result = git_core::branch::switch_branch(&f.repo, "other");
-    assert!(
-        matches!(&result, Err(BranchError::Git(e)) if is_checkout_conflict(e)),
-        "{result:?}"
-    );
+    match result {
+        Err(error @ BranchError::LinkedFolder(_)) => assert_eq!(
+            error.to_string(),
+            "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
+        ),
+        other => panic!("{other:?}"),
+    }
     f.untouched();
 }
 
@@ -660,7 +666,7 @@ fn switch_branch_adding_below_the_ancestor_is_refused() {
     let (f, _) = adds_below_linked_folder();
     let result = git_core::branch::switch_branch(&f.repo, "other");
     assert!(
-        matches!(&result, Err(BranchError::Git(e)) if is_checkout_conflict(e)),
+        matches!(&result, Err(BranchError::LinkedFolder(_))),
         "{result:?}"
     );
     precious_kept(&f);
@@ -775,4 +781,502 @@ fn start_rebase_adding_below_the_ancestor_is_refused() {
     let result = git_core::rebase::start_rebase(&f.repo, &onto, plan);
     assert!(result.is_err(), "{:?}", result.map(|(_, r)| r));
     precious_kept(&f);
+}
+
+// --- A folder that HEAD tracks *as a symlink* (review round 2) ------------------------------
+//
+// A committed link is libgit2's normal typechange case: a checkout to a commit with a folder
+// there removes the link itself (never following it). Browsitory must not remove it first (that
+// broke the hard reset), and nothing may land outside even after the user retargets the link.
+
+/// Replaces the folder `d` with a link to `target` and commits it (c2). Returns c1 (with `d/f`),
+/// also left as branch `old`.
+fn commit_folder_link(f: &Fx, target: &std::path::Path) -> String {
+    let c1 = f.head();
+    git_core::branch::create_branch(&f.repo, "old", &c1).unwrap();
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    common::replace_with_link(f.path(), "d", target);
+    let mut index = f.repo.index().unwrap();
+    index.remove_dir(std::path::Path::new("d"), 0).unwrap();
+    index.add_path(std::path::Path::new("d")).unwrap();
+    index.write().unwrap();
+    common::commit_all(&f.repo, "d is a link");
+    c1
+}
+
+/// The committed link `d` (to a harmless in-repo name) now points at the outside folder.
+fn retarget_link(f: &Fx) -> String {
+    let c1 = commit_folder_link(f, std::path::Path::new("nowhere"));
+    common::replace_with_link(f.path(), "d", f.out.path());
+    c1
+}
+
+fn d_is_the_folder_again(f: &Fx) {
+    assert!(std::fs::symlink_metadata(f.path().join("d"))
+        .unwrap()
+        .is_dir());
+    assert_eq!(common::read(f.path(), "d/f"), "inner\n");
+}
+
+#[test]
+fn reset_hard_from_a_committed_folder_link_restores_the_folder() {
+    let f = fx();
+    let c1 = commit_folder_link(&f, f.out.path());
+    reset_to(&f.repo, &c1, ResetMode::Hard).unwrap();
+    f.untouched();
+    d_is_the_folder_again(&f);
+}
+
+#[test]
+fn reset_hard_from_a_retargeted_committed_folder_link_never_writes_through() {
+    let f = fx();
+    let c1 = retarget_link(&f);
+    reset_to(&f.repo, &c1, ResetMode::Hard).unwrap();
+    f.untouched();
+    d_is_the_folder_again(&f);
+}
+
+#[test]
+fn reset_hard_to_head_with_a_committed_folder_link_keeps_the_link() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    common::write_file(f.path(), "a.txt", "edited\n");
+    reset_to(&f.repo, &f.head(), ResetMode::Hard).unwrap();
+    f.untouched();
+    assert!(common::is_link(f.path(), "d"));
+}
+
+#[test]
+fn switch_from_a_committed_folder_link_restores_the_folder() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    f.untouched();
+    d_is_the_folder_again(&f);
+}
+
+#[test]
+fn switch_from_a_retargeted_committed_folder_link_never_writes_through() {
+    let f = fx();
+    retarget_link(&f);
+    let _ = git_core::branch::switch_branch(&f.repo, "old");
+    f.untouched();
+}
+
+#[test]
+fn switch_to_a_committed_folder_link_and_back() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    let link_branch = f.main.clone();
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    git_core::branch::switch_branch(&f.repo, &link_branch).unwrap();
+    f.untouched();
+    assert!(common::is_link(f.path(), "d"));
+}
+
+#[test]
+fn discard_a_retargeted_committed_folder_link_restores_the_link() {
+    let f = fx();
+    retarget_link(&f);
+    git_core::stage::discard_file(&f.repo, "d").unwrap();
+    f.untouched();
+    assert_eq!(
+        std::fs::read_link(f.path().join("d")).unwrap(),
+        std::path::Path::new("nowhere")
+    );
+}
+
+#[test]
+fn undo_and_redo_across_a_committed_folder_link() {
+    let f = fx();
+    let folder = capture(&f.repo, SnapshotScope::Full).unwrap();
+    commit_folder_link(&f, f.out.path());
+    let link = capture(&f.repo, SnapshotScope::Full).unwrap();
+    restore(&f.repo, &link, &folder, "undo").unwrap();
+    f.untouched();
+    d_is_the_folder_again(&f);
+    restore(&f.repo, &folder, &link, "redo").unwrap();
+    f.untouched();
+    assert!(common::is_link(f.path(), "d"));
+}
+
+#[test]
+fn undo_with_a_retargeted_committed_folder_link_never_writes_through() {
+    let f = fx();
+    let folder = capture(&f.repo, SnapshotScope::Full).unwrap();
+    commit_folder_link(&f, std::path::Path::new("nowhere"));
+    let link = capture(&f.repo, SnapshotScope::Full).unwrap();
+    common::replace_with_link(f.path(), "d", f.out.path());
+    let result = restore(&f.repo, &link, &folder, "undo");
+    assert!(
+        matches!(result, Ok(()) | Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    f.untouched();
+}
+
+#[test]
+fn stash_with_a_retargeted_committed_folder_link_never_writes_through() {
+    let mut f = fx();
+    retarget_link(&f);
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    f.untouched();
+    assert_eq!(
+        std::fs::read_link(f.path().join("d")).unwrap(),
+        std::path::Path::new("nowhere")
+    );
+}
+
+/// On the link commit, merges `old2` (c1 + `d/new.txt`): libgit2 would merge `d/new.txt` without
+/// a conflict and write it through the committed link.
+#[test]
+fn merge_adding_below_a_committed_folder_link_is_refused() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    f.commit(&[("d/new.txt", "NEW\n")], "old2");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default());
+    match result {
+        Err(error @ MergeError::LinkedFolder(_)) => assert_eq!(
+            error.to_string(),
+            "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
+        ),
+        other => panic!("{other:?}"),
+    }
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
+}
+
+#[test]
+fn cherry_pick_adding_below_a_committed_folder_link_is_refused() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    let picked = f.commit(&[("d/new.txt", "NEW\n")], "old2");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    let result = git_core::pick::cherry_pick(&f.repo, &picked, None);
+    assert!(
+        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
+}
+
+/// A merge whose result has nothing below `d` is not blocked by the committed link; aborting its
+/// conflict keeps the link.
+#[test]
+fn merge_and_abort_beside_a_committed_folder_link_work() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    f.commit(&[("a.txt", "main\n")], "main");
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    f.commit(&[("a.txt", "old\n")], "old2");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default()).unwrap();
+    assert!(
+        matches!(result, MergeOutcome::Conflicted { .. }),
+        "{result:?}"
+    );
+    git_core::merge::abort_merge(&f.repo).unwrap();
+    f.untouched();
+    assert!(common::is_link(f.path(), "d"));
+}
+
+/// `old` (folder `d`) gets a commit that conflicts with the link branch, which it is rebased
+/// onto; aborting goes back from the link to the folder.
+#[test]
+fn abort_rebase_from_a_committed_folder_link_restores_the_folder() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    f.commit(&[("a.txt", "main\n")], "main");
+    let onto = f.head();
+    git_core::branch::switch_branch(&f.repo, "old").unwrap();
+    let picked = f.commit(&[("a.txt", "old\n")], "old2");
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: picked,
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (state, step) = git_core::rebase::start_rebase(&f.repo, &onto, plan).unwrap();
+    assert!(matches!(
+        step,
+        git_core::rebase::RebaseStepResult::Conflicted { .. }
+    ));
+    assert!(common::is_link(f.path(), "d"));
+    git_core::rebase::abort_rebase(&f.repo, state).unwrap();
+    f.untouched();
+    d_is_the_folder_again(&f);
+}
+
+// --- An *untracked* folder link below which the operation adds files (review round 2) ------
+//
+// libgit2's safe checkouts create a new file through a symlink nothing tracks (cherry-pick
+// overwrote the outside `f`). Every safe operation scans what it brings in and refuses.
+
+const LINKED: &str =
+    "'e' is a symbolic link where the repository has a folder. Remove or rename it first.";
+
+/// `other` adds `e/f` and `e/new.txt` (HEAD has no `e`); `e` is an untracked link to the outside
+/// folder, whose `f` must survive and which must not gain a `new.txt`.
+fn untracked_link_fixture() -> (Fx, String) {
+    let f = fx();
+    let other = f.side_branch(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")]);
+    f.link_e();
+    (f, other)
+}
+
+impl Fx {
+    fn link_e(&self) {
+        common::replace_with_link(self.path(), "e", self.out.path());
+    }
+
+    fn nothing_outside(&self) {
+        self.untouched();
+        assert!(!self.out.path().join("new.txt").exists());
+    }
+}
+
+#[test]
+fn switch_branch_adding_below_an_untracked_link_is_refused() {
+    let (f, _) = untracked_link_fixture();
+    let result = git_core::branch::switch_branch(&f.repo, "other");
+    match result {
+        Err(error @ BranchError::LinkedFolder(_)) => assert_eq!(error.to_string(), LINKED),
+        other => panic!("{other:?}"),
+    }
+    f.nothing_outside();
+}
+
+#[test]
+fn checkout_commit_adding_below_an_untracked_link_is_refused() {
+    let (f, other) = untracked_link_fixture();
+    let result = git_core::branch::checkout_commit(&f.repo, &other);
+    assert!(
+        matches!(result, Err(BranchError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn merge_fast_forward_adding_below_an_untracked_link_is_refused() {
+    let (f, _) = untracked_link_fixture();
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default());
+    assert!(
+        matches!(result, Err(MergeError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn merge_non_fast_forward_adding_below_an_untracked_link_is_refused() {
+    let f = fx();
+    f.side_branch(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")]);
+    f.commit(&[("a.txt", "main\n")], "main");
+    f.link_e();
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default());
+    assert!(
+        matches!(result, Err(MergeError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn squash_merge_adding_below_an_untracked_link_is_refused() {
+    let f = fx();
+    f.side_branch(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")]);
+    f.commit(&[("a.txt", "main\n")], "main");
+    f.link_e();
+    let opts = MergeOptions {
+        squash: true,
+        ..MergeOptions::default()
+    };
+    let result = git_core::merge::start_merge(&f.repo, "other", opts);
+    assert!(
+        matches!(result, Err(MergeError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn cherry_pick_adding_below_an_untracked_link_is_refused() {
+    let (f, other) = untracked_link_fixture();
+    let result = git_core::pick::cherry_pick(&f.repo, &other, None);
+    assert!(
+        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+    assert_eq!(f.repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn cherry_pick_many_adding_below_an_untracked_link_is_refused() {
+    let (f, other) = untracked_link_fixture();
+    let run = git_core::pick::cherry_pick_many(&f.repo, &[other]);
+    assert!(
+        matches!(run.outcome, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{:?}",
+        run.outcome
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn revert_adding_below_an_untracked_link_is_refused() {
+    let f = fx();
+    f.commit(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")], "adds e");
+    std::fs::remove_dir_all(f.path().join("e")).unwrap();
+    let mut index = f.repo.index().unwrap();
+    index.remove_dir(std::path::Path::new("e"), 0).unwrap();
+    index.write().unwrap();
+    common::commit_all(&f.repo, "removes e");
+    let removal = f.head();
+    f.link_e();
+    let result = git_core::pick::revert(&f.repo, &removal, None);
+    assert!(
+        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn rebase_step_adding_below_an_untracked_link_is_refused() {
+    let (f, other) = untracked_link_fixture();
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: other,
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let onto = f.head();
+    let result = git_core::rebase::start_rebase(&f.repo, &onto, plan);
+    assert!(
+        matches!(result, Err(git_core::rebase::RebaseError::LinkedFolder(_))),
+        "{:?}",
+        result.map(|(_, r)| r)
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn start_rebase_onto_a_commit_adding_below_an_untracked_link_is_refused() {
+    let f = fx();
+    let base = f.head();
+    let second = f.commit(&[("a.txt", "second\n")], "second");
+    git_core::branch::create_branch(&f.repo, "onto", &base).unwrap();
+    let onto = f.commit(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")], "onto");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    f.link_e();
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: second,
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let result = git_core::rebase::start_rebase(&f.repo, &onto, plan);
+    assert!(
+        matches!(result, Err(git_core::rebase::RebaseError::LinkedFolder(_))),
+        "{:?}",
+        result.map(|(_, r)| r)
+    );
+    f.nothing_outside();
+}
+
+/// The original HEAD has `e/f`; the sequence's first pick deletes it, the second conflicts, and
+/// rewinding to the original HEAD would bring `e/f` back through the link.
+#[test]
+fn sequence_rewind_adding_below_an_untracked_link_is_refused() {
+    let f = fx();
+    let original = f.commit(&[("e/f", "ORIG\n"), ("e/new.txt", "ORIG\n")], "adds e");
+    git_core::branch::create_branch(&f.repo, "work", &original).unwrap();
+    std::fs::remove_dir_all(f.path().join("e")).unwrap();
+    let mut index = f.repo.index().unwrap();
+    index.remove_dir(std::path::Path::new("e"), 0).unwrap();
+    index.write().unwrap();
+    common::commit_all(&f.repo, "removes e");
+    let removal = f.head();
+    let conflicting = f.commit(&[("a.txt", "picked\n")], "a");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    f.commit(&[("a.txt", "local\n")], "local a");
+    let run = git_core::pick::cherry_pick_many(&f.repo, &[removal, conflicting]);
+    let state = run.state.expect("the sequence stops on the conflict");
+    assert!(!f.path().join("e").exists());
+    f.link_e();
+    let result = git_core::pick::abort_sequence(&f.repo, &state);
+    assert!(
+        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.nothing_outside();
+}
+
+#[test]
+fn stash_apply_adding_below_an_untracked_link_is_refused() {
+    let mut f = fx();
+    common::write_file(f.path(), "e/f", "NEW\n");
+    common::write_file(f.path(), "e/new.txt", "NEW\n");
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    f.link_e();
+    let result = git_core::stash::apply_stash(&mut f.repo, 0, None, false);
+    match result {
+        Err(error @ StashError::LinkedFolder(_)) => assert_eq!(error.to_string(), LINKED),
+        other => panic!("{other:?}"),
+    }
+    f.nothing_outside();
+}
+
+#[test]
+fn stash_pop_adding_below_an_untracked_link_is_refused() {
+    let mut f = fx();
+    common::write_file(f.path(), "e/f", "NEW\n");
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    f.link_e();
+    let result = git_core::stash::pop_stash(&mut f.repo, 0, None, false);
+    assert!(
+        matches!(result, Err(StashError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut f.repo).unwrap().len(), 1);
+    f.nothing_outside();
+}
+
+/// `e` is excluded, so the worktree counts as clean for a pull.
+#[test]
+fn pull_fast_forward_adding_below_an_ignored_link_is_refused() {
+    let f = fx();
+    let other = f.side_branch(&[("e/f", "NEW\n"), ("e/new.txt", "NEW\n")]);
+    std::fs::create_dir_all(f.repo.path().join("info")).unwrap();
+    std::fs::write(f.repo.path().join("info/exclude"), "e\n").unwrap();
+    f.repo
+        .reference(
+            &format!("refs/remotes/origin/{}", f.main),
+            git2::Oid::from_str(&other).unwrap(),
+            true,
+            "fetched",
+        )
+        .unwrap();
+    f.link_e();
+    let result = git_core::remote::pull_after_fetch(&f.repo, "origin", &f.main);
+    match result {
+        Err(error @ git_core::remote::RemoteError::LinkedFolder(_)) => {
+            assert_eq!(error.to_string(), LINKED)
+        }
+        other => panic!("{other:?}"),
+    }
+    f.nothing_outside();
+}
+
+#[test]
+fn switch_branch_with_an_untracked_link_nothing_brings_in_still_works() {
+    let f = fx();
+    f.side_branch(&[("a.txt", "other\n")]);
+    f.link_e();
+    git_core::branch::switch_branch(&f.repo, "other").unwrap();
+    f.nothing_outside();
+    assert!(common::is_link(f.path(), "e"));
 }
