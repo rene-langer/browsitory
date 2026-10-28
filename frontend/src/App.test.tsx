@@ -1504,8 +1504,10 @@ describe("App external tools", () => {
   });
 
   it("the palette opens Preferences…", async () => {
-    render(<App client={toolsClient()} />);
+    const { container } = render(<App client={toolsClient()} />);
     await screen.findByRole("tab", { name: "a" });
+    // The palette shortcut lives in the active RepoWorkspace, which mounts after the tabs (#135).
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", { name: "Command palette" });
     fireEvent.change(input, { target: { value: "Preferences" } });
@@ -1547,8 +1549,10 @@ describe("App external tools", () => {
     const openTerminal = vi.fn(async () => {
       throw new Error("Couldn't find the program 'kitty'.");
     });
-    render(<App client={toolsClient({ openTerminal })} />);
+    const { container } = render(<App client={toolsClient({ openTerminal })} />);
     await screen.findByRole("tab", { name: "a" });
+    // The palette shortcut lives in the active RepoWorkspace, which mounts after the tabs (#135).
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", { name: "Command palette" });
     fireEvent.change(input, { target: { value: "Open terminal here" } });
