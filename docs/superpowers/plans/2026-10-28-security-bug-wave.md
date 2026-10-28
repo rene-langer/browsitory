@@ -83,6 +83,21 @@ the spec's table). Where plan and code disagreed the code won; deviations, in ta
   `Path` components and fail closed; a signer whose stdout never drains is an error.
   Documented, not fixed: check-then-act races in raw writes/reads, Windows intermediate reparse
   points followed during `open_beneath`'s open.
+- **Review round 2 (independent verifier):** (1, major regression) `prepare_forced_checkout`
+  removed a folder link HEAD tracks *as a link*, so `reset --hard` from a committed link to a
+  folder failed ("null OID") and lost the link — hazards on a path HEAD tracks as a link are now
+  skipped (libgit2's typechange; retargeted-link rows prove nothing leaks). (2, major,
+  pre-existing) cherry-pick wrote through an *untracked* folder link; the old comment "a link
+  where nothing tracked a folder already conflicts in libgit2" was false. `refuse_linked_folders`
+  now takes what the operation brings in: target trees for checkouts (tracked links skipped),
+  merged results for merge/squash/cherry-pick/revert/rebase steps (nothing skipped: libgit2 also
+  merged `d/new.txt` through a *committed* folder link), the stash's trees for apply/pop. The
+  refusal is a `LinkedFolder` error naming the path (user decision), so stash apply no longer
+  maps it to `WouldOverwrite` and pull shows it. (3) submodule update refuses a linked path or
+  ancestor. (4, user decision) staging below a linked folder refuses like git
+  (`StageError::BeyondSymlink`), for hunks and lines too. (6) hardlinks documented as residual
+  risk. (7) one shared directory cache per guard call, no file stats for the refusal: 100k
+  files, release, 1.1 s → 0.24 s (refuse) and 1.15 s → 0.6 s (forced). Matrix: 82 rows (was 49).
 - Pre-existing flake seen once: `signing_ssh::unlisted_ssh_signer_is_good_untrusted` (passed on
   every rerun, before P2 touched signing).
 

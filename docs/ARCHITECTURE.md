@@ -345,14 +345,29 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   point, then `GetFinalPathNameByHandleW` on the opened handle must lie under the canonical work
   tree (a junction on the way is caught on the handle itself). Hand-declared `kernel32` import,
   no new dependency.
+- A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
+  a tracked link with the target's folder (a typechange) by unlinking it, never following it,
+  even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
 - Safe (non-forced) checkouts refuse to *modify* a file below a link but still *create* new
-  ones through it. So every safe checkout (switch, checkout commit, merge incl. squash,
-  cherry-pick/revert steps, sequence rewind, rebase start and steps, stash apply/pop, pull
-  fast-forward) first calls `refuse_linked_folders`: a checkout conflict while a symlink stands
-  where HEAD or the index has a folder. A leaf typechange is refused by libgit2 itself.
-  `tests/symlink_write_through.rs` pins every operation × {file link, folder link, a new file
-  below the folder link}, refusals included, so a future switch to a forced checkout is caught.
-- `stage_file` stages the deletion of a path below a symlinked folder instead of reading it.
+  ones through it, also through a link nothing tracks. So every safe operation first calls
+  `refuse_linked_folders` with what it brings in, refusing with `LinkedFolder` ("'d' is a
+  symbolic link where the repository has a folder. Remove or rename it first.", one error type
+  every operation's error enum wraps) while a symlink stands where HEAD, the index or the
+  incoming side has a folder. Tree checkouts (switch, checkout commit, merge fast-forward, pull
+  fast-forward, rebase start, sequence rewind) pass the target tree (`Incoming::Checkout`); a
+  folder link HEAD tracks is skipped there (libgit2 replaces it, or reports a conflict when it
+  was changed). Merge-like operations pass their merged result (`Incoming::Merge`): merge and
+  squash `merge_commits`, cherry-pick/revert steps and rebase steps `cherrypick_commit` /
+  `revert_commit`, stash apply/pop the stash's trees. Nothing is skipped there: libgit2 merges
+  `d/new.txt` without a conflict and writes it through a folder link HEAD tracks. The guard
+  examines each folder once across all sources and never stats files (100k-file repo: ~0.24 s).
+  A leaf typechange is refused by libgit2 itself. `tests/symlink_write_through.rs` pins every
+  operation × {file link, folder link, a new file below a tracked or an untracked folder link, a
+  committed folder link}, refusals included, so a future switch to a forced checkout is caught.
+- Submodule update refuses when the submodule path or a folder above it is a symlink (libgit2
+  would clone through it); nested updates check each nested path the same way.
+- `stage_file`, `stage_hunk` and `stage_lines` refuse a path below a symlinked folder like git
+  ("'d/f' is beyond a symbolic link."): the index→workdir diff would read through the link.
 - The forced-checkout path filter follows `core.ignorecase` like libgit2's pathspecs.
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or
   the refusal check) and libgit2's write; libgit2 has no `openat`-style checkout. Likewise
@@ -360,6 +375,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   threat class as #138 (a local writer racing the app). On Windows `open_beneath` follows
   intermediate reparse points during the open (a link to an inside folder is allowed; a link to
   a UNC share is contacted before the refusal); only the final path is checked.
+- Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
+  is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
+  the outside name sees the new content). A hardlink is indistinguishable from a regular file by
+  path; it needs the user (or a local process) to have created it on the same filesystem, and
+  git behaves the same way.
 
 ## Image preview
 

@@ -435,7 +435,10 @@ change lists have no multi-select. A file inside a symlinked folder can't be sta
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
 link away first). So do switching branches, merging, cherry-picking, reverting, rebasing,
-applying a stash and pulling, which could otherwise create files through the link.
+applying a stash and pulling, which could otherwise create files through the link — also when
+nothing tracked the link's name but the operation would create files below it. The message names
+the link: "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
+Staging a file below such a link refuses too ("'d/f' is beyond a symbolic link."), like git.
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there

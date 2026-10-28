@@ -179,9 +179,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   applying a stash and pulling refuse while a symbolic link stands where the repository has a
   folder ("'d' is a symbolic link where the repository has a folder…"); git's own safe checkout
   could otherwise create a new file through the link, overwriting a file outside the repository.
-- Undo/redo snapshots and their checks, and staging a file below a symbolic link that replaced a
-  folder, no longer read the file through the link (staging now stages its deletion, as git
-  shows it).
+- Undo/redo snapshots and their checks no longer read a file through a symbolic link that
+  replaced a folder. Staging a file (or a hunk or lines of it) below such a link refuses like git
+  ("'d/f' is beyond a symbolic link.") instead of reading the link's target.
+- Those refusals also cover a symbolic link nothing in the repository tracks, when the operation
+  would create files below it (a cherry-pick could overwrite a file outside the repository), and
+  a merge, cherry-pick, revert or rebase step that would add a file below a folder the branch
+  has committed as a symbolic link. The message names the link ("'d' is a symbolic link where
+  the repository has a folder. Remove or rename it first."); applying a stash and pulling no
+  longer show a generic error instead.
+- Hard reset, switching branches and undo/redo work again when the repository itself has
+  committed a symbolic link where another commit has a folder (the hard reset failed and
+  deleted the link); nothing is written through the link, even after it is pointed elsewhere.
+- Updating a submodule whose folder was replaced by a symbolic link (or sits below one) refuses
+  instead of cloning into the link's target.
 - The image preview reads working-tree files without following a folder that is swapped for a
   symbolic link while it reads (#138).
 
