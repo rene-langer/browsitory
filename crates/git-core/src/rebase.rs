@@ -17,6 +17,8 @@ pub enum RebaseError {
     HeadMoved { expected: String, actual: String },
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,6 +462,14 @@ pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseE
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
 fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
     repo.set_head(branch_ref)?;
+    // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
+    // folder; remove such links first, like git (#114).
+    let tree = repo.head()?.peel_to_tree()?;
+    crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
+        None,
+    )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     repo.checkout_head(Some(&mut checkout))?;
