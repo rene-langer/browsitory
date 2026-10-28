@@ -19,5 +19,6 @@ serde_json = "1"
 forge-fixture-override = ["repo-service/forge-fixture-override"]
 
 [dev-dependencies]
+test-support = { path = "../test-support" }
 git2 = "0.21"
 tempfile = "3"

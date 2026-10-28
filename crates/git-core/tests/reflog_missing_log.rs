@@ -1,3 +1,6 @@
+// Hide the developer's / CI runner's global and system git config from every test (#111).
+test_support::hermetic_git!();
+
 use git2::{Oid, Repository};
 use git_core::reflog::{read_reflog, restore_reflog_entry, ReflogError};
 use tempfile::TempDir;

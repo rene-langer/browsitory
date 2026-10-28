@@ -241,6 +241,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lines (#100). The command-palette spec re-sends Ctrl+K if the first keypress after startup is
   lost.
 
+### Internal
+
+- Rust tests no longer pick up the developer's or CI runner's global/system git config
+  (`init.defaultBranch`, `core.autocrlf`, `fetch.prune`, `commit.gpgSign`, `core.hooksPath`, …),
+  and no longer race a temporary config directory's cleanup on Windows (#111).
+- Fixed an intermittent SSH-signing test failure caused by one test's throwaway ssh-agent
+  leaking into concurrently running signing tests (#153).
+
 ## [0.3.0] - 2026-10-21
 
 ### Commit signing

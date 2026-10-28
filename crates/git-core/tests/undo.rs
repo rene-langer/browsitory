@@ -1,3 +1,6 @@
+// Hide the developer's / CI runner's global and system git config from every test (#111).
+test_support::hermetic_git!();
+
 use std::fs;
 use std::path::Path;
 

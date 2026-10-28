@@ -50,5 +50,6 @@ tauri-plugin-log = "2"
 log = "0.4"
 
 [dev-dependencies]
+test-support = { path = "../test-support" }
 tempfile = "3"
 git2 = "0.21"

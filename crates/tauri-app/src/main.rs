@@ -211,3 +211,7 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+// Hide the developer's / CI runner's global and system git config from every test (#111).
+#[cfg(test)]
+test_support::hermetic_git!();

@@ -1485,6 +1485,7 @@ dependencies = [
  "git2",
  "libc",
  "tempfile",
+ "test-support",
  "thiserror 1.0.69",
  "url",
 ]
@@ -3347,6 +3348,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "test-support",
  "url",
 ]
 
@@ -4279,6 +4281,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tempfile",
+ "test-support",
 ]
 
 [[package]]
@@ -4607,6 +4610,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08"
 dependencies = [
  "new_debug_unreachable",
+]
+
+[[package]]
+name = "test-support"
+version = "0.1.0"
+dependencies = [
+ "ctor",
+ "git2",
 ]
 
 [[package]]
@@ -5121,6 +5132,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "test-support",
 ]
 
 [[package]]
