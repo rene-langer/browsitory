@@ -240,7 +240,7 @@ pub(crate) fn conflict_path(conflict: &IndexConflict) -> Option<String> {
         .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
 }
 
-fn find_conflict(repo: &Repository, path: &str) -> Result<IndexConflict, MergeError> {
+pub(crate) fn find_conflict(repo: &Repository, path: &str) -> Result<IndexConflict, MergeError> {
     let index = repo.index()?;
     for conflict in index.conflicts()? {
         let conflict = conflict?;

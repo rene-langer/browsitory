@@ -82,7 +82,6 @@ impl TailBuffer {
     }
 
     /// The last `limit` bytes seen so far.
-    #[allow(dead_code)] // used by `tools` (next commit)
     pub(crate) fn tail_bytes(&self) -> &[u8] {
         &self.bytes[self.bytes.len().saturating_sub(self.limit)..]
     }
@@ -629,7 +628,6 @@ pub fn spawn_detached(spec: &SpawnSpec) -> Result<(), LaunchError> {
 
 /// Reads `source` until EOF on its own thread, keeping only the last `cap` bytes. Draining to
 /// the end means a chatty tool never blocks on (or dies of `SIGPIPE` from) a full pipe.
-#[allow(dead_code)] // used by `tools` (next commit)
 pub(crate) fn drain_tail(
     mut source: impl Read + Send + 'static,
     cap: usize,
