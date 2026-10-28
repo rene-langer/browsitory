@@ -578,11 +578,11 @@ mod tests {
         link_tc_and_d(dir.path(), out.path());
         let tree = head_tree(&repo);
 
-        let only_tc = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["tc".into()])).unwrap();
+        let only_tc = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["tc"])).unwrap();
         assert_eq!(only_tc, vec![Hazard::Leaf("tc".into())]);
-        let below_d = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["d".into()])).unwrap();
+        let below_d = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["d"])).unwrap();
         assert_eq!(below_d, vec![Hazard::Ancestor("d".into())]);
-        let prefix_only = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["t".into()])).unwrap();
+        let prefix_only = scan(dir.path(), &GuardSource::Tree(&tree), Some(&["t"])).unwrap();
         assert!(prefix_only.is_empty());
     }
 
