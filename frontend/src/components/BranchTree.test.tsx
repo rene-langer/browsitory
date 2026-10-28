@@ -406,15 +406,6 @@ describe("BranchTree — remotes", () => {
   });
 
   const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
-  const oneRemoteWithPush = [
-    {
-      name: "origin",
-      fetchUrl: "git@github.com:user/repo.git",
-      pushUrl: "git@github.com:user/push-repo.git",
-      authMode: null,
-      authUsername: null,
-    },
-  ];
 
   it("lists remote folders and lazily loads their branches on first expand", async () => {
     const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "feat/foo"]);
@@ -784,84 +775,6 @@ describe("BranchTree — remotes", () => {
   // why (single global credential/edit modals replace the old per-row inline forms, so a few
   // row-isolation and disclosure-default tests no longer have anything to attach to).
 
-  it("copies the fetch URL to the clipboard from the Edit remote dialog", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Copy fetch URL for origin" }));
-    expect(writeText).toHaveBeenCalledWith("git@github.com:user/repo.git");
-  });
-
-  it("copies the push URL to the clipboard when one is set", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderTree({ remotes: oneRemoteWithPush });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Copy push URL for origin" }));
-    expect(writeText).toHaveBeenCalledWith("git@github.com:user/push-repo.git");
-  });
-
-  it("does not render a push-URL copy button when the remote has no push URL", async () => {
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    expect(within(dialog).queryByRole("button", { name: "Copy push URL for origin" })).not.toBeInTheDocument();
-  });
-
-  it("uses the SSH agent without rendering a token input", async () => {
-    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(true);
-    renderTree({ remotes: oneRemote, onSetRemoteAuthMode });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("Authentication for origin"), { target: { value: "SshAgent" } });
-    expect(within(dialog).queryByLabelText("Access token")).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Use SSH agent" }));
-    await waitFor(() => expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "SshAgent", null));
-  });
-
-  it("explains what the SSH agent option does", async () => {
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("Authentication for origin"), { target: { value: "SshAgent" } });
-    expect(within(dialog).getByText(/uses your system's ssh agent/i)).toBeInTheDocument();
-  });
-
-  it("clears the token after a failed credential save, keeping the dialog open", async () => {
-    const onSaveHttpsCredential = vi.fn().mockRejectedValue(new Error("keychain unavailable"));
-    renderTree({ remotes: oneRemote, onSaveHttpsCredential });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "rene" } });
-    fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "token-123" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save HTTPS credential" }));
-    await waitFor(() => expect(within(dialog).getByLabelText("Access token")).toHaveValue(""));
-  });
-
-  it("does not save a token when HTTPS authentication setup fails", async () => {
-    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(false);
-    const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
-    renderTree({ remotes: oneRemote, onSetRemoteAuthMode, onSaveHttpsCredential });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "rene" } });
-    fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "token-123" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save HTTPS credential" }));
-    await waitFor(() => expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "HttpsToken", "rene"));
-    expect(onSaveHttpsCredential).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(dialog).getByLabelText("Access token")).toHaveValue(""));
-  });
-
   it("disables Push current branch here while another operation is active", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
@@ -1075,22 +988,6 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Remove remote" })).toHaveAttribute("data-destructive", "true");
-  });
-
-  it("does not update an existing remote's URLs when rename fails, leaving the dialog open", async () => {
-    const onRenameRemote = vi.fn().mockResolvedValue(false);
-    const onUpdateRemoteUrls = vi.fn().mockResolvedValue(undefined);
-    const backup = { name: "backup", fetchUrl: "../backup.git", pushUrl: "../push-backup.git", authMode: null, authUsername: null };
-    renderTree({ remotes: [...oneRemote, backup], onRenameRemote, onUpdateRemoteUrls });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "backup" } });
-    fireEvent.change(within(dialog).getByLabelText("Fetch URL"), { target: { value: "../replacement.git" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote" }));
-    await waitFor(() => expect(onRenameRemote).toHaveBeenCalledWith("origin", "backup"));
-    expect(onUpdateRemoteUrls).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Edit origin" })).toBeInTheDocument();
   });
 
   it("offers branch suggestions from the selected remote for the upstream-branch field", async () => {
@@ -1536,5 +1433,76 @@ describe("BranchTree — keyboard menus", () => {
     renderTree();
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("menu")).toHaveStyle({ left: "180px", top: "60px" });
+  });
+});
+
+describe("BranchTree — controlled remote dialogs", () => {
+  const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
+  beforeEach(() => localStorage.clear());
+
+  it.each([
+    ["edit", "Edit origin"],
+    ["credentials", "Credentials for origin"],
+    ["remove", "Remove remote confirmation"],
+  ] as const)("renders the %s dialog from props even while Branches is collapsed", async (kind, name) => {
+    localStorage.setItem("sidebar-branches", "closed");
+    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
+    expect(screen.queryByRole("button", { name: "origin" })).toBeNull(); // body not rendered
+    expect(await screen.findByRole("dialog", { name, hidden: true })).toBeInTheDocument();
+  });
+
+  it("menu items report the dialog through onRemoteDialogChange when controlled", () => {
+    const onRemoteDialogChange = vi.fn();
+    renderTree({ remotes: [origin], remoteDialog: null, onRemoteDialogChange });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
+    expect(onRemoteDialogChange).toHaveBeenCalledWith({ kind: "credentials", remoteName: "origin" });
+    expect(screen.queryByRole("dialog", { name: "Credentials for origin", hidden: true })).toBeNull();
+  });
+
+  it("closing a controlled dialog reports null", () => {
+    const onRemoteDialogChange = vi.fn();
+    renderTree({ remotes: [origin], remoteDialog: { kind: "edit", remoteName: "origin" }, onRemoteDialogChange });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", hidden: true }));
+    expect(onRemoteDialogChange).toHaveBeenCalledWith(null);
+  });
+
+  it("renders nothing for a dialog whose remote is gone", () => {
+    renderTree({ remotes: [], remoteDialog: { kind: "edit", remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
+    expect(screen.queryByRole("dialog", { name: "Edit origin", hidden: true })).toBeNull();
+  });
+
+  it("asks to clear upstreams based on the upstreams when the confirmation renders", () => {
+    const props = {
+      remotes: [origin],
+      remoteDialog: { kind: "remove" as const, remoteName: "origin" },
+      onRemoteDialogChange: vi.fn(),
+    };
+    const { rerender, props: full } = renderTree({ ...props, remoteUpstreams: {} });
+    expect(screen.getByText("Remove remote origin?")).toBeInTheDocument();
+    rerender(
+      <BranchTree
+        {...full}
+        remoteUpstreams={{ origin: [{ localBranch: "main", remoteName: "origin", remoteBranch: "main" }] }}
+      />,
+    );
+    expect(screen.getByText(/clear upstreams for main/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
+    expect(full.onRemoveRemote).toHaveBeenCalledWith("origin", true);
+  });
+
+  it("a successful rename keeps the Edit dialog bound to the renamed remote", async () => {
+    const onRemoteDialogChange = vi.fn();
+    renderTree({
+      remotes: [origin],
+      remoteDialog: { kind: "edit", remoteName: "origin" },
+      onRemoteDialogChange,
+      onRenameRemote: vi.fn().mockResolvedValue(true),
+    });
+    const dialog = screen.getByRole("dialog", { name: "Edit origin", hidden: true });
+    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "upstream" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
+    await waitFor(() => expect(onRemoteDialogChange).toHaveBeenLastCalledWith(null));
+    expect(onRemoteDialogChange).toHaveBeenCalledWith({ kind: "edit", remoteName: "upstream" });
   });
 });

@@ -58,6 +58,9 @@ const GRAPH_PAGE_SIZE = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
 
+/** A remote's Edit / Credentials / Remove dialog, opened from its menu or the palette. */
+export type RemoteDialog = { kind: "edit" | "credentials" | "remove"; remoteName: string };
+
 /** Whether two selections name the same row. */
 export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
   if (a === "uncommitted" || b === "uncommitted") {
@@ -102,6 +105,9 @@ export interface AppState {
   // Mirrors createBranchDraft: lets both BranchTree's own "+" button and the command palette's
   // "Add remote" entry open the same inline add-remote form.
   addRemoteDraftOpen: boolean;
+  // Non-null while a remote's Edit / Credentials / Remove dialog is open — in app state (not
+  // BranchTree's) so the palette can open it while the Branches section is collapsed.
+  remoteDialog: RemoteDialog | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
   headInfo: HeadInfo;
@@ -230,6 +236,8 @@ export interface UseAppStateResult {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
+  openRemoteDialog(kind: RemoteDialog["kind"], remoteName: string): void;
+  closeRemoteDialog(): void;
   requestForcePush(remoteName: string): void;
   cancelForcePush(): void;
   forcePushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
@@ -335,6 +343,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pullRequests: {},
     createBranchDraft: null,
     addRemoteDraftOpen: false,
+    remoteDialog: null,
     stashes: [],
     mergeMessage: null,
     headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
@@ -555,6 +564,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    openRemoteDialog,
+    closeRemoteDialog,
     requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,
@@ -714,6 +725,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    openRemoteDialog,
+    closeRemoteDialog,
     requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,

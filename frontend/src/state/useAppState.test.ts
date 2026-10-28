@@ -4228,6 +4228,19 @@ describe("useAppState — refs and remotes (4b)", () => {
     expect(result.current.state.deleteRemoteBranchDialog).toBeNull();
   });
 
+  it("openRemoteDialog/closeRemoteDialog toggle remoteDialog without calling the client", async () => {
+    const client = transferClient({});
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const calls = Object.values(client).filter((fn) => vi.isMockFunction(fn)).map((fn) => fn.mock.calls.length);
+    expect(result.current.state.remoteDialog).toBeNull();
+    act(() => result.current.openRemoteDialog("credentials", "origin"));
+    expect(result.current.state.remoteDialog).toEqual({ kind: "credentials", remoteName: "origin" });
+    act(() => result.current.closeRemoteDialog());
+    expect(result.current.state.remoteDialog).toBeNull();
+    expect(Object.values(client).filter((fn) => vi.isMockFunction(fn)).map((fn) => fn.mock.calls.length)).toEqual(calls);
+  });
+
   it("removes a deleted branch from the saved graph selection", async () => {
     const setGraphBranchSelection = vi.fn(async () => {});
     const client = transferClient({

@@ -767,6 +767,10 @@ function RepoWorkspace({
               onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
               onCompareBranch={compare.compareBranch}
               refreshGeneration={appState.state.refreshGeneration}
+              remoteDialog={appState.state.remoteDialog}
+              onRemoteDialogChange={(dialog) =>
+                dialog === null ? appState.closeRemoteDialog() : appState.openRemoteDialog(dialog.kind, dialog.remoteName)
+              }
             />
             {panelVisibility.visibility.stash && (
               <StashPanel

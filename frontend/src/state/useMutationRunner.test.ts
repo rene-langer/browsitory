@@ -42,6 +42,7 @@ const BASE_STATE: AppState = {
   error: null,
   pending: false,
   addRemoteDraftOpen: false,
+  remoteDialog: null,
   refreshGeneration: 0,
   headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
   forcePushOffer: null,
