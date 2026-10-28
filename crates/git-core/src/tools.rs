@@ -823,14 +823,11 @@ fn write_side(dir: &Path, path: &str, side: &str, contents: &[u8]) -> Result<Pat
 /// work tree (a tool must never read or write outside it through `REMOTE`/`MERGED`).
 fn work_tree_file(workdir: &Path, rel: &Path) -> Result<PathBuf, ToolError> {
     let file = workdir.join(rel);
-    if let (Some(parent), Ok(root)) = (file.parent(), workdir.canonicalize()) {
-        if let Ok(parent) = parent.canonicalize() {
-            if !parent.starts_with(&root) {
-                return Err(ToolError::InvalidPath);
-            }
-        }
+    if crate::launch::parent_stays_inside(workdir, &file) {
+        Ok(file)
+    } else {
+        Err(ToolError::InvalidPath)
     }
-    Ok(file)
 }
 
 fn is_symlink(path: &Path) -> bool {

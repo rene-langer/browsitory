@@ -70,12 +70,36 @@ pub enum EditorTarget {
 
 /// Joins a repository-relative path from IPC onto the work tree root. Refused: empty, absolute,
 /// or any `.`, `..`, root or prefix component, and on Windows a `:` (alternate data streams,
-/// drive-relative paths), so the result can never leave the work tree.
+/// drive-relative paths). Also refused when a directory on the way is a symlink that leads out
+/// of the work tree (`etc -> /etc`), so the result can never leave it.
 pub fn resolve_in_workdir(workdir: &Path, rel: &str) -> Result<PathBuf, OpenError> {
-    if is_safe_relative(rel) {
-        Ok(workdir.join(rel))
+    if !is_safe_relative(rel) {
+        return Err(OpenError::InvalidPath);
+    }
+    let path = workdir.join(rel);
+    if parent_stays_inside(workdir, &path) {
+        Ok(path)
     } else {
         Err(OpenError::InvalidPath)
+    }
+}
+
+/// Whether the directory holding `path` (its nearest existing ancestor, with symlinks resolved)
+/// is inside `workdir`. A leaf symlink is not judged here: callers decide what following it
+/// means for them.
+pub(crate) fn parent_stays_inside(workdir: &Path, path: &Path) -> bool {
+    let Ok(root) = workdir.canonicalize() else {
+        // Nothing on disk to compare against (pure callers); the lexical checks still apply.
+        return true;
+    };
+    let Some(parent) = path.parent() else {
+        return true;
+    };
+    match parent.ancestors().find(|p| p.exists()) {
+        Some(existing) => existing
+            .canonicalize()
+            .is_ok_and(|resolved| resolved.starts_with(&root)),
+        None => true,
     }
 }
 
@@ -140,8 +164,12 @@ pub fn expand_placeholders(
     out
 }
 
-/// Extensions the Windows shell runs (or installs, or follows) instead of opening as a document.
-const WINDOWS_RUNNABLE: &[&str] = &[
+/// Extensions some desktop runs (or installs, or follows) instead of opening as a document:
+/// Windows programs, scripts, installers and shortcuts; macOS bundles, scripts and launchers;
+/// Linux launchers and shell scripts. Lower case. Every OS checks the whole list, because Wine
+/// on Linux and macOS hands `.msi`, `.lnk`, `.bat` and `.exe` files from `xdg-open`/`open` to
+/// Windows programs, and a repository is often shared between platforms.
+const RUNNABLE_EXTENSIONS: &[&str] = &[
     "exe",
     "com",
     "bat",
@@ -192,10 +220,6 @@ const WINDOWS_RUNNABLE: &[&str] = &[
     "pyz",
     "rb",
     "pl",
-];
-
-/// Extensions macOS/Linux desktops run (or treat as launchers) instead of opening as a document.
-const UNIX_RUNNABLE: &[&str] = &[
     "app",
     "command",
     "tool",
@@ -211,8 +235,6 @@ const UNIX_RUNNABLE: &[&str] = &[
     "inetloc",
     "webloc",
     "desktop",
-    "jar",
-    "jnlp",
     "sh",
     "bash",
     "zsh",
@@ -224,29 +246,48 @@ const UNIX_RUNNABLE: &[&str] = &[
     "bin",
     "appimage",
     "flatpakref",
-    "py",
-    "pyw",
-    "rb",
-    "pl",
+    "msu",
+    "rdp",
+    "ahk",
+    "pyc",
+    "pyo",
+    "pyzw",
+    "theme",
+    "themepack",
+    "deskthemepack",
+    "searchconnector-ms",
+    "xll",
+    "vb",
+    "prefpane",
+    "mobileconfig",
 ];
 
-/// Whether the OS default "open" action could run `path` rather than open it. Pure: the caller
-/// says whether the file has an execute bit.
-pub fn may_execute(path: &Path, os: Os, has_exec_bit: bool) -> bool {
-    let ext = path
-        .extension()
+/// Old Office documents share the OLE container format (`D0 CF 11 E0`) with `.msi` installers;
+/// with one of these extensions an OLE file is a document.
+const OLE_DOCUMENTS: &[&str] = &[
+    "doc", "dot", "xls", "xlt", "ppt", "pot", "pps", "msg", "vsd", "pub", "mpp",
+];
+
+const OLE_MAGIC: &[u8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
+
+fn lower_extension(path: &Path) -> String {
+    path.extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
-    match os {
-        Os::Windows => WINDOWS_RUNNABLE.contains(&ext.as_str()),
-        Os::Linux | Os::MacOs => has_exec_bit || UNIX_RUNNABLE.contains(&ext.as_str()),
-    }
+        .unwrap_or_default()
 }
 
-/// A script (`#!`) or a native executable (ELF, PE `MZ`, Mach-O, fat Mach-O), judged by its
-/// first bytes. A file can be both runnable and misnamed (`notes.txt` holding a script), and
-/// desktop handlers sniff contents.
+/// Whether the OS default "open" action could run `path` rather than open it: a runnable
+/// extension (any platform's, see `RUNNABLE_EXTENSIONS`), or an execute bit on macOS/Linux.
+/// Pure: the caller says whether the file has an execute bit.
+pub fn may_execute(path: &Path, os: Os, has_exec_bit: bool) -> bool {
+    RUNNABLE_EXTENSIONS.contains(&lower_extension(path).as_str())
+        || (matches!(os, Os::Linux | Os::MacOs) && has_exec_bit)
+}
+
+/// A script (`#!`), a native executable (ELF, PE `MZ`, Mach-O, fat Mach-O), an OLE container
+/// (`.msi` installers), or a freedesktop `[Desktop Entry]` launcher, judged by the first bytes.
+/// A file can be both runnable and misnamed, and desktop handlers sniff contents.
 pub fn looks_runnable(head: &[u8]) -> bool {
     const MAGICS: &[&[u8]] = &[
         b"#!",
@@ -257,8 +298,18 @@ pub fn looks_runnable(head: &[u8]) -> bool {
         b"\xce\xfa\xed\xfe",
         b"\xcf\xfa\xed\xfe",
         b"\xca\xfe\xba\xbe",
+        OLE_MAGIC,
     ];
-    MAGICS.iter().any(|magic| head.starts_with(magic))
+    MAGICS.iter().any(|magic| head.starts_with(magic)) || is_desktop_entry(head)
+}
+
+/// The first line that is not blank or a `#` comment is `[Desktop Entry]` (after a UTF-8 BOM).
+fn is_desktop_entry(head: &[u8]) -> bool {
+    let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
+    head.split(|b| *b == b'\n')
+        .map(|line| line.trim_ascii())
+        .find(|line| !line.is_empty() && !line.starts_with(b"#"))
+        .is_some_and(|line| line == b"[Desktop Entry]")
 }
 
 #[cfg(unix)]
@@ -347,7 +398,9 @@ pub fn default_terminal(
 ) -> Option<Invocation> {
     match os {
         Os::MacOs => Some(inv(&["open", "-a", "Terminal", "{dir}"], false)),
-        Os::Windows if has_program("wt") => Some(inv(&["wt", "-d", "{dir}"], false)),
+        // Never `-d {dir}`: `;` in a path would split wt's command line into subcommands. wt
+        // starts in its working directory, which `run_invocation` sets to the work tree root.
+        Os::Windows if has_program("wt") => Some(inv(&["wt", "-d", "."], false)),
         Os::Windows => Some(inv(&["cmd", "/K"], true)),
         Os::Linux => {
             if let Some(words) = env_terminal
@@ -398,7 +451,11 @@ pub fn terminal_invocation(
 fn file_may_run(file: &Path, os: Os) -> bool {
     let check = |path: &Path| {
         may_execute(path, os, has_exec_bit(path))
-            || read_head(path).is_some_and(|head| looks_runnable(&head))
+            || read_head(path).is_some_and(|head| {
+                looks_runnable(&head)
+                    && !(head.starts_with(OLE_MAGIC)
+                        && OLE_DOCUMENTS.contains(&lower_extension(path).as_str()))
+            })
     };
     if check(file) {
         return true;
@@ -418,10 +475,10 @@ fn read_head(path: &Path) -> Option<Vec<u8>> {
     if !std::fs::metadata(path).ok()?.is_file() {
         return None;
     }
-    let mut head = Vec::with_capacity(8);
+    let mut head = Vec::with_capacity(1024);
     std::fs::File::open(path)
         .ok()?
-        .take(8)
+        .take(1024)
         .read_to_end(&mut head)
         .ok()?;
     Some(head)
@@ -466,14 +523,19 @@ pub fn prepare_terminal(workdir: &Path, configured: Option<&str>) -> Result<Invo
 
 /// What "Reveal" shows: the work tree root for `None`, else the file, or its nearest existing
 /// parent inside the work tree when it was deleted.
+/// A symlink reveals its folder: the file manager would show the link's target, which may be
+/// outside the work tree.
 pub fn reveal_target(workdir: &Path, rel: Option<&str>) -> Result<PathBuf, OpenError> {
-    match rel {
-        None => Ok(workdir.to_path_buf()),
-        Some(rel) => Ok(nearest_existing(
-            workdir,
-            &resolve_in_workdir(workdir, rel)?,
-        )),
-    }
+    let Some(rel) = rel else {
+        return Ok(workdir.to_path_buf());
+    };
+    let path = resolve_in_workdir(workdir, rel)?;
+    let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink());
+    let shown = match (is_link, path.parent()) {
+        (true, Some(parent)) => parent.to_path_buf(),
+        _ => path,
+    };
+    Ok(nearest_existing(workdir, &shown))
 }
 
 /// Starts `invocation` detached, with `cwd` as its working directory. `argv[0]` is resolved to
@@ -639,7 +701,6 @@ mod tests {
         assert!(may_execute(Path::new("app.js"), Os::Windows, false));
         assert!(may_execute(Path::new("tool.ps1"), Os::Windows, false));
         assert!(may_execute(Path::new("x.reg"), Os::Windows, false));
-        assert!(!may_execute(Path::new("app.js"), Os::Linux, false));
         assert!(!may_execute(Path::new("README.md"), Os::Windows, false));
         assert!(may_execute(Path::new("build"), Os::Linux, true));
         assert!(may_execute(Path::new("x.desktop"), Os::Linux, false));
@@ -650,6 +711,112 @@ mod tests {
         assert!(may_execute(Path::new("x.terminal"), Os::MacOs, false));
         assert!(!may_execute(Path::new("notes.txt"), Os::MacOs, false));
         assert!(!may_execute(Path::new("Makefile"), Os::Linux, false));
+    }
+
+    #[test]
+    fn may_execute_checks_every_platforms_list_on_every_os() {
+        // Wine on Linux/macOS hands Windows programs and shortcuts to `xdg-open`/`open` too.
+        for os in [Os::Linux, Os::MacOs, Os::Windows] {
+            for name in [
+                "setup.msi",
+                "x.lnk",
+                "run.bat",
+                "run.CMD",
+                "x.desktop",
+                "Tool.app",
+                "x.sh",
+                "x.msu",
+                "x.rdp",
+                "x.ahk",
+                "x.pyc",
+                "x.pyo",
+                "x.pyzw",
+                "x.theme",
+                "x.themepack",
+                "x.deskthemepack",
+                "x.searchConnector-ms",
+                "x.xll",
+                "x.vb",
+                "x.prefPane",
+                "x.mobileconfig",
+                "x.PY",
+            ] {
+                assert!(may_execute(Path::new(name), os, false), "{name} on {os:?}");
+            }
+            assert!(!may_execute(Path::new("README.md"), os, false));
+        }
+    }
+
+    #[test]
+    fn looks_runnable_detects_desktop_entries_and_installers() {
+        assert!(looks_runnable(b"[Desktop Entry]\nExec=x\n"));
+        assert!(looks_runnable(b"# comment\n\n  [Desktop Entry]\nExec=x\n"));
+        assert!(looks_runnable(b"\xef\xbb\xbf[Desktop Entry]\n"));
+        assert!(looks_runnable(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rest"));
+        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+    }
+
+    #[test]
+    fn an_old_office_document_is_not_mistaken_for_an_installer() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rest";
+        std::fs::write(dir.path().join("report.doc"), ole).unwrap();
+        std::fs::write(dir.path().join("notes.txt"), ole).unwrap();
+        assert!(matches!(
+            prepare_editor(dir.path(), "report.doc", None, None),
+            Ok(EditorTarget::SystemDefault(_))
+        ));
+        assert!(matches!(
+            prepare_editor(dir.path(), "notes.txt", None, None),
+            Err(OpenError::MayExecute(_))
+        ));
+    }
+
+    #[test]
+    fn an_extensionless_desktop_entry_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("LAUNCH"), "[Desktop Entry]\nExec=sh -c x\n").unwrap();
+        assert!(matches!(
+            prepare_editor(dir.path(), "LAUNCH", None, None),
+            Err(OpenError::MayExecute(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_symlink_out_of_the_work_tree_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("etc")).unwrap();
+        assert!(matches!(
+            prepare_editor(dir.path(), "etc/secret.txt", None, Some("code")),
+            Err(OpenError::InvalidPath)
+        ));
+        assert!(matches!(
+            reveal_target(dir.path(), Some("etc/secret.txt")),
+            Err(OpenError::InvalidPath)
+        ));
+        assert!(matches!(
+            reveal_target(dir.path(), Some("etc/gone/x.txt")),
+            Err(OpenError::InvalidPath)
+        ));
+        // A symlink inside the work tree is fine.
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        std::fs::write(dir.path().join("real/a.txt"), "a").unwrap();
+        std::os::unix::fs::symlink("real", dir.path().join("alias")).unwrap();
+        assert!(prepare_editor(dir.path(), "alias/a.txt", None, Some("code")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn revealing_a_file_symlink_shows_the_link_not_its_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.txt"), dir.path().join("link"))
+            .unwrap();
+        assert_eq!(reveal_target(dir.path(), Some("link")).unwrap(), dir.path());
     }
 
     #[test]
@@ -738,7 +905,9 @@ mod tests {
         );
         assert_eq!(
             argv(&default_terminal(Os::Windows, None, &only("wt")).unwrap()),
-            ["wt", "-d", "{dir}"]
+            // `;` separates wt subcommands, so the directory is never on its command line: wt
+            // starts in its working directory, which is the work tree root.
+            ["wt", "-d", "."]
         );
         let cmd = default_terminal(Os::Windows, None, &none).unwrap();
         assert_eq!((argv(&cmd), cmd.new_console), (vec!["cmd", "/K"], true));
