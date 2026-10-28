@@ -88,6 +88,12 @@ pub fn dispatch(
         "set_graph_branch_selection" => set_graph_branch_selection(params),
         "get_diff_settings" => get_diff_settings(),
         "set_diff_settings" => set_diff_settings(params),
+        "get_external_tool_settings" => get_external_tool_settings(),
+        "set_external_tool_settings" => set_external_tool_settings(params),
+        "get_git_tools" => get_git_tools(params, repos),
+        "mark_resolved" => mark_resolved(params, repos),
+        "read_file_version" => read_file_version(params, repos),
+        "repo_workdir" => repo_workdir(params, repos),
         "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(params),
         "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
@@ -1058,6 +1064,197 @@ fn set_diff_settings(params: Value) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     config::set_diff_settings(&params.settings.into()).map_err(|error| error.to_string())?;
     Ok(Value::Null)
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExternalToolSettingsDto {
+    editor: Option<String>,
+    terminal: Option<String>,
+}
+
+impl From<config::ExternalToolSettings> for ExternalToolSettingsDto {
+    fn from(settings: config::ExternalToolSettings) -> Self {
+        Self {
+            editor: settings.editor,
+            terminal: settings.terminal,
+        }
+    }
+}
+
+impl From<ExternalToolSettingsDto> for config::ExternalToolSettings {
+    fn from(dto: ExternalToolSettingsDto) -> Self {
+        Self {
+            editor: dto.editor,
+            terminal: dto.terminal,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SetExternalToolSettingsParams {
+    settings: ExternalToolSettingsDto,
+}
+
+fn get_external_tool_settings() -> Result<Value, String> {
+    let settings = config::get_external_tool_settings().map_err(|error| error.to_string())?;
+    serde_json::to_value(ExternalToolSettingsDto::from(settings)).map_err(|error| error.to_string())
+}
+
+fn set_external_tool_settings(params: Value) -> Result<Value, String> {
+    let params: SetExternalToolSettingsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::set_external_tool_settings(&params.settings.into())
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+#[derive(Serialize)]
+enum GitConfigSourceDto {
+    System,
+    Xdg,
+    Global,
+    Local,
+    Worktree,
+    Other,
+}
+
+impl From<git_core::tools::ConfigSource> for GitConfigSourceDto {
+    fn from(source: git_core::tools::ConfigSource) -> Self {
+        use git_core::tools::ConfigSource;
+        match source {
+            ConfigSource::System => Self::System,
+            ConfigSource::Xdg => Self::Xdg,
+            ConfigSource::Global => Self::Global,
+            ConfigSource::Local => Self::Local,
+            ConfigSource::Worktree => Self::Worktree,
+            ConfigSource::Other => Self::Other,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitToolDto {
+    name: String,
+    command: Option<String>,
+    source: GitConfigSourceDto,
+    via_merge_tool: bool,
+    problem: Option<String>,
+}
+
+impl From<git_core::tools::GitToolInfo> for GitToolDto {
+    fn from(info: git_core::tools::GitToolInfo) -> Self {
+        Self {
+            name: info.name,
+            command: info.command,
+            source: info.source.into(),
+            via_merge_tool: info.via_merge_tool,
+            problem: info.problem,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitToolsDto {
+    diff_tool: Option<GitToolDto>,
+    merge_tool: Option<GitToolDto>,
+}
+
+fn get_git_tools(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let tools = worker_handle(repos, &params.repo_path)?.get_git_tools()?;
+    serde_json::to_value(GitToolsDto {
+        diff_tool: tools.diff_tool.map(Into::into),
+        merge_tool: tools.merge_tool.map(Into::into),
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+enum MarkResolvedOutcomeDto {
+    Resolved,
+    MarkersRemain,
+}
+
+impl From<git_core::merge::MarkResolvedOutcome> for MarkResolvedOutcomeDto {
+    fn from(outcome: git_core::merge::MarkResolvedOutcome) -> Self {
+        match outcome {
+            git_core::merge::MarkResolvedOutcome::Resolved => Self::Resolved,
+            git_core::merge::MarkResolvedOutcome::MarkersRemain => Self::MarkersRemain,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MarkResolvedParams {
+    repo_path: String,
+    path: String,
+    force: bool,
+}
+
+fn mark_resolved(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: MarkResolvedParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome =
+        worker_handle(repos, &params.repo_path)?.mark_resolved(params.path, params.force)?;
+    serde_json::to_value(MarkResolvedOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+enum FileVersionDto {
+    Head,
+    Index,
+    Stage {
+        stage: u8,
+    },
+    #[serde(rename_all = "camelCase")]
+    Commit {
+        commit_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    FirstParent {
+        commit_id: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadFileVersionParams {
+    repo_path: String,
+    path: String,
+    version: FileVersionDto,
+}
+
+/// Internal: not on `RepoClient`. Called by the extension host's `browsitory-file:` content
+/// provider (diff and merge editor sides). Contents are lossy UTF-8, capped at
+/// `MAX_FILE_VERSION_BYTES`; `text: null` when the path doesn't exist in that version.
+fn read_file_version(params: Value, repos: &Repos) -> Result<Value, String> {
+    use git_core::tools::FileVersion;
+    let params: ReadFileVersionParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let version = match params.version {
+        FileVersionDto::Head => FileVersion::Head,
+        FileVersionDto::Index => FileVersion::Index,
+        FileVersionDto::Stage { stage } if (1..=3).contains(&stage) => FileVersion::Stage(stage),
+        FileVersionDto::Stage { .. } => return Err("stage must be 1, 2 or 3".into()),
+        FileVersionDto::Commit { commit_id } => FileVersion::Commit(commit_id),
+        FileVersionDto::FirstParent { commit_id } => FileVersion::FirstParent(commit_id),
+    };
+    let bytes = worker_handle(repos, &params.repo_path)?.read_file_version(params.path, version)?;
+    Ok(serde_json::json!({ "text": bytes.map(|b| String::from_utf8_lossy(&b).into_owned()) }))
+}
+
+/// Internal: not on `RepoClient`. The work tree root for the extension host's native launch
+/// methods (the repo path may be a subdirectory of it).
+fn repo_workdir(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let workdir = worker_handle(repos, &params.repo_path)?.workdir()?;
+    Ok(Value::String(workdir.to_string_lossy().into_owned()))
 }
 
 /// `commit` / `amend_commit` params; `noVerify` (skip `pre-commit` and `commit-msg`) defaults
