@@ -544,6 +544,9 @@ export class SidecarBridge {
           const repoPath = params["repoPath"] as string;
           const workdir = await this.workdir(repoPath);
           repoFile(workdir, rel);
+          // The desktop merge tool's guards (a text conflict, no symlink or submodule, a work
+          // tree file inside the tree): the merge editor writes its result to that file.
+          await this.callRunningSidecar("check_merge_target", { repoPath, path: rel });
           await this.dependencies.openMergeEditor(mergeSides(repoPath, workdir, rel));
           // VSCode owns the merge from here; Browsitory can't see when it's done.
           result = "HandedOff";

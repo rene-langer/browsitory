@@ -399,6 +399,10 @@ describe("SidecarBridge", () => {
       params: { repoPath: "/repos/a/sub", path: "x.ts" },
     });
     await answerWorkdir(4);
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(6));
+    const check = writtenRequest(child, 5);
+    expect(check).toMatchObject({ method: "check_merge_target", params: { repoPath: "/repos/a/sub", path: "x.ts" } });
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: check.id, result: null })}\n`);
     await merge;
     expect(openMergeEditor).toHaveBeenCalledWith(expect.objectContaining({ output: "file:///repos/a/x.ts" }));
 
@@ -410,6 +414,34 @@ describe("SidecarBridge", () => {
       // The merge editor fell back to a plain open: still handed off to VSCode.
       { jsonrpc: "2.0", id: 5, result: "HandedOff" },
     ]);
+  });
+
+  it("does not open the merge editor when the sidecar refuses the merge target", async () => {
+    const { bridge, child, postToWebview, openMergeEditor } = createBridge();
+    const merge = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "open_merge_tool",
+      params: { repoPath: "/r", path: "link" },
+    });
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(1));
+    const workdir = writtenRequest(child, 0);
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: workdir.id, result: "/r" })}\n`);
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(2));
+    const check = writtenRequest(child, 1);
+    expect(check).toMatchObject({ method: "check_merge_target" });
+    child.stdout.push(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: check.id,
+        error: { code: -32000, message: "link is a symbolic link, which a merge tool can't merge." },
+      })}\n`,
+    );
+    await merge;
+    expect(openMergeEditor).not.toHaveBeenCalled();
+    const reply = postToWebview.mock.calls.at(-1)?.[0] as { id: number; error?: { message: string } };
+    expect(reply.id).toBe(7);
+    expect(reply.error?.message).toContain("is a symbolic link");
   });
 
   it("rejects malformed launch params without asking the sidecar", async () => {
