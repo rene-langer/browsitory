@@ -119,6 +119,12 @@ fn init_repo() -> (tempfile::TempDir, git2::Repository) {
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();
     config.set_bool("commit.gpgSign", false).unwrap();
+    // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
+    let hooks = repo.path().join("hooks");
+    config
+        .set_str("core.hooksPath", hooks.to_str().expect("utf-8 temp path"))
+        .unwrap();
+    drop(config);
     (dir, repo)
 }
 
@@ -626,7 +632,11 @@ fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
         "commit",
         serde_json::json!({"repoPath": repo_path, "message": "add new.txt"}),
     );
-    let commit_id = committed["result"].as_str().expect("commit id").to_string();
+    assert_eq!(committed["result"]["kind"], "Committed");
+    let commit_id = committed["result"]["commitId"]
+        .as_str()
+        .expect("commit id")
+        .to_string();
     assert_eq!(commit_id.len(), 40);
 
     let files = sidecar.call(
@@ -2168,4 +2178,63 @@ fn stash_options_files_and_pop_round_trip_through_the_sidecar() {
         std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
         "mine"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_pre_commit_streams_hook_progress_and_returns_hook_failed() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "new.txt", "hello");
+    let hooks = repo.path().join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    std::fs::write(
+        hooks.join("pre-commit"),
+        "#!/bin/sh\necho blocked\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        hooks.join("pre-commit"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    sidecar.call(
+        2,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "new.txt"}),
+    );
+
+    let (response, mut notifications) = sidecar.call_and_collect_notifications(
+        3,
+        "commit",
+        serde_json::json!({"repoPath": repo_path, "message": "m", "noVerify": false}),
+        false,
+    );
+
+    assert_eq!(
+        response["result"],
+        serde_json::json!({"kind": "HookFailed", "hook": "pre-commit", "output": "blocked\n"})
+    );
+    // The relay thread may write after the response line; both events are already queued.
+    let is_finished =
+        |n: &serde_json::Value| n["method"] == "hookProgress" && n["params"]["phase"] == "Finished";
+    while !notifications.iter().any(is_finished) {
+        notifications.push(sidecar.read_line());
+    }
+    let phases: Vec<&serde_json::Value> = notifications
+        .iter()
+        .filter(|n| n["method"] == "hookProgress")
+        .map(|n| &n["params"]["phase"])
+        .collect();
+    assert_eq!(phases, ["Started", "Finished"]);
+    let started = &notifications[0]["params"];
+    assert_eq!(started["hook"], "pre-commit");
+    assert_eq!(started["repoPath"], repo_path.as_str());
+    assert!(started["operationId"]
+        .as_str()
+        .unwrap()
+        .starts_with("commit-"));
 }

@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import type { RepoClient, StatusEntry, StatusKind } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
-import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
+import type { RunMutation, RunMutationWithOutcome, RunOptimisticMutation } from "./useMutationRunner";
+import { hookFailedMessage } from "../lib/hookFailure";
 
 export interface StagingActions {
   selectRow(row: SelectedRow): void;
@@ -24,7 +25,9 @@ export interface StagingActions {
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
-  commit(message: string): Promise<void>;
+  // Resolves `true` once committed; `false` on any failure (a hook failure also stores
+  // `hookFailure`), so CommitBox only clears the message after a commit that landed.
+  commit(message: string, noVerify: boolean): Promise<boolean>;
 }
 
 // A path can have two StatusEntry rows simultaneously (staged + unstaged, for a partially-staged
@@ -48,6 +51,7 @@ export function useStagingActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
+  runMutationWithOutcome: RunMutationWithOutcome,
   runOptimisticMutation: RunOptimisticMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): StagingActions {
@@ -144,8 +148,22 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const commit = useCallback(
-    (message: string) => runMutation(() => client.commit(repoPath, message)),
-    [client, runMutation, repoPath],
+    async (message: string, noVerify: boolean) => {
+      const ok = await runMutationWithOutcome(async () => {
+        const outcome = await client.commit(repoPath, message, noVerify);
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: { hook: outcome.hook, output: outcome.output, retry: { kind: "commit", message }, dialogOpen: true },
+          }));
+          throw new Error(hookFailedMessage(outcome.hook));
+        }
+        setState((prev) => ({ ...prev, skipHooks: false, hookFailure: null }));
+      });
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return ok;
+    },
+    [client, runMutationWithOutcome, repoPath, setState],
   );
 
   return {

@@ -12,8 +12,26 @@ pub fn init_repo() -> (TempDir, Repository) {
         config.set_bool("core.autocrlf", false).unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         config.set_bool("commit.gpgSign", false).unwrap();
+        // Pin the hooks dir (to git's default) so a developer's global `core.hooksPath` never
+        // runs real hooks in the test suite.
+        let hooks = repo.path().join("hooks");
+        config
+            .set_str("core.hooksPath", hooks.to_str().expect("utf-8 temp path"))
+            .unwrap();
     }
     (dir, repo)
+}
+
+/// Writes an executable `#!/bin/sh` hook `name` into `dir` (created if missing).
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn install_hook(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).expect("create hooks dir");
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write hook");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod hook");
+    path
 }
 
 /// Stages everything in the worktree and commits it on `HEAD`, creating the first commit

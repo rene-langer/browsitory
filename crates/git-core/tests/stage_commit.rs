@@ -25,7 +25,12 @@ fn stage_file_stages_a_deletion() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "hello");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "add file").unwrap();
+    commit(
+        &mut repo,
+        "add file",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     std::fs::remove_file(dir.path().join("tracked.txt")).unwrap();
     stage_file(&repo, "tracked.txt").unwrap();
@@ -42,7 +47,12 @@ fn unstage_file_restores_the_index_entry_from_head() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "hello");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "add file").unwrap();
+    commit(
+        &mut repo,
+        "add file",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     write_file(dir.path(), "tracked.txt", "changed");
     stage_file(&repo, "tracked.txt").unwrap();
@@ -77,7 +87,12 @@ fn stage_hunk_stages_only_the_targeted_hunk_leaving_the_other_unstaged() {
     let original: String = (1..=15).map(|n| format!("line {n}\n")).collect();
     write_file(dir.path(), "tracked.txt", &original);
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let mut lines: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
     lines[1] = "line 2 changed".to_string();
@@ -128,7 +143,12 @@ fn stage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "line one\n");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     write_file(dir.path(), "tracked.txt", "line one changed\n");
 
     let result = stage_hunk(&repo, "tracked.txt", 999, 999, 3);
@@ -145,7 +165,12 @@ fn unstage_hunk_unstages_only_the_targeted_hunk_leaving_the_other_staged() {
     let original: String = (1..=15).map(|n| format!("line {n}\n")).collect();
     write_file(dir.path(), "tracked.txt", &original);
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let mut lines: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
     lines[1] = "line 2 changed".to_string();
@@ -192,7 +217,12 @@ fn unstage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "line one\n");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     write_file(dir.path(), "tracked.txt", "line one changed\n");
     stage_file(&repo, "tracked.txt").unwrap();
 
@@ -210,7 +240,12 @@ fn discard_hunk_reverts_only_the_targeted_hunk_in_the_workdir() {
     let original: String = (1..=15).map(|n| format!("line {n}\n")).collect();
     write_file(dir.path(), "tracked.txt", &original);
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let mut lines: Vec<String> = (1..=15).map(|n| format!("line {n}")).collect();
     lines[1] = "line 2 changed".to_string();
@@ -248,7 +283,12 @@ fn discard_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "tracked.txt", "line one\n");
     stage_file(&repo, "tracked.txt").unwrap();
-    commit(&mut repo, "initial commit").unwrap();
+    commit(
+        &mut repo,
+        "initial commit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     write_file(dir.path(), "tracked.txt", "line one changed\n");
 
     let result = discard_hunk(&repo, "tracked.txt", 999, 999, 3);
@@ -265,7 +305,12 @@ fn commit_creates_a_commit_with_the_given_message_and_staged_content() {
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    let oid = commit(&mut repo, "add greeting").unwrap();
+    let oid = commit(
+        &mut repo,
+        "add greeting",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     assert!(git_core::status::status(&repo).unwrap().is_empty());
     let commit = repo
@@ -280,7 +325,12 @@ fn commit_on_a_fresh_repo_creates_a_parentless_first_commit() {
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    let oid = commit(&mut repo, "add greeting").unwrap();
+    let oid = commit(
+        &mut repo,
+        "add greeting",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let commit = repo
         .find_commit(git2::Oid::from_str(&oid).unwrap())
@@ -364,7 +414,7 @@ fn commit_without_a_configured_identity_returns_an_error() {
     write_file(dir.path(), "greeting.txt", "hello");
     stage_file(&repo, "greeting.txt").unwrap();
 
-    assert!(commit(&mut repo, "msg").is_err());
+    assert!(commit(&mut repo, "msg", git_core::hooks::HookOptions::default()).is_err());
 }
 
 #[test]

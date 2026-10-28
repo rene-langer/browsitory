@@ -16,7 +16,7 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{TransferEvent, Worker};
+use repo_service::worker::{HookEvent, TransferEvent, Worker};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -104,7 +104,7 @@ pub fn dispatch(
         "discard_file" => discard_file(params, repos),
         "discard_all_unstaged" => discard_all_unstaged(params, repos),
         "ignore_path" => ignore_path(params, repos),
-        "commit" => commit(params, repos),
+        "commit" => commit(params, repos, stdout),
         "list_branches" => list_branches(params, repos),
         "create_branch" => create_branch(params, repos),
         "switch_branch" => switch_branch(params, repos),
@@ -141,7 +141,7 @@ pub fn dispatch(
         "push_current_branch" => push_current_branch(params, repos, stdout),
         "force_push_current_branch" => force_push_current_branch(params, repos, stdout),
         "get_head_info" => get_head_info(params, repos),
-        "amend_commit" => amend_commit(params, repos),
+        "amend_commit" => amend_commit(params, repos, stdout),
         "get_undo_state" => get_undo_state(params, repos),
         "undo_last" => undo_last(params, repos),
         "redo_last" => redo_last(params, repos),
@@ -1060,17 +1060,107 @@ fn set_diff_settings(params: Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// `commit` / `amend_commit` params; `noVerify` (skip `pre-commit` and `commit-msg`) defaults
+/// to `false`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CommitParams {
+struct CommitMessageParams {
     repo_path: String,
     message: String,
+    #[serde(default)]
+    no_verify: bool,
 }
 
-fn commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CommitParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let commit_id = worker_handle(repos, &params.repo_path)?.commit(params.message)?;
-    Ok(Value::String(commit_id))
+/// A commit/amend result: a failing gate hook is data the UI renders, not an error.
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum CommitOutcomeDto {
+    Committed {
+        #[serde(rename = "commitId")]
+        commit_id: String,
+    },
+    HookFailed {
+        hook: String,
+        output: String,
+    },
+}
+
+impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
+    fn from(outcome: git_core::commit::CommitOutcome) -> Self {
+        match outcome {
+            git_core::commit::CommitOutcome::Committed { commit_id } => {
+                Self::Committed { commit_id }
+            }
+            git_core::commit::CommitOutcome::HookFailed { hook, output } => {
+                Self::HookFailed { hook, output }
+            }
+        }
+    }
+}
+
+/// Payload of the `hookProgress` notification (commit/amend hooks).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HookProgressDto {
+    repo_path: String,
+    operation_id: String,
+    hook: String,
+    phase: &'static str,
+}
+
+fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
+    let (operation_id, hook, phase) = match event {
+        HookEvent::Started { operation_id, hook } => (operation_id, hook, "Started"),
+        HookEvent::Finished { operation_id, hook } => (operation_id, hook, "Finished"),
+    };
+    HookProgressDto {
+        repo_path: repo_path.to_string(),
+        operation_id,
+        hook,
+        phase,
+    }
+}
+
+/// Writes each hook event as a `hookProgress` notification; same framing and shutdown as
+/// `spawn_progress_relay`.
+fn spawn_hook_relay<W: std::io::Write + Send + 'static>(
+    repo_path: String,
+    event_rx: mpsc::Receiver<HookEvent>,
+    out: Arc<Mutex<W>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for event in event_rx {
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "hookProgress",
+                "params": hook_progress_dto(&repo_path, event),
+            });
+            let Ok(line) = serde_json::to_string(&notification) else {
+                continue;
+            };
+            let mut out = out.lock().unwrap_or_else(|error| error.into_inner());
+            if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
+                return;
+            }
+        }
+    })
+}
+
+fn commit(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: CommitMessageParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
+    let outcome = worker_handle(repos, &params.repo_path)?.commit(
+        params.message,
+        params.no_verify,
+        event_tx,
+    )?;
+    serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]
@@ -1723,6 +1813,9 @@ struct TransferProgressDto {
     /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
     #[serde(skip_serializing_if = "Option::is_none")]
     remote_name: Option<String>,
+    /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
+    /// `message` this comes from the user's own script, not the remote.
+    hook_output: Option<String>,
 }
 
 fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
@@ -1740,6 +1833,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             received_bytes: 0,
             message: None,
             remote_name: None,
+            hook_output: None,
         },
         TransferEvent::Progress(progress) => TransferProgressDto {
             operation_id: progress.operation_id,
@@ -1754,6 +1848,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
             message: None,
             remote_name: None,
+            hook_output: None,
         },
         TransferEvent::RemoteFailed {
             operation_id,
@@ -1770,11 +1865,13 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             received_bytes: 0,
             message: None,
             remote_name: Some(remote_name),
+            hook_output: None,
         },
         TransferEvent::Completed {
             operation_id,
             operation,
             error,
+            hook_output,
         } => {
             let failed = error.is_some();
             TransferProgressDto {
@@ -1787,6 +1884,7 @@ fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
                 received_bytes: 0,
                 message: None,
                 remote_name: None,
+                hook_output,
             }
         }
     }
@@ -1883,6 +1981,8 @@ struct PushBranchParams {
     local_branch: String,
     remote_branch: String,
     set_upstream: bool,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn push_branch(
@@ -1899,6 +1999,7 @@ fn push_branch(
         params.local_branch,
         params.remote_branch,
         params.set_upstream,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -1910,6 +2011,8 @@ struct DeleteRemoteBranchParams {
     repo_path: String,
     remote_name: String,
     branch_name: String,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn delete_remote_branch(
@@ -1924,6 +2027,7 @@ fn delete_remote_branch(
     let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
         params.remote_name,
         params.branch_name,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -1949,17 +2053,29 @@ fn cancel_transfer(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// Params of a current-branch push; `noVerify` (skip `pre-push`) defaults to `false`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushParams {
+    repo_path: String,
+    remote_name: String,
+    #[serde(default)]
+    no_verify: bool,
+}
+
 fn push_current_branch(
     params: Value,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
-    let operation_id = worker_handle(repos, &params.repo_path)?
-        .push_current_branch(params.remote_name, event_tx)?;
+    let operation_id = worker_handle(repos, &params.repo_path)?.push_current_branch(
+        params.remote_name,
+        params.no_verify,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -1968,12 +2084,14 @@ fn force_push_current_branch(
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
-    let operation_id = worker_handle(repos, &params.repo_path)?
-        .force_push_current_branch(params.remote_name, event_tx)?;
+    let operation_id = worker_handle(repos, &params.repo_path)?.force_push_current_branch(
+        params.remote_name,
+        params.no_verify,
+        event_tx,
+    )?;
     Ok(Value::String(operation_id))
 }
 
@@ -1985,6 +2103,7 @@ struct HeadInfoDto {
     head_pushed: bool,
     operation: Option<&'static str>,
     squash_message: Option<String>,
+    commit_hooks: Vec<String>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -2000,6 +2119,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 OperationKind::Revert => "Revert",
             }),
             squash_message: info.squash_message,
+            commit_hooks: info.commit_hooks,
         }
     }
 }
@@ -2144,13 +2264,6 @@ struct CommitIdParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MessageParams {
-    repo_path: String,
-    message: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ResetParams {
     repo_path: String,
     commit_id: String,
@@ -2185,11 +2298,21 @@ fn redo_last(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn amend_commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: MessageParams =
+fn amend_commit(
+    params: Value,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let params: CommitMessageParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.amend_commit(params.message)?;
-    Ok(Value::Null)
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
+    let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
+        params.message,
+        params.no_verify,
+        event_tx,
+    )?;
+    serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -2226,6 +2349,8 @@ struct PushTagsParams {
     repo_path: String,
     remote_name: String,
     names: Vec<String>,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 fn push_tags(
@@ -2240,6 +2365,7 @@ fn push_tags(
     let operation_id = worker_handle(repos, &params.repo_path)?.push_tags(
         params.remote_name,
         params.names,
+        params.no_verify,
         event_tx,
     )?;
     Ok(Value::String(operation_id))
@@ -3088,6 +3214,7 @@ mod tests {
                 operation_id: "fetch-1".to_string(),
                 operation: TransferOperation::Fetch,
                 error: Some(TransferErrorKind::TransferFailed),
+                hook_output: None,
             })
             .unwrap();
 
@@ -3116,6 +3243,7 @@ mod tests {
                 "total": 0,
                 "receivedBytes": 0,
                 "message": null,
+                "hookOutput": null,
             })
         );
         // The sideband text above is dropped, not forwarded — same redaction
@@ -3131,6 +3259,7 @@ mod tests {
                 "total": 10,
                 "receivedBytes": 128,
                 "message": null,
+                "hookOutput": null,
             })
         );
         assert_eq!(
@@ -3144,6 +3273,7 @@ mod tests {
                 "total": 0,
                 "receivedBytes": 0,
                 "message": null,
+                "hookOutput": null,
             })
         );
     }
@@ -3221,9 +3351,23 @@ mod tests {
             operation_id: "fetch-all-7".into(),
             operation: TransferOperation::FetchAll,
             error: None,
+            hook_output: None,
         }))
         .unwrap();
         assert!(!completed.as_object().unwrap().contains_key("remoteName"));
+        assert_eq!(completed["hookOutput"], serde_json::Value::Null);
+
+        let hook_failed = serde_json::to_value(transfer_progress_dto(TransferEvent::Completed {
+            operation_id: "push-8".into(),
+            operation: TransferOperation::PushBranch,
+            error: Some(TransferErrorKind::HookFailed),
+            hook_output: Some("tests failed\n".into()),
+        }))
+        .unwrap();
+        assert_eq!(hook_failed["phase"], "Failed");
+        assert_eq!(hook_failed["errorKind"], "HookFailed");
+        assert_eq!(hook_failed["hookOutput"], "tests failed\n");
+        assert_eq!(hook_failed["message"], serde_json::Value::Null);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Toolbar } from "./primitives/Toolbar";
+import { runningHookLabel } from "../lib/hookFailure";
 import styles from "./CommitBox.module.css";
 
 /**
@@ -30,8 +31,15 @@ export function CommitBox({
   amend,
   focusMessage = false,
   onFocusMessageHandled,
+  hooks,
+  clearMessage = null,
+  onClearMessageHandled,
 }: {
-  onCommit: (message: string) => void;
+  /**
+   * Resolves `true` once the commit landed. The message is cleared only then (and only if it was
+   * not edited meanwhile), so a failed commit — e.g. a failing pre-commit hook — keeps it.
+   */
+  onCommit: (message: string) => Promise<boolean>;
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
@@ -54,6 +62,22 @@ export function CommitBox({
    */
   focusMessage?: boolean;
   onFocusMessageHandled?: () => void;
+  /** Commit hooks: the "Skip hooks" toggle (only when installed) and the running hook's status. */
+  hooks?: {
+    installed: boolean;
+    skip: boolean;
+    onToggleSkip: (on: boolean) => void;
+    running: { operationId: string; hook: string } | null;
+    onCancel: () => void;
+  };
+  /**
+   * One-shot request to clear the message, carrying the committed text (a commit retried from the
+   * hook-failure dialog landed). Only a field (or stashed pre-amend draft) still holding exactly
+   * that text is cleared, so text typed meanwhile survives. `onClearMessageHandled` then lets the
+   * owner reset it.
+   */
+  clearMessage?: string | null;
+  onClearMessageHandled?: () => void;
   /** Amend-last-commit mode; omit to hide the toggle entirely. */
   amend?: {
     /** headId !== null && no operation in progress. */
@@ -63,7 +87,8 @@ export function CommitBox({
     headMessage: string | null;
     pushed: boolean;
     onToggle: (on: boolean) => void;
-    onAmend: (message: string) => void;
+    /** Resolves `true` once amended; Amend is disabled while it runs. */
+    onAmend: (message: string) => Promise<boolean>;
   };
 }) {
   const [message, setMessage] = useState(initialDraft?.message ?? "");
@@ -127,22 +152,46 @@ export function CommitBox({
     onFocusMessageHandled?.();
   }, [focusMessage, focusReady, onFocusMessageHandled]);
 
+  useEffect(() => {
+    if (clearMessage === null) return;
+    // One-shot clear requested by the owner, acknowledged right away.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMessage((current) => (current === clearMessage ? "" : current));
+    setStashedDraft((stashed) => (stashed === clearMessage ? "" : stashed));
+    setLastSeeded("");
+    onClearMessageHandled?.();
+  }, [clearMessage, onClearMessageHandled]);
+
+  // True while a commit (and its hooks) is in flight, so Commit cannot be pressed twice now that
+  // the message stays in the field until the commit lands.
+  const [submitting, setSubmitting] = useState(false);
+  // Keyed by operation id (like `TransferPanel`), so Cancel re-arms for the next hook run.
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
   const commitIfReady = () => {
     if (amendOn) {
-      if (message.trim() === "") {
+      if (submitting || message.trim() === "") {
         return;
       }
       // Leave message and stash alone: on success amend mode turns off and the stashed draft
       // is restored; on failure the typed message stays put.
-      amend.onAmend(message);
+      setSubmitting(true);
+      void amend.onAmend(message).finally(() => setSubmitting(false));
       return;
     }
-    if (disabled || message.trim() === "") {
+    if (disabled || submitting || message.trim() === "") {
       return;
     }
-    onCommit(message);
-    setMessage("");
-    setLastSeeded("");
+    const submitted = message;
+    setSubmitting(true);
+    void onCommit(submitted)
+      .then((ok) => {
+        if (!ok) return;
+        // Only clear what was committed: text typed while the commit (and its hooks) ran stays.
+        setMessage((current) => (current === submitted ? "" : current));
+        setLastSeeded("");
+      })
+      .finally(() => setSubmitting(false));
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -178,14 +227,38 @@ export function CommitBox({
           Amend last commit
         </label>
       )}
+      {hooks?.installed === true && (
+        <label
+          className={styles.amendToggle}
+          title="Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)"
+        >
+          <input type="checkbox" checked={hooks.skip} onChange={(event) => hooks.onToggleSkip(event.target.checked)} />
+          Skip hooks
+        </label>
+      )}
       {amendOn && amend?.pushed === true && (
         <p className={styles.reason}>Already pushed — you'll need to force push.</p>
+      )}
+      {hooks?.running != null && (
+        <p role="status" className={styles.hookStatus}>
+          {runningHookLabel(hooks.running.hook)}{" "}
+          <button
+            type="button"
+            disabled={cancellingId === hooks.running.operationId}
+            onClick={() => {
+              setCancellingId(hooks.running?.operationId ?? null);
+              hooks.onCancel();
+            }}
+          >
+            {cancellingId === hooks.running.operationId ? "Cancelling…" : "Cancel"}
+          </button>
+        </p>
       )}
       <Toolbar>
         <button
           className={styles.commitButton}
           onClick={commitIfReady}
-          disabled={amendOn ? message.trim() === "" : disabled || message.trim() === ""}
+          disabled={submitting || message.trim() === "" || (!amendOn && disabled)}
           aria-describedby={
             !amendOn && disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined
           }

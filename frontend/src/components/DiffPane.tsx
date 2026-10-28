@@ -378,8 +378,17 @@ function UncommittedFileSection({
   );
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null };
+/** The hook controls `DiffPane` hands to `CommitBox` (whether hooks are installed is derived). */
+export interface CommitHooksControls {
+  skip: boolean;
+  onToggleSkip: (on: boolean) => void;
+  running: { operationId: string; hook: string } | null;
+  onCancel: () => void;
+}
+
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] };
 const noop = () => {};
+const noAmend = async () => false;
 
 export function DiffPane({
   repoPath,
@@ -410,9 +419,12 @@ export function DiffPane({
   amendMode = false,
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
-  onAmendCommit = noop,
+  onAmendCommit = noAmend,
   focusCommitMessage = false,
   onCommitMessageFocused,
+  commitHooks,
+  clearCommitMessage = null,
+  onCommitMessageCleared,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -471,7 +483,8 @@ export function DiffPane({
   // The paths the confirm dialog listed; only those are discarded.
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
-  onCommit: (message: string) => void;
+  // Resolves `true` once committed; CommitBox keeps the message otherwise.
+  onCommit: (message: string) => Promise<boolean>;
   onSaveStash: () => void;
   // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
   onOpenStashDialog?: (paths: string[]) => void;
@@ -483,9 +496,15 @@ export function DiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => void;
+  onAmendCommit?: (message: string) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
+  // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
+  // `headInfo.commitHooks`); omitted, neither shows.
+  commitHooks?: CommitHooksControls;
+  // One-shot CommitBox clear request (see its `clearMessage`).
+  clearCommitMessage?: string | null;
+  onCommitMessageCleared?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
@@ -523,6 +542,9 @@ export function DiffPane({
         onAmendCommit={onAmendCommit}
         focusCommitMessage={focusCommitMessage}
         onCommitMessageFocused={onCommitMessageFocused}
+        commitHooks={commitHooks}
+        clearCommitMessage={clearCommitMessage}
+        onCommitMessageCleared={onCommitMessageCleared}
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
@@ -612,9 +634,12 @@ function UncommittedDiffPane({
   amendMode = false,
   headInfo = NO_HEAD_INFO,
   onSetAmendMode = noop,
-  onAmendCommit = noop,
+  onAmendCommit = noAmend,
   focusCommitMessage = false,
   onCommitMessageFocused,
+  commitHooks,
+  clearCommitMessage = null,
+  onCommitMessageCleared,
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
@@ -652,7 +677,8 @@ function UncommittedDiffPane({
   // The paths the confirm dialog listed; only those are discarded.
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
-  onCommit: (message: string) => void;
+  // Resolves `true` once committed; CommitBox keeps the message otherwise.
+  onCommit: (message: string) => Promise<boolean>;
   onSaveStash: () => void;
   onOpenStashDialog: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -663,9 +689,15 @@ function UncommittedDiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => void;
+  onAmendCommit?: (message: string) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
+  // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
+  // `headInfo.commitHooks`); omitted, neither shows.
+  commitHooks?: CommitHooksControls;
+  // One-shot CommitBox clear request (see its `clearMessage`).
+  clearCommitMessage?: string | null;
+  onCommitMessageCleared?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
@@ -1042,6 +1074,13 @@ function UncommittedDiffPane({
             onDraftChange={onCommitDraftChange}
             focusMessage={focusCommitMessage}
             onFocusMessageHandled={onCommitMessageFocused}
+            hooks={
+              commitHooks === undefined
+                ? undefined
+                : { installed: headInfo.commitHooks.length > 0, ...commitHooks }
+            }
+            clearMessage={clearCommitMessage}
+            onClearMessageHandled={onCommitMessageCleared}
             amend={{
               available: headInfo.headId !== null && headInfo.operation === null && mergeMessage === null,
               on: amendMode,

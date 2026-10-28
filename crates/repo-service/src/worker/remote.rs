@@ -9,6 +9,15 @@ use crate::credentials::{CredentialService, CredentialStore, CredentialStoreErro
 
 static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
 
+/// `"<prefix>-<n>"`, unique per process; also used for commit/amend so their hooks can be
+/// cancelled through `CancelRegistry` like a transfer.
+pub(super) fn next_operation_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}",
+        NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 struct ChannelReporter {
     events: Sender<TransferEvent>,
     operation_id: String,
@@ -214,7 +223,7 @@ impl TransferOp<'_> {
     ///
     /// Owns a clone of the shared registry and the operation's own ID, so the check stays valid
     /// for the whole (blocking) transfer without borrowing anything from the command loop.
-    fn cancel_check(&self) -> impl Fn() -> bool {
+    pub(super) fn cancel_check(&self) -> impl Fn() -> bool {
         let cancelled = Arc::clone(self.cancelled);
         let operation_id = self.id.clone();
         move || {
@@ -228,7 +237,7 @@ impl TransferOp<'_> {
     /// Drops this operation from the shared registry. Called on every terminal path (success,
     /// real failure and cancellation alike) so a long-lived worker's cancel set cannot grow
     /// unbounded.
-    fn clear(&self) {
+    pub(super) fn clear(&self) {
         self.cancelled
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -243,10 +252,18 @@ fn complete(
     result: Result<(), git_core::remote::RemoteError>,
 ) {
     op.clear();
+    let hook_output = match &result {
+        Err(git_core::remote::RemoteError::HookFailed { output, .. }) => Some(output.clone()),
+        Err(git_core::remote::RemoteError::Hook(
+            error @ git_core::hooks::HookError::Spawn { .. },
+        )) => Some(git_core::hooks::spawn_failure_output(error)),
+        _ => None,
+    };
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.id,
         operation,
         error: result.err().map(|error| error.transfer_error_kind()),
+        hook_output,
     });
 }
 pub(super) fn fetch<S: CredentialStore>(
@@ -316,6 +333,9 @@ pub(super) fn pull<S: CredentialStore>(
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
         git_core::remote::pull_after_fetch(repo, &upstream.remote_name, &upstream.remote_branch)
     })();
+    if matches!(result, Ok(PullOutcome::FastForwarded { .. })) {
+        super::hooks::run_post_hook(repo, "post-merge", &["0"]);
+    }
     let error = result
         .as_ref()
         .err()
@@ -334,6 +354,7 @@ pub(super) fn pull<S: CredentialStore>(
         operation_id: op.id,
         operation: TransferOperation::Pull,
         error,
+        hook_output: None,
     });
 }
 /// Refuses a current-branch push before any transfer starts when `push.default` does not settle
@@ -358,6 +379,7 @@ pub(super) fn push_current<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
+    no_verify: bool,
     op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
@@ -376,12 +398,14 @@ pub(super) fn push_current<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
         git_core::remote::push_current_branch(
             repo,
             &remote_name,
+            no_verify,
             &mut provider,
             &mut reporter,
             &cancel,
@@ -393,6 +417,7 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
+    no_verify: bool,
     op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
@@ -411,12 +436,14 @@ pub(super) fn force_push_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
         git_core::remote::force_push_current_branch(
             repo,
             &remote_name,
+            no_verify,
             &mut provider,
             &mut reporter,
             &cancel,
@@ -424,11 +451,13 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     });
     complete(&events, op, TransferOperation::ForcePushBranch, result);
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn push_tags<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
     names: Vec<String>,
+    no_verify: bool,
     op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
@@ -442,6 +471,7 @@ pub(super) fn push_tags<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
@@ -449,6 +479,7 @@ pub(super) fn push_tags<S: CredentialStore>(
             repo,
             &remote_name,
             &names,
+            no_verify,
             &mut provider,
             &mut reporter,
             &cancel,
@@ -463,6 +494,7 @@ pub(super) struct PushTarget {
     pub(super) local_branch: String,
     pub(super) remote_branch: String,
     pub(super) set_upstream: bool,
+    pub(super) no_verify: bool,
 }
 
 /// Builds the credential provider for one remote of a Fetch all from its auth profile.
@@ -527,6 +559,7 @@ pub(super) fn fetch_all<S: CredentialStore>(
         operation_id: op.id,
         operation: TransferOperation::FetchAll,
         error,
+        hook_output: None,
     });
 }
 pub(super) fn push_branch<S: CredentialStore>(
@@ -546,6 +579,7 @@ pub(super) fn push_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, target.no_verify);
     let cancel = op.cancel_check();
     let result =
         git_core::remote::remote_auth_profile(repo, &target.remote_name).and_then(|profile| {
@@ -557,6 +591,7 @@ pub(super) fn push_branch<S: CredentialStore>(
                 &target.local_branch,
                 &target.remote_branch,
                 target.set_upstream,
+                target.no_verify,
                 &mut provider,
                 &mut reporter,
                 &cancel,
@@ -564,11 +599,13 @@ pub(super) fn push_branch<S: CredentialStore>(
         });
     complete(&events, op, TransferOperation::PushBranch, result);
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn delete_remote_branch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
     branch_name: String,
+    no_verify: bool,
     op: TransferOp<'_>,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
@@ -582,6 +619,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
         events: events.clone(),
         operation_id: op.id.clone(),
     };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
     let cancel = op.cancel_check();
     let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
         let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
@@ -589,6 +627,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
             repo,
             &remote_name,
             &branch_name,
+            no_verify,
             &mut provider,
             &mut reporter,
             &cancel,
@@ -645,6 +684,7 @@ impl WorkerHandle {
         local_branch: String,
         remote_branch: String,
         set_upstream: bool,
+        no_verify: bool,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -655,6 +695,7 @@ impl WorkerHandle {
                 local_branch,
                 remote_branch,
                 set_upstream,
+                no_verify,
                 operation_id,
                 events,
                 reply,
@@ -667,6 +708,7 @@ impl WorkerHandle {
         &self,
         remote_name: String,
         branch_name: String,
+        no_verify: bool,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -678,6 +720,7 @@ impl WorkerHandle {
             .send(Command::DeleteRemoteBranch {
                 remote_name,
                 branch_name,
+                no_verify,
                 operation_id,
                 events,
                 reply,
@@ -705,6 +748,7 @@ impl WorkerHandle {
     pub fn push_current_branch(
         &self,
         remote_name: String,
+        no_verify: bool,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -712,6 +756,7 @@ impl WorkerHandle {
         self.tx
             .send(Command::PushCurrentBranch {
                 remote_name,
+                no_verify,
                 operation_id,
                 events,
                 reply,
@@ -723,6 +768,7 @@ impl WorkerHandle {
     pub fn force_push_current_branch(
         &self,
         remote_name: String,
+        no_verify: bool,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -733,6 +779,7 @@ impl WorkerHandle {
         self.tx
             .send(Command::ForcePushCurrentBranch {
                 remote_name,
+                no_verify,
                 operation_id,
                 events,
                 reply,
@@ -745,6 +792,7 @@ impl WorkerHandle {
         &self,
         remote_name: String,
         names: Vec<String>,
+        no_verify: bool,
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
@@ -753,6 +801,7 @@ impl WorkerHandle {
             .send(Command::PushTags {
                 remote_name,
                 names,
+                no_verify,
                 operation_id,
                 events,
                 reply,

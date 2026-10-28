@@ -32,6 +32,7 @@ mod branch;
 mod compare;
 mod forge;
 mod history;
+mod hooks;
 mod merge;
 mod rebase;
 mod reflog;
@@ -45,6 +46,7 @@ mod undo;
 mod undo_store;
 mod worktree;
 
+pub use hooks::HookEvent;
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +66,9 @@ pub enum TransferEvent {
         operation_id: String,
         operation: TransferOperation,
         error: Option<TransferErrorKind>,
+        /// The failed `pre-push` hook's output (`error` is `HookFailed`); `None` for every other
+        /// outcome. Unlike remote sideband text this comes from the user's own script.
+        hook_output: Option<String>,
     },
 }
 
@@ -237,7 +242,10 @@ pub(crate) enum Command {
     },
     Commit {
         message: String,
-        reply: Sender<Result<String, String>>,
+        no_verify: bool,
+        operation_id: String,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
     },
     ListBranches {
         reply: Sender<Result<Vec<BranchInfo>, String>>,
@@ -477,7 +485,10 @@ pub(crate) enum Command {
     },
     AmendCommit {
         message: String,
-        reply: Sender<Result<(), String>>,
+        no_verify: bool,
+        operation_id: String,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
     },
     CherryPick {
         commit_id: String,
@@ -498,12 +509,14 @@ pub(crate) enum Command {
     },
     ForcePushCurrentBranch {
         remote_name: String,
+        no_verify: bool,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
     },
     PushCurrentBranch {
         remote_name: String,
+        no_verify: bool,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -511,6 +524,7 @@ pub(crate) enum Command {
     PushTags {
         remote_name: String,
         names: Vec<String>,
+        no_verify: bool,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -526,6 +540,7 @@ pub(crate) enum Command {
         local_branch: String,
         remote_branch: String,
         set_upstream: bool,
+        no_verify: bool,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -533,6 +548,7 @@ pub(crate) enum Command {
     DeleteRemoteBranch {
         remote_name: String,
         branch_name: String,
+        no_verify: bool,
         operation_id: String,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -879,7 +895,23 @@ impl Worker {
                     Command::IgnorePath { pattern, reply } => {
                         status::ignore_path(&repo, pattern, reply)
                     }
-                    Command::Commit { message, reply } => status::commit(&mut repo, message, reply),
+                    Command::Commit {
+                        message,
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => status::commit(
+                        &mut repo,
+                        message,
+                        no_verify,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
                         name,
@@ -1038,9 +1070,23 @@ impl Worker {
                     } => merge::resolve(&repo, path, resolved_content, reply),
                     Command::AbortMerge { reply } => merge::abort(&repo, reply),
                     Command::GetHeadInfo { reply } => history::head_info(&repo, reply),
-                    Command::AmendCommit { message, reply } => {
-                        history::amend(&repo, message, reply)
-                    }
+                    Command::AmendCommit {
+                        message,
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => history::amend(
+                        &repo,
+                        message,
+                        no_verify,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::CherryPick { commit_id, reply } => {
                         history::cherry_pick(&repo, commit_id, reply)
                     }
@@ -1057,6 +1103,7 @@ impl Worker {
                     }
                     Command::ForcePushCurrentBranch {
                         remote_name,
+                        no_verify,
                         operation_id,
                         events,
                         reply,
@@ -1064,6 +1111,7 @@ impl Worker {
                         &repo,
                         &credential_service,
                         remote_name,
+                        no_verify,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1124,6 +1172,7 @@ impl Worker {
                     ),
                     Command::PushCurrentBranch {
                         remote_name,
+                        no_verify,
                         operation_id,
                         events,
                         reply,
@@ -1131,6 +1180,7 @@ impl Worker {
                         &repo,
                         &credential_service,
                         remote_name,
+                        no_verify,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1141,6 +1191,7 @@ impl Worker {
                     Command::PushTags {
                         remote_name,
                         names,
+                        no_verify,
                         operation_id,
                         events,
                         reply,
@@ -1149,6 +1200,7 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         names,
+                        no_verify,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1177,6 +1229,7 @@ impl Worker {
                         local_branch,
                         remote_branch,
                         set_upstream,
+                        no_verify,
                         operation_id,
                         events,
                         reply,
@@ -1188,6 +1241,7 @@ impl Worker {
                             local_branch,
                             remote_branch,
                             set_upstream,
+                            no_verify,
                         },
                         remote::TransferOp {
                             id: operation_id,
@@ -1199,6 +1253,7 @@ impl Worker {
                     Command::DeleteRemoteBranch {
                         remote_name,
                         branch_name,
+                        no_verify,
                         operation_id,
                         events,
                         reply,
@@ -1207,6 +1262,7 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         branch_name,
+                        no_verify,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1392,6 +1448,8 @@ mod tests {
     use git_core::remote::{TransferErrorKind, TransferOperation};
     use tempfile::TempDir;
 
+    #[cfg(unix)]
+    use super::HookEvent;
     use super::{ensure_worker, Command, TransferEvent, UndoOutcome, UndoState, Worker};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
@@ -1488,8 +1546,265 @@ mod tests {
             config.set_str("user.email", "test@example.com").unwrap();
             config.set_bool("core.autocrlf", false).unwrap();
             config.set_bool("commit.gpgSign", false).unwrap();
+            // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
+            let hooks = repo.path().join("hooks");
+            config
+                .set_str("core.hooksPath", hooks.to_str().expect("utf-8 temp path"))
+                .unwrap();
         }
         (dir, repo)
+    }
+
+    #[cfg(unix)]
+    fn install_hook(repo: &Repository, name: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = git_core::hooks::hooks_dir(repo).expect("hooks dir");
+        std::fs::create_dir_all(&dir).expect("create hooks dir");
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write hook");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_pre_commit_replies_a_hook_failed_outcome_and_records_no_undo() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        install_hook(&repo, "pre-commit", "echo nope; exit 1");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        let undo_before = handle.get_undo_state().unwrap().undo;
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let outcome = handle.commit("msg".into(), false, events_tx).unwrap();
+
+        assert_eq!(
+            outcome,
+            git_core::commit::CommitOutcome::HookFailed {
+                hook: "pre-commit".into(),
+                output: "nope\n".into()
+            }
+        );
+        let events: Vec<HookEvent> = events_rx.iter().collect();
+        assert!(
+            matches!(&events[..], [
+                HookEvent::Started { operation_id: a, hook: h1 },
+                HookEvent::Finished { operation_id: b, hook: h2 },
+            ] if a == b && a.starts_with("commit-") && h1 == "pre-commit" && h2 == "pre-commit"),
+            "{events:?}"
+        );
+        assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
+        assert!(repo.head().is_err(), "nothing may be committed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_transfer_stops_a_running_pre_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        install_hook(&repo, "pre-commit", "sleep 30");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            if let Ok(HookEvent::Started { operation_id, .. }) = events_rx.recv() {
+                canceller.cancel_transfer(&operation_id);
+            }
+        });
+        let started = std::time::Instant::now();
+
+        let result = handle.commit("msg".into(), false, events_tx);
+
+        cancel_thread.join().unwrap();
+        assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
+        // Generous bound: only proves the hook's `sleep 30` was not waited out.
+        assert!(started.elapsed() < Duration::from_secs(25));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_pre_push_completes_with_hook_failed_and_its_output() {
+        let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+        let local = Repository::open(local_dir.path()).unwrap();
+        write_file(local_dir.path(), "new.txt", "new");
+        commit_all(&local, "to push");
+        let branch = local.head().unwrap().shorthand().unwrap().to_string();
+        install_hook(&local, "pre-push", "echo 'tests failed'; exit 1");
+        drop(local);
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let (event_tx, event_rx) = mpsc::channel();
+        handle
+            .push_branch(
+                "origin".into(),
+                branch.clone(),
+                "topic".into(),
+                false,
+                false,
+                event_tx,
+            )
+            .unwrap();
+        let events: Vec<_> = event_rx.iter().collect();
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TransferEvent::Progress(progress)
+                    if progress.phase == git_core::remote::TransferPhase::RunningHook
+            )),
+            "{events:?}"
+        );
+        assert!(
+            matches!(
+                events.last(),
+                Some(TransferEvent::Completed {
+                    error: Some(TransferErrorKind::HookFailed),
+                    hook_output: Some(output),
+                    ..
+                }) if output == "tests failed\n"
+            ),
+            "{events:?}"
+        );
+
+        let (event_tx, event_rx) = mpsc::channel();
+        handle
+            .push_branch(
+                "origin".into(),
+                branch,
+                "topic".into(),
+                false,
+                true,
+                event_tx,
+            )
+            .unwrap();
+        let events: Vec<_> = event_rx.iter().collect();
+        assert!(
+            matches!(
+                events.last(),
+                Some(TransferEvent::Completed {
+                    error: None,
+                    hook_output: None,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn post_checkout_gets_old_and_new_head_after_switch_and_checkout_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        let first = repo.head().unwrap().target().unwrap();
+        repo.branch("other", &repo.find_commit(first).unwrap(), false)
+            .unwrap();
+        write_file(dir.path(), "a.txt", "b");
+        commit_all(&repo, "second");
+        let second = repo.head().unwrap().target().unwrap();
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        let record = dir.path().join("post-checkout.txt");
+        // Fails on purpose: a post-checkout failure must not fail the switch.
+        install_hook(
+            &repo,
+            "post-checkout",
+            &format!(r#"echo "$@" >> '{}'; exit 1"#, record.display()),
+        );
+        std::fs::write(
+            dir.path().join(".gitignore"),
+            "post-checkout.txt\n.gitignore\n",
+        )
+        .unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle.switch_branch("other".into()).unwrap();
+        handle.checkout_commit(second.to_string()).unwrap();
+        handle.switch_branch(main).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&record).unwrap(),
+            format!("{second} {first} 1\n{first} {second} 1\n{second} {second} 1\n")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn post_merge_runs_after_a_merge_and_a_squash() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        let first = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &first, false).unwrap();
+        repo.branch("other", &first, false).unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        write_file(dir.path(), "b.txt", "b");
+        commit_all(&repo, "feature work");
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "c.txt", "c");
+        commit_all(&repo, "other work");
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        let record = repo.path().join("post-merge.txt");
+        install_hook(
+            &repo,
+            "post-merge",
+            &format!(r#"echo "$@" >> '{}'"#, record.display()),
+        );
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let merged = handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        assert_eq!(merged, MergeOutcome::FastForwarded);
+        let squashed = handle
+            .start_merge(
+                "other".into(),
+                git_core::merge::MergeOptions {
+                    squash: true,
+                    ..git_core::merge::MergeOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(squashed, MergeOutcome::Squashed);
+
+        assert_eq!(std::fs::read_to_string(&record).unwrap(), "0\n1\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn amend_with_no_verify_skips_a_failing_pre_commit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        install_hook(&repo, "pre-commit", "exit 1");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let failed = handle
+            .amend_commit("amended".into(), false, mpsc::channel().0)
+            .unwrap();
+        assert!(matches!(
+            failed,
+            git_core::commit::CommitOutcome::HookFailed { .. }
+        ));
+        let outcome = handle
+            .amend_commit("amended".into(), true, mpsc::channel().0)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
     }
 
     fn write_file(dir: &Path, relative_path: &str, contents: &str) {
@@ -1596,7 +1911,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle.stage_file("new.txt".into()).unwrap();
-        let result = handle.commit("message".into());
+        let result = handle.commit("message".into(), false, mpsc::channel().0);
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
@@ -1708,7 +2023,7 @@ mod tests {
         let handle = worker.handle();
         handle.stage_file("b.txt".into()).unwrap();
         let undo_before = handle.get_undo_state().unwrap().undo;
-        let result = handle.commit("signed?".into());
+        let result = handle.commit("signed?".into(), false, mpsc::channel().0);
 
         assert_eq!(
             result.unwrap_err(),
@@ -2294,6 +2609,7 @@ mod tests {
                 operation_id: id,
                 operation: TransferOperation::Fetch,
                 error: None,
+                hook_output: None,
             }) if id == &operation_id
         ));
     }
@@ -2316,6 +2632,7 @@ mod tests {
                 operation_id: id,
                 operation: TransferOperation::Fetch,
                 error: Some(TransferErrorKind::TransferFailed),
+                hook_output: None,
             }) if id == &operation_id
         ));
     }
@@ -2353,6 +2670,7 @@ mod tests {
                 operation_id: id,
                 operation: TransferOperation::Fetch,
                 error: Some(TransferErrorKind::Cancelled),
+                hook_output: None,
             }) if id == "fetch-cancel-test"
         ));
         // The cancelled transfer never created the tracking ref it would have on success.
@@ -2419,7 +2737,7 @@ mod tests {
 
         let operation_id = worker
             .handle()
-            .push_current_branch("origin".into(), event_tx)
+            .push_current_branch("origin".into(), false, event_tx)
             .expect("start branch push");
         let events: Vec<_> = event_rx.iter().collect();
 
@@ -2429,6 +2747,7 @@ mod tests {
                 operation_id: id,
                 operation: TransferOperation::PushBranch,
                 error: Some(TransferErrorKind::NonFastForward),
+                hook_output: None,
             }) if id == &operation_id
         ));
     }
@@ -2573,6 +2892,7 @@ mod tests {
                 "topic".into(),
                 "topic".into(),
                 true,
+                false,
                 event_tx,
             )
             .expect("start push");
@@ -2590,7 +2910,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::channel();
         let delete_id = handle
-            .delete_remote_branch("origin".into(), "topic".into(), event_tx)
+            .delete_remote_branch("origin".into(), "topic".into(), false, event_tx)
             .expect("start delete");
         let events: Vec<_> = event_rx.iter().collect();
         assert!(delete_id.starts_with("delete-remote-"));
@@ -2642,10 +2962,10 @@ mod tests {
         let handle = worker.handle();
 
         let (event_tx, event_rx) = mpsc::channel();
-        let pushed = handle.push_current_branch("origin".into(), event_tx);
+        let pushed = handle.push_current_branch("origin".into(), false, event_tx);
         assert!(event_rx.iter().next().is_none());
         let (event_tx, event_rx) = mpsc::channel();
-        let forced = handle.force_push_current_branch("origin".into(), event_tx);
+        let forced = handle.force_push_current_branch("origin".into(), false, event_tx);
         assert!(event_rx.iter().next().is_none());
 
         for result in [pushed, forced] {
@@ -2692,7 +3012,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::channel();
         let operation_id = handle
-            .push_current_branch("origin".into(), event_tx)
+            .push_current_branch("origin".into(), false, event_tx)
             .expect("start branch push");
         let events: Vec<_> = event_rx.iter().collect();
 
@@ -3214,7 +3534,12 @@ mod tests {
         git_core::branch::switch_branch(&repo, &main_branch).unwrap();
         std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
         git_core::stage::stage_file(&repo, "shared.txt").unwrap();
-        git_core::commit::commit(&mut repo, "main commit deletes").unwrap();
+        git_core::commit::commit(
+            &mut repo,
+            "main commit deletes",
+            git_core::hooks::HookOptions::default(),
+        )
+        .unwrap();
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
@@ -3509,7 +3834,9 @@ mod tests {
             git_core::pick::PickOutcome::Committed { .. }
         ));
 
-        handle.amend_commit("side, amended".into()).unwrap();
+        handle
+            .amend_commit("side, amended".into(), false, mpsc::channel().0)
+            .unwrap();
         let picked = handle.get_head_info().unwrap().head_id.unwrap();
 
         let reverted = handle.revert_commit(picked).unwrap();
@@ -3551,7 +3878,7 @@ mod tests {
 
         let operation_id = worker
             .handle()
-            .force_push_current_branch("origin".into(), event_tx)
+            .force_push_current_branch("origin".into(), false, event_tx)
             .expect("start force push");
         let events: Vec<_> = event_rx.iter().collect();
 
@@ -3562,6 +3889,7 @@ mod tests {
                 operation_id: id,
                 operation: TransferOperation::ForcePushBranch,
                 error: None,
+                hook_output: None,
             }) if id == &operation_id
         ));
     }
@@ -3761,7 +4089,9 @@ mod tests {
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
-        handle.commit("Merge feature".into()).unwrap();
+        handle
+            .commit("Merge feature".into(), false, mpsc::channel().0)
+            .unwrap();
         assert_eq!(
             handle.get_undo_state().unwrap(),
             UndoState {

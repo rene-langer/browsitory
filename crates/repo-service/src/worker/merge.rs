@@ -7,10 +7,18 @@ pub(super) fn start(
     options: MergeOptions,
     reply: Sender<Result<MergeOutcome, String>>,
 ) {
-    let _ = reply.send(
-        git_core::merge::start_merge(repo, &branch_name, options)
-            .map_err(|error| error.to_string()),
-    );
+    let result = git_core::merge::start_merge(repo, &branch_name, options)
+        .map_err(|error| error.to_string());
+    // git runs post-merge after a merge that completed (or a squash, with "1"); not after a
+    // conflicted or no-op one.
+    match result {
+        Ok(MergeOutcome::FastForwarded) | Ok(MergeOutcome::Merged) => {
+            super::hooks::run_post_hook(repo, "post-merge", &["0"])
+        }
+        Ok(MergeOutcome::Squashed) => super::hooks::run_post_hook(repo, "post-merge", &["1"]),
+        _ => {}
+    }
+    let _ = reply.send(result);
 }
 pub(super) fn defaults(repo: &git2::Repository, reply: Sender<Result<MergeOptions, String>>) {
     let _ = reply.send(Ok(git_core::merge::merge_defaults(repo)));

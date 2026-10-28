@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TransferProgress } from "../ipc/RepoClient";
+import { runningHookLabel } from "../lib/hookFailure";
 import { Panel } from "./primitives/Panel";
 import styles from "./TransferPanel.module.css";
 
@@ -30,14 +31,21 @@ export function TransferPanel({
 
   return (
     <Panel title="Transferring" ariaLive="polite" ariaLabel="Transfer progress">
-      <p>{progress.phase}</p>
-      <div className={styles.progressTrack} aria-hidden="true">
-        <div className={styles.progressFill} style={{ width: `${percent}%` }} />
-      </div>
-      <p>
-        {progress.current} / {progress.total} objects
-      </p>
-      <p>{formatBytes(progress.receivedBytes)} received</p>
+      {progress.phase === "RunningHook" ? (
+        // Only pushes run a hook mid-transfer, and only `pre-push`; nothing is transferred yet.
+        <p>{runningHookLabel("pre-push")}</p>
+      ) : (
+        <>
+          <p>{progress.phase}</p>
+          <div className={styles.progressTrack} aria-hidden="true">
+            <div className={styles.progressFill} style={{ width: `${percent}%` }} />
+          </div>
+          <p>
+            {progress.current} / {progress.total} objects
+          </p>
+          <p>{formatBytes(progress.receivedBytes)} received</p>
+        </>
+      )}
       <div className={styles.actions}>
         <button
           type="button"

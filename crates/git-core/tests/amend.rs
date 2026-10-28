@@ -21,7 +21,12 @@ fn amend_folds_staged_changes_and_new_message_into_head() {
     index.add_path(std::path::Path::new("c.txt")).unwrap();
     index.write().unwrap();
 
-    let new_id = amend_head(&repo, "second, amended").unwrap();
+    let new_id = amend_head(
+        &repo,
+        "second, amended",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.id().to_string(), new_id);
@@ -40,7 +45,7 @@ fn amend_folds_staged_changes_and_new_message_into_head() {
 fn message_only_amend_keeps_tree() {
     let (_dir, repo) = repo_with_two_commits();
     let old_tree = repo.head().unwrap().peel_to_commit().unwrap().tree_id();
-    amend_head(&repo, "reworded").unwrap();
+    amend_head(&repo, "reworded", git_core::hooks::HookOptions::default()).unwrap();
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.tree_id(), old_tree);
     assert_eq!(head.message().unwrap(), "reworded");
@@ -51,7 +56,12 @@ fn amend_works_on_detached_head() {
     let (_dir, repo) = repo_with_two_commits();
     let oid = repo.head().unwrap().target().unwrap();
     repo.set_head_detached(oid).unwrap();
-    let new_id = amend_head(&repo, "detached amend").unwrap();
+    let new_id = amend_head(
+        &repo,
+        "detached amend",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert_eq!(repo.head().unwrap().target().unwrap().to_string(), new_id);
     assert!(repo.head_detached().unwrap());
 }
@@ -60,7 +70,7 @@ fn amend_works_on_detached_head() {
 fn amend_refuses_unborn_head() {
     let (_dir, repo) = common::init_repo();
     assert!(matches!(
-        amend_head(&repo, "x"),
+        amend_head(&repo, "x", git_core::hooks::HookOptions::default()),
         Err(CommitError::NothingToAmend)
     ));
 }
@@ -71,7 +81,7 @@ fn amend_refuses_during_a_merge() {
     let oid = repo.head().unwrap().target().unwrap();
     std::fs::write(repo.path().join("MERGE_HEAD"), format!("{oid}\n")).unwrap();
     assert!(matches!(
-        amend_head(&repo, "x"),
+        amend_head(&repo, "x", git_core::hooks::HookOptions::default()),
         Err(CommitError::OperationInProgress)
     ));
 }
@@ -86,7 +96,7 @@ fn commit_finishes_a_paused_cherry_pick_with_a_single_parent_and_clean_state() {
     index.add_path(std::path::Path::new("d.txt")).unwrap();
     index.write().unwrap();
 
-    commit(&mut repo, "picked").unwrap();
+    commit(&mut repo, "picked", git_core::hooks::HookOptions::default()).unwrap();
 
     let new_head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(new_head.parent_count(), 1);

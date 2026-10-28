@@ -1,14 +1,16 @@
 import { useCallback } from "react";
 import type { RepoClient, ResetMode } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import type { RunMutation } from "./useMutationRunner";
+import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
+import { hookFailedMessage } from "../lib/hookFailure";
 
 export interface HistoryActions {
   cherryPick(commitId: string): Promise<void>;
   revertCommit(commitId: string): Promise<void>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
-  amendCommit(message: string): Promise<void>;
+  // Resolves `true` once amended; see `StagingActions.commit`.
+  amendCommit(message: string, noVerify: boolean): Promise<boolean>;
   setAmendMode(on: boolean): void;
 }
 
@@ -19,6 +21,7 @@ export function useHistoryActions(
   client: RepoClient,
   repoPath: string,
   runMutation: RunMutation,
+  runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): HistoryActions {
   const cherryPick = useCallback(
@@ -38,12 +41,22 @@ export function useHistoryActions(
     [client, runMutation, repoPath],
   );
   const amendCommit = useCallback(
-    (message: string) =>
-      runMutation(async () => {
-        await client.amendCommit(repoPath, message);
-        setState((prev) => ({ ...prev, amendMode: false }));
-      }),
-    [client, runMutation, repoPath, setState],
+    async (message: string, noVerify: boolean) => {
+      const ok = await runMutationWithOutcome(async () => {
+        const outcome = await client.amendCommit(repoPath, message, noVerify);
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: { hook: outcome.hook, output: outcome.output, retry: { kind: "amend", message }, dialogOpen: true },
+          }));
+          throw new Error(hookFailedMessage(outcome.hook));
+        }
+        setState((prev) => ({ ...prev, amendMode: false, skipHooks: false, hookFailure: null }));
+      });
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return ok;
+    },
+    [client, runMutationWithOutcome, repoPath, setState],
   );
   const setAmendMode = useCallback(
     (on: boolean) => setState((prev) => ({ ...prev, amendMode: on })),

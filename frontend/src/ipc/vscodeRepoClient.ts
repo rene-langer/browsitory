@@ -1,5 +1,7 @@
 import type {
+  CommitOutcome,
   CommitSignature,
+  HookProgress,
   BlameLine,
   BranchInfo,
   ConflictSegment,
@@ -124,6 +126,7 @@ const pending = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
+const hookProgressListeners = new Set<(event: HookProgress) => void>();
 
 function handleMessage(event: MessageEvent) {
   const message = event.data;
@@ -142,6 +145,11 @@ function handleMessage(event: MessageEvent) {
   if (message.method === "transferProgress") {
     const progress = message.params as TransferProgress;
     for (const listener of transferProgressListeners) listener(progress);
+    return;
+  }
+  if (message.method === "hookProgress") {
+    const hookEvent = message.params as HookProgress;
+    for (const listener of hookProgressListeners) listener(hookEvent);
     return;
   }
   if (message.method !== "transportStatus" || !isTransportStatus(message.params)) return;
@@ -189,6 +197,7 @@ export function __resetVscodeRepoClientForTests() {
   nextRequestId = 1;
   pending.clear();
   transferProgressListeners.clear();
+  hookProgressListeners.clear();
   __resetTransportStatusForTests();
 }
 
@@ -274,7 +283,8 @@ export const vscodeRepoClient: RepoClient = {
   ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => call<DiffSettings>("get_diff_settings", {}),
   setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),
-  commit: (repoPath: string, message: string) => call<void>("commit", { repoPath, message }),
+  commit: (repoPath: string, message: string, noVerify: boolean) =>
+    call<CommitOutcome>("commit", { repoPath, message, noVerify }),
   listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
     call<void>("create_branch", { repoPath, name, startPoint }),
@@ -341,14 +351,14 @@ export const vscodeRepoClient: RepoClient = {
     call<string>("fetch_remote", { repoPath, remoteName, prune }),
   fetchAllRemotes: (repoPath: string, prune: boolean | null) =>
     call<string>("fetch_all_remotes", { repoPath, prune }),
-  pushBranch: (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean) =>
-    call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream }),
-  deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string) =>
-    call<string>("delete_remote_branch", { repoPath, remoteName, branchName }),
-  pushCurrentBranch: (repoPath: string, remoteName: string) =>
-    call<string>("push_current_branch", { repoPath, remoteName }),
-  pushTags: (repoPath: string, remoteName: string, names: string[]) =>
-    call<string>("push_tags", { repoPath, remoteName, names }),
+  pushBranch: (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) =>
+    call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify }),
+  deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) =>
+    call<string>("delete_remote_branch", { repoPath, remoteName, branchName, noVerify }),
+  pushCurrentBranch: (repoPath: string, remoteName: string, noVerify: boolean) =>
+    call<string>("push_current_branch", { repoPath, remoteName, noVerify }),
+  pushTags: (repoPath: string, remoteName: string, names: string[], noVerify: boolean) =>
+    call<string>("push_tags", { repoPath, remoteName, names, noVerify }),
   pullCurrentUpstream: (repoPath: string) =>
     call<PullOutcome>("pull_current_upstream", { repoPath }),
   cancelTransfer: (repoPath: string, operationId: string) =>
@@ -360,6 +370,13 @@ export const vscodeRepoClient: RepoClient = {
     transferProgressListeners.add(listener);
     return () => {
       transferProgressListeners.delete(listener);
+    };
+  },
+  subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+    ensureInitialized();
+    hookProgressListeners.add(listener);
+    return () => {
+      hookProgressListeners.delete(listener);
     };
   },
   listStashes: (repoPath: string) => call<StashEntry[]>("list_stashes", { repoPath }),
@@ -386,7 +403,8 @@ export const vscodeRepoClient: RepoClient = {
   abortMerge: (repoPath: string) => call<void>("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => call<HeadInfo>("get_head_info", { repoPath }),
-  amendCommit: (repoPath: string, message: string) => call<void>("amend_commit", { repoPath, message }),
+  amendCommit: (repoPath: string, message: string, noVerify: boolean) =>
+    call<CommitOutcome>("amend_commit", { repoPath, message, noVerify }),
   getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),
@@ -395,8 +413,8 @@ export const vscodeRepoClient: RepoClient = {
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
     call<void>("reset_to_commit", { repoPath, commitId, mode }),
   checkoutCommit: (repoPath: string, commitId: string) => call<void>("checkout_commit", { repoPath, commitId }),
-  forcePushCurrentBranch: (repoPath: string, remoteName: string) =>
-    call<string>("force_push_current_branch", { repoPath, remoteName }),
+  forcePushCurrentBranch: (repoPath: string, remoteName: string, noVerify: boolean) =>
+    call<string>("force_push_current_branch", { repoPath, remoteName, noVerify }),
   resolveAddDeleteConflict: (repoPath: string, path: string, choice: FileConflictChoice) =>
     call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>

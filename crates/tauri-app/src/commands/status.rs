@@ -1,9 +1,9 @@
 use super::{
-    worker_handle, AppState, BlameLineDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
-    FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
+    emit_hook_events, worker_handle, AppState, BlameLineDto, CommitOutcomeDto, CommitSignatureDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
 };
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn get_status(
@@ -321,7 +321,13 @@ pub async fn ignore_path(
 pub async fn commit(
     repo_path: String,
     message: String,
+    no_verify: bool,
+    app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
-    worker_handle(&state, &repo_path)?.commit(message)
+) -> Result<CommitOutcomeDto, String> {
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    emit_hook_events(app, repo_path.clone(), event_rx);
+    Ok(CommitOutcomeDto::from(
+        worker_handle(&state, &repo_path)?.commit(message, no_verify, event_tx)?,
+    ))
 }

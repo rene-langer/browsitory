@@ -35,6 +35,23 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("button", { name: "Never mind" })).toBeInTheDocument();
   });
 
+  it("renders only the cancel action when hideConfirm is set", () => {
+    render(
+      <ConfirmDialog
+        ariaLabel="Info"
+        message="Nothing to confirm."
+        confirmLabel="Remove"
+        cancelLabel="Close"
+        hideConfirm
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Info" });
+    expect(within(dialog).getAllByRole("button").map((button) => button.textContent)).toEqual(["Close"]);
+  });
+
   it("calls onConfirm when the confirm button is clicked", () => {
     const onConfirm = vi.fn();
     render(

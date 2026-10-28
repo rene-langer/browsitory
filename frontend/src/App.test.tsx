@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { CommitOutcome, RepoClient } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
@@ -98,6 +98,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     pullCurrentUpstream: async () => unused(),
     cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
+    subscribeHookProgress: () => () => {},
     listStashes: unused,
     saveStash: unused,
     applyStash: unused,
@@ -117,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -588,6 +589,155 @@ describe("App", () => {
     });
   });
 
+  it("shows a failing commit hook's output, keeps the message, and commits without hooks", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "lint failed\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      commit,
+    });
+    render(<App client={client} />);
+
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: hooked" } });
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    expect(within(dialog).getByLabelText("Hook output")).toHaveTextContent("lint failed");
+    expect(commit).toHaveBeenCalledWith("/repos/a", "feat: hooked", false);
+    expect(box).toHaveValue("feat: hooked");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+    expect(screen.getByText("The pre-commit hook failed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+
+    fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
+
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: hooked", true));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+    await waitFor(() => expect(box).toHaveValue(""));
+  });
+
+  it("does not bring back a committed message when the tab was switched away mid-commit", async () => {
+    let finish: (outcome: CommitOutcome) => void = () => {};
+    const commit = vi.fn(() => new Promise<CommitOutcome>((resolve) => (finish = resolve)));
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async (repoPath: string) => (repoPath === "/repos/a" ? [{ path: "a.txt", staged: true, kind: "Modified" as const }] : []),
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      commit,
+    });
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
+      target: { value: "feat: in flight" },
+    });
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    await waitFor(() => expect(commit).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    await act(async () => finish({ kind: "Committed", commitId: "c1" }));
+    fireEvent.click(screen.getByRole("tab", { name: "a" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+
+    expect(await screen.findByRole("textbox", { name: "Commit message" })).toHaveValue("");
+  });
+
+  it("retries a failed commit with the message as edited after the hook failed", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "subject too long\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      commit,
+    });
+    render(<App client={client} />);
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: a very long subject" } });
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+
+    fireEvent.change(box, { target: { value: "feat: short" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
+
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: short", true));
+    await waitFor(() => expect(box).toHaveValue(""));
+  });
+
+  it("retries a failed commit with the commit message even after switching to amend mode", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "no\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"] }),
+      getCommitMessage: async () => "HEAD's message",
+      commit,
+    });
+    render(<App client={client} />);
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: new work" } });
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+
+    fireEvent.click(screen.getByLabelText("Amend last commit"));
+    await waitFor(() => expect(box).toHaveValue("HEAD's message"));
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
+
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: new work", true));
+  });
+
   it("publishes the current branch from the sync bar through the Push dialog", async () => {
     const pushBranch = vi.fn(async () => "push-1");
     const client = fakeClient({
@@ -611,7 +761,7 @@ describe("App", () => {
     expect(within(dialog).getByLabelText("Set as upstream")).toBeChecked();
     fireEvent.click(within(dialog).getByRole("button", { name: "Push" }));
 
-    await waitFor(() => expect(pushBranch).toHaveBeenCalledWith("/repos/a", "origin", "main", "main", true));
+    await waitFor(() => expect(pushBranch).toHaveBeenCalledWith("/repos/a", "origin", "main", "main", true, false));
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
@@ -639,7 +789,7 @@ describe("App", () => {
     expect(dialog).toHaveTextContent("Delete origin/topic on the remote? This can't be undone.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete remote branch" }));
 
-    await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic"));
+    await waitFor(() => expect(deleteRemoteBranch).toHaveBeenCalledWith("/repos/a", "origin", "topic", false));
     expect(screen.queryByRole("dialog", { name: "Delete remote branch" })).toBeNull();
     localStorage.clear();
   });

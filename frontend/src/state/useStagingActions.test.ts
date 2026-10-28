@@ -17,7 +17,7 @@ function setup() {
     await fn();
   }) as never;
   const { result } = renderHook(() =>
-    useStagingActions(client as unknown as RepoClient, "/repo", runMutation, vi.fn() as never, vi.fn()),
+    useStagingActions(client as unknown as RepoClient, "/repo", runMutation, vi.fn() as never, vi.fn() as never, vi.fn()),
   );
   return { client, actions: result.current };
 }

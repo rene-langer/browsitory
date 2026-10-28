@@ -36,6 +36,8 @@ pub enum TransferOperation {
 pub enum TransferPhase {
     Receiving,
     Updating,
+    /// A `pre-push` hook is running; no transfer progress yet.
+    RunningHook,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +52,8 @@ pub enum TransferErrorKind {
     /// The caller asked for the in-flight transfer to stop — see the `cancel` parameter on
     /// `fetch_remote`/`push_current_branch`/`push_tags`.
     Cancelled,
+    /// The `pre-push` hook failed (or could not run); nothing was sent.
+    HookFailed,
 }
 
 /// Stable callback marker used internally to classify a missing keychain token without sending
@@ -347,6 +351,11 @@ pub enum RemoteError {
         remote: String,
         local_branch: String,
     },
+    /// A gate hook (`pre-push`) failed; nothing was sent. `output` is what the user sees.
+    #[error("the {hook} hook failed")]
+    HookFailed { hook: String, output: String },
+    #[error("{0}")]
+    Hook(#[from] crate::hooks::HookError),
 }
 
 impl RemoteError {
@@ -356,6 +365,10 @@ impl RemoteError {
             Self::NonFastForward => TransferErrorKind::NonFastForward,
             Self::RejectedRemoteRef => TransferErrorKind::RejectedRemoteRef,
             Self::StaleLease => TransferErrorKind::StaleLease,
+            Self::HookFailed { .. } | Self::Hook(crate::hooks::HookError::Spawn { .. }) => {
+                TransferErrorKind::HookFailed
+            }
+            Self::Hook(crate::hooks::HookError::Cancelled { .. }) => TransferErrorKind::Cancelled,
             Self::Git(error) if error.code() == ErrorCode::NotFastForward => {
                 TransferErrorKind::NonFastForward
             }
@@ -590,9 +603,11 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
 /// `push.default` (`PushTargetNeedsChoice` when it settles none; nothing is sent). `cancel` is
 /// checked once, at `push_negotiation` (before any data is sent); a cancel requested after that
 /// is ignored so a push that lands is never reported as cancelled — see `push_refs`.
+/// Runs the `pre-push` hook unless `no_verify`.
 pub fn push_current_branch(
     repo: &Repository,
     remote_name: &str,
+    no_verify: bool,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -604,6 +619,7 @@ pub fn push_current_branch(
         &local,
         &target,
         false,
+        no_verify,
         credentials,
         reporter,
         cancel,
@@ -614,10 +630,11 @@ pub fn push_current_branch(
 /// to a differently named upstream unless `push.default=upstream`), but only if the remote's
 /// branch still points where our `refs/remotes/<remote>/<target>` says it did at the last fetch
 /// (a missing tracking ref means "must not exist on the remote"). A mismatch is
-/// `RemoteError::StaleLease`, remote untouched.
+/// `RemoteError::StaleLease`, remote untouched. Runs the `pre-push` hook unless `no_verify`.
 pub fn force_push_current_branch(
     repo: &Repository,
     remote_name: &str,
+    no_verify: bool,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -640,6 +657,7 @@ pub fn force_push_current_branch(
         reporter,
         cancel,
         Some((dst.as_str(), expected)),
+        no_verify,
     )
 }
 
@@ -712,7 +730,7 @@ pub fn set_branch_upstream(
 /// Pushes `local_branch` to `refs/heads/<remote_branch>` on `remote_name` (never forced: a
 /// non-fast-forward is `NonFastForward`). With `set_upstream`, a push that lands also makes that
 /// remote branch the local branch's upstream; a failed push leaves the config untouched.
-/// `cancel` behaves as for `push_current_branch`.
+/// `cancel` behaves as for `push_current_branch`. Runs the `pre-push` hook unless `no_verify`.
 #[allow(clippy::too_many_arguments)]
 pub fn push_branch(
     repo: &Repository,
@@ -720,6 +738,7 @@ pub fn push_branch(
     local_branch: &str,
     remote_branch: &str,
     set_upstream: bool,
+    no_verify: bool,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -736,6 +755,7 @@ pub fn push_branch(
         reporter,
         cancel,
         None,
+        no_verify,
     )?;
     if set_upstream {
         set_branch_upstream(repo, local_branch, remote_name, remote_branch)?;
@@ -746,11 +766,13 @@ pub fn push_branch(
 /// Deletes `refs/heads/<branch>` on `remote_name`, then our `refs/remotes/<remote>/<branch>`.
 /// Local branches that tracked it keep their config (git's "gone" upstream). A refusal
 /// (protected branch, server hook) is `RejectedRemoteRef`; `cancel` behaves as for
-/// `push_current_branch`.
+/// `push_current_branch`. Runs the `pre-push` hook unless `no_verify`, like
+/// `git push <remote> :<branch>` (its stdin line starts with `(delete)`).
 pub fn delete_remote_branch(
     repo: &Repository,
     remote_name: &str,
     branch: &str,
+    no_verify: bool,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -765,6 +787,7 @@ pub fn delete_remote_branch(
         reporter,
         cancel,
         None,
+        no_verify,
     )?;
     // libgit2's push update_tips normally removed it already; this makes it not depend on that.
     // The local tracking ref is wherever the remote's fetch refspec maps the branch, not a
@@ -800,11 +823,12 @@ fn tracking_ref_name(
 }
 
 /// Pushes `names` (or every local tag when empty). `cancel` behaves as for
-/// `push_current_branch`.
+/// `push_current_branch`. Runs the `pre-push` hook unless `no_verify`.
 pub fn push_tags(
     repo: &Repository,
     remote_name: &str,
     names: &[String],
+    no_verify: bool,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
@@ -837,6 +861,7 @@ pub fn push_tags(
         reporter,
         cancel,
         None,
+        no_verify,
     )
 }
 
@@ -1112,8 +1137,22 @@ fn push_refs(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
     lease: Option<(&str, git2::Oid)>,
+    no_verify: bool,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
+    let push_url = remote
+        .pushurl()
+        .ok()
+        .flatten()
+        .or_else(|| remote.url().ok())
+        .unwrap_or_default()
+        .to_string();
+    let run_pre_push = !no_verify
+        && matches!(
+            crate::hooks::find_hook(repo, "pre-push"),
+            Ok(crate::hooks::HookLookup::Found(_))
+        );
+    let hook_failure: RefCell<Option<RemoteError>> = RefCell::new(None);
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
     let rejection = Cell::new(None);
@@ -1152,6 +1191,48 @@ fn push_refs(
             if current != expected {
                 stale_lease.set(true);
                 return Err(git2::Error::from_str("stale lease"));
+            }
+        }
+        // git runs pre-push at exactly this point: refs advertised (so `src()` is the live
+        // remote SHA), nothing sent yet. A stale lease was rejected above first, as git does.
+        if run_pre_push {
+            reporter.borrow_mut().report(TransferProgress {
+                operation_id: String::new(),
+                operation,
+                phase: TransferPhase::RunningHook,
+                current: 0,
+                total: 0,
+                received_bytes: 0,
+                message: None,
+            });
+            let input = pre_push_input(updates);
+            let args = [remote_name, push_url.as_str()];
+            let invocation = crate::hooks::HookInvocation {
+                name: "pre-push",
+                args: &args,
+                stdin: Some(input.as_bytes()),
+                env: &[],
+            };
+            match crate::hooks::run_hook(repo, &invocation, cancel, crate::hooks::HOOK_TIMEOUT) {
+                Ok(outcome) => {
+                    if let Some(output) =
+                        crate::hooks::failure_output(&outcome, crate::hooks::HOOK_TIMEOUT)
+                    {
+                        *hook_failure.borrow_mut() = Some(RemoteError::HookFailed {
+                            hook: "pre-push".to_string(),
+                            output,
+                        });
+                        return Err(git2::Error::from_str("pre-push hook failed"));
+                    }
+                }
+                Err(crate::hooks::HookError::Cancelled { .. }) => {
+                    cancelled_at_negotiation.set(true);
+                    return Err(git2::Error::from_str("transfer cancelled"));
+                }
+                Err(error) => {
+                    *hook_failure.borrow_mut() = Some(RemoteError::Hook(error));
+                    return Err(git2::Error::from_str("pre-push hook could not run"));
+                }
             }
         }
         Ok(())
@@ -1202,6 +1283,8 @@ fn push_refs(
             Err(RemoteError::StaleLease)
         } else if cancelled_at_negotiation.get() {
             Err(RemoteError::Cancelled)
+        } else if let Some(failure) = hook_failure.borrow_mut().take() {
+            Err(failure)
         } else if error.code() == ErrorCode::NotFastForward {
             Err(RemoteError::NonFastForward)
         } else {
@@ -1220,8 +1303,34 @@ fn push_refs(
         // Cancellation aborts the `push` call itself (above); it is never recorded as a
         // per-reference rejection.
         Some(TransferErrorKind::Cancelled) => unreachable!(),
+        // A hook failure aborts negotiation, never a per-ref rejection.
+        Some(TransferErrorKind::HookFailed) => unreachable!(),
         None => Ok(()),
     }
+}
+
+/// git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` per ref that will
+/// change. `src()` is what the remote advertised (zero when the ref is new), `dst()` the new
+/// value (zero for a deletion, whose local ref is `(delete)`).
+fn pre_push_input(updates: &[git2::PushUpdate<'_>]) -> String {
+    let mut input = String::new();
+    for update in updates {
+        if update.src() == update.dst() {
+            continue;
+        }
+        let local_ref = if update.dst().is_zero() {
+            "(delete)"
+        } else {
+            update.src_refname().unwrap_or("")
+        };
+        let remote_ref = update.dst_refname().unwrap_or("");
+        input.push_str(&format!(
+            "{local_ref} {} {remote_ref} {}\n",
+            update.dst(),
+            update.src()
+        ));
+    }
+    input
 }
 
 fn validate_tag_name(name: &str) -> Result<(), RemoteError> {

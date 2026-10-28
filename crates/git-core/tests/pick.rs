@@ -87,7 +87,12 @@ fn conflicting_cherry_pick_pauses_with_merge_msg_and_can_be_finished() {
     stage(&repo, "shared.txt");
     drop(base);
     let mut repo = repo;
-    git_core::commit::commit(&mut repo, "theirs edit").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "theirs edit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
 
@@ -374,7 +379,12 @@ fn finishing_a_conflicted_cherry_pick_keeps_the_original_author() {
     stage(&repo, "shared.txt");
     drop(base);
     let mut repo = repo;
-    git_core::commit::commit(&mut repo, "theirs edit").unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        "theirs edit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.author().name().unwrap(), "Other Author");

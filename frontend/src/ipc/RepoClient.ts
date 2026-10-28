@@ -108,6 +108,8 @@ export interface HeadInfo {
   operation: OperationKind | null;
   /** A pending squash merge's message (`SQUASH_MSG`); pre-fills the commit box. */
   squashMessage: string | null;
+  /** Installed commit hooks that `noVerify` skips (`pre-commit`, `commit-msg`). */
+  commitHooks: string[];
 }
 export interface UndoState {
   undo: string | null;
@@ -119,6 +121,17 @@ export type UndoOutcome =
   | { kind: "RepositoryChanged"; label: string }
   | { kind: "OperationInProgress" };
 export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
+/** A commit/amend result: a failing gate hook resolves `HookFailed` with the hook's output. */
+export type CommitOutcome =
+  | { kind: "Committed"; commitId: string }
+  | { kind: "HookFailed"; hook: string; output: string };
+/** A commit/amend hook starting or finishing; `operationId` is accepted by `cancelTransfer`. */
+export interface HookProgress {
+  repoPath: string;
+  operationId: string;
+  hook: string;
+  phase: "Started" | "Finished";
+}
 export type ResetMode = "soft" | "mixed" | "hard";
 
 export type TransferOperation =
@@ -131,7 +144,7 @@ export type TransferOperation =
   | "DeleteRemoteBranch"
   | "Clone";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed";
 
 export interface CloneRequest {
   url: string;
@@ -181,7 +194,8 @@ export function toCloneError(raw: unknown): CloneError {
 export interface TransferProgress {
   operationId: string;
   operation: TransferOperation;
-  phase: "Starting" | "Receiving" | "Updating" | "RemoteFailed" | "Completed" | "Failed";
+  /** `RunningHook`: a `pre-push` hook is running; no transfer progress yet. */
+  phase: "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed";
   errorKind: TransferErrorKind | null;
   current: number;
   total: number;
@@ -189,6 +203,11 @@ export interface TransferProgress {
   message: string | null;
   /** Only on `RemoteFailed`: the remote that failed during a Fetch all. */
   remoteName?: string;
+  /**
+   * The failed `pre-push` hook's output when `errorKind` is `HookFailed`; `null` otherwise.
+   * Unlike `message` this comes from the user's own script, so it is forwarded.
+   */
+  hookOutput: string | null;
 }
 
 export interface TagInfo {
@@ -472,7 +491,12 @@ export interface RepoClient {
   ignorePath(repoPath: string, pattern: string): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;
-  commit(repoPath: string, message: string): Promise<void>;
+  /**
+   * Commits the index, running the commit hooks unless `noVerify` (which skips `pre-commit` and
+   * `commit-msg`). A failing gate hook resolves `HookFailed`; only real failures reject. Hook
+   * progress arrives on `subscribeHookProgress`.
+   */
+  commit(repoPath: string, message: string, noVerify: boolean): Promise<CommitOutcome>;
   listBranches(repoPath: string): Promise<BranchInfo[]>;
   createBranch(repoPath: string, name: string, startPoint: string): Promise<void>;
   switchBranch(repoPath: string, name: string): Promise<void>;
@@ -506,8 +530,9 @@ export interface RepoClient {
   deleteTag(repoPath: string, name: string): Promise<void>;
   /** `prune` `null` = git config decides (`remote.<name>.prune`, then `fetch.prune`). */
   fetchRemote(repoPath: string, remoteName: string, prune: boolean | null): Promise<string>;
-  pushCurrentBranch(repoPath: string, remoteName: string): Promise<string>;
-  pushTags(repoPath: string, remoteName: string, names: string[]): Promise<string>;
+  /** Every push runs the `pre-push` hook unless `noVerify`; a failure completes `HookFailed`. */
+  pushCurrentBranch(repoPath: string, remoteName: string, noVerify: boolean): Promise<string>;
+  pushTags(repoPath: string, remoteName: string, names: string[], noVerify: boolean): Promise<string>;
   /**
    * Fetches every remote in turn under one operation id. A failed remote arrives as a
    * `RemoteFailed` progress event; the operation completes unless every remote failed.
@@ -517,18 +542,20 @@ export interface RepoClient {
    * Pushes `localBranch` to `remoteBranch` on `remoteName`, and when `setUpstream` is set and the
    * push lands, records it as the branch's upstream.
    */
-  pushBranch(repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean): Promise<string>;
-  /** Deletes the branch on the remote and its remote-tracking ref. */
-  deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string): Promise<string>;
+  pushBranch(repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean): Promise<string>;
+  /** Deletes the branch on the remote and its remote-tracking ref (runs `pre-push` unless `noVerify`). */
+  deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string, noVerify: boolean): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
   /**
-   * Asks the backend to abort the in-flight transfer `operationId`. Resolves as soon as the
+   * Asks the backend to abort the in-flight transfer or hook run `operationId` (commit/amend ids
+   * arrive on `subscribeHookProgress`). Resolves as soon as the
    * request is recorded, not when the transfer stops: the cancellation itself arrives as that
    * operation's terminal `subscribeTransferProgress` event with `errorKind: "Cancelled"`.
    * Unknown or already-finished ids are a no-op.
    */
   cancelTransfer(repoPath: string, operationId: string): Promise<void>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
+  subscribeHookProgress(listener: (event: HookProgress) => void): () => void;
   listStashes(repoPath: string): Promise<StashEntry[]>;
   saveStash(repoPath: string, options: StashOptions): Promise<void>;
   /**
@@ -554,7 +581,8 @@ export interface RepoClient {
   abortMerge(repoPath: string): Promise<void>;
   getMergeMessage(repoPath: string): Promise<string | null>;
   getHeadInfo(repoPath: string): Promise<HeadInfo>;
-  amendCommit(repoPath: string, message: string): Promise<void>;
+  /** Amends HEAD; hooks and `noVerify` as for `commit`. */
+  amendCommit(repoPath: string, message: string, noVerify: boolean): Promise<CommitOutcome>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `OperationInProgress`) resolve; only real failures reject. */
@@ -565,7 +593,7 @@ export interface RepoClient {
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(repoPath: string, commitId: string): Promise<void>;
   /** Resolves with the transfer operation id; progress arrives via `subscribeTransferProgress`. */
-  forcePushCurrentBranch(repoPath: string, remoteName: string): Promise<string>;
+  forcePushCurrentBranch(repoPath: string, remoteName: string, noVerify: boolean): Promise<string>;
   resolveAddDeleteConflict(repoPath: string, path: string, choice: FileConflictChoice): Promise<void>;
   commitsSince(repoPath: string, onto: string): Promise<RebasePlanCommit[]>;
   startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;

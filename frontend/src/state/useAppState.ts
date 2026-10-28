@@ -34,6 +34,8 @@ import { readFetchPrune } from "../lib/fetchPrune";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
 import { useHistoryActions } from "./useHistoryActions";
+import { useHookActions } from "./useHookActions";
+import type { HookFailure, HookRetry } from "../lib/hookFailure";
 import { useUndoActions } from "./useUndoActions";
 import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
@@ -109,6 +111,17 @@ export interface AppState {
   deleteRemoteBranchDialog: { remoteName: string | null; branchName: string | null } | null;
   // CommitBox amend toggle.
   amendMode: boolean;
+  // CommitBox "Skip hooks" (`--no-verify`) for the next commit/amend; reset after one lands.
+  skipHooks: boolean;
+  // The commit/amend hook running right now (from `subscribeHookProgress`), for its status line
+  // and Cancel button. Pushes show their `pre-push` through `transfer` instead.
+  hookRun: { operationId: string; hook: string } | null;
+  // The last failed gate hook: its output, and the request to retry without hooks.
+  hookFailure: HookFailure | null;
+  // One-shot request for CommitBox to clear its message, carrying the committed text (a commit
+  // retried from the hook dialog landed; CommitBox did not submit it, so it cannot know).
+  // CommitBox clears only if the box still holds exactly that text.
+  clearCommitMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
@@ -163,7 +176,9 @@ export interface UseAppStateResult {
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
-  commit(message: string): Promise<void>;
+  // `true` once committed. `noVerify` skips `pre-commit`/`commit-msg`; a failing hook stores
+  // `state.hookFailure` and resolves `false`.
+  commit(message: string, noVerify: boolean): Promise<boolean>;
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
   // below. Naming a new branch is the one create-form action here with an obvious single trigger
   // point (the "New branch…" draft form), so its failure surfaces next to that form instead of
@@ -202,21 +217,21 @@ export interface UseAppStateResult {
   // `Promise<string | null>` for the same reason as `createBranch`/`createWorktree` above.
   createTag(name: string, message: string | null): Promise<string | null>;
   deleteTag(name: string): Promise<void>;
-  pushCurrentBranch(remoteName: string): Promise<void>;
-  pushTags(remoteName: string, names: string[]): Promise<void>;
+  pushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
+  pushTags(remoteName: string, names: string[], noVerify?: boolean): Promise<void>;
   pullCurrentUpstream(): Promise<void>;
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
   requestForcePush(remoteName: string): void;
   cancelForcePush(): void;
-  forcePushCurrentBranch(remoteName: string): Promise<void>;
+  forcePushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
   fetchAllRemotes(): Promise<void>;
   setFetchPrune(prune: boolean): void;
-  pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean): Promise<void>;
+  pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify?: boolean): Promise<void>;
   openPushDialog(localBranch: string): void;
   closePushDialog(): void;
-  deleteRemoteBranch(remoteName: string, branchName: string): Promise<void>;
+  deleteRemoteBranch(remoteName: string, branchName: string, noVerify?: boolean): Promise<void>;
   openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
   closeDeleteRemoteBranchDialog(): void;
   openCreateBranchDraft(startPoint: string): void;
@@ -246,8 +261,17 @@ export interface UseAppStateResult {
   revertCommit(commitId: string): Promise<void>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
-  amendCommit(message: string): Promise<void>;
+  amendCommit(message: string, noVerify: boolean): Promise<boolean>;
   setAmendMode(on: boolean): void;
+  setSkipHooks(on: boolean): void;
+  // Cancels the running commit/amend hook (`state.hookRun`) through `cancelTransfer`.
+  cancelHookRun(): Promise<void>;
+  openHookFailure(): void;
+  closeHookFailure(): void;
+  clearCommitMessageHandled(): void;
+  // Replays the failed request with `noVerify: true`. Resolves `true` when a commit/amend landed
+  // (pushes: once started; their outcome arrives as transfer progress).
+  retryWithoutHooks(retry: HookRetry): Promise<boolean>;
   listPullRequests(remoteName: string, account: string): Promise<void>;
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
@@ -297,13 +321,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     addRemoteDraftOpen: false,
     stashes: [],
     mergeMessage: null,
-    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null },
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
     forcePushOffer: null,
     forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),
     pushDialog: null,
     deleteRemoteBranchDialog: null,
     amendMode: false,
+    skipHooks: false,
+    hookRun: null,
+    hookFailure: null,
+    clearCommitMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
     rebasePreset: null,
@@ -448,7 +476,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     discardAllUnstaged,
     ignorePath,
     commit,
-  } = useStagingActions(client, repoPath, runMutation, runOptimisticMutation, setState);
+  } = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
 
   const branchNames = useMemo(() => state.branches.map((branch) => branch.name), [state.branches]);
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
@@ -574,14 +602,40 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   } = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
   const { cherryPick, revertCommit, resetToCommit, checkoutCommit, amendCommit, setAmendMode } =
-    useHistoryActions(client, repoPath, runMutation, setState);
+    useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const { setSkipHooks, cancelHookRun, openHookFailure, closeHookFailure, clearCommitMessageHandled } =
+    useHookActions(client, repoPath, state.hookRun, setState);
+  const retryWithoutHooks = useCallback(
+    async (retry: HookRetry) => {
+      setState((prev) => ({ ...prev, hookFailure: null, error: null }));
+      if (retry.kind === "commit") {
+        const ok = await commit(retry.message, true);
+        if (ok) setState((prev) => ({ ...prev, clearCommitMessage: retry.message }));
+        return ok;
+      }
+      if (retry.kind === "amend") {
+        // No clear request: a landed amend leaves amend mode, which already puts the
+        // pre-amend draft back into the CommitBox.
+        return amendCommit(retry.message, true);
+      }
+      const push = retry.push;
+      if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
+      else if (push.operation === "ForcePushBranch") await forcePushCurrentBranch(push.remoteName, true);
+      else if (push.operation === "PushTags") await pushTags(push.remoteName, push.names, true);
+      else if (push.operation === "PushBranchTo")
+        await pushBranch(push.remoteName, push.localBranch, push.remoteBranch, push.setUpstream, true);
+      else await deleteRemoteBranch(push.remoteName, push.branchName, true);
+      return true;
+    },
+    [commit, amendCommit, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch],
+  );
 
   const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
 
   const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
     useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const dismissError = useCallback(() => {
-    setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null }));
+    setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null, hookFailure: null }));
   }, []);
 
   return {
@@ -684,5 +738,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     redo,
     refreshUndoState,
     dismissError,
+    setSkipHooks,
+    cancelHookRun,
+    openHookFailure,
+    closeHookFailure,
+    clearCommitMessageHandled,
+    retryWithoutHooks,
   };
 }

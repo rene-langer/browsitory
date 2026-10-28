@@ -22,6 +22,7 @@ export function ConfirmDialog({
   onCancel,
   confirmDisabled = false,
   confirmTitle,
+  hideConfirm = false,
 }: {
   /** Accessible name for the dialog (`aria-label`). */
   ariaLabel: string;
@@ -34,6 +35,8 @@ export function ConfirmDialog({
   confirmDisabled?: boolean;
   /** `title` for the confirm button — e.g. explaining why it's disabled (issue #31/UX-003). */
   confirmTitle?: string;
+  /** Omits the confirm button: an informational dialog whose only action is `cancelLabel`. */
+  hideConfirm?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   useRestoreFocus();
@@ -61,15 +64,17 @@ export function ConfirmDialog({
     >
       <div className={styles.message}>{message}</div>
       <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.confirmButton}
-          disabled={confirmDisabled}
-          title={confirmTitle}
-          onClick={onConfirm}
-        >
-          {confirmLabel}
-        </button>
+        {!hideConfirm && (
+          <button
+            type="button"
+            className={styles.confirmButton}
+            disabled={confirmDisabled}
+            title={confirmTitle}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        )}
         <button type="button" data-autofocus onClick={onCancel}>
           {cancelLabel}
         </button>
