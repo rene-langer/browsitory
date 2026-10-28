@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
 
@@ -1131,7 +1131,7 @@ describe("BranchTree — keys from inner controls", () => {
       remotes: [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }],
       onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
     });
-    fireEvent.click(screen.getByRole("button", { name: /origin/ }));
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
     const actions = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
     fireEvent.keyDown(actions, { key: "Enter" });
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
@@ -1410,5 +1410,131 @@ describe("BranchTree — refs and remotes (4b)", () => {
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
 
     await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("BranchTree — keyboard menus", () => {
+  const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
+  function rect(left: number, top: number, width: number, height: number) {
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Shift+F10 on a local branch row opens its menu at the row and Escape returns focus to the row", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(8, 100, 240, 22));
+    renderTree();
+    const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "8px", top: "122px" });
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(row).toHaveFocus();
+  });
+
+  it("the Menu key on the current branch focuses the first enabled item (Checkout is disabled)", () => {
+    renderTree();
+    const row = screen.getByTitle("main").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+  });
+
+  it("the Menu key on a row's '…' button opens the row's menu and Escape returns to the button", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
+    actions.focus();
+    fireEvent.keyDown(actions, { key: "ContextMenu" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(actions).toHaveFocus();
+  });
+
+  it("does not open the row menu from the rename field", () => {
+    renderTree();
+    const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename feat/foo" }), { key: "F10", shiftKey: true });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("remote-tracking branch rows are focusable and open their menu from the keyboard", async () => {
+    renderTree({ remotes: [origin], onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByTitle("topic")).closest('[role="button"]') as HTMLElement;
+    expect(row.tabIndex).toBe(0);
+    row.focus();
+    expect(row).toHaveFocus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(row).toHaveFocus();
+  });
+
+  it("the Menu key on a remote folder header opens the remote's menu at the header", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(4, 300, 240, 22));
+    const { props } = renderTree({ remotes: [origin] });
+    const header = screen.getByRole("button", { name: "origin" });
+    header.focus();
+    const prevented = !fireEvent.keyDown(header, { key: "ContextMenu" });
+    expect(prevented).toBe(true);
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "4px", top: "322px" });
+    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Fetch" }), { key: "Escape" });
+    expect(header).toHaveFocus();
+    // The header's own toggle did not run.
+    expect(props.onListRemoteBranches).not.toHaveBeenCalled();
+  });
+
+  it("right-click on a remote folder header opens at the pointer", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(0, 300, 240, 22));
+    renderTree({ remotes: [origin] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }), { clientX: 50, clientY: 310 });
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "50px", top: "310px" });
+  });
+
+  it("a remote folder has a '…' button for its actions", () => {
+    renderTree({ remotes: [origin] });
+    const actions = screen.getByRole("button", { name: "Actions for remote origin" });
+    expect(actions).toHaveAttribute("aria-haspopup", "menu");
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
+  });
+
+  it("'…' and '+' report whether their menu is open", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
+    const add = screen.getByRole("button", { name: "Add" });
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    expect(add).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(add);
+    expect(add).toHaveAttribute("aria-expanded", "true");
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "New branch…" }), { key: "Escape" });
+    fireEvent.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    expect(add).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the '+' menu opens under the button, not at (0,0) (regression, PR #72)", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(180, 40, 20, 20));
+    renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "180px", top: "60px" });
   });
 });

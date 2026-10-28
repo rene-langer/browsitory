@@ -16,6 +16,7 @@ import { FormDialog } from "./primitives/FormDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./BranchTree.module.css";
@@ -276,13 +277,8 @@ export function BranchTree({
                   if (!isRebasing) onSwitchBranch(branch.name);
                 }
           }
-          onContextMenu={
-            isRenaming
-              ? undefined
-              : (event) => {
-                  event.preventDefault();
-                  openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
-                }
+          onOpenMenu={
+            isRenaming ? undefined : (anchor) => openRowMenu({ kind: "local-branch", name: branch.name, ...anchor })
           }
         >
           <div className={styles.rowInner}>
@@ -336,10 +332,10 @@ export function BranchTree({
                 className={styles.iconButton}
                 aria-label={`Actions for ${branch.name}`}
                 aria-haspopup="menu"
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  openRowMenu({ kind: "local-branch", name: branch.name, x: rect.left, y: rect.bottom });
-                }}
+                aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
+                onClick={(event) =>
+                  openRowMenu({ kind: "local-branch", name: branch.name, ...rectAnchor(event.currentTarget) })
+                }
               >
                 <MoreHorizontal size={12} aria-hidden="true" />
               </button>
@@ -385,10 +381,7 @@ export function BranchTree({
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
           }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
-          }}
+          onOpenMenu={(anchor) => openRowMenu({ kind: "remote-branch", remoteName, branchName, ...anchor })}
         >
           <div className={styles.rowInner}>
             <button
@@ -408,19 +401,20 @@ export function BranchTree({
             <span className={styles.name} title={branchName}>
               {node.name}
             </span>
-            {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
-                native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
-                name button has focus) — without this, a keyboard/screen-reader user has no
-                visible indication those actions exist at all (AUD-2026-09-05-FE-001). */}
+            {/* Visible affordance for the row's menu (which the row itself also opens on
+                right-click, the Menu key or Shift+F10): without it a pointer or screen-reader
+                user has no indication those actions exist (AUD-2026-09-05-FE-001). */}
             <button
               type="button"
               className={styles.iconButton}
               aria-label={`Actions for ${branchName}`}
               aria-haspopup="menu"
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
-                openRowMenu({ kind: "remote-branch", remoteName, branchName, x: rect.left, y: rect.bottom });
-              }}
+              aria-expanded={
+                rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
+              }
+              onClick={(event) =>
+                openRowMenu({ kind: "remote-branch", remoteName, branchName, ...rectAnchor(event.currentTarget) })
+              }
             >
               <MoreHorizontal size={12} aria-hidden="true" />
             </button>
@@ -732,10 +726,8 @@ export function BranchTree({
           className={styles.iconButton}
           aria-label="Add"
           aria-haspopup="menu"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            openRowMenu({ kind: "add", x: rect.left, y: rect.bottom });
-          }}
+          aria-expanded={rowMenu?.kind === "add"}
+          onClick={(event) => openRowMenu({ kind: "add", ...rectAnchor(event.currentTarget) })}
         >
           <Plus size={14} aria-hidden="true" />
         </button>
@@ -907,24 +899,47 @@ export function BranchTree({
 
         {remotes.map((remote) => (
           <li key={remote.name} className={styles.folder}>
-            <button
-              type="button"
-              className={styles.folderHeader}
-              aria-expanded={isRemoteOpen(remote.name)}
-              onClick={() => toggleRemote(remote.name)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                openRowMenu({ kind: "remote-folder", name: remote.name, x: event.clientX, y: event.clientY });
-              }}
-            >
-              <ChevronRight
-                size={14}
-                aria-hidden="true"
-                className={isRemoteOpen(remote.name) ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
-              />
-              <Cloud size={14} aria-hidden="true" />
-              {remote.name}
-            </button>
+            <div className={styles.folderRow}>
+              <button
+                type="button"
+                className={styles.folderHeader}
+                aria-expanded={isRemoteOpen(remote.name)}
+                aria-keyshortcuts="Shift+F10 ContextMenu"
+                onClick={() => toggleRemote(remote.name)}
+                onKeyDown={(event) => {
+                  if (!isMenuKey(event)) return;
+                  event.preventDefault();
+                  openRowMenu({ kind: "remote-folder", name: remote.name, ...rectAnchor(event.currentTarget) });
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openRowMenu({ kind: "remote-folder", name: remote.name, ...menuAnchor(event, event.currentTarget) });
+                }}
+              >
+                <ChevronRight
+                  size={14}
+                  aria-hidden="true"
+                  className={isRemoteOpen(remote.name) ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+                />
+                <Cloud size={14} aria-hidden="true" />
+                {remote.name}
+              </button>
+              {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key).
+                  No text content: `commands.ts`'s `expandRemoteBranches` finds the header by its
+                  text, which must keep matching only the button above. */}
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label={`Actions for remote ${remote.name}`}
+                aria-haspopup="menu"
+                aria-expanded={rowMenu?.kind === "remote-folder" && rowMenu.name === remote.name}
+                onClick={(event) =>
+                  openRowMenu({ kind: "remote-folder", name: remote.name, ...rectAnchor(event.currentTarget) })
+                }
+              >
+                <MoreHorizontal size={12} aria-hidden="true" />
+              </button>
+            </div>
             {isRemoteOpen(remote.name) && (
               <ul className={styles.folderBody}>
                 {remoteBranches[remote.name] === undefined && remoteBranchesError === null && (
