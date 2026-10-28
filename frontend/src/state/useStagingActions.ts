@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { RepoClient, StatusEntry, StatusKind } from "../ipc/RepoClient";
+import type { RepoClient, StatusEntry, StatusKind, Trailer } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome, RunOptimisticMutation } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
@@ -27,7 +27,7 @@ export interface StagingActions {
   ignorePath(pattern: string): Promise<void>;
   // Resolves `true` once committed; `false` on any failure (a hook failure also stores
   // `hookFailure`), so CommitBox only clears the message after a commit that landed.
-  commit(message: string, noVerify: boolean): Promise<boolean>;
+  commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
 }
 
 // A path can have two StatusEntry rows simultaneously (staged + unstaged, for a partially-staged
@@ -148,13 +148,18 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const commit = useCallback(
-    async (message: string, noVerify: boolean) => {
+    async (message: string, noVerify: boolean, trailers: Trailer[] = []) => {
       const ok = await runMutationWithOutcome(async () => {
-        const outcome = await client.commit(repoPath, message, noVerify);
+        const outcome = await client.commit(repoPath, message, noVerify, trailers);
         if (outcome.kind === "HookFailed") {
           setState((prev) => ({
             ...prev,
-            hookFailure: { hook: outcome.hook, output: outcome.output, retry: { kind: "commit", message }, dialogOpen: true },
+            hookFailure: {
+              hook: outcome.hook,
+              output: outcome.output,
+              retry: { kind: "commit", message, trailers },
+              dialogOpen: true,
+            },
           }));
           throw new Error(hookFailedMessage(outcome.hook));
         }

@@ -2144,3 +2144,56 @@ describe("DiffPane commit message settings", () => {
     expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
   });
 });
+
+describe("DiffPane co-authors and amend author", () => {
+  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null };
+  const head = {
+    id: "h1",
+    shortId: "h1",
+    summary: "head",
+    authorName: "Me",
+    authorEmail: "me@x.org",
+    timestamp: 0,
+    parentIds: [],
+    branchRefs: [],
+    remoteBranchRefs: [],
+  };
+
+  it("prefills the amend Author from the graph and amends with the options", async () => {
+    const onAmendCommit = vi.fn(async () => true);
+    renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
+      amendMode: true,
+      headInfo,
+      commits: [head],
+      onAmendCommit,
+    });
+    const author = await screen.findByRole("textbox", { name: "Author" });
+    expect(author).toHaveValue("Me <me@x.org>");
+    await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
+    fireEvent.click(screen.getByRole("button", { name: "Amend" }));
+    expect(onAmendCommit).toHaveBeenCalledWith("head message", { author: null, trailers: [] });
+  });
+
+  it("leaves the Author empty when HEAD is not in the graph", async () => {
+    renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
+      amendMode: true,
+      headInfo,
+      commits: [],
+    });
+    expect(await screen.findByRole("textbox", { name: "Author" })).toHaveValue("");
+  });
+
+  it("offers the repository's recent authors and commits them as trailers", async () => {
+    const listRecentAuthors = vi.fn(async () => [{ name: "Ada", email: "ada@x.org" }]);
+    const onCommit = vi.fn(async () => true);
+    renderUncommitted(fakeClient({ listRecentAuthors }), [{ path: "a.txt", staged: true, kind: "Modified" }], {
+      onCommit,
+    });
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
+    expect(onCommit).toHaveBeenCalledWith("Fix", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
+  });
+});

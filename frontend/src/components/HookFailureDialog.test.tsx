@@ -5,7 +5,7 @@ import { HookFailureDialog } from "./HookFailureDialog";
 const failure = {
   hook: "pre-commit",
   output: "lint failed\n",
-  retry: { kind: "commit" as const, message: "m" },
+  retry: { kind: "commit" as const, message: "m", trailers: [] },
   dialogOpen: true,
 };
 

@@ -12,8 +12,9 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
+  AmendOptions,
   BlameLine,
   DiffHunk,
   DiffOptions,
@@ -27,6 +28,7 @@ import type {
   StashFiles,
   StatusEntry,
   StatusKind,
+  Trailer,
 } from "../ipc/RepoClient";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -617,7 +619,7 @@ export function DiffPane({
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
-  onCommit: (message: string) => Promise<boolean>;
+  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
   // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
   onOpenStashDialog?: (paths: string[]) => void;
@@ -629,7 +631,7 @@ export function DiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => Promise<boolean>;
+  onAmendCommit?: (message: string, options: AmendOptions) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
@@ -699,6 +701,7 @@ export function DiffPane({
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
+        commits={commits}
       />
     );
   }
@@ -754,6 +757,7 @@ function entryKey(entry: { path: string; staged: boolean }): string {
 function UncommittedDiffPane({
   repoPath,
   client,
+  commits,
   status,
   onStageFile,
   onUnstageFile,
@@ -833,7 +837,9 @@ function UncommittedDiffPane({
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
-  onCommit: (message: string) => Promise<boolean>;
+  /** The graph's commits, for HEAD's author in the amend Author field. */
+  commits?: GraphCommit[];
+  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
   onOpenStashDialog: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -844,7 +850,7 @@ function UncommittedDiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => Promise<boolean>;
+  onAmendCommit?: (message: string, options: AmendOptions) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
@@ -863,6 +869,9 @@ function UncommittedDiffPane({
   sequencePending?: boolean;
 }) {
   const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
+  const loadRecentAuthors = useCallback(() => client.listRecentAuthors(repoPath), [client, repoPath]);
+  const headCommit = headInfo.headId === null ? undefined : commits?.find((c) => c.id === headInfo.headId);
+  const headAuthor = headCommit === undefined ? null : { name: headCommit.authorName, email: headCommit.authorEmail };
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
     if (!amendMode || headInfo.headId === null) {
@@ -1261,6 +1270,7 @@ function UncommittedDiffPane({
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
             messageSettings={commitMessageSettings}
+            loadRecentAuthors={loadRecentAuthors}
             amend={{
               available:
                 headInfo.headId !== null &&
@@ -1272,6 +1282,7 @@ function UncommittedDiffPane({
               pushed: headInfo.headPushed,
               onToggle: onSetAmendMode,
               onAmend: onAmendCommit,
+              headAuthor,
             }}
           />
         )}

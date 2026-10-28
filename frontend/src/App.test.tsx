@@ -637,7 +637,7 @@ describe("App", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
     expect(within(dialog).getByLabelText("Hook output")).toHaveTextContent("lint failed");
-    expect(commit).toHaveBeenCalledWith("/repos/a", "feat: hooked", false);
+    expect(commit).toHaveBeenCalledWith("/repos/a", "feat: hooked", false, []);
     expect(box).toHaveValue("feat: hooked");
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -648,9 +648,60 @@ describe("App", () => {
 
     fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
 
-    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: hooked", true));
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: hooked", true, []));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
     await waitFor(() => expect(box).toHaveValue(""));
+  });
+
+  it("commits without hooks with the co-authors the box holds, then clears them", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "no\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRecentAuthors: async () => [
+        { name: "Ada", email: "ada@x.org" },
+        { name: "Bob", email: "bob@x.org" },
+      ],
+      commit,
+    });
+    render(<App client={client} />);
+
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: pair" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    const ada = { key: "Co-authored-by", value: "Ada <ada@x.org>" };
+    const dialog = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
+    expect(commit).toHaveBeenCalledWith("/repos/a", "feat: pair", false, [ada]);
+
+    // A chip added after the failure goes into the retry too.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "commit-msg hook failed" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Bob <bob@x.org>" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
+
+    await waitFor(() =>
+      expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: pair", true, [
+        ada,
+        { key: "Co-authored-by", value: "Bob <bob@x.org>" },
+      ]),
+    );
+    await waitFor(() => expect(box).toHaveValue(""));
+    expect(screen.queryByRole("list", { name: "Co-authors" })).toBeNull();
   });
 
   it("does not bring back a committed message when the tab was switched away mid-commit", async () => {
@@ -721,7 +772,7 @@ describe("App", () => {
     const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
     fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
 
-    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: short", true));
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: short", true, []));
     await waitFor(() => expect(box).toHaveValue(""));
   });
 
@@ -758,7 +809,7 @@ describe("App", () => {
     const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
     fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
 
-    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: new work", true));
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: new work", true, []));
   });
 
   it("publishes the current branch from the sync bar through the Push dialog", async () => {

@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { DEFAULT_COMMIT_MESSAGE_SETTINGS, type CommitMessageSettings } from "../ipc/RepoClient";
+import {
+  DEFAULT_COMMIT_MESSAGE_SETTINGS,
+  type AmendOptions,
+  type CommitMessageSettings,
+  type SignatureInput,
+  type Trailer,
+} from "../ipc/RepoClient";
+import { coAuthorTrailers, formatPerson, parsePerson, sameEmail } from "../lib/people";
+import { CoAuthorPicker } from "./CoAuthorPicker";
+import { Field } from "./primitives/Field";
 import { Toolbar } from "./primitives/Toolbar";
 import { runningHookLabel } from "../lib/hookFailure";
 import styles from "./CommitBox.module.css";
@@ -17,7 +26,15 @@ export interface CommitDraft {
    * otherwise). Persisted so a remount while amending can't lose it.
    */
   stashed?: string | null;
+  /** Co-author chips; they become `Co-authored-by:` trailers on commit/amend. */
+  coAuthors?: SignatureInput[];
+  /** The pre-amend chips while amend mode has swapped them out (null/absent otherwise). */
+  stashedCoAuthors?: SignatureInput[] | null;
+  /** The amend Author field's text once edited (null/absent: HEAD's author). */
+  amendAuthor?: string | null;
 }
+
+const NO_PEOPLE: SignatureInput[] = [];
 
 export function CommitBox({
   onCommit,
@@ -36,12 +53,16 @@ export function CommitBox({
   clearMessage = null,
   onClearMessageHandled,
   messageSettings = DEFAULT_COMMIT_MESSAGE_SETTINGS,
+  loadRecentAuthors,
 }: {
   /**
-   * Resolves `true` once the commit landed. The message is cleared only then (and only if it was
-   * not edited meanwhile), so a failed commit — e.g. a failing pre-commit hook — keeps it.
+   * Resolves `true` once the commit landed. The message (and the co-author chips) are cleared
+   * only then (and only if not edited meanwhile), so a failed commit — e.g. a failing pre-commit
+   * hook — keeps them. `trailers` are the chips as `Co-authored-by` trailers.
    */
-  onCommit: (message: string) => Promise<boolean>;
+  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
+  /** Recent authors for "Add co-author"; omit to hide co-authors. */
+  loadRecentAuthors?: () => Promise<SignatureInput[]>;
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
@@ -92,7 +113,9 @@ export function CommitBox({
     pushed: boolean;
     onToggle: (on: boolean) => void;
     /** Resolves `true` once amended; Amend is disabled while it runs. */
-    onAmend: (message: string) => Promise<boolean>;
+    onAmend: (message: string, options: AmendOptions) => Promise<boolean>;
+    /** HEAD's author, prefilled in the Author field; null when unknown (not in the graph). */
+    headAuthor?: SignatureInput | null;
   };
 }) {
   const [message, setMessage] = useState(initialDraft?.message ?? "");
@@ -102,13 +125,20 @@ export function CommitBox({
   const [lastSeeded, setLastSeeded] = useState(initialDraft?.lastSeeded ?? "");
 
   const [stashedDraft, setStashedDraft] = useState<string | null>(initialDraft?.stashed ?? null);
+  const [coAuthors, setCoAuthors] = useState<SignatureInput[]>(initialDraft?.coAuthors ?? NO_PEOPLE);
+  const [stashedCoAuthors, setStashedCoAuthors] = useState<SignatureInput[] | null>(
+    initialDraft?.stashedCoAuthors ?? null,
+  );
+  // The amend Author field's text; null shows HEAD's author.
+  const [amendAuthor, setAmendAuthor] = useState<string | null>(initialDraft?.amendAuthor ?? null);
+  const [authorError, setAuthorError] = useState(false);
 
   // Write-through rather than lifting the state itself: the owner only needs the value back on
   // the next mount, and making it controlled from `App` would re-render the whole workspace on
   // every keystroke.
   useEffect(() => {
-    onDraftChange?.({ message, lastSeeded, stashed: stashedDraft });
-  }, [message, lastSeeded, stashedDraft, onDraftChange]);
+    onDraftChange?.({ message, lastSeeded, stashed: stashedDraft, coAuthors, stashedCoAuthors, amendAuthor });
+  }, [message, lastSeeded, stashedDraft, coAuthors, stashedCoAuthors, amendAuthor, onDraftChange]);
 
   // Seeds the field when a merge starts or when the pre-fill message changes to a different
   // merge's message, and clears it when a merge ends — but in every case only if the field still
@@ -136,17 +166,24 @@ export function CommitBox({
   // Amend mode is only effective while it's actually available (e.g. not mid-merge).
   const amendOn = amend !== undefined && amend.on && amend.available;
   const headMessage = amend?.headMessage ?? null;
+  // The co-author chips are swapped the same way: amend starts with none.
   useEffect(() => {
     if (amendOn && stashedDraft === null && headMessage !== null) {
       // Deliberate seed write: entering amend mode swaps the draft out for HEAD's message.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStashedDraft(message);
       setMessage(headMessage);
+      setStashedCoAuthors(coAuthors);
+      setCoAuthors(NO_PEOPLE);
     } else if (!amendOn && stashedDraft !== null) {
       setMessage(stashedDraft);
       setStashedDraft(null);
+      setCoAuthors(stashedCoAuthors ?? NO_PEOPLE);
+      setStashedCoAuthors(null);
+      setAmendAuthor(null);
+      setAuthorError(false);
     }
-  }, [amendOn, headMessage, stashedDraft, message]);
+  }, [amendOn, headMessage, stashedDraft, message, coAuthors, stashedCoAuthors]);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusReady = !amendOn || stashedDraft !== null;
@@ -156,12 +193,22 @@ export function CommitBox({
     onFocusMessageHandled?.();
   }, [focusMessage, focusReady, onFocusMessageHandled]);
 
+  // Read by the clear request below, which must not re-run on every keystroke.
+  const latest = useRef({ message, stashedDraft });
+  useEffect(() => {
+    latest.current = { message, stashedDraft };
+  }, [message, stashedDraft]);
+
   useEffect(() => {
     if (clearMessage === null) return;
-    // One-shot clear requested by the owner, acknowledged right away.
+    // One-shot clear requested by the owner, acknowledged right away. The chips that went with
+    // the committed message go too.
+    const { message: shown, stashedDraft: stashed } = latest.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessage((current) => (current === clearMessage ? "" : current));
-    setStashedDraft((stashed) => (stashed === clearMessage ? "" : stashed));
+    setStashedDraft((draft) => (draft === clearMessage ? "" : draft));
+    if (shown === clearMessage) setCoAuthors(NO_PEOPLE);
+    if (stashed === clearMessage) setStashedCoAuthors(NO_PEOPLE);
     setLastSeeded("");
     onClearMessageHandled?.();
   }, [clearMessage, onClearMessageHandled]);
@@ -172,15 +219,32 @@ export function CommitBox({
   // Keyed by operation id (like `TransferPanel`), so Cancel re-arms for the next hook run.
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
+  // A merge/pick/revert (or squash) message is git's: no co-authors are added to it.
+  const showCoAuthors = loadRecentAuthors !== undefined && initialMessage === undefined;
+  const headAuthor = amend?.headAuthor ?? null;
+  const headAuthorText = headAuthor === null ? "" : formatPerson(headAuthor);
+  const authorText = amendAuthor ?? headAuthorText;
+
   const commitIfReady = () => {
+    const submittedCoAuthors = coAuthors;
+    const trailers = showCoAuthors ? coAuthorTrailers(submittedCoAuthors) : [];
     if (amendOn) {
       if (submitting || message.trim() === "") {
         return;
       }
+      // Blank or unchanged keeps HEAD's author; anything else must be `Name <email>`.
+      let author: SignatureInput | null = null;
+      if (authorText.trim() !== "" && authorText.trim() !== headAuthorText) {
+        author = parsePerson(authorText);
+        if (author === null) {
+          setAuthorError(true);
+          return;
+        }
+      }
       // Leave message and stash alone: on success amend mode turns off and the stashed draft
       // is restored; on failure the typed message stays put.
       setSubmitting(true);
-      void amend.onAmend(message).finally(() => setSubmitting(false));
+      void amend.onAmend(message, { author, trailers }).finally(() => setSubmitting(false));
       return;
     }
     if (disabled || submitting || message.trim() === "") {
@@ -188,11 +252,13 @@ export function CommitBox({
     }
     const submitted = message;
     setSubmitting(true);
-    void onCommit(submitted)
+    void onCommit(submitted, trailers)
       .then((ok) => {
         if (!ok) return;
-        // Only clear what was committed: text typed while the commit (and its hooks) ran stays.
+        // Only clear what was committed: text typed (or chips changed) while the commit (and its
+        // hooks) ran stays.
         setMessage((current) => (current === submitted ? "" : current));
+        setCoAuthors((current) => (current === submittedCoAuthors ? NO_PEOPLE : current));
         setLastSeeded("");
       })
       .finally(() => setSubmitting(false));
@@ -234,6 +300,51 @@ export function CommitBox({
       >
         Summary {summaryLength}/{summaryLimit}
       </span>
+      {showCoAuthors && (
+        <div className={styles.coAuthors}>
+          {coAuthors.length > 0 && (
+            <ul className={styles.chips} aria-label="Co-authors">
+              {coAuthors.map((person) => (
+                <li key={person.email.toLowerCase()} className={styles.chip}>
+                  <span>{formatPerson(person)}</span>
+                  <button
+                    type="button"
+                    className={styles.chipRemove}
+                    aria-label={`Remove co-author ${person.name}`}
+                    onClick={() => setCoAuthors((current) => current.filter((p) => !sameEmail(p, person)))}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <CoAuthorPicker
+            load={loadRecentAuthors}
+            exclude={coAuthors}
+            onPick={(person) =>
+              setCoAuthors((current) => (current.some((p) => sameEmail(p, person)) ? current : [...current, person]))
+            }
+          />
+        </div>
+      )}
+      {amendOn && (
+        <Field label="Author" error={authorError ? "Use the form Name <email>." : null} className={styles.authorField}>
+          {(props) => (
+            <input
+              {...props}
+              type="text"
+              spellCheck={false}
+              placeholder="Keep original author"
+              value={authorText}
+              onChange={(event) => {
+                setAmendAuthor(event.target.value);
+                setAuthorError(false);
+              }}
+            />
+          )}
+        </Field>
+      )}
       {!amendOn && disabled && disabledReason !== undefined && (
         <p id="commit-disabled-reason" className={styles.reason}>
           {disabledReason}
