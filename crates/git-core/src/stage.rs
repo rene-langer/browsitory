@@ -61,20 +61,37 @@ impl From<LinePatchError> for StageError {
 
 /// Stages the file as it is in the work tree, or its deletion when it is gone. A path below a
 /// symlinked folder is refused like git ("beyond a symbolic link"): staging it would read the
-/// link's target, possibly outside the repository. A symlink is staged as a link even when it
-/// dangles.
+/// link's target, possibly outside the repository; once the link itself is staged (it replaces
+/// the folder's entries, like `git add -A`) such a path has nothing left to stage. A symlink is
+/// staged as a link even when it dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
-    refuse_beyond_symlink(workdir, path)?;
     let mut index = repo.index()?;
-    if workdir.join(rel).symlink_metadata().is_ok() {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
+        // Staging the link that replaced the folder (as "Stage all" does first) already took
+        // the path out of the index; nothing is left to stage, and nothing is read.
+        if index.get_path(rel, 0).is_none() && !has_conflict_entries(&index, path) {
+            return Ok(());
+        }
+        return Err(StageError::BeyondSymlink(path.to_string()));
+    }
+    let full = workdir.join(rel);
+    if let Ok(meta) = full.symlink_metadata() {
+        if meta.file_type().is_symlink() {
+            // A link that replaced a tracked folder takes the folder's place, like `git add`.
+            index.remove_dir(rel, 0)?;
+        }
         index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;
     }
     index.write()?;
     Ok(())
+}
+
+fn has_conflict_entries(index: &git2::Index, path: &str) -> bool {
+    (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some())
 }
 
 /// git's "'d/f' is beyond a symbolic link" for a path below a symlinked folder.

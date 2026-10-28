@@ -1398,3 +1398,86 @@ fn stage_hunk_ancestor_is_refused() {
     d_f_still_staged(&f);
     f.untouched();
 }
+
+// --- Stage all over a linked folder, discard below one (review round 2, user decisions) ----
+
+/// "Stage all" sends every unstaged path, in status order, to `stage_file`.
+fn stage_all(f: &Fx) {
+    let paths: Vec<String> = git_core::status::status(&f.repo)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| !entry.staged)
+        .map(|entry| entry.path)
+        .collect();
+    assert_eq!(paths, ["d", "d/f"]);
+    for path in paths {
+        git_core::stage::stage_file(&f.repo, &path).unwrap();
+    }
+}
+
+#[test]
+fn stage_all_with_a_linked_folder_stages_the_link_in_place_of_the_folder() {
+    let f = fx();
+    f.link_ancestor();
+    stage_all(&f);
+    let index = f.repo.index().unwrap();
+    assert_eq!(
+        index.get_path(std::path::Path::new("d"), 0).unwrap().mode,
+        0o120000
+    );
+    assert!(index.iter().all(|entry| !entry.path.starts_with(b"d/")));
+    let status = git_core::status::status(&f.repo).unwrap();
+    let summary: Vec<_> = status
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry.staged, entry.kind))
+        .collect();
+    use git_core::status::StatusKind;
+    assert_eq!(
+        summary,
+        [
+            ("d", true, StatusKind::New),
+            ("d/f", true, StatusKind::Deleted)
+        ]
+    );
+    f.untouched();
+}
+
+#[test]
+fn stage_file_of_the_linked_folder_itself_replaces_its_entries() {
+    let f = fx();
+    f.link_ancestor();
+    git_core::stage::stage_file(&f.repo, "d").unwrap();
+    let index = f.repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/f"), 0).is_none());
+    assert_eq!(
+        index.get_path(std::path::Path::new("d"), 0).unwrap().mode,
+        0o120000
+    );
+    f.untouched();
+}
+
+#[test]
+fn discard_file_below_the_linked_folder_is_beyond_a_symbolic_link() {
+    let f = fx();
+    f.link_ancestor();
+    let error = git_core::stage::discard_file(&f.repo, "d/f").unwrap_err();
+    assert_eq!(error.to_string(), "'d/f' is beyond a symbolic link.");
+    f.untouched();
+}
+
+#[test]
+fn discard_hunk_below_the_linked_folder_is_beyond_a_symbolic_link() {
+    let f = fx();
+    f.link_ancestor();
+    let hunks = git_core::diff::working_diff(&f.repo, "d/f", false, &Default::default()).unwrap();
+    assert!(!hunks.is_empty());
+    for hunk in hunks {
+        let result =
+            git_core::stage::discard_hunk(&f.repo, "d/f", hunk.old_start, hunk.new_start, 3);
+        assert!(
+            matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f"),
+            "{result:?}"
+        );
+    }
+    f.untouched();
+}
