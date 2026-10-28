@@ -690,6 +690,32 @@ fn an_add_add_conflict_gets_an_empty_base() {
 }
 
 #[test]
+fn without_a_base_kdiff3_and_beyond_compare_get_no_base_argument() {
+    let (_dir, repo) = conflicted_repo();
+    let program = some_program();
+    for tool in ["kdiff3", "bc"] {
+        let (_c, config) = user_config(
+            Some(&repo),
+            &[
+                ("merge.tool", tool),
+                (&format!("mergetool.{tool}.path"), &program),
+            ],
+        );
+        let root = TempDir::new().unwrap();
+        let with_base = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
+        let base = env(&with_base.invocation.env, "BASE").display().to_string();
+        assert!(with_base.invocation.args.contains(&base), "{tool}");
+        let add_add = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+        let base = env(&add_add.invocation.env, "BASE").display().to_string();
+        assert!(!add_add.invocation.args.contains(&base), "{tool}");
+        assert_eq!(
+            add_add.invocation.args.len(),
+            with_base.invocation.args.len() - 1
+        );
+    }
+}
+
+#[test]
 fn merge_tool_refuses_paths_without_a_text_conflict() {
     let (dir, repo) = conflicted_repo();
     write_file(dir.path(), "other.txt", "x\n");

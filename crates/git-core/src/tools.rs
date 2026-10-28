@@ -29,7 +29,8 @@ use thiserror::Error;
 use crate::launch::is_safe_relative;
 use crate::merge::{find_conflict, MergeError};
 use crate::process::{
-    self, drain_tail, spawn, tail_text, CommandStyle, LaunchError, SpawnSpec, SplitError,
+    self, drain_tail, hides_console, spawn, tail_text, CommandStyle, LaunchError, SpawnSpec,
+    SplitError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,7 +166,8 @@ const PRESETS: &[Preset] = &[
         "p4merge",
         "p4merge",
         &["$LOCAL", "$REMOTE"],
-        &["$BASE", "$LOCAL", "$REMOTE", "$MERGED"],
+        // git's order: base, theirs, ours, result.
+        &["$BASE", "$REMOTE", "$LOCAL", "$MERGED"],
     ),
     (
         "vscode",
@@ -196,11 +198,19 @@ const TERMINAL_TOOLS: &[&str] = &[
 ];
 
 pub fn preset(kind: ToolKind, name: &str) -> Option<(&'static str, &'static [&'static str])> {
-    PRESETS
-        .iter()
-        .find(|p| p.0 == name)
-        .map(|p| (p.1, if kind == ToolKind::Diff { p.2 } else { p.3 }))
+    PRESETS.iter().find(|p| p.0 == name).map(|p| {
+        // Like git: on Windows `bcomp` (it waits); `BCompare.exe` returns at once.
+        let program = if p.1 == "bcompare" && cfg!(windows) {
+            "bcomp"
+        } else {
+            p.1
+        };
+        (program, if kind == ToolKind::Diff { p.2 } else { p.3 })
+    })
 }
+
+/// Presets that, like git, leave out the base when a conflict has none (add/add).
+const DROP_MISSING_BASE: &[&str] = &["kdiff3", "bc", "bc3", "bc4"];
 
 pub fn is_terminal_tool(name: &str) -> bool {
     TERMINAL_TOOLS.contains(&name)
@@ -477,13 +487,16 @@ pub(crate) fn build_invocation(
 ) -> Result<ToolInvocation, ToolError> {
     let cwd = workdir.to_path_buf();
     match command {
-        ToolCommand::Preset { program, args } => Ok(ToolInvocation {
-            program: program_path(program)?,
-            args: args.iter().map(|a| expand_tool_vars(a, vars)).collect(),
-            env: vars.env(),
-            cwd,
-            no_window: false,
-        }),
+        ToolCommand::Preset { program, args } => {
+            let program = program_path(program)?;
+            Ok(ToolInvocation {
+                no_window: cfg!(windows) && hides_console(&program),
+                program,
+                args: args.iter().map(|a| expand_tool_vars(a, vars)).collect(),
+                env: vars.env(),
+                cwd,
+            })
+        }
         ToolCommand::Shell(cmd) => match shell() {
             // The paths travel only as environment variables; the cmd text is the user's own.
             Some(sh) => Ok(ToolInvocation {
@@ -501,12 +514,13 @@ pub(crate) fn build_invocation(
                 let (program, args) = words
                     .split_first()
                     .ok_or(ToolError::from(SplitError::Empty))?;
+                let program = program_path(program)?;
                 Ok(ToolInvocation {
-                    program: program_path(program)?,
+                    no_window: cfg!(windows) && hides_console(&program),
+                    program,
                     args: args.to_vec(),
                     env: vars.env(),
                     cwd,
-                    no_window: false,
                 })
             }
         },
@@ -776,7 +790,9 @@ fn side_name(path: &str, side: &str) -> String {
     fn clean(text: &str, max: usize) -> String {
         text.chars()
             .map(|c| {
-                if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                // Letters and digits of any script are safe in a file name; separators, `:`,
+                // wildcards and control characters are not.
+                if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
                     c
                 } else {
                     '_'
@@ -979,7 +995,12 @@ pub fn prepare_merge_tool_with(
     if is_symlink(&merged) {
         return Err(ToolError::NotAFile(path.to_string()));
     }
-    let tool = resolve_tool(config, ToolKind::Merge)?;
+    let mut tool = resolve_tool(config, ToolKind::Merge)?;
+    if conflict.ancestor.is_none() && DROP_MISSING_BASE.contains(&tool.name.as_str()) {
+        if let ToolCommand::Preset { args, .. } = &mut tool.command {
+            args.retain(|arg| arg != "$BASE");
+        }
+    }
     let blob =
         |id: Oid| -> Result<Vec<u8>, ToolError> { Ok(repo.find_blob(id)?.content().to_vec()) };
     let ours = blob(ours.id)?;
@@ -1163,7 +1184,14 @@ mod tests {
             preset(ToolKind::Diff, "meld"),
             Some(("meld", &["$LOCAL", "$REMOTE"][..]))
         );
-        assert_eq!(preset(ToolKind::Merge, "bc4").unwrap().0, "bcompare");
+        // Like git: Beyond Compare's console launcher on Windows (`BCompare.exe` returns at
+        // once, which would end the merge before you start).
+        let bc = if cfg!(windows) { "bcomp" } else { "bcompare" };
+        assert_eq!(preset(ToolKind::Merge, "bc4").unwrap().0, bc);
+        assert_eq!(
+            preset(ToolKind::Merge, "p4merge").unwrap().1,
+            &["$BASE", "$REMOTE", "$LOCAL", "$MERGED"][..]
+        );
         assert_eq!(
             preset(ToolKind::Merge, "vscode").unwrap().1,
             &["--wait", "--merge", "$REMOTE", "$LOCAL", "$BASE", "$MERGED"][..]
@@ -1171,6 +1199,14 @@ mod tests {
         assert_eq!(preset(ToolKind::Diff, "vimdiff"), None);
         assert!(is_terminal_tool("nvimdiff2"));
         assert!(!is_terminal_tool("gvimdiff"));
+    }
+
+    #[test]
+    fn batch_files_are_started_without_a_console_window() {
+        assert!(hides_console(Path::new(r"C:\Users\me\bin\code.cmd")));
+        assert!(hides_console(Path::new("x.BAT")));
+        assert!(!hides_console(Path::new("meld.exe")));
+        assert!(!hides_console(Path::new("/usr/bin/meld")));
     }
 
     #[test]
@@ -1192,6 +1228,8 @@ mod tests {
             "we_ird_na_me__LOCAL.t_xt"
         );
         assert_eq!(side_name("CON", "LOCAL"), "CON_LOCAL");
+        assert_eq!(side_name("dir/Übersicht.md", "LOCAL"), "Übersicht_LOCAL.md");
+        assert_eq!(side_name("文档.txt", "BASE"), "文档_BASE.txt");
         let long = format!("{}.rs", "x".repeat(300));
         assert_eq!(side_name(&long, "LOCAL").len(), 64 + "_LOCAL.rs".len());
     }

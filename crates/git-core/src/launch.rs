@@ -548,12 +548,12 @@ pub fn run_invocation(invocation: &Invocation, cwd: &Path) -> Result<(), OpenErr
     let program =
         process::find_program(program).ok_or_else(|| LaunchError::NotFound(program.clone()))?;
     process::spawn_detached(&SpawnSpec {
+        no_window: cfg!(windows) && process::hides_console(&program),
         program,
         args: args.to_vec(),
         cwd: cwd.to_path_buf(),
         env: Vec::new(),
         new_console: invocation.new_console,
-        no_window: false,
         capture_stderr: false,
     })?;
     Ok(())

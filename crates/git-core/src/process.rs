@@ -546,6 +546,15 @@ pub fn find_sh() -> Option<PathBuf> {
         .or_else(|| find_program("sh.exe"))
 }
 
+/// A batch file (`.cmd`/`.bat`, such as VS Code's `code.cmd`) runs in `cmd.exe`, which would
+/// flash or keep open a console window on Windows while the program waits (`code --wait`).
+pub fn hides_console(program: &std::path::Path) -> bool {
+    program
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+}
+
 /// Variables that pin git to one repository/index/prefix. Removed from every spawned program:
 /// a tool or terminal opened for one repository must not operate on whichever repository
 /// Browsitory itself was launched for (from a git hook or alias, say).
