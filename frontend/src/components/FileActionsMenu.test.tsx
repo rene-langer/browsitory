@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { discardAllConfirmMessage, discardConfirmMessage, fileMenuItems, ignorePatterns } from "./FileActionsMenu";
+import {
+  commitFileMenuItems,
+  discardAllConfirmMessage,
+  discardConfirmMessage,
+  fileMenuItems,
+  ignorePatterns,
+} from "./FileActionsMenu";
 
 const tracked = { path: "src/a.ts", staged: false, kind: "Modified" as const };
 const untracked = { path: "logs/run.log", staged: false, kind: "New" as const };
@@ -48,5 +54,61 @@ describe("FileActionsMenu", () => {
       "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone.",
     );
     expect(discardAllConfirmMessage([tracked])).toBe("Discard changes to 1 file? This can't be undone.");
+  });
+
+  describe("external tools", () => {
+    const conflicted = { path: "c.txt", staged: false, kind: "Conflicted" as const };
+    const deleted = { path: "gone.txt", staged: false, kind: "Deleted" as const };
+    const idle = { mergeToolRunning: false };
+
+    it("adds external tool items only when tools are available", () => {
+      expect(fileMenuItems(tracked, vi.fn(), idle).map((i) => i.label)).toEqual([
+        "Discard changes…",
+        "Stash file…",
+        "Open in editor",
+        "Reveal in file manager",
+        "Open in diff tool",
+      ]);
+      expect(fileMenuItems({ ...tracked, staged: true }, vi.fn(), idle).map((i) => i.label)).toEqual([
+        "Stash file…",
+        "Open in editor",
+        "Reveal in file manager",
+        "Open in diff tool",
+      ]);
+    });
+
+    it("offers the merge tool for conflicted files and disables it while running", () => {
+      const onPick = vi.fn();
+      const items = fileMenuItems(conflicted, onPick, { mergeToolRunning: true });
+      expect(items.map((i) => i.label)).toEqual(["Open in editor", "Reveal in file manager", "Open in merge tool"]);
+      expect(items[2].disabled).toBe(true);
+      fileMenuItems(conflicted, onPick, idle)[2].onSelect();
+      expect(onPick).toHaveBeenCalledWith({ kind: "mergeTool" });
+    });
+
+    it("disables open in editor for a deleted file", () => {
+      const open = fileMenuItems(deleted, vi.fn(), idle).find((i) => i.label === "Open in editor");
+      expect(open?.disabled).toBe(true);
+      expect(open?.title).toBe("The file was deleted");
+    });
+
+    it("reports external tool picks", () => {
+      const onPick = vi.fn();
+      const items = fileMenuItems(tracked, onPick, idle);
+      for (const item of items.slice(2)) item.onSelect();
+      expect(onPick.mock.calls.map(([action]) => action)).toEqual([
+        { kind: "openInEditor" },
+        { kind: "reveal" },
+        { kind: "diffTool" },
+      ]);
+    });
+
+    it("builds the commit file menu and reports picks", () => {
+      const onPick = vi.fn();
+      const items = commitFileMenuItems(onPick);
+      expect(items.map((i) => i.label)).toEqual(["Open in editor", "Reveal in file manager", "Open in diff tool"]);
+      items[2].onSelect();
+      expect(onPick).toHaveBeenCalledWith({ kind: "diffTool" });
+    });
   });
 });

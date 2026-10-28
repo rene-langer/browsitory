@@ -1,17 +1,23 @@
+import { MoreHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { BlameLine, DiffHunk, DiffOptions, RepoClient } from "../ipc/RepoClient";
+import type { BlameLine, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
+import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import { DiffView } from "./DiffView";
+import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
+import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
 
 /**
  * One file's diff in a read-only view (a commit or a compare), with Blame and History.
- * `fetchDiff` runs again whenever `diffKey`, the path or the diff settings change.
+ * `fetchDiff` runs again whenever `diffKey`, the path or the diff settings change. With
+ * `externalTools` and `toolSource`, a "…" button and right-click menu open the file in the
+ * user's editor, file manager or diff tool.
  */
 export function ReadOnlyFileSection({
   repoPath,
@@ -25,6 +31,8 @@ export function ReadOnlyFileSection({
   onToggleCollapse,
   onSelectRow,
   onOpenFileHistory,
+  externalTools,
+  toolSource,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -39,8 +47,19 @@ export function ReadOnlyFileSection({
   onToggleCollapse: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  externalTools?: ExternalToolsApi;
+  /** The two versions "Open in diff tool" compares. */
+  toolSource?: DiffSource;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
+  const onPickFileAction = (action: FileAction) => {
+    if (tools === null) return;
+    if (action.kind === "openInEditor") tools.externalTools.openInEditor(path, null);
+    else if (action.kind === "reveal") tools.externalTools.reveal(path);
+    else if (action.kind === "diffTool") tools.externalTools.openDiffTool(path, tools.toolSource);
+  };
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
@@ -101,7 +120,17 @@ export function ReadOnlyFileSection({
 
   return (
     <li className={styles.fileSection}>
-      <div className={styles.fileSectionHeader}>
+      <div
+        className={styles.fileSectionHeader}
+        onContextMenu={
+          tools === null
+            ? undefined
+            : (event) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY });
+              }
+        }
+      >
         <CollapseToggle collapsed={collapsed} path={path} onToggle={onToggleCollapse} />
         <span className={styles.path}>{path}</span>
         {oldPath != null && <span className={styles.renamedFrom}>Renamed from {oldPath}</span>}
@@ -112,6 +141,20 @@ export function ReadOnlyFileSection({
           {onOpenFileHistory !== undefined && (
             <button type="button" aria-label={`History of ${path}`} onClick={() => onOpenFileHistory(path)}>
               History
+            </button>
+          )}
+          {tools !== null && (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`Actions for ${path}`}
+              aria-haspopup="menu"
+              onClick={(event) => {
+                const r = event.currentTarget.getBoundingClientRect();
+                setMenu({ x: r.left, y: r.bottom });
+              }}
+            >
+              <MoreHorizontal size={14} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -143,6 +186,9 @@ export function ReadOnlyFileSection({
             <DiffView hunks={hunks} path={path} />
           )}
         </div>
+      )}
+      {menu !== null && (
+        <ContextMenu x={menu.x} y={menu.y} items={commitFileMenuItems(onPickFileAction)} onClose={() => setMenu(null)} />
       )}
     </li>
   );

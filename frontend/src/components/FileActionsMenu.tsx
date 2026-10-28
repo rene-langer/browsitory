@@ -1,7 +1,14 @@
 import type { StatusEntry } from "../ipc/RepoClient";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
-export type FileAction = { kind: "discard" } | { kind: "ignore"; pattern: string } | { kind: "stash" };
+export type FileAction =
+  | { kind: "discard" }
+  | { kind: "ignore"; pattern: string }
+  | { kind: "stash" }
+  | { kind: "openInEditor" }
+  | { kind: "reveal" }
+  | { kind: "diffTool" }
+  | { kind: "mergeTool" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
@@ -22,23 +29,61 @@ export function ignorePatterns(path: string): Array<{ label: string; pattern: st
 }
 
 /**
- * The per-file actions menu. Conflicted files have none; staged files only "Stash file…";
- * unstaged files also discard, and untracked ones ignore.
+ * The per-file actions menu. Conflicted files have no repo actions; staged files only
+ * "Stash file…"; unstaged files also discard, and untracked ones ignore. With `tools` (external
+ * tools are available), every entry also gets editor/file manager items plus its diff tool, or
+ * for a conflicted file its merge tool (disabled while that tool is open).
  */
-export function fileMenuItems(entry: StatusEntry, onPick: (action: FileAction) => void): ContextMenuItem[] {
-  if (entry.kind === "Conflicted") return [];
-  const stash: ContextMenuItem = { label: "Stash file…", onSelect: () => onPick({ kind: "stash" }) };
-  if (entry.staged) return [stash];
-  const items: ContextMenuItem[] = [
-    { label: "Discard changes…", destructive: true, onSelect: () => onPick({ kind: "discard" }) },
-    stash,
-  ];
-  if (isUntracked(entry)) {
-    for (const { label, pattern } of ignorePatterns(entry.path)) {
-      items.push({ label, onSelect: () => onPick({ kind: "ignore", pattern }) });
+export function fileMenuItems(
+  entry: StatusEntry,
+  onPick: (action: FileAction) => void,
+  tools?: { mergeToolRunning: boolean },
+): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [];
+  if (entry.kind !== "Conflicted") {
+    const stash: ContextMenuItem = { label: "Stash file…", onSelect: () => onPick({ kind: "stash" }) };
+    if (entry.staged) {
+      items.push(stash);
+    } else {
+      items.push({ label: "Discard changes…", destructive: true, onSelect: () => onPick({ kind: "discard" }) }, stash);
+      if (isUntracked(entry)) {
+        for (const { label, pattern } of ignorePatterns(entry.path)) {
+          items.push({ label, onSelect: () => onPick({ kind: "ignore", pattern }) });
+        }
+      }
+    }
+  }
+  if (tools !== undefined) {
+    const deleted = entry.kind === "Deleted";
+    items.push(
+      {
+        label: "Open in editor",
+        disabled: deleted,
+        title: deleted ? "The file was deleted" : undefined,
+        onSelect: () => onPick({ kind: "openInEditor" }),
+      },
+      { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
+    );
+    if (entry.kind === "Conflicted") {
+      items.push({
+        label: "Open in merge tool",
+        disabled: tools.mergeToolRunning,
+        onSelect: () => onPick({ kind: "mergeTool" }),
+      });
+    } else {
+      items.push({ label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) });
     }
   }
   return items;
+}
+
+/** The menu of a read-only file section (a commit's or a compare's file). */
+export function commitFileMenuItems(onPick: (action: FileAction) => void): ContextMenuItem[] {
+  return [
+    { label: "Open in editor", onSelect: () => onPick({ kind: "openInEditor" }) },
+    { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
+    { label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) },
+  ];
 }
 
 export function discardConfirmMessage(entry: StatusEntry): string {

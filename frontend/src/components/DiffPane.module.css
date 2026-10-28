@@ -66,6 +66,15 @@ li.fileSection[aria-selected="true"] .fileSectionHeader {
   color: var(--color-warning-text);
 }
 
+.mergeToolNotice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-warning-text);
+  font-size: var(--text-sm);
+}
+
 .fileSectionHeader {
   display: flex;
   align-items: center;

@@ -1,6 +1,7 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { X, Plus } from "lucide-react";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { repoPanelId, repoTabId } from "./repoTabIds";
 import styles from "./RepoTabs.module.css";
 
@@ -33,6 +34,7 @@ export function RepoTabs({
   onClose,
   onCloseGroup,
   onAddTab,
+  tabMenuItems,
 }: {
   openRepos: OpenRepo[];
   activePath: string | null;
@@ -42,8 +44,11 @@ export function RepoTabs({
   onClose: (path: string) => void;
   onCloseGroup: (paths: string[]) => void;
   onAddTab: () => void;
+  /** A tab's context menu (right-click, the ContextMenu key or Shift+F10); omitted, none. */
+  tabMenuItems?: (path: string) => ContextMenuItem[];
 }) {
   const tablistRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   if (openRepos.length === 0) return null;
 
   // Roving tabindex: only the selected tab (or the first, when none is) is a tab stop; arrow keys
@@ -54,6 +59,12 @@ export function RepoTabs({
     const tabs = Array.from(tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     const current = tabs.indexOf(event.currentTarget);
     if (current === -1) return;
+    if (tabMenuItems !== undefined && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      setMenu({ path, x: rect.left, y: rect.bottom });
+      return;
+    }
     // WAI-ARIA APG tabs pattern: Delete closes the focused tab — any tab, not just the active one.
     // This is the host-independent keyboard path for the mouse-only close button below; Ctrl/Cmd+W
     // (App.tsx) can be swallowed by the Tauri/VSCode host first. Focus moves to the tab that takes
@@ -92,7 +103,16 @@ export function RepoTabs({
           aria-controls={repoPanelId(repo.path)}
           tabIndex={repo.path === tabStopPath ? 0 : -1}
           aria-keyshortcuts="Delete"
+          aria-haspopup={tabMenuItems !== undefined ? "menu" : undefined}
           onKeyDown={(event) => handleTabKeyDown(event, repo.path, busy)}
+          onContextMenu={
+            tabMenuItems === undefined
+              ? undefined
+              : (event) => {
+                  event.preventDefault();
+                  setMenu({ path: repo.path, x: event.clientX, y: event.clientY });
+                }
+          }
           title={repo.path}
           className={styles.tabLabel}
           onClick={() => onSwitchTo(repo.path)}
@@ -151,6 +171,10 @@ export function RepoTabs({
       <button type="button" className={styles.addButton} aria-label="Open another repository" title="Open another repository" onClick={onAddTab}>
         <Plus size={14} aria-hidden="true" />
       </button>
+      {/* Outside the tablist: a tablist may only own tabs. */}
+      {menu !== null && tabMenuItems !== undefined && (
+        <ContextMenu x={menu.x} y={menu.y} items={tabMenuItems(menu.path)} onClose={() => setMenu(null)} />
+      )}
     </div>
   );
 }

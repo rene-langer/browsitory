@@ -232,3 +232,48 @@ describe("RepoTabs grouping", () => {
     expect(screen.queryByRole("button", { name: /close deleted-ws/i })).not.toBeInTheDocument();
   });
 });
+
+describe("RepoTabs tab menu", () => {
+  const renderTabs = (tabMenuItems?: (path: string) => { label: string; onSelect: () => void }[]) =>
+    render(
+      <RepoTabs
+        openRepos={repos}
+        activePath="/repos/widget"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        tabMenuItems={tabMenuItems}
+      />,
+    );
+
+  it("opens a tab menu from right-click and from the keyboard", () => {
+    const onPick = vi.fn();
+    const tabMenuItems = vi.fn((path: string) => [{ label: "Open terminal here", onSelect: () => onPick(path) }]);
+    renderTabs(tabMenuItems);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "widget" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open terminal here" }));
+    expect(onPick).toHaveBeenCalledWith("/repos/widget");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "gadget" }), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Open terminal here" })).toBeInTheDocument();
+    expect(tabMenuItems).toHaveBeenLastCalledWith("/repos/gadget");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "widget" }), { key: "ContextMenu" });
+    expect(tabMenuItems).toHaveBeenLastCalledWith("/repos/widget");
+    expect(screen.getByRole("tab", { name: "widget" })).toHaveAttribute("aria-haspopup", "menu");
+  });
+
+  it("has no tab menu without tabMenuItems", () => {
+    renderTabs();
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "widget" }));
+    fireEvent.keyDown(screen.getByRole("tab", { name: "widget" }), { key: "F10", shiftKey: true });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("tab", { name: "widget" })).not.toHaveAttribute("aria-haspopup");
+  });
+});
