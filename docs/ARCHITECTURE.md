@@ -16,8 +16,10 @@ browsitory/
 
 `vscode-sidecar` is `tauri-app`'s sibling for the VSCode extension target: a standalone binary
 speaking line-delimited JSON-RPC 2.0 over stdio instead of Tauri's IPC. It wires every
-`RepoClient` method except five VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
-`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`), which the `extension/` host
+`RepoClient` method except the VSCode-native ones (`pickRepoFolder`, `getAppVersion`,
+`getLastSeenVersion`, `setLastSeenVersion`, `openExternalUrl`, `logFrontendError`, and the
+external-tool launchers `openInEditor`, `revealInFileManager`, `openTerminal`, `openDiffTool`,
+`openMergeTool`), which the `extension/` host
 implements directly against VSCode APIs instead of round-tripping through the sidecar — see
 `docs/superpowers/specs/2026-08-30-vscode-extension-design.md`'s "VSCode-native integrations"
 section. Transfer progress (`subscribeTransferProgress`) rides the same JSON-RPC connection as
@@ -28,7 +30,7 @@ sidecar binary.
 
 ### VSCode host and sidecar lifecycle
 
-One `SidecarBridge` belongs to each open Browsitory webview panel. The host handles the five
+One `SidecarBridge` belongs to each open Browsitory webview panel. The host handles the
 VSCode-native methods above itself; all repository/config/credential requests keep their
 original JSON-RPC id and are forwarded one-per-line to one lazily spawned sidecar. Valid sidecar
 responses remove their ids from the pending set before being relayed unchanged.
@@ -267,6 +269,41 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   `TransferPhase::RunningHook` for pushes. Commit/amend get `commit-<n>`/`amend-<n>` ids in
   `CancelRegistry`, so `cancelTransfer` stops a running hook. Hooks block the repo worker like
   signing does.
+
+## External tools
+
+- Each host launches tools its own way. The desktop app spawns programs from Rust
+  (`commands/tools.rs`). The VSCode extension host answers the five launch methods with VSCode
+  APIs (`vscode.open`, `vscode.diff`, `_open.mergeEditor`, `createTerminal`, `revealFileInOS`),
+  and they never reach the sidecar.
+- `git-core::process` (shared with hooks) splits editor/terminal command lines itself (POSIX or
+  `CommandLineToArgvW` rules, no expansion) and never uses a shell for them; `{file}`, `{line}`
+  and `{dir}` are replaced inside each word after splitting. Programs are resolved to absolute
+  paths through absolute `PATH` entries only, so nothing in the work tree or the current
+  directory can shadow them, and every path handed to a program is absolute (it can't be read
+  as an option).
+- Paths from IPC go through `launch::resolve_in_workdir` (no empty, absolute, `.`/`..`, root
+  or prefix components; no `:` on Windows), and tool side paths are refused when a directory on
+  the way is a symlink out of the work tree.
+- With no editor configured, `launch::prepare_editor` refuses files the OS would run rather than
+  open (by extension per OS, execute bit, `#!`/ELF/PE/Mach-O magic, and the same checks on a
+  symlink's target) before calling `tauri_plugin_opener::open_path`.
+- `git-core::tools` resolves `diff.tool`/`merge.tool` from **trusted config levels only**
+  (system, XDG, global): a repository's own `.git/config` (and its includes) can neither pick a
+  tool nor change its `cmd`, `path` or `trustExitCode`, and is reported as ignored. A
+  `difftool.<name>.cmd`/`mergetool.<name>.cmd` runs as `sh -c` with `LOCAL`/`REMOTE`/`MERGED`/
+  `BASE` as environment variables, exactly as git runs it, so no path is ever spliced into
+  shell text. On Windows, `sh` is Git for Windows' `sh.exe`; without it, the cmd is split and
+  expanded directly. Presets are argv templates run without a shell.
+- The repo worker only prepares a tool launch: it resolves config and writes the
+  `LOCAL`/`REMOTE`/`BASE` files into a fresh `browsitory-tool-*` directory in the temp dir
+  (random name, 0700, files created `O_EXCL` with sanitized names). The Tauri command spawns the
+  tool and, for the merge tool, waits on `spawn_blocking`, so a tool window that stays open for
+  hours never blocks the repo's command queue. Stale directories are swept after 24 hours.
+- VSCode reads historical file contents through the `browsitory-file:` content provider, which
+  calls the sidecar's internal `read_file_version`. No temp files are needed there.
+- Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
+  repo path, which may be a subdirectory (`Repository::discover`).
 
 ## Fetch all
 

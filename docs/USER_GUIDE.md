@@ -489,6 +489,106 @@ buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.
 Tools that show all refs (`git log --all`, gitk) show a "browsitory undo anchor" commit; it
 keeps undoable objects from being garbage-collected.
 
+## External tools
+
+### Opening files
+
+Every changed file, every file of a commit and every file in a compare has a "…" button and a
+right-click menu with **Open in editor**, **Reveal in file manager** and **Open in diff tool**
+(**Open in merge tool** for a conflicted file). The palette has "Open current file in editor"
+and "Open current file in diff tool".
+
+Set your editor in **Preferences** (the gear button in the header, or "Preferences…" in the
+palette). The command is split into words the way a shell would, but never run through a
+shell, and these placeholders are replaced inside each word:
+
+- `{file}`: the file's full path (added at the end when the command has no `{file}`)
+- `{line}`: the first changed line, or 1
+- `{dir}`: the repository's root folder
+
+Examples: `code --goto {file}:{line}`, `subl {file}:{line}`, or on Windows
+`"C:\Program Files\Sublime Text\subl.exe" {file}:{line}`.
+
+Without an editor setting, the file opens with your system's default app. Files the system
+might run instead of open are refused: programs, scripts (`.sh`, `.py`, `.bat`, `.ps1`, …),
+shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), files with the execute bit on macOS
+and Linux, and files that start like a script or program. Set an editor to open those.
+
+### Terminal
+
+Right-click a repository tab (or focus it and press Shift+F10 or the Menu key) for **Open
+terminal here** and **Reveal repository**; both are also in the palette. The terminal starts
+in the repository's root folder. Without a terminal setting Browsitory uses:
+
+- macOS: Terminal.app
+- Windows: Windows Terminal (`wt`), else a `cmd` window
+- Linux: `$TERMINAL`, else the first of `x-terminal-emulator`, GNOME Terminal, Konsole, Xfce
+  Terminal, Alacritty, kitty and xterm that is installed
+
+A terminal command in Preferences can use `{dir}`, for example `kitty --directory {dir}` or
+`wezterm start --cwd {dir}`.
+
+### Diff and merge tools
+
+Browsitory uses the diff and merge tools from your git config, like `git difftool` and `git
+mergetool`:
+
+```sh
+git config --global diff.tool meld
+git config --global merge.tool meld
+```
+
+Without `diff.tool`, the diff tool falls back to `merge.tool`. These work without more setup:
+`meld`, `kdiff3`, `bc` / `bc3` / `bc4` (Beyond Compare), `p4merge`, `vscode` and `winmerge`.
+Point one at a program that is not on your `PATH` with `difftool.<name>.path` (or
+`mergetool.<name>.path`). Any other tool needs a command, which runs through `sh` with the
+`$LOCAL`, `$REMOTE`, `$MERGED` and `$BASE` variables, exactly as in git:
+
+```sh
+git config --global difftool.mytool.cmd 'mytool "$LOCAL" "$REMOTE"'
+```
+
+The command must wait until its window closes (for example `code --wait`), as with `git
+difftool`. Terminal tools such as `vimdiff` are not supported, since Browsitory has no terminal
+to run them in; give them a `cmd` that opens a terminal window if you want them anyway.
+**Preferences** shows which tools Browsitory found and where they were set.
+
+Browsitory only reads tool settings from your own git config (global, XDG or system), never
+from a repository's `.git/config`: a repository you downloaded or share with others can't make
+Browsitory run a command when you click a menu item. If a repository sets one, Preferences and
+the error message say so.
+
+What the tool compares:
+
+- an unstaged change: the staged (index) version against the file in your working tree, which
+  you can edit in the tool
+- a staged change: the last commit against the staged version
+- a commit's file: the commit's first parent against the commit (the old name for a rename)
+- a compare: the left side against the right side (or the working tree file)
+
+A missing side (a new or deleted file) is an empty file. The other sides are temporary copies,
+removed when the tool closes.
+
+### Resolving with a merge tool
+
+**Open in merge tool** on a conflicted file opens your tool with your version (`LOCAL`), the
+incoming version (`REMOTE`), their common ancestor (`BASE`) and the working tree file
+(`MERGED`) to save the result to. Other actions keep working while the tool is open. When it
+closes, the file shows "The merge tool finished." with **Mark resolved**, or "The merge tool
+closed without resolving the conflict." With `mergetool.<name>.trustExitCode` set, the tool's
+exit code decides; otherwise any change to the file counts as finished. **Mark resolved**
+stages the file; if it still contains `<<<<<<<` or `>>>>>>>` lines, Browsitory asks first.
+No `.orig` backup is written.
+
+### In VSCode
+
+In the VSCode extension, everything opens in VSCode itself: **Open in editor** opens the file
+at the line, **Open in diff tool** opens VSCode's diff view, **Open in merge tool** opens
+VSCode's merge editor (Browsitory can't tell when you are done there, so it shows no notice:
+save the result and stage the file as you normally would), **Open terminal here** opens an integrated terminal, and
+**Reveal** uses "Reveal in File Explorer/Finder". The editor and terminal settings and your git
+tools are not used there.
+
 ## Command palette
 
 Press **Ctrl+K** (or **Cmd+K** on macOS) anywhere to open the command

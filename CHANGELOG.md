@@ -95,6 +95,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   panel) shows with a Cancel button; a hook is stopped after 10 minutes. On Windows hooks run
   with Git for Windows' `sh`; without it a blocking hook fails with a message saying so.
 
+### External tools
+
+- File menus (the "…" button or right-click on a changed file, a commit's file or a compared
+  file) open the file in your editor, reveal it in the file manager, or open its changes in your
+  git diff tool. Conflicted files open in your git merge tool, and when it finishes Browsitory
+  offers **Mark resolved** (it asks first if conflict markers remain).
+- Right-click a repository tab (or press Shift+F10 / the Menu key on it, or use the palette) for
+  **Open terminal here** and **Reveal repository**.
+- A new **Preferences** dialog (gear button or "Preferences…" in the palette) sets the editor
+  and terminal commands, with `{file}`, `{line}` and `{dir}` placeholders. Without an editor,
+  files open with the system default app, except files that could run (programs, scripts,
+  shortcuts, launchers), which Browsitory refuses to hand to the system.
+- The diff and merge tools come from your own git config (`diff.tool`, `merge.tool`,
+  `difftool.<name>.cmd`, …) and are shown in Preferences read-only. meld, kdiff3, Beyond
+  Compare, p4merge, VS Code and WinMerge work without a `cmd`. Tool settings in a repository's
+  own `.git/config` are ignored, so a repository can't make Browsitory run commands.
+- In the VSCode extension, these open in VSCode itself: editor, diff view, merge editor,
+  integrated terminal and "Reveal in OS".
+
 ### Fixed
 
 - A commit that fails (for example because of a hook) no longer clears the message you typed
