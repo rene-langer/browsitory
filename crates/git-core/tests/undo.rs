@@ -13,7 +13,15 @@ fn init_repo() -> (TempDir, Repository) {
         config.set_str("user.name", "Test User").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         config.set_bool("core.autocrlf", false).unwrap();
+        config.set_str("core.eol", "lf").unwrap();
+        config.set_bool("core.safecrlf", false).unwrap();
+        config.set_bool("commit.gpgSign", false).unwrap();
+        let hooks = repo.path().join("hooks");
+        config
+            .set_str("core.hooksPath", hooks.to_str().unwrap())
+            .unwrap();
     }
+    repo.set_head("refs/heads/main").unwrap();
     (dir, repo)
 }
 
@@ -911,4 +919,120 @@ fn a_refused_restore_keeps_the_squash_message() {
     assert!(restore(&repo, &after, &before, "browsitory: undo test").is_err());
 
     assert!(repo.path().join("SQUASH_MSG").exists());
+}
+
+#[cfg(unix)]
+fn outside_dir() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("target.txt"), "OUTSIDE\n").unwrap();
+    fs::write(dir.path().join("f"), "OUTSIDE\n").unwrap();
+    dir
+}
+
+#[cfg(unix)]
+fn assert_outside_untouched(out: &Path) {
+    assert_eq!(
+        fs::read_to_string(out.join("target.txt")).unwrap(),
+        "OUTSIDE\n"
+    );
+    assert_eq!(fs::read_to_string(out.join("f")).unwrap(), "OUTSIDE\n");
+}
+
+#[cfg(unix)]
+fn seeded_with_tc_and_d() -> (TempDir, Repository) {
+    let (dir, repo) = seeded();
+    write(&repo, "tc", "plain\n");
+    write(&repo, "d/f", "inner\n");
+    stage(&repo, "tc");
+    stage(&repo, "d/f");
+    commit(&repo, "tc and d");
+    (dir, repo)
+}
+
+#[test]
+#[cfg(unix)]
+fn restore_over_a_typechanged_symlink_does_not_write_through_it() {
+    let out = outside_dir();
+    let (dir, repo) = seeded_with_tc_and_d();
+    let clean = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_file(dir.path().join("tc")).unwrap();
+    std::os::unix::fs::symlink(out.path().join("target.txt"), dir.path().join("tc")).unwrap();
+    let dirty = capture(&repo, SnapshotScope::Full).unwrap();
+
+    restore(&repo, &dirty, &clean, "undo").unwrap();
+
+    assert_outside_untouched(out.path());
+    assert!(!fs::symlink_metadata(dir.path().join("tc"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(read(&repo, "tc").as_deref(), Some("plain\n"));
+}
+
+#[test]
+#[cfg(unix)]
+fn restore_over_a_symlinked_directory_does_not_write_through_it() {
+    let out = outside_dir();
+    let (dir, repo) = seeded_with_tc_and_d();
+    let clean = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(out.path(), dir.path().join("d")).unwrap();
+    let dirty = capture(&repo, SnapshotScope::Full).unwrap();
+
+    restore(&repo, &dirty, &clean, "undo").unwrap();
+
+    assert_outside_untouched(out.path());
+    assert!(!fs::symlink_metadata(dir.path().join("d"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(read(&repo, "d/f").as_deref(), Some("inner\n"));
+}
+
+#[test]
+#[cfg(unix)]
+fn redo_to_a_snapshot_with_a_symlinked_directory_never_deletes_through_it() {
+    // Snapshot pair: real `d/f` → `d` replaced by a link. Undo restores the real directory;
+    // redo deletes `d/f` and writes the link. Neither may touch the outside directory.
+    let out = outside_dir();
+    let (dir, repo) = seeded_with_tc_and_d();
+    let with_dir = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(out.path(), dir.path().join("d")).unwrap();
+    let with_link = capture(&repo, SnapshotScope::Full).unwrap();
+
+    restore(&repo, &with_link, &with_dir, "undo").unwrap();
+    assert_outside_untouched(out.path());
+    assert_eq!(read(&repo, "d/f").as_deref(), Some("inner\n"));
+
+    restore(&repo, &with_dir, &with_link, "redo").unwrap();
+    assert_outside_untouched(out.path());
+    assert!(fs::symlink_metadata(dir.path().join("d"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+#[test]
+#[cfg(unix)]
+fn restore_never_deletes_through_a_symlinked_directory_swapped_in_after_the_snapshot() {
+    let out = outside_dir();
+    fs::write(out.path().join("x.txt"), "OUTSIDE\n").unwrap();
+    let (dir, repo) = seeded_with_tc_and_d();
+    write(&repo, "d/x.txt", "untracked\n");
+    let with_file = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_file(dir.path().join("d/x.txt")).unwrap();
+    let without = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "d/x.txt", "untracked\n");
+    fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::os::unix::fs::symlink(out.path(), dir.path().join("d")).unwrap();
+
+    let result = restore(&repo, &with_file, &without, "redo");
+
+    assert!(
+        matches!(result, Ok(()) | Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert!(out.path().join("x.txt").exists());
+    assert_outside_untouched(out.path());
 }

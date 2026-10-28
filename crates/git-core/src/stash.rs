@@ -416,7 +416,7 @@ fn worktree_blob(
     previous_mode: Option<u32>,
 ) -> Result<Option<(git2::Oid, u32)>, StashError> {
     let Some((bytes, mode)) =
-        crate::undo::read_worktree_file(&workdir.join(path), config, previous_mode)?
+        crate::undo::read_worktree_file(workdir, path, config, previous_mode)?
     else {
         return Ok(None);
     };

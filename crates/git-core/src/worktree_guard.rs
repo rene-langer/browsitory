@@ -220,6 +220,22 @@ pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
     false
 }
 
+/// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
+/// `rel` lands in a real directory inside the repository.
+pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
+    let mut current = workdir.to_path_buf();
+    let components: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        current.push(component);
+        match entry_kind(&current) {
+            Entry::Dir => {}
+            Entry::Link => return remove_link(&current),
+            Entry::Other => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
 /// Removes the file or link `rel` without following a link at the leaf or above it. Returns
 /// `Ok(false)` and does nothing when an ancestor is a symlink, `rel` is a directory, or `rel` is
 /// not a plain relative path. A missing `rel` counts as removed.
