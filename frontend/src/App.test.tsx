@@ -261,10 +261,15 @@ describe("App", () => {
       listStashes: async () => [],
     });
 
-    render(<App client={client} />);
+    const { container } = render(<App client={client} />);
 
     await screen.findByRole("tab", { name: "a" });
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+    // The Ctrl/Cmd+W listener lives in the active RepoWorkspace, which mounts after the tabs
+    // render, and it ignores the key while the workspace is busy. Wait for both, or a keydown
+    // fired under load lands before the listener exists and is lost.
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    await waitFor(() => expect(screen.getAllByTitle("Close (Delete)")).toHaveLength(2));
 
     fireEvent.keyDown(window, { key: "w", ctrlKey: true });
 
