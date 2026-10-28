@@ -92,6 +92,7 @@ pub fn dispatch(
         "set_external_tool_settings" => set_external_tool_settings(params),
         "get_git_tools" => get_git_tools(params, repos),
         "mark_resolved" => mark_resolved(params, repos),
+        "resolve_whole_file" => resolve_whole_file(params, repos),
         "read_file_version" => read_file_version(params, repos),
         "repo_workdir" => repo_workdir(params, repos),
         "check_merge_target" => check_merge_target(params, repos),
@@ -154,6 +155,10 @@ pub fn dispatch(
         "redo_last" => redo_last(params, repos),
         "cherry_pick" => cherry_pick(params, repos),
         "revert_commit" => revert_commit(params, repos),
+        "cherry_pick_many" => cherry_pick_many(params, repos),
+        "revert_many" => revert_many(params, repos),
+        "continue_sequence" => continue_sequence(params, repos),
+        "abort_sequence" => abort_sequence(params, repos),
         "reset_to_commit" => reset_to_commit(params, repos),
         "checkout_commit" => checkout_commit(params, repos),
         "push_tags" => push_tags(params, repos, stdout),
@@ -1198,6 +1203,31 @@ struct MarkResolvedParams {
     repo_path: String,
     path: String,
     force: bool,
+}
+
+#[derive(Deserialize)]
+enum ConflictSideDto {
+    Ours,
+    Theirs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolveWholeFileParams {
+    repo_path: String,
+    path: String,
+    side: ConflictSideDto,
+}
+
+fn resolve_whole_file(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: ResolveWholeFileParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let side = match params.side {
+        ConflictSideDto::Ours => git_core::merge::ConflictSide::Ours,
+        ConflictSideDto::Theirs => git_core::merge::ConflictSide::Theirs,
+    };
+    worker_handle(repos, &params.repo_path)?.resolve_whole_file(params.path, side)?;
+    Ok(Value::Null)
 }
 
 fn mark_resolved(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -2323,6 +2353,7 @@ struct HeadInfoDto {
     operation: Option<&'static str>,
     squash_message: Option<String>,
     commit_hooks: Vec<String>,
+    sequence: Option<SequenceProgressDto>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -2339,8 +2370,64 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             }),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
+            sequence: info.sequence.map(SequenceProgressDto::from),
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SequenceProgressDto {
+    kind: &'static str,
+    current_step: usize,
+    total_steps: usize,
+    current_commit: String,
+}
+
+impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
+    fn from(progress: git_core::pick::SequenceProgress) -> Self {
+        Self {
+            kind: match progress.kind {
+                git_core::pick::SequenceKind::CherryPick => "CherryPick",
+                git_core::pick::SequenceKind::Revert => "Revert",
+            },
+            current_step: progress.current_step,
+            total_steps: progress.total_steps,
+            current_commit: progress.current_commit,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum SequenceOutcomeDto {
+    Completed {
+        applied: usize,
+        skipped: Vec<String>,
+    },
+    Conflicted {
+        files: Vec<String>,
+        progress: SequenceProgressDto,
+    },
+}
+
+impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
+    fn from(outcome: git_core::pick::SequenceOutcome) -> Self {
+        match outcome {
+            git_core::pick::SequenceOutcome::Completed { applied, skipped } => {
+                Self::Completed { applied, skipped }
+            }
+            git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
+                files,
+                progress: progress.into(),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct SequenceAbortDto {
+    rewound: bool,
 }
 
 #[derive(Serialize)]
@@ -2534,18 +2621,67 @@ fn amend_commit(
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PickParams {
+    repo_path: String,
+    commit_id: String,
+    /// 1-based parent for a merge commit; absent or `null` otherwise.
+    #[serde(default)]
+    mainline: Option<u32>,
+}
+
 fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CommitIdParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id, None)?;
+    let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome =
+        worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id, params.mainline)?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 fn revert_commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CommitIdParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(params.commit_id, None)?;
+    let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?
+        .revert_commit(params.commit_id, params.mainline)?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitIdsParams {
+    repo_path: String,
+    /// Oldest-first.
+    commit_ids: Vec<String>,
+}
+
+fn cherry_pick_many(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CommitIdsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick_many(params.commit_ids)?;
+    serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn revert_many(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: CommitIdsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.revert_many(params.commit_ids)?;
+    serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn continue_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let outcome = worker_handle(repos, &params.repo_path)?.continue_sequence()?;
+    serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+}
+
+fn abort_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let abort = worker_handle(repos, &params.repo_path)?.abort_sequence()?;
+    serde_json::to_value(SequenceAbortDto {
+        rewound: abort.rewound,
+    })
+    .map_err(|error| error.to_string())
 }
 
 fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
