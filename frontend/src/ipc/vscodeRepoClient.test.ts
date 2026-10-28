@@ -43,9 +43,9 @@ describe("vscodeRepoClient", () => {
       method: "get_status",
       params: { repoPath: "/repo" },
     });
-    respond(1, [{ path: "a.txt", staged: false, kind: "New" }]);
+    respond(1, [{ path: "a.txt", oldPath: null, staged: false, kind: "New" }]);
 
-    await expect(promise).resolves.toEqual([{ path: "a.txt", staged: false, kind: "New" }]);
+    await expect(promise).resolves.toEqual([{ path: "a.txt", oldPath: null, staged: false, kind: "New" }]);
   });
 
   it("rejects when the sidecar returns a JSON-RPC error", async () => {
@@ -71,14 +71,14 @@ describe("vscodeRepoClient", () => {
     const openPromise = vscodeRepoClient.openRepo("/repo");
     const statusPromise = vscodeRepoClient.getStatus("/repo");
 
-    respond(2, [{ path: "b.txt", staged: true, kind: "Modified" }]);
+    respond(2, [{ path: "b.txt", oldPath: null, staged: true, kind: "Modified" }]);
     respond(1, null);
 
     // A void-returning JSON-RPC method's wire response carries `result: null` (JSON has no
     // `undefined`); the client resolves with that `null` as-is rather than coercing it.
     await expect(openPromise).resolves.toBeNull();
     await expect(statusPromise).resolves.toEqual([
-      { path: "b.txt", staged: true, kind: "Modified" },
+      { path: "b.txt", oldPath: null, staged: true, kind: "Modified" },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.openInEditor("/r", "a.ts", null), "open_in_editor", { repoPath: "/r", path: "a.ts", line: null }, null],
       [() => vscodeRepoClient.revealInFileManager("/r", "a.ts"), "reveal_in_file_manager", { repoPath: "/r", path: "a.ts" }, null],
       [() => vscodeRepoClient.openTerminal("/r"), "open_terminal", { repoPath: "/r" }, null],
-      [() => vscodeRepoClient.openDiffTool("/r", "a.ts", { kind: "Staged" }), "open_diff_tool", { repoPath: "/r", path: "a.ts", source: { kind: "Staged" } }, null],
+      [() => vscodeRepoClient.openDiffTool("/r", "a.ts", { kind: "Staged", oldPath: null }), "open_diff_tool", { repoPath: "/r", path: "a.ts", source: { kind: "Staged", oldPath: null } }, null],
       [() => vscodeRepoClient.openMergeTool("/r", "a.ts"), "open_merge_tool", { repoPath: "/r", path: "a.ts" }, "HandedOff"],
       [() => vscodeRepoClient.markResolved("/r", "a.ts", true), "mark_resolved", { repoPath: "/r", path: "a.ts", force: true }, "Resolved"],
       [() => vscodeRepoClient.getExternalToolSettings(), "get_external_tool_settings", {}, { editor: null, terminal: null }],
@@ -101,13 +101,14 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.openInEditor("/r", "a.ts", null), "open_in_editor", { repoPath: "/r", path: "a.ts", line: null }, null],
       [() => vscodeRepoClient.revealInFileManager("/r", "a.ts"), "reveal_in_file_manager", { repoPath: "/r", path: "a.ts" }, null],
       [() => vscodeRepoClient.openTerminal("/r"), "open_terminal", { repoPath: "/r" }, null],
-      [() => vscodeRepoClient.openDiffTool("/r", "a.ts", { kind: "Staged" }), "open_diff_tool", { repoPath: "/r", path: "a.ts", source: { kind: "Staged" } }, null],
+      [() => vscodeRepoClient.openDiffTool("/r", "a.ts", { kind: "Staged", oldPath: null }), "open_diff_tool", { repoPath: "/r", path: "a.ts", source: { kind: "Staged", oldPath: null } }, null],
       [() => vscodeRepoClient.openMergeTool("/r", "a.ts"), "open_merge_tool", { repoPath: "/r", path: "a.ts" }, "HandedOff"],
       [() => vscodeRepoClient.markResolved("/r", "a.ts", true), "mark_resolved", { repoPath: "/r", path: "a.ts", force: true }, "Resolved"],
       [() => vscodeRepoClient.getExternalToolSettings(), "get_external_tool_settings", {}, { editor: null, terminal: null }],
       [() => vscodeRepoClient.setExternalToolSettings({ editor: null, terminal: "kitty" }), "set_external_tool_settings", { settings: { editor: null, terminal: "kitty" } }, null],
       [() => vscodeRepoClient.getGitTools("/r"), "get_git_tools", { repoPath: "/r" }, { diffTool: null, mergeTool: null }],
-      [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5 }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5 } }, []],
+      [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5 }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5 }, oldPath: null }, []],
+      [() => vscodeRepoClient.getWorkingDiff("/repo", "new.txt", true, { ignoreWhitespace: true, contextLines: 5 }, "old.txt"), "get_working_diff", { repoPath: "/repo", path: "new.txt", staged: true, opts: { ignoreWhitespace: true, contextLines: 5 }, oldPath: "old.txt" }, []],
       [() => vscodeRepoClient.getCommitDiff("/repo", "abc", "f.txt", { ignoreWhitespace: true, contextLines: 5 }), "get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts: { ignoreWhitespace: true, contextLines: 5 } }, []],
       [() => vscodeRepoClient.stageHunk("/repo", "f.txt", 1, 2, 5), "stage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
       [() => vscodeRepoClient.unstageHunk("/repo", "f.txt", 1, 2, 5), "unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],

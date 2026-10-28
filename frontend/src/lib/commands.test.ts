@@ -1017,7 +1017,7 @@ describe("diff option and discard commands", () => {
   });
 
   it("offers file history of the current file, even while an operation is running", () => {
-    const state = makeAppState({ pending: true, status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const state = makeAppState({ pending: true, status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const { commands, diffCommands } = build(state, { currentFile: "a.txt" });
 
     const command = commands.find((c) => c.id === "file-history-current-file");
@@ -1047,7 +1047,7 @@ describe("diff option and discard commands", () => {
   });
 
   it("offers discard commands that only request a confirmation", () => {
-    const state = makeAppState({ status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const state = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const { commands, diffCommands } = build(state, { currentFile: "a.txt" });
     commands.find((c) => c.id === "discard-current-file")!.run();
     expect(diffCommands.requestDiscardCurrentFile).toHaveBeenCalled();
@@ -1056,13 +1056,13 @@ describe("diff option and discard commands", () => {
   });
 
   it("omits discard-all when only conflicted entries are unstaged", () => {
-    const state = makeAppState({ status: [{ path: "a.txt", staged: false, kind: "Conflicted" }] });
+    const state = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Conflicted" }] });
     const { commands } = build(state);
     expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
   });
 
   it("omits discard commands while an operation is running", () => {
-    const state = makeAppState({ pending: true, status: [{ path: "a.txt", staged: false, kind: "Modified" }] });
+    const state = makeAppState({ pending: true, status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const { commands } = build(state, { currentFile: "a.txt" });
     expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
     expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);

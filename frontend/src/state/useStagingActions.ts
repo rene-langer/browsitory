@@ -37,13 +37,21 @@ export interface StagingActions {
 function withFilesStaged(status: StatusEntry[], paths: string[], staged: boolean): StatusEntry[] {
   const targets = new Set(paths);
   const kindByPath = new Map<string, StatusKind>();
+  // Only a staged rename has an old path; the refresh after the mutation has the real rows.
+  const oldPathByPath = new Map<string, string | null>();
   for (const entry of status) {
     if (targets.has(entry.path)) kindByPath.set(entry.path, entry.kind);
+    if (targets.has(entry.path) && entry.oldPath !== null) oldPathByPath.set(entry.path, entry.oldPath);
   }
   const untouched = status.filter((entry) => !targets.has(entry.path));
   const updated = paths
     .filter((path) => kindByPath.has(path))
-    .map((path) => ({ path, staged, kind: kindByPath.get(path) as StatusKind }));
+    .map((path) => ({
+      path,
+      oldPath: staged ? (oldPathByPath.get(path) ?? null) : null,
+      staged,
+      kind: kindByPath.get(path) as StatusKind,
+    }));
   return [...untouched, ...updated];
 }
 
