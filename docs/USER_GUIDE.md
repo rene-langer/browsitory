@@ -362,6 +362,13 @@ rebase onto one, is available from that commit's row in the graph. The
 current branch's upstream status, a **Pull** button, and **Set upstream…**
 live at the bottom of the section.
 
+**From the keyboard.** Tab to a branch, a remote branch or a remote folder and press the Menu key
+or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open the same menu.
+In any menu, ↑/↓, Home/End or a letter move between items, Enter or Space runs one, Esc closes
+the menu and returns to the row, and Tab closes it and moves on. The command palette also has
+**Edit remote …**, **Manage credentials for …** and **Remove remote …** for each remote; they
+open the same dialogs (Remove still asks first), even while the Branches section is collapsed.
+
 **Publishing a branch.** **Push to…** pushes any local branch to a remote under any name.
 The dialog asks for the remote (the branch's upstream remote, else `origin`), the remote
 branch name (the local name by default) and **Set as upstream**, which is on by default for
@@ -436,7 +443,8 @@ and push a selection (or all of them) to a remote.
 Tags also appear as outlined badges (with a tag icon) on commit rows in the graph, file history
 and search results. Right-click a badge in the graph to push that tag to a remote, check out its
 commit (detached), or delete the local tag. The Tags panel remains the keyboard path for pushing
-and deleting tags.
+and deleting tags; **Check out tag … (detached)** in the command palette checks out a tag's
+commit.
 
 ![The Tags panel: create, delete, and push tags](assets/tags.png)
 
@@ -699,6 +707,9 @@ tools are not used there.
 Press **Ctrl+K** (or **Cmd+K** on macOS) anywhere to open the command
 palette: a fuzzy-searchable list of every action above, ranked by recent
 use.
+
+Context menus work from the keyboard too: the Menu key or Shift+F10 opens the menu of the
+focused branch, remote, changed file, commit or tab. Press **?** for the full list of shortcuts.
 
 ![The command palette, filtered to branch-related commands](assets/command-palette.png)
 

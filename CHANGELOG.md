@@ -148,6 +148,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Amending shows an editable **Author** field; the original author date is kept and the
   committer stays you.
 
+### Keyboard context menus
+
+- Every row with a context menu opens it with the Menu key or Shift+F10: local and remote
+  branches, remote folders, changed files and commit/compare file headers (commits and tabs
+  already did). The menu opens at the row, not the top-left corner (#44).
+- Menus return focus to where they were opened when closed with Esc or by running an item (so a
+  dialog an item opens also returns there), close on Tab, and jump to an item by its first letter.
+  A menu whose items are all disabled still takes focus, so Esc and Tab work.
+- Remote folders have a "…" actions button, like branches.
+- Command palette: **Edit remote …**, **Manage credentials for …** and **Remove remote …** for
+  each remote, and **Check out tag … (detached)** for each tag. The remote dialogs also open while
+  the Branches section is collapsed.
+- The shortcut sheet (**?**) lists the context menu keys.
+
 ### Fixed
 
 - A commit that fails (for example because of a hook) no longer clears the message you typed
