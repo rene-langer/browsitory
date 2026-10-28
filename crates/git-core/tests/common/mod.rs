@@ -176,3 +176,50 @@ pub fn commit_tree(
     repo.commit(None, &sig, &sig, message, &tree, &parent_refs)
         .unwrap()
 }
+
+/// A directory outside any repository holding `target.txt` and `f`, both "OUTSIDE\n".
+#[allow(dead_code)]
+pub fn outside_dir() -> TempDir {
+    let dir = TempDir::new().expect("outside dir");
+    std::fs::write(dir.path().join("target.txt"), "OUTSIDE\n").unwrap();
+    std::fs::write(dir.path().join("f"), "OUTSIDE\n").unwrap();
+    dir
+}
+
+/// Fails when `outside_dir`'s files were modified or deleted.
+#[allow(dead_code)]
+pub fn assert_outside_untouched(outside: &Path) {
+    assert_eq!(
+        std::fs::read_to_string(outside.join("target.txt")).unwrap(),
+        "OUTSIDE\n",
+        "outside target.txt was written through a link"
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("f")).unwrap(),
+        "OUTSIDE\n",
+        "outside f was written through a link"
+    );
+}
+
+/// Replaces the worktree entry `rel` (file or directory) with a symlink to `target`.
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn replace_with_link(workdir: &Path, rel: &str, target: &Path) {
+    let p = workdir.join(rel);
+    match std::fs::symlink_metadata(&p) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(&p).unwrap(),
+        Ok(_) => std::fs::remove_file(&p).unwrap(),
+        Err(_) => {}
+    }
+    std::os::unix::fs::symlink(target, &p).unwrap();
+}
+
+#[allow(dead_code)]
+pub fn is_link(workdir: &Path, rel: &str) -> bool {
+    std::fs::symlink_metadata(workdir.join(rel)).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+#[allow(dead_code)]
+pub fn read(workdir: &Path, rel: &str) -> String {
+    std::fs::read_to_string(workdir.join(rel)).unwrap()
+}

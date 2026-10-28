@@ -31,6 +31,16 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         ResetMode::Mixed => ResetType::Mixed,
         ResetMode::Hard => ResetType::Hard,
     };
+    if mode == ResetMode::Hard {
+        // libgit2's hard reset writes (and deletes) through a symlink that replaced a tracked
+        // file or folder; remove such links first, like git (#114).
+        let tree = target.tree()?;
+        crate::worktree_guard::prepare_forced_checkout::<ResetError>(
+            repo,
+            Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
+            None,
+        )?;
+    }
     repo.reset(target.as_object(), kind, None)?;
     // Like git's `remove_branch_state`: a reset abandons a pending squash merge's message.
     crate::merge::clear_squash_message(repo)?;
