@@ -100,6 +100,31 @@ type SidecarBridgeState = "idle" | "running" | "reconnecting" | "failed";
 const TRANSPORT_ERROR_CODE = -32001;
 const DISPOSED_MESSAGE = "Browsitory sidecar bridge disposed";
 
+/**
+ * Splits a text stream into `\n`-terminated lines. Only each new chunk is scanned for a newline,
+ * and a partial line is kept as a list of pieces joined once its newline arrives, so a single
+ * multi-megabyte line delivered in many small chunks costs linear rather than quadratic time.
+ */
+export class LineAccumulator {
+  private pending: string[] = [];
+
+  constructor(private readonly onLine: (line: string) => void) {}
+
+  push(text: string): void {
+    let start = 0;
+    let newline = text.indexOf("\n");
+    while (newline !== -1) {
+      const tail = text.slice(start, newline);
+      const line = this.pending.length === 0 ? tail : this.pending.join("") + tail;
+      this.pending = [];
+      start = newline + 1;
+      this.onLine(line);
+      newline = text.indexOf("\n", start);
+    }
+    if (start < text.length) this.pending.push(text.slice(start));
+  }
+}
+
 export class SidecarBridge {
   private sidecar: SidecarProcess | undefined;
   private state: SidecarBridgeState = "idle";
@@ -280,16 +305,13 @@ export class SidecarBridge {
       if (text.length > 0) this.dependencies.appendLine("vscode-sidecar stderr: " + text);
     };
     const decoder = new StringDecoder("utf8");
-    let buffered = "";
+    const stdoutLines = new LineAccumulator((rawLine) => {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (line.trim().length === 0) return;
+      this.relaySidecarLine(line);
+    });
     const onStdoutData = (chunk: Buffer | string) => {
-      buffered += decoder.write(chunkToBuffer(chunk));
-      const lines = buffered.split("\n");
-      buffered = lines.pop() ?? "";
-      for (const rawLine of lines) {
-        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-        if (line.trim().length === 0) continue;
-        this.relaySidecarLine(line);
-      }
+      stdoutLines.push(decoder.write(chunkToBuffer(chunk)));
     };
 
     sidecar.on("error", onProcessError);

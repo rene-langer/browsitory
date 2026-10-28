@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
+  AmendOptions,
+  Trailer,
   BranchInfo,
   ConflictSide,
   PickOutcome,
@@ -183,7 +185,7 @@ export interface UseAppStateResult {
   ignorePath(pattern: string): Promise<void>;
   // `true` once committed. `noVerify` skips `pre-commit`/`commit-msg`; a failing hook stores
   // `state.hookFailure` and resolves `false`.
-  commit(message: string, noVerify: boolean): Promise<boolean>;
+  commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
   // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
   // below. Naming a new branch is the one create-form action here with an obvious single trigger
   // point (the "New branch…" draft form), so its failure surfaces next to that form instead of
@@ -275,7 +277,7 @@ export interface UseAppStateResult {
   abortSequence(): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
-  amendCommit(message: string, noVerify: boolean): Promise<boolean>;
+  amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
   setAmendMode(on: boolean): void;
   setSkipHooks(on: boolean): void;
   // Cancels the running commit/amend hook (`state.hookRun`) through `cancelTransfer`.
@@ -636,14 +638,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     async (retry: HookRetry) => {
       setState((prev) => ({ ...prev, hookFailure: null, error: null }));
       if (retry.kind === "commit") {
-        const ok = await commit(retry.message, true);
+        const ok = await commit(retry.message, true, retry.trailers);
         if (ok) setState((prev) => ({ ...prev, clearCommitMessage: retry.message }));
         return ok;
       }
       if (retry.kind === "amend") {
         // No clear request: a landed amend leaves amend mode, which already puts the
         // pre-amend draft back into the CommitBox.
-        return amendCommit(retry.message, true);
+        return amendCommit(retry.message, true, retry.options);
       }
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);

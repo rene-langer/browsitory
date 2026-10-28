@@ -9,6 +9,8 @@ import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import { DiffView } from "./DiffView";
+import { ImageDiff, ImageTextToggle } from "./ImageDiff";
+import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -17,7 +19,8 @@ import { InlineError } from "./primitives/InlineError";
  * One file's diff in a read-only view (a commit or a compare), with Blame and History.
  * `fetchDiff` runs again whenever `diffKey`, the path or the diff settings change. With
  * `externalTools` and `toolSource`, a "…" button and right-click menu open the file in the
- * user's editor, file manager or diff tool.
+ * user's editor, file manager or diff tool. With `previewSource`, an image file (by extension)
+ * shows a before/after preview instead of hunks; an SVG can switch to its text diff.
  */
 export function ReadOnlyFileSection({
   repoPath,
@@ -33,6 +36,7 @@ export function ReadOnlyFileSection({
   onOpenFileHistory,
   externalTools,
   toolSource,
+  previewSource,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -50,8 +54,13 @@ export function ReadOnlyFileSection({
   externalTools?: ExternalToolsApi;
   /** The two versions "Open in diff tool" compares. */
   toolSource?: DiffSource;
+  /** The two versions an image preview shows (the same ones the diff compares). */
+  previewSource?: DiffSource;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
+  const isImage = previewSource !== undefined && imageMimeType(path) !== null;
+  const [imageAsText, setImageAsText] = useState(false);
+  const showImage = isImage && !imageAsText;
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
   const onPickFileAction = (action: FileAction) => {
@@ -87,10 +96,10 @@ export function ReadOnlyFileSection({
   };
 
   useEffect(() => {
-    if (mode !== "diff" || collapsed) return;
+    if (mode !== "diff" || collapsed || showImage) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffKey, path, oldPath, mode, collapsed, settings.ignoreWhitespace, settings.contextLines]);
+  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, settings.contextLines]);
 
   const loadBlame = () => {
     let ignore = false;
@@ -175,6 +184,11 @@ export function ReadOnlyFileSection({
               )}
               <button onClick={() => setMode("diff")}>Back to diff</button>
             </>
+          ) : showImage && previewSource !== undefined ? (
+            <>
+              {isSvgPath(path) && <ImageTextToggle asText={false} onToggle={() => setImageAsText(true)} />}
+              <ImageDiff client={client} repoPath={repoPath} path={path} source={previewSource} refreshKey={diffKey} />
+            </>
           ) : error !== null ? (
             <InlineError
               message={error.message}
@@ -183,7 +197,10 @@ export function ReadOnlyFileSection({
               onRetry={loadDiff}
             />
           ) : (
-            <DiffView hunks={hunks} path={path} />
+            <>
+              {isImage && <ImageTextToggle asText onToggle={() => setImageAsText(false)} />}
+              <DiffView hunks={hunks} path={path} />
+            </>
           )}
         </div>
       )}

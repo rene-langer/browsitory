@@ -303,6 +303,25 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   `TransferPhase::RunningHook` for pushes. Commit/amend get `commit-<n>`/`amend-<n>` ids in
   `CancelRegistry`, so `cancelTransfer` stops a running hook. Hooks block the repo worker like
   signing does.
+- Commit trailers (`Co-authored-by` from the commit box) are appended by the worker with
+  `git_core::commit::append_trailers` *before* `commit`/`amend_head`, so `prepare-commit-msg` and
+  `commit-msg` see them, as with `git commit --trailer`.
+
+## Image preview
+
+- `git_core::diff::file_sides(repo, &DiffSource, path, cap)` returns both sides of a diff as
+  bytes for the same `DiffSource` 4f's diff tool uses (index ↔ work tree, HEAD ↔ index, first
+  parent ↔ commit, `from` ↔ `to` or the work tree), so it covers the working tree, commits,
+  stashes and compares. Each side is capped at `MAX_PREVIEW_BYTES` (20 MB), judged from the
+  object header (`odb.read_header`) or file metadata before anything is read, and the work tree
+  read is bounded too. A work tree side never follows a symlink (the file itself, or a folder
+  symlink out of the work tree), and paths must be relative without `.`/`..`.
+- Bytes cross IPC as base64 in JSON (`repo_service::base64`, a hand-rolled RFC 4648 encoder, no
+  dependency) with the image type `git_core::diff::sniff_image_mime` read from the magic bytes
+  (PNG, JPEG, GIF, WebP, SVG root element). The frontend only picks *candidates* by extension;
+  it renders only a sniffed type from a fixed allowlist, as an `<img src="data:…">`, never inline
+  SVG, `<object>` or `<iframe>`, so SVG script never runs. The VSCode webview CSP allows
+  `img-src data:` for this and nothing else.
 
 ## External tools
 

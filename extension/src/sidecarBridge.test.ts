@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { ExtensionContext, Uri } from "vscode";
 import {
+  LineAccumulator,
   resolveDevelopmentSidecarPath,
   resolvePackagedSidecarPath,
   SidecarBridge,
@@ -838,4 +839,66 @@ describe("SidecarBridge", () => {
     }
   });
 
+});
+
+describe("LineAccumulator", () => {
+  it("emits each complete line, joins a line split across chunks, and holds a trailing partial", () => {
+    const lines: string[] = [];
+    const accumulator = new LineAccumulator((line) => lines.push(line));
+
+    accumulator.push("one\ntwo\nthr");
+    expect(lines).toEqual(["one", "two"]);
+    accumulator.push("e");
+    accumulator.push("e\n\nfour");
+    expect(lines).toEqual(["one", "two", "three", ""]);
+    accumulator.push("\n");
+    expect(lines).toEqual(["one", "two", "three", "", "four"]);
+  });
+
+  it("reassembles one huge line from many small chunks in linear time", () => {
+    const lines: string[] = [];
+    const accumulator = new LineAccumulator((line) => lines.push(line));
+    const chunk = "x".repeat(16 * 1024);
+    const chunkCount = 1024; // 16 MiB: the old `buffered += chunk; split` took tens of seconds here
+
+    const started = performance.now();
+    for (let index = 0; index < chunkCount; index += 1) accumulator.push(chunk);
+    accumulator.push("\n");
+    const elapsedMs = performance.now() - started;
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toHaveLength(chunk.length * chunkCount);
+    // Generous bound: linear accumulation finishes in milliseconds; this only trips on a
+    // regression back to rescanning the whole buffer per chunk.
+    expect(elapsedMs).toBeLessThan(3000);
+  });
+});
+
+describe("SidecarBridge stdout framing", () => {
+  it("relays a multi-megabyte response line delivered in many chunks alongside small lines", async () => {
+    const { bridge, child, postToWebview } = createBridge();
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 5, method: "get_file_sides", params: { repoPath: "/repo" },
+    });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 6, method: "get_status", params: { repoPath: "/repo" },
+    });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 7, method: "get_status", params: { repoPath: "/repo" },
+    });
+    postToWebview.mockClear();
+
+    const big = { jsonrpc: "2.0", id: 5, result: { text: "y".repeat(4 * 1024 * 1024) } };
+    const small1 = { jsonrpc: "2.0", id: 6, result: null };
+    const small2 = { jsonrpc: "2.0", id: 7, result: "ok" };
+    const bytes = Buffer.from(`${JSON.stringify(big)}\n${JSON.stringify(small1)}\r\n${JSON.stringify(small2)}\n`);
+    for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
+      child.stdout.push(bytes.subarray(offset, offset + 64 * 1024));
+    }
+
+    expect(postToWebview).toHaveBeenCalledTimes(3);
+    expect(postToWebview).toHaveBeenNthCalledWith(1, big);
+    expect(postToWebview).toHaveBeenNthCalledWith(2, small1);
+    expect(postToWebview).toHaveBeenNthCalledWith(3, small2);
+  });
 });

@@ -595,6 +595,7 @@ mod tests {
             label(Command::Commit {
                 message: "Fix parser\n\nbody".into(),
                 no_verify: false,
+                trailers: Vec::new(),
                 operation_id: "commit-1".into(),
                 events: channel().0,
                 reply: tx
@@ -705,6 +706,7 @@ mod tests {
         let (text, _) = label(Command::Commit {
             message: "x".repeat(200),
             no_verify: false,
+            trailers: Vec::new(),
             operation_id: "commit-1".into(),
             events: channel().0,
             reply: tx,
@@ -775,12 +777,15 @@ mod tests {
         assert_held!(Commit {
             message: s(),
             no_verify: false,
+            trailers: Vec::new(),
             operation_id: s(),
             events: channel().0
         });
         assert_held!(AmendCommit {
             message: s(),
             no_verify: false,
+            author: None,
+            trailers: Vec::new(),
             operation_id: s(),
             events: channel().0
         });
@@ -923,6 +928,8 @@ mod tests {
             label(Command::AmendCommit {
                 message: "  ".into(),
                 no_verify: false,
+                author: None,
+                trailers: Vec::new(),
                 operation_id: "amend-1".into(),
                 events: channel().0,
                 reply: tx

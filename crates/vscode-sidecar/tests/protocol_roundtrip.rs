@@ -2558,3 +2558,104 @@ fn a_merge_commit_is_picked_with_a_mainline_through_the_sidecar() {
     assert_eq!(picked["result"]["kind"], "Committed");
     assert!(dir.path().join("f.txt").exists());
 }
+
+#[test]
+fn file_sides_trailers_and_commit_message_settings_round_trip_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "img.png", "foo");
+    commit_all(&repo, "first");
+    write_file(dir.path(), "img.png", "foobar");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let sides = sidecar.call(
+        2,
+        "get_file_sides",
+        serde_json::json!({"repoPath": repo_path, "path": "img.png", "source": {"kind": "Unstaged"}}),
+    );
+    assert_eq!(
+        sides["result"],
+        serde_json::json!({
+            "old": {"kind": "Loaded", "size": 3, "base64": "Zm9v", "mime": null},
+            "new": {"kind": "Loaded", "size": 6, "base64": "Zm9vYmFy", "mime": null},
+        })
+    );
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let commit_sides = sidecar.call(
+        3,
+        "get_file_sides",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "path": "img.png",
+            "source": {"kind": "Range", "fromId": head, "toId": null, "oldPath": null},
+        }),
+    );
+    assert_eq!(commit_sides["result"]["new"]["base64"], "Zm9vYmFy");
+
+    sidecar.call(
+        4,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "img.png"}),
+    );
+    let committed = sidecar.call(
+        5,
+        "commit",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "message": "Grow",
+            "trailers": [{"key": "Co-authored-by", "value": "Ada <ada@x.org>"}],
+        }),
+    );
+    let commit_id = committed["result"]["commitId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let message = sidecar.call(
+        6,
+        "get_commit_message",
+        serde_json::json!({"repoPath": repo_path, "commitId": commit_id}),
+    );
+    assert_eq!(
+        message["result"],
+        serde_json::json!("Grow\n\nCo-authored-by: Ada <ada@x.org>\n")
+    );
+
+    let amended = sidecar.call(
+        7,
+        "amend_commit",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "message": "Grow",
+            "author": {"name": "Bob", "email": "bob@x.org"},
+            "trailers": [],
+        }),
+    );
+    assert_eq!(amended["result"]["kind"], "Committed");
+    let authors = sidecar.call(
+        8,
+        "list_recent_authors",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        authors["result"],
+        serde_json::json!([{"name": "Bob", "email": "bob@x.org"}])
+    );
+
+    let settings = sidecar.call(9, "get_commit_message_settings", serde_json::json!({}));
+    assert_eq!(
+        settings["result"],
+        serde_json::json!({"summaryLimit": 50, "bodyRuler": 72, "showRuler": true})
+    );
+    sidecar.call(
+        10,
+        "set_commit_message_settings",
+        serde_json::json!({"settings": {"summaryLimit": 5, "bodyRuler": 80, "showRuler": false}}),
+    );
+    let settings = sidecar.call(11, "get_commit_message_settings", serde_json::json!({}));
+    assert_eq!(
+        settings["result"],
+        serde_json::json!({"summaryLimit": 10, "bodyRuler": 80, "showRuler": false})
+    );
+}

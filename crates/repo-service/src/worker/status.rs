@@ -290,6 +290,7 @@ pub(super) fn commit(
     repo: &mut git2::Repository,
     message: String,
     no_verify: bool,
+    trailers: Vec<git_core::commit::Trailer>,
     op: super::remote::TransferOp<'_>,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
@@ -299,16 +300,19 @@ pub(super) fn commit(
         events,
         operation_id: op.id.clone(),
     };
-    let result = git_core::commit::commit(
-        repo,
-        &message,
-        git_core::hooks::HookOptions {
-            no_verify,
-            cancel: Some(&cancel),
-            reporter: Some(&mut reporter),
-            ..Default::default()
-        },
-    );
+    // Before the hooks, so `prepare-commit-msg`/`commit-msg` see them (`git commit --trailer`).
+    let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {
+        git_core::commit::commit(
+            repo,
+            &message,
+            git_core::hooks::HookOptions {
+                no_verify,
+                cancel: Some(&cancel),
+                reporter: Some(&mut reporter),
+                ..Default::default()
+            },
+        )
+    });
     op.clear();
     let _ = reply.send(commit_reply(result));
 }
@@ -659,6 +663,7 @@ impl WorkerHandle {
         &self,
         message: String,
         no_verify: bool,
+        trailers: Vec<git_core::commit::Trailer>,
         events: Sender<super::HookEvent>,
     ) -> Result<git_core::commit::CommitOutcome, String> {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -666,6 +671,7 @@ impl WorkerHandle {
             .send(Command::Commit {
                 message,
                 no_verify,
+                trailers,
                 operation_id: super::remote::next_operation_id("commit"),
                 events,
                 reply: tx,

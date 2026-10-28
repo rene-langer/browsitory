@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
-import { ExternalToolsSection, PreferencesDialog } from "./PreferencesDialog";
+import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
+import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./PreferencesDialog";
+import { within } from "@testing-library/react";
 
 function renderTools(client: Partial<RepoClient>, toolHost: "desktop" | "vscode" = "desktop", repoPath: string | null = "/r") {
   const onClose = vi.fn();
@@ -123,5 +125,71 @@ describe("PreferencesDialog", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("Commit message preferences", () => {
+  function renderCommitMessage(client: Partial<RepoClient>) {
+    render(
+      <CommitMessageSettingsProvider client={client as RepoClient}>
+        <PreferencesDialog onClose={vi.fn()}>
+          <CommitMessageSection />
+        </PreferencesDialog>
+      </CommitMessageSettingsProvider>,
+    );
+  }
+
+  it("edits the commit message settings, clamping numbers on blur", async () => {
+    const setCommitMessageSettings = vi.fn(async () => {});
+    renderCommitMessage({
+      getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+      setCommitMessageSettings,
+    });
+    const group = await screen.findByRole("group", { name: "Commit message" });
+    const summary = within(group).getByRole("spinbutton", { name: "Summary length limit" });
+    await waitFor(() => expect(summary).toHaveValue(50));
+    fireEvent.change(summary, { target: { value: "60" } });
+    expect(setCommitMessageSettings).not.toHaveBeenCalled();
+    fireEvent.blur(summary);
+    await waitFor(() =>
+      expect(setCommitMessageSettings).toHaveBeenLastCalledWith({ summaryLimit: 60, bodyRuler: 72, showRuler: true }),
+    );
+    fireEvent.click(within(group).getByRole("checkbox", { name: "Show ruler" }));
+    await waitFor(() =>
+      expect(setCommitMessageSettings).toHaveBeenLastCalledWith({ summaryLimit: 60, bodyRuler: 72, showRuler: false }),
+    );
+    const ruler = within(group).getByRole("spinbutton", { name: "Ruler column" });
+    fireEvent.change(ruler, { target: { value: "500" } });
+    fireEvent.blur(ruler);
+    await waitFor(() =>
+      expect(setCommitMessageSettings).toHaveBeenLastCalledWith({ summaryLimit: 60, bodyRuler: 200, showRuler: false }),
+    );
+    expect(ruler).toHaveValue(200);
+  });
+
+  it("puts back the saved value for an empty or unchanged field", async () => {
+    const setCommitMessageSettings = vi.fn(async () => {});
+    renderCommitMessage({
+      getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+      setCommitMessageSettings,
+    });
+    const summary = await screen.findByRole("spinbutton", { name: "Summary length limit" });
+    await waitFor(() => expect(summary).toHaveValue(50));
+    fireEvent.change(summary, { target: { value: "" } });
+    fireEvent.blur(summary);
+    expect(summary).toHaveValue(50);
+    fireEvent.blur(summary);
+    expect(setCommitMessageSettings).not.toHaveBeenCalled();
+  });
+
+  it("shows a failed save", async () => {
+    renderCommitMessage({
+      getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+      setCommitMessageSettings: async () => {
+        throw new Error("read-only config");
+      },
+    });
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show ruler" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
   });
 });

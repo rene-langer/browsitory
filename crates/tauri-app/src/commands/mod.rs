@@ -40,7 +40,8 @@ pub use forge::{
 };
 pub use history::{
     abort_sequence, amend_commit, checkout_commit, cherry_pick, cherry_pick_many,
-    continue_sequence, get_head_info, reset_to_commit, revert_commit, revert_many,
+    continue_sequence, get_head_info, list_recent_authors, reset_to_commit, revert_commit,
+    revert_many,
 };
 pub use merge::{
     abort_merge, get_conflict_hunks, get_merge_message, get_merge_options, mark_resolved,
@@ -63,8 +64,8 @@ pub use status::{
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
 pub use tools::{
-    get_external_tool_settings, get_git_tools, open_diff_tool, open_in_editor, open_merge_tool,
-    open_terminal, reveal_in_file_manager, set_external_tool_settings,
+    get_external_tool_settings, get_file_sides, get_git_tools, open_diff_tool, open_in_editor,
+    open_merge_tool, open_terminal, reveal_in_file_manager, set_external_tool_settings,
 };
 pub use undo::{get_undo_state, redo_last, undo_last};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
@@ -904,6 +905,99 @@ impl From<ResetModeDto> for git_core::reset::ResetMode {
     }
 }
 
+/// One side of a file for the image preview. `Loaded` carries the bytes as base64 and the
+/// image type sniffed from them (`null` when they are not a previewable image).
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind")]
+pub enum FileSideDto {
+    Missing,
+    TooLarge {
+        size: u64,
+    },
+    Loaded {
+        size: u64,
+        base64: String,
+        mime: Option<&'static str>,
+    },
+}
+
+impl From<git_core::diff::FileSide> for FileSideDto {
+    fn from(side: git_core::diff::FileSide) -> Self {
+        match side {
+            git_core::diff::FileSide::Missing => Self::Missing,
+            git_core::diff::FileSide::TooLarge { size } => Self::TooLarge { size },
+            git_core::diff::FileSide::Loaded { bytes } => Self::Loaded {
+                size: bytes.len() as u64,
+                mime: git_core::diff::sniff_image_mime(&bytes),
+                base64: repo_service::base64::encode(&bytes),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct FileSidesDto {
+    pub old: FileSideDto,
+    pub new: FileSideDto,
+}
+
+impl From<git_core::diff::FileSides> for FileSidesDto {
+    fn from(sides: git_core::diff::FileSides) -> Self {
+        Self {
+            old: sides.old.into(),
+            new: sides.new.into(),
+        }
+    }
+}
+
+/// A `Key: value` trailer for a commit/amend message (`RepoClient`'s `Trailer`).
+#[derive(Debug, Deserialize)]
+pub struct TrailerDto {
+    pub key: String,
+    pub value: String,
+}
+
+impl From<TrailerDto> for git_core::commit::Trailer {
+    fn from(dto: TrailerDto) -> Self {
+        Self {
+            key: dto.key,
+            value: dto.value,
+        }
+    }
+}
+
+/// A person: the amend author override (in) and a recent author (out).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignatureInputDto {
+    pub name: String,
+    pub email: String,
+}
+
+impl From<SignatureInputDto> for git_core::commit::SignatureInput {
+    fn from(dto: SignatureInputDto) -> Self {
+        Self {
+            name: dto.name,
+            email: dto.email,
+        }
+    }
+}
+
+impl From<git_core::commit::SignatureInput> for SignatureInputDto {
+    fn from(input: git_core::commit::SignatureInput) -> Self {
+        Self {
+            name: input.name,
+            email: input.email,
+        }
+    }
+}
+
+pub(crate) fn trailers_from(dtos: Option<Vec<TrailerDto>>) -> Vec<git_core::commit::Trailer> {
+    dtos.unwrap_or_default()
+        .into_iter()
+        .map(Into::into)
+        .collect()
+}
+
 /// Which two sides "Open in diff tool" compares (`RepoClient`'s `DiffSource`).
 #[derive(Deserialize)]
 #[serde(tag = "kind")]
@@ -1693,6 +1787,46 @@ pub fn set_diff_settings(settings: DiffSettingsDto) -> Result<(), String> {
     config::set_diff_settings(&settings.into()).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitMessageSettingsDto {
+    pub summary_limit: u32,
+    pub body_ruler: u32,
+    pub show_ruler: bool,
+}
+
+impl From<config::CommitMessageSettings> for CommitMessageSettingsDto {
+    fn from(s: config::CommitMessageSettings) -> Self {
+        Self {
+            summary_limit: s.summary_limit,
+            body_ruler: s.body_ruler,
+            show_ruler: s.show_ruler,
+        }
+    }
+}
+
+impl From<CommitMessageSettingsDto> for config::CommitMessageSettings {
+    fn from(d: CommitMessageSettingsDto) -> Self {
+        Self {
+            summary_limit: d.summary_limit,
+            body_ruler: d.body_ruler,
+            show_ruler: d.show_ruler,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_commit_message_settings() -> Result<CommitMessageSettingsDto, String> {
+    config::get_commit_message_settings()
+        .map(CommitMessageSettingsDto::from)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_commit_message_settings(settings: CommitMessageSettingsDto) -> Result<(), String> {
+    config::set_commit_message_settings(&settings.into()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn get_last_seen_version() -> Result<Option<String>, String> {
     config::get_last_seen_version().map_err(|e| e.to_string())
@@ -1753,9 +1887,89 @@ mod tests {
         RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
         UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
     };
+    use super::{CommitMessageSettingsDto, FileSidesDto, SignatureInputDto, TrailerDto};
     use super::{
         MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
     };
+
+    #[test]
+    fn file_sides_dto_encodes_base64_sniffs_the_type_and_tags_each_side() {
+        use git_core::diff::{FileSide, FileSides};
+        let png = b"\x89PNG\r\n\x1a\n".to_vec();
+        let dto = serde_json::to_value(FileSidesDto::from(FileSides {
+            old: FileSide::Loaded {
+                bytes: b"foo".to_vec(),
+            },
+            new: FileSide::Loaded { bytes: png },
+        }))
+        .unwrap();
+        assert_eq!(
+            dto,
+            serde_json::json!({
+                "old": { "kind": "Loaded", "size": 3, "base64": "Zm9v", "mime": null },
+                "new": { "kind": "Loaded", "size": 8, "base64": "iVBORw0KGgo=", "mime": "image/png" },
+            })
+        );
+        let big = serde_json::to_value(FileSidesDto::from(FileSides {
+            old: FileSide::TooLarge { size: 25_000_000 },
+            new: FileSide::Missing,
+        }))
+        .unwrap();
+        assert_eq!(
+            big,
+            serde_json::json!({
+                "old": { "kind": "TooLarge", "size": 25_000_000 },
+                "new": { "kind": "Missing" },
+            })
+        );
+    }
+
+    #[test]
+    fn commit_inputs_and_settings_dtos_are_camel_case() {
+        let trailer: TrailerDto = serde_json::from_value(
+            serde_json::json!({ "key": "Co-authored-by", "value": "A <a@x>" }),
+        )
+        .unwrap();
+        assert_eq!(
+            git_core::commit::Trailer::from(trailer),
+            git_core::commit::Trailer {
+                key: "Co-authored-by".into(),
+                value: "A <a@x>".into()
+            }
+        );
+        assert!(super::trailers_from(None).is_empty());
+        let author: SignatureInputDto =
+            serde_json::from_value(serde_json::json!({ "name": "Ada", "email": "a@x" })).unwrap();
+        assert_eq!(git_core::commit::SignatureInput::from(author).email, "a@x");
+        assert_eq!(
+            serde_json::to_value(SignatureInputDto::from(git_core::commit::SignatureInput {
+                name: "Bob".into(),
+                email: "b@x".into()
+            }))
+            .unwrap(),
+            serde_json::json!({ "name": "Bob", "email": "b@x" })
+        );
+        let settings = serde_json::to_value(CommitMessageSettingsDto::from(
+            config::CommitMessageSettings::default(),
+        ))
+        .unwrap();
+        assert_eq!(
+            settings,
+            serde_json::json!({ "summaryLimit": 50, "bodyRuler": 72, "showRuler": true })
+        );
+        let back: CommitMessageSettingsDto = serde_json::from_value(
+            serde_json::json!({ "summaryLimit": 60, "bodyRuler": 80, "showRuler": false }),
+        )
+        .unwrap();
+        assert_eq!(
+            config::CommitMessageSettings::from(back),
+            config::CommitMessageSettings {
+                summary_limit: 60,
+                body_ruler: 80,
+                show_ruler: false
+            }
+        );
+    }
 
     #[test]
     fn diff_options_dto_parses_camel_case() {

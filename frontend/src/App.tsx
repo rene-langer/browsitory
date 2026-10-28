@@ -42,10 +42,11 @@ import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { RepoClient, Trailer } from "./ipc/RepoClient";
+import { coAuthorTrailers, parsePerson } from "./lib/people";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
-import { ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
+import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
 import { useExternalTools } from "./state/useExternalTools";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { upstreamPushBranch } from "./lib/pushTarget";
@@ -58,6 +59,7 @@ import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
+import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -172,17 +174,17 @@ function RepoWorkspace({
     (message: string) => {
       const draft = getCommitDraft(repoPath);
       if (draft !== undefined && draft.message === message) {
-        onCommitDraftChange(repoPath, { ...draft, message: "", lastSeeded: "" });
+        onCommitDraftChange(repoPath, { ...draft, message: "", lastSeeded: "", coAuthors: [] });
       } else if (draft !== undefined && draft.stashed === message) {
-        onCommitDraftChange(repoPath, { ...draft, stashed: "" });
+        onCommitDraftChange(repoPath, { ...draft, stashed: "", stashedCoAuthors: [] });
       }
     },
     [getCommitDraft, onCommitDraftChange, repoPath],
   );
   const { commit: commitStaged, retryWithoutHooks } = appState;
   const commitAndClearDraft = useCallback(
-    async (message: string, noVerify: boolean) => {
-      const ok = await commitStaged(message, noVerify);
+    async (message: string, noVerify: boolean, trailers: Trailer[]) => {
+      const ok = await commitStaged(message, noVerify, trailers);
       if (ok) clearCommittedDraft(message);
       return ok;
     },
@@ -200,11 +202,31 @@ function RepoWorkspace({
       const current =
         retry.kind === "commit" ? ((amending ? draft?.stashed : draft?.message) ?? "") : amending ? (draft?.message ?? "") : "";
       const message = current.trim() === "" ? retry.message : current;
-      const ok = await retryWithoutHooks({ ...retry, message });
+      // While a merge/pick/squash message is seeded the box hides the chips and sends none.
+      const seeded = appState.state.mergeMessage !== null || appState.state.headInfo.squashMessage !== null;
+      const fromBox = current.trim() !== "";
+      if (retry.kind === "amend") {
+        // The amend-mode Author field and chips as they are now, like the message.
+        const chips = draft?.coAuthors;
+        const trailers = seeded || !fromBox || chips == null ? retry.options.trailers : coAuthorTrailers(chips);
+        // Blank (or never edited) keeps HEAD's author; text the box would refuse keeps the
+        // author the failed amend was sent with.
+        const authorText = draft?.amendAuthor?.trim() ?? "";
+        const author = !fromBox
+          ? retry.options.author
+          : authorText === ""
+            ? null
+            : (parsePerson(authorText) ?? retry.options.author);
+        return retryWithoutHooks({ ...retry, message, options: { author, trailers } });
+      }
+      // The co-author chips the box holds now, too (the stashed ones while amending).
+      const chips = draft === undefined ? undefined : amending ? draft.stashedCoAuthors : draft.coAuthors;
+      const trailers = seeded || !fromBox || chips == null ? retry.trailers : coAuthorTrailers(chips);
+      const ok = await retryWithoutHooks({ ...retry, message, trailers });
       if (ok && retry.kind === "commit") clearCommittedDraft(message);
       return ok;
     },
-    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath],
+    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath, appState.state.mergeMessage, appState.state.headInfo.squashMessage],
   );
   const panelVisibility = useSidebarPanelVisibility();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);
@@ -996,7 +1018,9 @@ function RepoWorkspace({
                   onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
                   onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
                   onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
-                  onCommit={(message) => announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks)}
+                  onCommit={(message, trailers) =>
+                    announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers)
+                  }
                   onSaveStash={announce("Changes stashed", () => appState.saveStash())}
                   onOpenStashDialog={appState.openStashDialog}
                   onSelectRow={appState.selectRow}
@@ -1010,8 +1034,8 @@ function RepoWorkspace({
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}
-                  onAmendCommit={(message) =>
-                    announce("Amended commit", appState.amendCommit)(message, appState.state.skipHooks)
+                  onAmendCommit={(message, options) =>
+                    announce("Amended commit", appState.amendCommit)(message, appState.state.skipHooks, options)
                   }
                   focusCommitMessage={focusCommitMessage}
                   onCommitMessageFocused={clearFocusCommitMessage}
@@ -1057,7 +1081,9 @@ export default function App(props: {
 }) {
   return (
     <DiffSettingsProvider client={props.client}>
-      <AppContent {...props} />
+      <CommitMessageSettingsProvider client={props.client}>
+        <AppContent {...props} />
+      </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
   );
 }
@@ -1357,6 +1383,7 @@ function AppContent({
       {preferencesOpen && (
         <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
           <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
+          <CommitMessageSection />
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (

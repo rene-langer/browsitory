@@ -4,6 +4,7 @@ import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
+import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
 import styles from "./DiffPane.module.css";
@@ -133,6 +134,10 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
+    getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
+    listRecentAuthors: async () => [],
+    getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+    setCommitMessageSettings: async () => {},
     getGraphBranchSelection: async () => null,
     setGraphBranchSelection: unused,
     getGraphRemoteBranchSelection: async () => null,
@@ -2019,5 +2024,176 @@ describe("DiffPane external tools", () => {
     renderCommit(fakeClient({ getCommitFiles: async () => ["b.ts"], getCommitDiff: async () => [] }), "abc123");
     await screen.findByText("b.ts");
     expect(screen.queryByRole("button", { name: "Actions for b.ts" })).toBeNull();
+  });
+});
+
+describe("DiffPane image preview", () => {
+  const pngSide = (base64: string) => ({ kind: "Loaded" as const, size: 3, base64, mime: "image/png" });
+  const svgSide = { kind: "Loaded" as const, size: 8, base64: "PHN2Zy8+", mime: "image/svg+xml" };
+
+  it("previews an unstaged image instead of fetching hunks", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    const getWorkingDiff = vi.fn(async () => []);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "logo.png", staged: false, kind: "Modified" }]);
+
+    expect(await screen.findByRole("img", { name: "After: logo.png" })).toHaveAttribute("src", "data:image/png;base64,YmFy");
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Unstaged" });
+    expect(getWorkingDiff).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Show text diff" })).toBeNull();
+  });
+
+  it("previews a staged image against HEAD", async () => {
+    const getFileSides = vi.fn(async () => ({ old: { kind: "Missing" as const }, new: pngSide("YmFy") }));
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff: vi.fn(async () => []) }), [
+      { path: "logo.png", staged: true, kind: "New" },
+    ]);
+    expect(await screen.findByText("Added")).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Staged" });
+  });
+
+  it("lets an SVG switch between the image and its text diff", async () => {
+    const getFileSides = vi.fn(async () => ({ old: { kind: "Missing" as const }, new: svgSide }));
+    const getWorkingDiff = vi.fn(async (): Promise<DiffHunk[]> => [
+      { oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "<svg/>" }] },
+    ]);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "icon.svg", staged: false, kind: "New" }]);
+
+    expect(await screen.findByRole("img", { name: "After: icon.svg" })).toBeInTheDocument();
+    expect(getWorkingDiff).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show text diff" }));
+    await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "icon.svg", false, DEFAULT_DIFF_OPTIONS));
+    expect(await screen.findByText("<svg/>")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show image" }));
+    expect(await screen.findByRole("img", { name: "After: icon.svg" })).toBeInTheDocument();
+  });
+
+  it("sends a conflicted image to the conflict pane, not the preview", async () => {
+    const getFileSides = vi.fn();
+    renderUncommitted(
+      fakeClient({ getFileSides, getConflictHunks: vi.fn(async () => []), getWorkingDiff: vi.fn(async () => []) }),
+      [{ path: "logo.png", staged: false, kind: "Conflicted" }],
+    );
+    await screen.findByText(/logo\.png/);
+    expect(getFileSides).not.toHaveBeenCalled();
+  });
+
+  it("previews a committed image with the commit and its rename", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    const getCommitDiff = vi.fn(async () => []);
+    renderCommit(
+      fakeClient({
+        getFileSides,
+        getCommitDiff,
+        getCommitFiles: vi.fn(async () => ["logo.png"]),
+        getCommitMessage: async () => "m",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+      }),
+      "abc123",
+    );
+    expect(await screen.findByRole("img", { name: "Before: logo.png" })).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Commit", commitId: "abc123", oldPath: null });
+    expect(getCommitDiff).not.toHaveBeenCalled();
+  });
+
+  it("previews an image in a stash, against the stash's base", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    renderCommit(
+      fakeClient({
+        getFileSides,
+        getStashFiles: vi.fn(async () => ({ tracked: ["logo.png"], untracked: [], untrackedCommitId: null })),
+        getCommitDiff: vi.fn(async () => []),
+        getBlame: async () => [],
+      }),
+      "s0",
+      {
+        stashes: [{ index: 0, message: "On main: wip", commitId: "s0" }],
+        stashActions: {
+          onApply: vi.fn(),
+          onPop: vi.fn(),
+          onDrop: vi.fn(),
+          restoreIndex: true,
+          onSetRestoreIndex: vi.fn(),
+          disabledReason: null,
+        },
+      },
+    );
+    expect(await screen.findByRole("img", { name: "After: logo.png" })).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Commit", commitId: "s0", oldPath: null });
+  });
+});
+
+describe("DiffPane commit message settings", () => {
+  it("hands the Preferences counter limit and ruler to the commit box", () => {
+    rtlRender(
+      <CommitMessageSettingsContext.Provider
+        value={{ settings: { summaryLimit: 60, bodyRuler: 80, showRuler: true }, update: vi.fn(), error: null, dismissError: vi.fn() }}
+      >
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({})}
+          selectedRow="uncommitted"
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </CommitMessageSettingsContext.Provider>,
+    );
+    expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 0/60");
+    expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
+  });
+});
+
+describe("DiffPane co-authors and amend author", () => {
+  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null };
+  const head = {
+    id: "h1",
+    shortId: "h1",
+    summary: "head",
+    authorName: "Me",
+    authorEmail: "me@x.org",
+    timestamp: 0,
+    parentIds: [],
+    branchRefs: [],
+    remoteBranchRefs: [],
+  };
+
+  it("prefills the amend Author from the graph and amends with the options", async () => {
+    const onAmendCommit = vi.fn(async () => true);
+    renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
+      amendMode: true,
+      headInfo,
+      commits: [head],
+      onAmendCommit,
+    });
+    const author = await screen.findByRole("textbox", { name: "Author" });
+    expect(author).toHaveValue("Me <me@x.org>");
+    await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("head message"));
+    fireEvent.click(screen.getByRole("button", { name: "Amend" }));
+    expect(onAmendCommit).toHaveBeenCalledWith("head message", { author: null, trailers: [] });
+  });
+
+  it("leaves the Author empty when HEAD is not in the graph", async () => {
+    renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
+      amendMode: true,
+      headInfo,
+      commits: [],
+    });
+    expect(await screen.findByRole("textbox", { name: "Author" })).toHaveValue("");
+  });
+
+  it("offers the repository's recent authors and commits them as trailers", async () => {
+    const listRecentAuthors = vi.fn(async () => [{ name: "Ada", email: "ada@x.org" }]);
+    const onCommit = vi.fn(async () => true);
+    renderUncommitted(fakeClient({ listRecentAuthors }), [{ path: "a.txt", staged: true, kind: "Modified" }], {
+      onCommit,
+    });
+    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
+    expect(onCommit).toHaveBeenCalledWith("Fix", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
   });
 });

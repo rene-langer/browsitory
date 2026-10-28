@@ -3,6 +3,7 @@
 //! the Tauri desktop app today, a JSON-RPC sidecar for the VSCode extension later. See
 //! `docs/superpowers/specs/2026-08-30-vscode-extension-design.md`.
 
+pub mod base64;
 pub mod clone;
 pub mod credentials;
 pub mod pull_requests;

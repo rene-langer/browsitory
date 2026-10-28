@@ -1,4 +1,9 @@
 import type {
+  AmendOptions,
+  CommitMessageSettings,
+  FileSides,
+  SignatureInput,
+  Trailer,
   DiffSource,
   ExternalToolSettings,
   GitTools,
@@ -291,8 +296,8 @@ export const vscodeRepoClient: RepoClient = {
   ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => call<DiffSettings>("get_diff_settings", {}),
   setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),
-  commit: (repoPath: string, message: string, noVerify: boolean) =>
-    call<CommitOutcome>("commit", { repoPath, message, noVerify }),
+  commit: (repoPath: string, message: string, noVerify: boolean, trailers: Trailer[] = []) =>
+    call<CommitOutcome>("commit", { repoPath, message, noVerify, trailers }),
   listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
     call<void>("create_branch", { repoPath, name, startPoint }),
@@ -411,8 +416,20 @@ export const vscodeRepoClient: RepoClient = {
   abortMerge: (repoPath: string) => call<void>("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => call<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => call<HeadInfo>("get_head_info", { repoPath }),
-  amendCommit: (repoPath: string, message: string, noVerify: boolean) =>
-    call<CommitOutcome>("amend_commit", { repoPath, message, noVerify }),
+  amendCommit: (repoPath: string, message: string, noVerify: boolean, options?: AmendOptions) =>
+    call<CommitOutcome>("amend_commit", {
+      repoPath,
+      message,
+      noVerify,
+      author: options?.author ?? null,
+      trailers: options?.trailers ?? [],
+    }),
+  getFileSides: (repoPath: string, path: string, source: DiffSource) =>
+    call<FileSides>("get_file_sides", { repoPath, path, source }),
+  listRecentAuthors: (repoPath: string) => call<SignatureInput[]>("list_recent_authors", { repoPath }),
+  getCommitMessageSettings: () => call<CommitMessageSettings>("get_commit_message_settings", {}),
+  setCommitMessageSettings: (settings: CommitMessageSettings) =>
+    call<void>("set_commit_message_settings", { settings }),
   getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),

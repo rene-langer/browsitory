@@ -128,10 +128,13 @@ pub(super) fn abort_sequence_for_merge(
 ) {
     let _ = reply.send(abort_stored(repo, sequence_store).map(|_| ()));
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn amend(
     repo: &git2::Repository,
     message: String,
     no_verify: bool,
+    author: Option<git_core::commit::SignatureInput>,
+    trailers: Vec<git_core::commit::Trailer>,
     op: super::remote::TransferOp<'_>,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
@@ -141,19 +144,36 @@ pub(super) fn amend(
         events,
         operation_id: op.id.clone(),
     };
-    let result = git_core::commit::amend_head(
-        repo,
-        &message,
-        git_core::hooks::HookOptions {
-            no_verify,
-            cancel: Some(&cancel),
-            reporter: Some(&mut reporter),
-            ..Default::default()
-        },
-    );
+    // Trailers before the hooks, as for a commit.
+    let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {
+        git_core::commit::amend_head(
+            repo,
+            &message,
+            author.as_ref(),
+            git_core::hooks::HookOptions {
+                no_verify,
+                cancel: Some(&cancel),
+                reporter: Some(&mut reporter),
+                ..Default::default()
+            },
+        )
+    });
     op.clear();
     let _ = reply.send(super::status::commit_reply(result));
 }
+/// The commit box's co-author suggestions.
+pub(super) fn recent_authors(
+    repo: &git2::Repository,
+    reply: Sender<Result<Vec<git_core::commit::SignatureInput>, String>>,
+) {
+    let _ = reply.send(
+        git_core::commit::recent_authors(repo, RECENT_AUTHORS_LIMIT).map_err(|e| e.to_string()),
+    );
+}
+
+/// How many co-author suggestions the commit box offers.
+pub const RECENT_AUTHORS_LIMIT: usize = 20;
+
 pub(super) fn cherry_pick(
     repo: &git2::Repository,
     commit_id: String,
@@ -219,16 +239,24 @@ impl WorkerHandle {
         &self,
         message: String,
         no_verify: bool,
+        author: Option<git_core::commit::SignatureInput>,
+        trailers: Vec<git_core::commit::Trailer>,
         events: Sender<super::HookEvent>,
     ) -> Result<git_core::commit::CommitOutcome, String> {
         let operation_id = super::remote::next_operation_id("amend");
         round_trip(self, |reply| Command::AmendCommit {
             message,
             no_verify,
+            author,
+            trailers,
             operation_id,
             events,
             reply,
         })
+    }
+    /// Up to `RECENT_AUTHORS_LIMIT` recent authors other than the current user, newest first.
+    pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, String> {
+        round_trip(self, |reply| Command::ListRecentAuthors { reply })
     }
     /// `mainline` (1-based parent) is required for a merge commit and refused otherwise.
     pub fn cherry_pick(

@@ -30,6 +30,18 @@ pub(super) fn prepare_merge_tool(
     let _ = reply.send(git_core::tools::prepare_merge_tool(repo, &path).map_err(|e| e.to_string()));
 }
 
+pub(super) fn file_sides(
+    repo: &git2::Repository,
+    path: String,
+    source: DiffSource,
+    reply: Sender<Result<git_core::diff::FileSides, String>>,
+) {
+    let _ = reply.send(
+        git_core::diff::file_sides(repo, &source, &path, git_core::diff::MAX_PREVIEW_BYTES)
+            .map_err(|e| e.to_string()),
+    );
+}
+
 pub(super) fn git_tools(repo: &git2::Repository, reply: Sender<Result<GitTools, String>>) {
     let _ = reply.send(git_core::tools::git_tools(repo).map_err(|e| e.to_string()));
 }
@@ -76,6 +88,24 @@ impl WorkerHandle {
         self.workdir
             .clone()
             .ok_or_else(|| "repository has no working directory (bare repository)".to_string())
+    }
+
+    /// Both sides of `path` in `source` as bytes, each capped at `MAX_PREVIEW_BYTES`.
+    pub fn get_file_sides(
+        &self,
+        path: String,
+        source: DiffSource,
+    ) -> Result<git_core::diff::FileSides, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetFileSides {
+                path,
+                source,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
     /// Resolves the diff tool and writes its side files. The caller launches it.

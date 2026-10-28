@@ -9,9 +9,11 @@ export type PushRequest =
   | { operation: "PushBranchTo"; remoteName: string; localBranch: string; remoteBranch: string; setUpstream: boolean }
   | { operation: "DeleteRemoteBranch"; remoteName: string; branchName: string };
 
+import type { AmendOptions, Trailer } from "../ipc/RepoClient";
+
 export type HookRetry =
-  | { kind: "commit"; message: string }
-  | { kind: "amend"; message: string }
+  | { kind: "commit"; message: string; trailers: Trailer[] }
+  | { kind: "amend"; message: string; options: AmendOptions }
   | { kind: "push"; push: PushRequest };
 
 export interface HookFailure {

@@ -32,6 +32,198 @@ pub enum CommitError {
     Hook(#[from] hooks::HookError),
     #[error("Aborting commit due to empty commit message.")]
     EmptyMessage,
+    /// `"{key}: {value}"` as given.
+    #[error("Invalid trailer \"{0}\".")]
+    InvalidTrailer(String),
+    #[error("Invalid author. Use a name and an email address.")]
+    InvalidAuthor,
+}
+
+/// A person as typed or listed in the UI: an amend author override, or a recent author.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureInput {
+    pub name: String,
+    pub email: String,
+}
+
+/// One `Key: value` line for a commit message's trailer block (e.g. `Co-authored-by`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trailer {
+    pub key: String,
+    pub value: String,
+}
+
+fn is_trailer_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// `Key: value` (or `Key:value`) with a valid key: the key (lowercase) and the trimmed value.
+fn parse_trailer_line(line: &str) -> Option<(String, String)> {
+    let (key, value) = line.split_once(':')?;
+    let key = key.trim_end();
+    is_trailer_key(key).then(|| (key.to_ascii_lowercase(), value.trim().to_string()))
+}
+
+fn is_blank(line: &str) -> bool {
+    line.trim().is_empty()
+}
+
+/// Adds `trailers` to `message`'s trailer block the way `git interpret-trailers` places them:
+/// the last paragraph is the trailer block when the message has more than one paragraph and
+/// every line of it is a `Key: value` trailer (or a whitespace-led continuation of one), and the
+/// new lines are appended to it; otherwise a blank line and a new block follow the message.
+/// Trailing blank lines are dropped. Lines starting with `#` are message text (nothing strips
+/// them in Browsitory), so trailers always go at the very end. A trailer already in the block (same key
+/// and value, both ignoring ASCII case, as git compares them) is not added again. No trailers leaves `message` byte-identical, and so
+/// does a call whose every trailer is already there. A blank `message` with trailers is
+/// [`CommitError::EmptyMessage`]: trailers alone must not turn an empty message into a commit.
+pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, CommitError> {
+    if trailers.is_empty() {
+        return Ok(message.to_string());
+    }
+    if message.trim().is_empty() {
+        return Err(CommitError::EmptyMessage);
+    }
+    let mut lines_to_add: Vec<(String, String, String)> = Vec::new();
+    for trailer in trailers {
+        let value = trailer.value.trim();
+        if !is_trailer_key(&trailer.key) || value.is_empty() || value.contains(['\n', '\r', '\0']) {
+            return Err(CommitError::InvalidTrailer(format!(
+                "{}: {}",
+                trailer.key, trailer.value
+            )));
+        }
+        lines_to_add.push((
+            trailer.key.to_ascii_lowercase(),
+            value.to_string(),
+            format!("{}: {}", trailer.key, value),
+        ));
+    }
+
+    // `#` lines are ordinary text here: Browsitory commits the message as typed (like
+    // `git commit -m`, no comment cleanup), so moving them after the trailers, as
+    // `git interpret-trailers` does for an editor buffer, would reorder the user's message.
+    let body = message.trim_end();
+
+    let body_lines: Vec<&str> = body.split('\n').collect();
+    let last_blank = body_lines.iter().rposition(|line| is_blank(line));
+    let block: Option<&[&str]> = match last_blank {
+        Some(blank) if body_lines[..blank].iter().any(|line| !is_blank(line)) => {
+            let paragraph = &body_lines[blank + 1..];
+            let first_is_trailer = paragraph
+                .first()
+                .is_some_and(|line| parse_trailer_line(line).is_some());
+            let all_trailers = paragraph
+                .iter()
+                .all(|line| line.starts_with([' ', '\t']) || parse_trailer_line(line).is_some());
+            (first_is_trailer && all_trailers).then_some(paragraph)
+        }
+        _ => None,
+    };
+
+    let mut present: Vec<(String, String)> = block
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|line| parse_trailer_line(line))
+        .collect();
+    let mut new_lines = Vec::new();
+    for (key, value, line) in lines_to_add {
+        // Like git's `addIfDifferent`: key and value both compared ignoring ASCII case.
+        if present
+            .iter()
+            .any(|(k, v)| *k == key && v.eq_ignore_ascii_case(&value))
+        {
+            continue;
+        }
+        present.push((key, value));
+        new_lines.push(line);
+    }
+    if new_lines.is_empty() {
+        return Ok(message.to_string());
+    }
+
+    let mut out = String::with_capacity(message.len() + 64);
+    if !body.is_empty() {
+        out.push_str(body);
+        out.push_str(if block.is_some() { "\n" } else { "\n\n" });
+    }
+    out.push_str(&new_lines.join("\n"));
+    out.push('\n');
+    Ok(out)
+}
+
+fn valid_author(author: &SignatureInput) -> Option<(&str, &str)> {
+    let name = author.name.trim();
+    let email = author.email.trim();
+    let name_ok = !name.is_empty()
+        && !name
+            .chars()
+            .any(|c| matches!(c, '<' | '>') || c.is_control());
+    let email_ok = !email.is_empty()
+        && !email
+            .chars()
+            .any(|c| matches!(c, '<' | '>') || c.is_whitespace() || c.is_control());
+    (name_ok && email_ok).then_some((name, email))
+}
+
+/// How many commits from HEAD `recent_authors` looks at, at most.
+pub const RECENT_AUTHORS_WALK_LIMIT: usize = 1000;
+
+/// Up to `limit` distinct authors (by case-insensitive email) of the newest
+/// `RECENT_AUTHORS_WALK_LIMIT` commits reachable from HEAD, newest first, without the current
+/// user (`repo.signature()`'s email). An unborn HEAD has none.
+pub fn recent_authors(
+    repo: &git2::Repository,
+    limit: usize,
+) -> Result<Vec<SignatureInput>, CommitError> {
+    let mut authors = Vec::new();
+    if limit == 0 {
+        return Ok(authors);
+    }
+    match repo.head() {
+        Ok(_) => {}
+        Err(error)
+            if matches!(
+                error.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            return Ok(authors)
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let me = repo
+        .signature()
+        .ok()
+        .and_then(|s| s.email().ok().map(str::to_lowercase));
+    let mut seen = std::collections::HashSet::new();
+    let mut walk = repo.revwalk()?;
+    // Unsorted on purpose: any sort mode makes libgit2 walk (and sort) the whole history before
+    // yielding the first commit, so `take` would bound only the output, not the work. The
+    // unsorted walk is lazy and already roughly newest-first (a commit-time priority queue).
+    walk.set_sorting(git2::Sort::NONE)?;
+    walk.push_head()?;
+    for oid in walk.take(RECENT_AUTHORS_WALK_LIMIT) {
+        let commit = repo.find_commit(oid?)?;
+        let author = commit.author();
+        let (Ok(name), Ok(email)) = (author.name(), author.email()) else {
+            continue;
+        };
+        let key = email.to_lowercase();
+        if email.trim().is_empty() || Some(&key) == me.as_ref() || !seen.insert(key) {
+            continue;
+        }
+        authors.push(SignatureInput {
+            name: name.to_string(),
+            email: email.to_string(),
+        });
+        if authors.len() == limit {
+            break;
+        }
+    }
+    Ok(authors)
 }
 
 struct HookedMessage {
@@ -280,15 +472,22 @@ pub fn commit(
 }
 
 /// Rewrites HEAD's commit with the current index tree and `message`, keeping its parents and
-/// author; committer becomes `repo.signature()`. Works on a branch (the branch ref moves) or a
+/// author (or, with `author`, replacing the author's name and email but keeping its time);
+/// committer becomes `repo.signature()`. An invalid `author` (blank, or `<`, `>`, control
+/// characters, or whitespace in the email) is `InvalidAuthor`, checked before anything runs. Works on a branch (the branch ref moves) or a
 /// detached HEAD. Refused while any operation (merge, cherry-pick, revert, rebase) is paused,
 /// since amending then would silently drop that operation's extra state. Goes through `signing::create_commit`, so it is signed when `commit.gpgSign`
 /// asks for it. Runs the commit hooks exactly as `commit` does.
 pub fn amend_head(
     repo: &git2::Repository,
     message: &str,
+    author: Option<&SignatureInput>,
     mut hooks: HookOptions<'_>,
 ) -> Result<String, CommitError> {
+    let author = match author {
+        Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
+        None => None,
+    };
     if repo.state() != git2::RepositoryState::Clean {
         return Err(CommitError::OperationInProgress);
     }
@@ -307,6 +506,11 @@ pub fn amend_head(
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let committer = repo.signature()?;
+    // Like `git commit --amend --author`: the new name and email, the original author time.
+    let author = match author {
+        Some((name, email)) => git2::Signature::new(name, email, &head.author().when())?,
+        None => head.author().to_owned(),
+    };
     let parents: Vec<git2::Commit> = head.parents().collect();
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
     let oid = crate::signing::create_commit(
@@ -315,7 +519,7 @@ pub fn amend_head(
             expected: Some(head.id()),
             reflog_operation: "commit (amend)",
         }),
-        &head.author(),
+        &author,
         &committer,
         &hooked.message,
         &tree,
@@ -323,4 +527,150 @@ pub fn amend_head(
     )?;
     run_post_commit(repo, &mut hooks);
     Ok(oid.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn co(value: &str) -> Trailer {
+        Trailer {
+            key: "Co-authored-by".into(),
+            value: value.into(),
+        }
+    }
+
+    const ADA: &str = "Ada <ada@x.org>";
+
+    #[test]
+    fn no_trailers_leaves_the_message_unchanged() {
+        assert_eq!(
+            append_trailers("Fix bug  \n\n", &[]).unwrap(),
+            "Fix bug  \n\n"
+        );
+        assert_eq!(append_trailers("", &[]).unwrap(), "");
+    }
+
+    #[test]
+    fn trailers_go_after_a_blank_line() {
+        assert_eq!(
+            append_trailers("Fix bug\n", &[co(ADA)]).unwrap(),
+            "Fix bug\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        assert_eq!(
+            append_trailers("Fix bug", &[co(ADA)]).unwrap(),
+            "Fix bug\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        assert_eq!(
+            append_trailers(
+                "Fix bug\n\nBody text.\n\n\n",
+                &[co(ADA), co("Bob <bob@x.org>")]
+            )
+            .unwrap(),
+            "Fix bug\n\nBody text.\n\nCo-authored-by: Ada <ada@x.org>\nCo-authored-by: Bob <bob@x.org>\n"
+        );
+        assert!(matches!(
+            append_trailers("  \n", &[co(ADA)]),
+            Err(CommitError::EmptyMessage)
+        ));
+    }
+
+    #[test]
+    fn an_existing_trailer_block_is_extended() {
+        assert_eq!(
+            append_trailers("Fix\n\nBody\n\nSigned-off-by: Me <me@x.org>\n", &[co(ADA)]).unwrap(),
+            "Fix\n\nBody\n\nSigned-off-by: Me <me@x.org>\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        // A continuation line belongs to the trailer above it.
+        assert_eq!(
+            append_trailers("Fix\n\nNote: long\n  wrapped\n", &[co(ADA)]).unwrap(),
+            "Fix\n\nNote: long\n  wrapped\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn duplicates_are_skipped() {
+        let message = "Fix\n\nCo-authored-by: Ada <ada@x.org>\n";
+        assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
+        // Key case and spacing don't make a different trailer, as in `git interpret-trailers`.
+        let message = "Fix\n\nco-authored-by:Ada <ada@x.org>\n";
+        assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
+        // Value case doesn't either: git compares trailer values with `strcasecmp`.
+        let message = "Fix\n\nCo-authored-by: ADA <ADA@x.org>\n";
+        assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
+        // Twice in one call: added once.
+        assert_eq!(
+            append_trailers("Fix\n", &[co(ADA), co(" Ada <ada@x.org> ")]).unwrap(),
+            "Fix\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        // The same text in the body is not a trailer, so it doesn't count.
+        assert_eq!(
+            append_trailers("Co-authored-by: Ada <ada@x.org>\n", &[co(ADA)]).unwrap(),
+            "Co-authored-by: Ada <ada@x.org>\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn a_paragraph_mixing_text_and_trailers_is_not_a_trailer_block() {
+        assert_eq!(
+            append_trailers("Fix\n\nBody\nKey: v\n", &[co(ADA)]).unwrap(),
+            "Fix\n\nBody\nKey: v\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn a_one_paragraph_message_that_looks_like_a_trailer_is_still_the_subject() {
+        assert_eq!(
+            append_trailers("fix: crash on start\n", &[co(ADA)]).unwrap(),
+            "fix: crash on start\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn hash_lines_are_message_text_and_trailers_go_last() {
+        // Browsitory never strips `#` lines, so they stay where the user put them.
+        assert_eq!(
+            append_trailers("Fix crash\n\n#123\n", &[co(ADA)]).unwrap(),
+            "Fix crash\n\n#123\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        assert_eq!(
+            append_trailers("Subject\n# not a comment\n", &[co(ADA)]).unwrap(),
+            "Subject\n# not a comment\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+        assert_eq!(
+            append_trailers("Subject\n\nSigned-off-by: A <a@x>\n# note\n", &[co(ADA)]).unwrap(),
+            "Subject\n\nSigned-off-by: A <a@x>\n# note\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn invalid_trailers_are_refused() {
+        for (key, value) in [
+            ("Bad key", "v"),
+            ("", "v"),
+            ("-lead", "v"),
+            ("Key:", "v"),
+            ("Kéy", "v"),
+            ("Key", "  "),
+            ("Key", "a\nb"),
+            ("Key", "a\rb"),
+            ("Key", "a\0b"),
+        ] {
+            let t = Trailer {
+                key: key.into(),
+                value: value.into(),
+            };
+            assert!(
+                matches!(
+                    append_trailers("x", &[t]),
+                    Err(CommitError::InvalidTrailer(_))
+                ),
+                "{key:?} {value:?}"
+            );
+        }
+        assert_eq!(
+            CommitError::InvalidTrailer("Bad key: v".into()).to_string(),
+            "Invalid trailer \"Bad key: v\"."
+        );
+    }
 }

@@ -9,16 +9,16 @@ describe("hookFailure", () => {
 
   it("offers a retry only for hooks --no-verify skips", () => {
     const base = { output: "", dialogOpen: true };
-    expect(retryLabel({ ...base, hook: "pre-commit", retry: { kind: "commit", message: "m" } })).toBe("Commit without hooks");
-    expect(retryLabel({ ...base, hook: "commit-msg", retry: { kind: "amend", message: "m" } })).toBe("Amend without hooks");
+    expect(retryLabel({ ...base, hook: "pre-commit", retry: { kind: "commit", message: "m", trailers: [] } })).toBe("Commit without hooks");
+    expect(retryLabel({ ...base, hook: "commit-msg", retry: { kind: "amend", message: "m", options: { author: null, trailers: [] } } })).toBe("Amend without hooks");
     expect(
       retryLabel({ ...base, hook: "pre-push", retry: { kind: "push", push: { operation: "PushBranch", remoteName: "o" } } }),
     ).toBe("Push without hooks");
-    expect(retryLabel({ ...base, hook: "prepare-commit-msg", retry: { kind: "commit", message: "m" } })).toBeNull();
+    expect(retryLabel({ ...base, hook: "prepare-commit-msg", retry: { kind: "commit", message: "m", trailers: [] } })).toBeNull();
   });
 
   it("names the success toast after the original action", () => {
-    expect(retrySuccessLabel({ kind: "commit", message: "m" })).toBe("Committed");
+    expect(retrySuccessLabel({ kind: "commit", message: "m", trailers: [] })).toBe("Committed");
     expect(retrySuccessLabel({ kind: "push", push: { operation: "ForcePushBranch", remoteName: "o" } })).toBe("Force pushed");
     expect(retrySuccessLabel({ kind: "push", push: { operation: "PushTags", remoteName: "o", names: [] } })).toBe("Push complete");
     expect(

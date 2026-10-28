@@ -26,6 +26,44 @@ export const DEFAULT_DIFF_SETTINGS: DiffSettings = { ignoreWhitespace: false, co
 export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3 };
 export const MAX_CONTEXT_LINES = 20;
 
+/** Commit message editor settings (`[commit_message]`); columns are clamped to 10–200. */
+export interface CommitMessageSettings {
+  summaryLimit: number;
+  bodyRuler: number;
+  showRuler: boolean;
+}
+export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = { summaryLimit: 50, bodyRuler: 72, showRuler: true };
+export const COMMIT_MESSAGE_COLUMNS = { min: 10, max: 200 } as const;
+
+/** A `Key: value` line for a commit message's trailer block, e.g. `Co-authored-by`. */
+export interface Trailer {
+  key: string;
+  value: string;
+}
+/** A person: an amend author override, or one of the recent authors. */
+export interface SignatureInput {
+  name: string;
+  email: string;
+}
+/** Amend extras: `author: null` keeps HEAD's author. */
+export interface AmendOptions {
+  author: SignatureInput | null;
+  trailers: Trailer[];
+}
+
+/**
+ * One side of a file for the image preview. `Loaded.base64` is the bytes; `mime` is the image
+ * type sniffed from them by the backend (`null`: not a PNG, JPEG, GIF, WebP or SVG).
+ */
+export type FileSide =
+  | { kind: "Missing" }
+  | { kind: "TooLarge"; size: number }
+  | { kind: "Loaded"; size: number; base64: string; mime: string | null };
+export interface FileSides {
+  old: FileSide;
+  new: FileSide;
+}
+
 export interface DiffHunk {
   oldStart: number;
   oldLines: number;
@@ -547,7 +585,7 @@ export interface RepoClient {
    * `commit-msg`). A failing gate hook resolves `HookFailed`; only real failures reject. Hook
    * progress arrives on `subscribeHookProgress`.
    */
-  commit(repoPath: string, message: string, noVerify: boolean): Promise<CommitOutcome>;
+  commit(repoPath: string, message: string, noVerify: boolean, trailers?: Trailer[]): Promise<CommitOutcome>;
   listBranches(repoPath: string): Promise<BranchInfo[]>;
   createBranch(repoPath: string, name: string, startPoint: string): Promise<void>;
   switchBranch(repoPath: string, name: string): Promise<void>;
@@ -632,8 +670,14 @@ export interface RepoClient {
   abortMerge(repoPath: string): Promise<void>;
   getMergeMessage(repoPath: string): Promise<string | null>;
   getHeadInfo(repoPath: string): Promise<HeadInfo>;
-  /** Amends HEAD; hooks and `noVerify` as for `commit`. */
-  amendCommit(repoPath: string, message: string, noVerify: boolean): Promise<CommitOutcome>;
+  /** Amends HEAD; hooks and `noVerify` as for `commit`. `options.author` replaces HEAD's author. */
+  amendCommit(repoPath: string, message: string, noVerify: boolean, options?: AmendOptions): Promise<CommitOutcome>;
+  /** Both sides of `path` in `source`, for the image preview (each capped at 20 MB). */
+  getFileSides(repoPath: string, path: string, source: DiffSource): Promise<FileSides>;
+  /** Up to 20 recent authors (other than the current user), newest first. */
+  listRecentAuthors(repoPath: string): Promise<SignatureInput[]>;
+  getCommitMessageSettings(): Promise<CommitMessageSettings>;
+  setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `OperationInProgress`) resolve; only real failures reject. */

@@ -12,8 +12,9 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type {
+  AmendOptions,
   BlameLine,
   DiffHunk,
   DiffOptions,
@@ -27,7 +28,9 @@ import type {
   StashFiles,
   StatusEntry,
   StatusKind,
+  Trailer,
 } from "../ipc/RepoClient";
+import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -40,6 +43,8 @@ import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { ImageDiff, ImageTextToggle } from "./ImageDiff";
+import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import {
   discardAllConfirmMessage,
   discardConfirmMessage,
@@ -174,6 +179,11 @@ function UncommittedFileSection({
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
+  // Image files show a before/after preview instead of hunks; an SVG (text) can switch to its
+  // text diff. Conflicted images still go to the conflict pane.
+  const isImage = imageMimeType(entry.path) !== null;
+  const [imageAsText, setImageAsText] = useState(false);
+  const showImage = isImage && !isConflicted && !imageAsText;
   // Tracks proximity to the viewport so a long file list doesn't eagerly fetch every section's
   // diff at once (PERF-001) — only sections within `rootMargin` of the viewport ever load.
   const sectionElRef = useRef<HTMLDivElement | null>(null);
@@ -229,10 +239,10 @@ function UncommittedFileSection({
     // Lazy: a collapsed section fetches nothing until it is expanded, and a section far from the
     // viewport fetches nothing until it is scrolled near (both PERF-001). `diffVersion` (not
     // `status`) is the staleness signal — see the comment on `loadDiff` above.
-    if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
+    if (mode !== "diff" || isConflicted || showImage || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -424,6 +434,21 @@ function UncommittedFileSection({
               onResolveWholeFile={onResolveWholeFile}
               onMarkResolved={onMarkResolved === undefined ? undefined : () => void markResolved(false)}
             />
+          ) : showImage ? (
+            <>
+              {isSvgPath(entry.path) && (
+                <ImageTextToggle asText={false} onToggle={() => setImageAsText(true)} />
+              )}
+              {nearViewport && (
+                <ImageDiff
+                  client={client}
+                  repoPath={repoPath}
+                  path={entry.path}
+                  source={{ kind: entry.staged ? "Staged" : "Unstaged" }}
+                  refreshKey={diffVersion}
+                />
+              )}
+            </>
           ) : error !== null ? (
             <InlineError
               message={error.message}
@@ -432,6 +457,10 @@ function UncommittedFileSection({
               onRetry={loadDiff}
             />
           ) : (
+            <>
+            {isImage && !isConflicted && (
+              <ImageTextToggle asText onToggle={() => setImageAsText(false)} />
+            )}
             <DiffView
               hunks={hunks}
               path={entry.path}
@@ -443,6 +472,7 @@ function UncommittedFileSection({
               onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
               partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
             />
+            </>
           )}
         </div>
       )}
@@ -589,7 +619,7 @@ export function DiffPane({
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
-  onCommit: (message: string) => Promise<boolean>;
+  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
   // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
   onOpenStashDialog?: (paths: string[]) => void;
@@ -601,7 +631,7 @@ export function DiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => Promise<boolean>;
+  onAmendCommit?: (message: string, options: AmendOptions) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
@@ -671,6 +701,7 @@ export function DiffPane({
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
+        commits={commits}
       />
     );
   }
@@ -726,6 +757,7 @@ function entryKey(entry: { path: string; staged: boolean }): string {
 function UncommittedDiffPane({
   repoPath,
   client,
+  commits,
   status,
   onStageFile,
   onUnstageFile,
@@ -805,7 +837,9 @@ function UncommittedDiffPane({
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
-  onCommit: (message: string) => Promise<boolean>;
+  /** The graph's commits, for HEAD's author in the amend Author field. */
+  commits?: GraphCommit[];
+  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
   onOpenStashDialog: (paths: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
@@ -816,7 +850,7 @@ function UncommittedDiffPane({
   amendMode?: boolean;
   headInfo?: HeadInfo;
   onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string) => Promise<boolean>;
+  onAmendCommit?: (message: string, options: AmendOptions) => Promise<boolean>;
   focusCommitMessage?: boolean;
   onCommitMessageFocused?: () => void;
   // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
@@ -834,6 +868,10 @@ function UncommittedDiffPane({
   // An action is running: the sequence's Continue/Abort are disabled (no double submit).
   sequencePending?: boolean;
 }) {
+  const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
+  const loadRecentAuthors = useCallback(() => client.listRecentAuthors(repoPath), [client, repoPath]);
+  const headCommit = headInfo.headId === null ? undefined : commits?.find((c) => c.id === headInfo.headId);
+  const headAuthor = headCommit === undefined ? null : { name: headCommit.authorName, email: headCommit.authorEmail };
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
     if (!amendMode || headInfo.headId === null) {
@@ -1231,6 +1269,8 @@ function UncommittedDiffPane({
             }
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
+            messageSettings={commitMessageSettings}
+            loadRecentAuthors={loadRecentAuthors}
             amend={{
               available:
                 headInfo.headId !== null &&
@@ -1242,6 +1282,7 @@ function UncommittedDiffPane({
               pushed: headInfo.headPushed,
               onToggle: onSetAmendMode,
               onAmend: onAmendCommit,
+              headAuthor,
             }}
           />
         )}
@@ -1364,6 +1405,7 @@ function CommitDiffPane({
               onSelectRow={onSelectRow}
               externalTools={externalTools}
               toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
+              previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
             />
           </ul>
           {files.length > 1 && (
@@ -1395,6 +1437,7 @@ function CommitDiffPane({
                 onOpenFileHistory={onOpenFileHistory}
                 externalTools={externalTools}
                 toolSource={{ kind: "Commit", commitId, oldPath: null }}
+                previewSource={{ kind: "Commit", commitId, oldPath: null }}
               />
             ))}
           </ul>
@@ -1523,6 +1566,7 @@ function StashDiffPane({
                     path={path}
                     diffKey={`commit:${stash.commitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, stash.commitId, path, opts)}
+                    previewSource={{ kind: "Commit", commitId: stash.commitId, oldPath: null }}
                     blameAt={stash.commitId}
                     collapsed={collapsedPaths.has(`t:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`t:${path}`)}
@@ -1546,6 +1590,7 @@ function StashDiffPane({
                     path={path}
                     diffKey={`commit:${untrackedCommitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, untrackedCommitId, path, opts)}
+                    previewSource={{ kind: "Commit", commitId: untrackedCommitId, oldPath: null }}
                     blameAt={untrackedCommitId}
                     collapsed={collapsedPaths.has(`u:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`u:${path}`)}

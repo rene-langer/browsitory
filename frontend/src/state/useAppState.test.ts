@@ -94,6 +94,10 @@ const remoteManagementClient = {
   getExternalToolSettings: async () => ({ editor: null, terminal: null }),
   setExternalToolSettings: async () => {},
   getGitTools: async () => ({ diffTool: null, mergeTool: null }),
+  getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
+  listRecentAuthors: async () => [],
+  getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+  setCommitMessageSettings: async () => {},
   getGraphBranchSelection: async () => null,
   setGraphBranchSelection: async () => {},
   getGraphRemoteBranchSelection: async () => null,
@@ -4531,12 +4535,12 @@ describe("git hooks", () => {
     });
 
     expect(ok).toBe(false);
-    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "msg", false);
+    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "msg", false, []);
     expect(result.current.state.error).toBe("The pre-commit hook failed.");
     expect(result.current.state.hookFailure).toEqual({
       hook: "pre-commit",
       output: "lint\n",
-      retry: { kind: "commit", message: "msg" },
+      retry: { kind: "commit", message: "msg", trailers: [] },
       dialogOpen: true,
     });
   });
@@ -4550,10 +4554,10 @@ describe("git hooks", () => {
     await act(async () => void (await result.current.commit("msg", false)));
 
     await act(async () => {
-      await result.current.retryWithoutHooks({ kind: "commit", message: "msg" });
+      await result.current.retryWithoutHooks({ kind: "commit", message: "msg", trailers: [] });
     });
 
-    expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", true);
+    expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", true, []);
     expect(result.current.state.hookFailure).toBeNull();
     expect(result.current.state.error).toBeNull();
     expect(result.current.state.clearCommitMessage).toBe("msg");
@@ -4569,14 +4573,42 @@ describe("git hooks", () => {
     const { result } = renderHook(() => useAppState(transferClient({ amendCommit }), TEST_REPO_PATH));
     act(() => result.current.setAmendMode(true));
     await act(async () => void (await result.current.amendCommit("m", false)));
-    expect(result.current.state.hookFailure?.retry).toEqual({ kind: "amend", message: "m" });
+    expect(result.current.state.hookFailure?.retry).toEqual({ kind: "amend", message: "m", options: { author: null, trailers: [] } });
     expect(result.current.state.amendMode).toBe(true);
 
-    await act(async () => result.current.retryWithoutHooks({ kind: "amend", message: "m" }));
+    await act(async () => result.current.retryWithoutHooks({ kind: "amend", message: "m", options: { author: null, trailers: [] } }));
 
-    expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", true);
+    expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", true, { author: null, trailers: [] });
     expect(result.current.state.amendMode).toBe(false);
     expect(result.current.state.clearCommitMessage).toBeNull();
+  });
+
+  it("keeps trailers and the amend author through a hook failure and its retry", async () => {
+    const trailers = [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }];
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const amendCommit = vi
+      .fn<RepoClient["amendCommit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c2" });
+    const { result } = renderHook(() => useAppState(transferClient({ commit, amendCommit }), TEST_REPO_PATH));
+
+    await act(async () => void (await result.current.commit("msg", false, trailers)));
+    expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", false, trailers);
+    const commitRetry = result.current.state.hookFailure!.retry;
+    expect(commitRetry).toEqual({ kind: "commit", message: "msg", trailers });
+    await act(async () => void (await result.current.retryWithoutHooks(commitRetry)));
+    expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", true, trailers);
+
+    const options = { author: { name: "Bob", email: "bob@x.org" }, trailers };
+    await act(async () => void (await result.current.amendCommit("m", false, options)));
+    expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", false, options);
+    const amendRetry = result.current.state.hookFailure!.retry;
+    expect(amendRetry).toEqual({ kind: "amend", message: "m", options });
+    await act(async () => void (await result.current.retryWithoutHooks(amendRetry)));
+    expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", true, options);
   });
 
   it("skip hooks applies to the next commit only", async () => {
@@ -4586,7 +4618,7 @@ describe("git hooks", () => {
 
     await act(async () => void (await result.current.commit("m", result.current.state.skipHooks)));
 
-    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "m", true);
+    expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "m", true, []);
     expect(result.current.state.skipHooks).toBe(false);
   });
 

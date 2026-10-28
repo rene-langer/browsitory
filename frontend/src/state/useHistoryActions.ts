@@ -1,8 +1,10 @@
 import { useCallback } from "react";
-import type { PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
+import type { AmendOptions, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
+
+const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
 
 export interface HistoryActions {
   /**
@@ -19,7 +21,7 @@ export interface HistoryActions {
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   // Resolves `true` once amended; see `StagingActions.commit`.
-  amendCommit(message: string, noVerify: boolean): Promise<boolean>;
+  amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
   setAmendMode(on: boolean): void;
 }
 
@@ -80,13 +82,18 @@ export function useHistoryActions(
     [client, runMutation, repoPath],
   );
   const amendCommit = useCallback(
-    async (message: string, noVerify: boolean) => {
+    async (message: string, noVerify: boolean, options: AmendOptions = NO_AMEND_OPTIONS) => {
       const ok = await runMutationWithOutcome(async () => {
-        const outcome = await client.amendCommit(repoPath, message, noVerify);
+        const outcome = await client.amendCommit(repoPath, message, noVerify, options);
         if (outcome.kind === "HookFailed") {
           setState((prev) => ({
             ...prev,
-            hookFailure: { hook: outcome.hook, output: outcome.output, retry: { kind: "amend", message }, dialogOpen: true },
+            hookFailure: {
+              hook: outcome.hook,
+              output: outcome.output,
+              retry: { kind: "amend", message, options },
+              dialogOpen: true,
+            },
           }));
           throw new Error(hookFailedMessage(outcome.hook));
         }

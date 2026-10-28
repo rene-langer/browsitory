@@ -12,9 +12,10 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
   const styleUri = escapeAttribute(webview.asWebviewUri(assets.style).toString());
   const csp =
     "default-src 'none'; " +
+    // `data:` for the image diff preview (base64 bytes from the backend; no network access).
     "img-src " +
     webview.cspSource +
-    "; " +
+    " data:; " +
     "font-src " +
     webview.cspSource +
     "; " +

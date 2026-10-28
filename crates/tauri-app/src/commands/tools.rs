@@ -7,7 +7,7 @@ use git_core::launch::{self, EditorTarget};
 use tauri::State;
 
 use super::{
-    worker_handle, AppState, DiffSourceDto, ExternalToolSettingsDto, GitToolsDto,
+    worker_handle, AppState, DiffSourceDto, ExternalToolSettingsDto, FileSidesDto, GitToolsDto,
     MergeToolOutcomeDto,
 };
 
@@ -58,6 +58,19 @@ pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Res
     let invocation =
         launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(|e| e.to_string())?;
     launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())
+}
+
+/// Both sides of `path` in `source`, for the image preview (each capped at 20 MB).
+#[tauri::command]
+pub async fn get_file_sides(
+    repo_path: String,
+    path: String,
+    source: DiffSourceDto,
+    state: State<'_, AppState>,
+) -> Result<FileSidesDto, String> {
+    Ok(FileSidesDto::from(
+        worker_handle(&state, &repo_path)?.get_file_sides(path, source.into())?,
+    ))
 }
 
 /// Prepares on the repo worker, then launches here. Returns after the diff tool's 1 s grace
