@@ -5,6 +5,11 @@ describe("hookFailure", () => {
   it("builds the copy", () => {
     expect(hookFailedMessage("pre-commit")).toBe("The pre-commit hook failed.");
     expect(runningHookLabel("pre-push")).toBe("Running pre-push hook…");
+    expect(runningHookLabel("pre-commit")).toBe("Running pre-commit hook…");
+  });
+
+  it("labels the signing program, which is not a hook", () => {
+    expect(runningHookLabel("signing")).toBe("Waiting for the signing program…");
   });
 
   it("offers a retry only for hooks --no-verify skips", () => {

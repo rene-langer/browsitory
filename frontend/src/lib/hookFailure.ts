@@ -31,7 +31,10 @@ export function hookFailedMessage(hook: string): string {
   return `The ${hook} hook failed.`;
 }
 
+/** The status line while a hook runs; `"signing"` is the signing program (not a hook), reported
+ * the same way so the commit box offers the same Cancel button. */
 export function runningHookLabel(hook: string): string {
+  if (hook === "signing") return "Waiting for the signing program…";
   return `Running ${hook} hook…`;
 }
 

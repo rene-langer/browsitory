@@ -439,3 +439,126 @@ fn stage_hunk_with_wider_context_stages_the_merged_hunk() {
     let remaining = git_core::diff::working_diff(&repo, "f.txt", false, &five).unwrap();
     assert!(remaining.is_empty(), "both edits staged in one go");
 }
+
+#[cfg(unix)]
+#[derive(Default)]
+struct SigningRecorder {
+    started: Vec<String>,
+    finished: Vec<String>,
+}
+
+#[cfg(unix)]
+impl git_core::hooks::HookReporter for SigningRecorder {
+    fn started(&mut self, hook: &str) {
+        self.started.push(hook.to_string());
+    }
+    fn finished(
+        &mut self,
+        hook: &str,
+        _result: &Result<git_core::hooks::HookOutcome, git_core::hooks::HookError>,
+    ) {
+        self.finished.push(hook.to_string());
+    }
+}
+
+#[cfg(unix)]
+fn hung_signer_repo() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tempfile::TempDir::new().unwrap();
+    let signer = bin.path().join("gpg");
+    std::fs::write(&signer, "#!/bin/sh\nsleep 30\n").unwrap();
+    std::fs::set_permissions(&signer, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "a.txt", "b\n");
+    git_core::stage::stage_file(&repo, "a.txt").unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config
+        .set_str("gpg.program", signer.to_str().unwrap())
+        .unwrap();
+    (dir, repo, bin)
+}
+
+#[test]
+#[cfg(unix)]
+fn commit_reports_signing_to_the_hook_reporter_and_honours_cancel() {
+    let (_dir, mut repo, _bin) = hung_signer_repo();
+    let head = repo.head().unwrap().target().unwrap();
+    let started = std::time::Instant::now();
+    let cancel = || started.elapsed() > std::time::Duration::from_millis(200);
+    let mut recorder = SigningRecorder::default();
+
+    let result = git_core::commit::commit(
+        &mut repo,
+        "signed",
+        git_core::hooks::HookOptions {
+            cancel: Some(&cancel),
+            reporter: Some(&mut recorder),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(result.unwrap_err().to_string(), "Signing was cancelled.");
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert_eq!(recorder.started, vec!["signing".to_string()]);
+    assert_eq!(recorder.finished, vec!["signing".to_string()]);
+    assert_eq!(repo.head().unwrap().target().unwrap(), head);
+}
+
+#[test]
+#[cfg(unix)]
+fn amend_reports_signing_and_honours_cancel() {
+    let (_dir, repo, _bin) = hung_signer_repo();
+    let started = std::time::Instant::now();
+    let cancel = || started.elapsed() > std::time::Duration::from_millis(200);
+    let mut recorder = SigningRecorder::default();
+
+    let result = git_core::commit::amend_head(
+        &repo,
+        "amended",
+        None,
+        git_core::hooks::HookOptions {
+            cancel: Some(&cancel),
+            reporter: Some(&mut recorder),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(result.unwrap_err().to_string(), "Signing was cancelled.");
+    assert_eq!(recorder.started, vec!["signing".to_string()]);
+}
+
+#[test]
+fn an_unsigned_commit_reports_no_signing() {
+    let (dir, mut repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    git_core::stage::stage_file(&repo, "a.txt").unwrap();
+    let mut recorder = Recorderless::default();
+    git_core::commit::commit(
+        &mut repo,
+        "plain",
+        git_core::hooks::HookOptions {
+            reporter: Some(&mut recorder),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(!recorder.0.iter().any(|hook| hook == "signing"));
+}
+
+#[derive(Default)]
+struct Recorderless(Vec<String>);
+
+impl git_core::hooks::HookReporter for Recorderless {
+    fn started(&mut self, hook: &str) {
+        self.0.push(hook.to_string());
+    }
+    fn finished(
+        &mut self,
+        _hook: &str,
+        _result: &Result<git_core::hooks::HookOutcome, git_core::hooks::HookError>,
+    ) {
+    }
+}
