@@ -99,6 +99,19 @@ describe("CompareDiffPane", () => {
     expect(getRangeDiff).not.toHaveBeenCalled();
   });
 
+  it("previews an image file from both ends of the range, renames included", async () => {
+    const getRangeFiles = vi.fn(async (): Promise<ChangedFile[]> => [{ path: "new.png", oldPath: "old.png" }]);
+    const getRangeDiff = vi.fn(async () => []);
+    const getFileSides = vi.fn(async () => ({
+      old: { kind: "Loaded" as const, size: 3, base64: "Zm9v", mime: "image/png" },
+      new: { kind: "Loaded" as const, size: 3, base64: "YmFy", mime: "image/png" },
+    }));
+    renderPane({ client: client({ getRangeFiles, getRangeDiff, getFileSides }) });
+    expect(await screen.findByRole("img", { name: "Before: new.png" })).toHaveAttribute("src", "data:image/png;base64,Zm9v");
+    expect(getFileSides).toHaveBeenCalledWith("/repo", "new.png", { kind: "Range", fromId: A, toId: B, oldPath: "old.png" });
+    expect(getRangeDiff).not.toHaveBeenCalled();
+  });
+
   it("a working-tree compare reloads on refresh and blames at HEAD", async () => {
     const getWorkingTreeCompareFiles = vi.fn(async () => [{ path: "a.txt", oldPath: null }]);
     const getBlame = vi.fn(async () => []);

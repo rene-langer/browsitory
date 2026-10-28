@@ -40,6 +40,8 @@ import { CommitHeader } from "./CommitHeader";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { DiffView } from "./DiffView";
 import styles from "./DiffPane.module.css";
+import { ImageDiff, ImageTextToggle } from "./ImageDiff";
+import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import {
   discardAllConfirmMessage,
   discardConfirmMessage,
@@ -174,6 +176,11 @@ function UncommittedFileSection({
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const isConflicted = entry.kind === "Conflicted";
+  // Image files show a before/after preview instead of hunks; an SVG (text) can switch to its
+  // text diff. Conflicted images still go to the conflict pane.
+  const isImage = imageMimeType(entry.path) !== null;
+  const [imageAsText, setImageAsText] = useState(false);
+  const showImage = isImage && !isConflicted && !imageAsText;
   // Tracks proximity to the viewport so a long file list doesn't eagerly fetch every section's
   // diff at once (PERF-001) — only sections within `rootMargin` of the viewport ever load.
   const sectionElRef = useRef<HTMLDivElement | null>(null);
@@ -229,10 +236,10 @@ function UncommittedFileSection({
     // Lazy: a collapsed section fetches nothing until it is expanded, and a section far from the
     // viewport fetches nothing until it is scrolled near (both PERF-001). `diffVersion` (not
     // `status`) is the staleness signal — see the comment on `loadDiff` above.
-    if (mode !== "diff" || isConflicted || collapsed || !nearViewport) return;
+    if (mode !== "diff" || isConflicted || showImage || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
+  }, [repoPath, client, entry.path, entry.staged, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -424,6 +431,21 @@ function UncommittedFileSection({
               onResolveWholeFile={onResolveWholeFile}
               onMarkResolved={onMarkResolved === undefined ? undefined : () => void markResolved(false)}
             />
+          ) : showImage ? (
+            <>
+              {isSvgPath(entry.path) && (
+                <ImageTextToggle asText={false} onToggle={() => setImageAsText(true)} />
+              )}
+              {nearViewport && (
+                <ImageDiff
+                  client={client}
+                  repoPath={repoPath}
+                  path={entry.path}
+                  source={{ kind: entry.staged ? "Staged" : "Unstaged" }}
+                  refreshKey={diffVersion}
+                />
+              )}
+            </>
           ) : error !== null ? (
             <InlineError
               message={error.message}
@@ -432,6 +454,10 @@ function UncommittedFileSection({
               onRetry={loadDiff}
             />
           ) : (
+            <>
+            {isImage && !isConflicted && (
+              <ImageTextToggle asText onToggle={() => setImageAsText(false)} />
+            )}
             <DiffView
               hunks={hunks}
               path={entry.path}
@@ -443,6 +469,7 @@ function UncommittedFileSection({
               onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
               partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
             />
+            </>
           )}
         </div>
       )}
@@ -1364,6 +1391,7 @@ function CommitDiffPane({
               onSelectRow={onSelectRow}
               externalTools={externalTools}
               toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
+              previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
             />
           </ul>
           {files.length > 1 && (
@@ -1395,6 +1423,7 @@ function CommitDiffPane({
                 onOpenFileHistory={onOpenFileHistory}
                 externalTools={externalTools}
                 toolSource={{ kind: "Commit", commitId, oldPath: null }}
+                previewSource={{ kind: "Commit", commitId, oldPath: null }}
               />
             ))}
           </ul>
@@ -1523,6 +1552,7 @@ function StashDiffPane({
                     path={path}
                     diffKey={`commit:${stash.commitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, stash.commitId, path, opts)}
+                    previewSource={{ kind: "Commit", commitId: stash.commitId, oldPath: null }}
                     blameAt={stash.commitId}
                     collapsed={collapsedPaths.has(`t:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`t:${path}`)}
@@ -1546,6 +1576,7 @@ function StashDiffPane({
                     path={path}
                     diffKey={`commit:${untrackedCommitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, untrackedCommitId, path, opts)}
+                    previewSource={{ kind: "Commit", commitId: untrackedCommitId, oldPath: null }}
                     blameAt={untrackedCommitId}
                     collapsed={collapsedPaths.has(`u:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`u:${path}`)}

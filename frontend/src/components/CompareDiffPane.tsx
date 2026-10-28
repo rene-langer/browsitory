@@ -148,6 +148,7 @@ export function CompareDiffPane({
               onOpenFileHistory={onOpenFileHistory}
               externalTools={externalTools}
               toolSource={{ kind: "Range", fromId: fromId as string, toId, oldPath: file.oldPath }}
+              previewSource={{ kind: "Range", fromId: fromId as string, toId, oldPath: file.oldPath }}
             />
           ))}
         </ul>

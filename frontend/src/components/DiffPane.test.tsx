@@ -2025,3 +2025,99 @@ describe("DiffPane external tools", () => {
     expect(screen.queryByRole("button", { name: "Actions for b.ts" })).toBeNull();
   });
 });
+
+describe("DiffPane image preview", () => {
+  const pngSide = (base64: string) => ({ kind: "Loaded" as const, size: 3, base64, mime: "image/png" });
+  const svgSide = { kind: "Loaded" as const, size: 8, base64: "PHN2Zy8+", mime: "image/svg+xml" };
+
+  it("previews an unstaged image instead of fetching hunks", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    const getWorkingDiff = vi.fn(async () => []);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "logo.png", staged: false, kind: "Modified" }]);
+
+    expect(await screen.findByRole("img", { name: "After: logo.png" })).toHaveAttribute("src", "data:image/png;base64,YmFy");
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Unstaged" });
+    expect(getWorkingDiff).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Show text diff" })).toBeNull();
+  });
+
+  it("previews a staged image against HEAD", async () => {
+    const getFileSides = vi.fn(async () => ({ old: { kind: "Missing" as const }, new: pngSide("YmFy") }));
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff: vi.fn(async () => []) }), [
+      { path: "logo.png", staged: true, kind: "New" },
+    ]);
+    expect(await screen.findByText("Added")).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Staged" });
+  });
+
+  it("lets an SVG switch between the image and its text diff", async () => {
+    const getFileSides = vi.fn(async () => ({ old: { kind: "Missing" as const }, new: svgSide }));
+    const getWorkingDiff = vi.fn(async (): Promise<DiffHunk[]> => [
+      { oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "<svg/>" }] },
+    ]);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "icon.svg", staged: false, kind: "New" }]);
+
+    expect(await screen.findByRole("img", { name: "After: icon.svg" })).toBeInTheDocument();
+    expect(getWorkingDiff).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show text diff" }));
+    await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "icon.svg", false, DEFAULT_DIFF_OPTIONS));
+    expect(await screen.findByText("<svg/>")).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show image" }));
+    expect(await screen.findByRole("img", { name: "After: icon.svg" })).toBeInTheDocument();
+  });
+
+  it("sends a conflicted image to the conflict pane, not the preview", async () => {
+    const getFileSides = vi.fn();
+    renderUncommitted(
+      fakeClient({ getFileSides, getConflictHunks: vi.fn(async () => []), getWorkingDiff: vi.fn(async () => []) }),
+      [{ path: "logo.png", staged: false, kind: "Conflicted" }],
+    );
+    await screen.findByText(/logo\.png/);
+    expect(getFileSides).not.toHaveBeenCalled();
+  });
+
+  it("previews a committed image with the commit and its rename", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    const getCommitDiff = vi.fn(async () => []);
+    renderCommit(
+      fakeClient({
+        getFileSides,
+        getCommitDiff,
+        getCommitFiles: vi.fn(async () => ["logo.png"]),
+        getCommitMessage: async () => "m",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+      }),
+      "abc123",
+    );
+    expect(await screen.findByRole("img", { name: "Before: logo.png" })).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Commit", commitId: "abc123", oldPath: null });
+    expect(getCommitDiff).not.toHaveBeenCalled();
+  });
+
+  it("previews an image in a stash, against the stash's base", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
+    renderCommit(
+      fakeClient({
+        getFileSides,
+        getStashFiles: vi.fn(async () => ({ tracked: ["logo.png"], untracked: [], untrackedCommitId: null })),
+        getCommitDiff: vi.fn(async () => []),
+        getBlame: async () => [],
+      }),
+      "s0",
+      {
+        stashes: [{ index: 0, message: "On main: wip", commitId: "s0" }],
+        stashActions: {
+          onApply: vi.fn(),
+          onPop: vi.fn(),
+          onDrop: vi.fn(),
+          restoreIndex: true,
+          onSetRestoreIndex: vi.fn(),
+          disabledReason: null,
+        },
+      },
+    );
+    expect(await screen.findByRole("img", { name: "After: logo.png" })).toBeInTheDocument();
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Commit", commitId: "s0", oldPath: null });
+  });
+});
