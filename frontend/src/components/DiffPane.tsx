@@ -134,6 +134,7 @@ function UncommittedFileSection({
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
+  const actionsRef = useRef<HTMLButtonElement>(null);
   const [confirmMarkers, setConfirmMarkers] = useState(false);
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
@@ -297,7 +298,8 @@ function UncommittedFileSection({
           hasFileActions
             ? (event) => {
                 event.preventDefault();
-                setMenu(menuAnchor(event, event.currentTarget));
+                // The header isn't focusable: closing from the keyboard or an item lands on "…".
+                setMenu({ ...menuAnchor(event, event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
               }
             : undefined
         }
@@ -336,6 +338,7 @@ function UncommittedFileSection({
             <button
               type="button"
               className={styles.stageToggle}
+              ref={actionsRef}
               aria-label={`Actions for ${entry.path}`}
               aria-haspopup="menu"
               onClick={(event) => {

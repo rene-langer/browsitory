@@ -457,6 +457,27 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it.each([
+        ["Escape", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Escape" })],
+        ["Tab", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Tab" })],
+        ["item activation", (item: HTMLElement) => fireEvent.click(item)],
+      ])("a file header right-click menu returns focus to its '…' on %s", (label, close) => {
+        render();
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        close(screen.getByRole("menuitem", { name: label === "item activation" ? "Stash file…" : "Discard changes…" }));
+        expect(screen.queryByRole("menu")).toBeNull();
+        expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
+      });
+
+      it("a contextmenu from a header control (keyboard) returns focus to '…'", () => {
+        render();
+        const blame = screen.getAllByRole("button", { name: "Blame" })[0];
+        blame.focus();
+        fireEvent.contextMenu(blame, { clientX: 0, clientY: 0 });
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
+      });
+
       it("opens the menu for the selected row with Shift+F10", () => {
         render();
         fireEvent.click(screen.getByText("src/a.ts (Modified)"));

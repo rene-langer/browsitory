@@ -1,5 +1,5 @@
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BlameLine, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
@@ -63,6 +63,7 @@ export function ReadOnlyFileSection({
   const [imageAsText, setImageAsText] = useState(false);
   const showImage = isImage && !imageAsText;
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
+  const actionsRef = useRef<HTMLButtonElement>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
   const onPickFileAction = (action: FileAction) => {
     if (tools === null) return;
@@ -137,18 +138,19 @@ export function ReadOnlyFileSection({
             ? undefined
             : (event) => {
                 event.preventDefault();
-                setMenu(menuAnchor(event, event.currentTarget));
+                setMenu({ ...menuAnchor(event, event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
               }
         }
         // The Menu key or Shift+F10 on any header control (collapse, Blame, History, "…") opens the
-        // file menu at the header; Escape then returns to that control (`ContextMenu`).
+        // file menu at the header. Every header menu (this, or a right-click on the non-focusable
+        // header) returns focus to the header's "…" when it closes from the keyboard or an item.
         onKeyDown={
           tools === null
             ? undefined
             : (event) => {
                 if (!isMenuKey(event)) return;
                 event.preventDefault();
-                setMenu(rectAnchor(event.currentTarget));
+                setMenu({ ...rectAnchor(event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
               }
         }
       >
@@ -168,6 +170,7 @@ export function ReadOnlyFileSection({
             <button
               type="button"
               className={styles.stageToggle}
+              ref={actionsRef}
               aria-label={`Actions for ${path}`}
               aria-haspopup="menu"
               onClick={(event) => {

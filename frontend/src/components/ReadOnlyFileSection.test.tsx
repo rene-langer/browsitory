@@ -49,7 +49,7 @@ describe("ReadOnlyFileSection", () => {
     expect(onOpenFileHistory).toHaveBeenCalledWith("new.txt");
   });
 
-  it("opens the file menu with the Menu key from a header button and returns focus there on Escape", () => {
+  it("opens the file menu with the Menu key from a header button and returns focus to '…' on Escape", () => {
     const externalTools = { openInEditor: vi.fn(), reveal: vi.fn(), openDiffTool: vi.fn() } as unknown as ExternalToolsApi;
     renderSection({ externalTools, toolSource: { kind: "Commit", commitId: "abc" } as unknown as DiffSource });
     const blame = screen.getByRole("button", { name: "Blame" });
@@ -59,7 +59,20 @@ describe("ReadOnlyFileSection", () => {
     expect(screen.getByRole("menuitem", { name: "Open in editor" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in editor" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(blame).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Actions for a.txt" })).toHaveFocus();
+  });
+
+  it.each([
+    ["Escape", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Escape" })],
+    ["Tab", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Tab" })],
+    ["item activation", (item: HTMLElement) => fireEvent.click(item)],
+  ])("a header right-click menu returns focus to '…' on %s", (_label, close) => {
+    const externalTools = { openInEditor: vi.fn(), reveal: vi.fn(), openDiffTool: vi.fn() } as unknown as ExternalToolsApi;
+    renderSection({ externalTools, toolSource: { kind: "Commit", commitId: "abc" } as unknown as DiffSource });
+    fireEvent.contextMenu(screen.getByText("a.txt"), { clientX: 0, clientY: 0 });
+    close(screen.getByRole("menuitem", { name: "Open in editor" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("button", { name: "Actions for a.txt" })).toHaveFocus();
   });
 
   it("has no menu key handling without external tools", () => {
