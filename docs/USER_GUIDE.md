@@ -83,6 +83,11 @@ all** action. Hover a file to reveal its stage/unstage toggle, or use
 commit message, and hit **Commit**. **Stash** sets the current changes
 aside — expand **Stashes** in the sidebar to get them back.
 
+A rename you staged (`git mv`, or staging both the deletion and the new file) is one **Staged**
+row under the new name with "Renamed from …": its diff shows only the edits, an image previews
+the old version against the new one, and unstaging it unstages both names. A file moved on disk
+but not staged yet shows as deleted plus new, like `git status`.
+
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
 ### Writing the commit message
@@ -140,7 +145,10 @@ file is changed again afterwards. **Discard all…** next to **Stage all** disca
 the unstaged changes of exactly the files its confirmation lists. It deletes untracked files
 and skips conflicted ones. Folders, such as an untracked nested repository, are never deleted;
 any file that couldn't be discarded is named in an error after the rest are done. Discarding
-never writes or deletes outside the repository, including through a symlinked folder.
+never writes or deletes outside the repository, including through a symlinked folder. If a
+tracked file was replaced by a symbolic link, discarding removes the link and restores the file
+(the link's target is never touched), like git; reset, undo/redo, aborting a merge or rebase and
+resolving a conflict do the same.
 
 For untracked files the menu also offers ignore items. Each appends a pattern to the
 repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left
@@ -167,7 +175,10 @@ If you see "Signing program 'gpg' was not found", Browsitory may not have inheri
 `gpg.program` to an absolute path.
 
 Passphrases come from gpg-agent's pinentry or from ssh-agent. Browsitory cannot prompt in a
-terminal. If signing fails, no commit is created and the signer's error is shown.
+terminal. If signing fails, no commit is created and the signer's error is shown. While the
+signing program runs, the commit box says "Waiting for the signing program…" with **Cancel**;
+after 2 minutes Browsitory stops it and says so (unlock your key and commit again). Checking a
+signature in the history gives up after 30 seconds and shows "Signature could not be checked".
 
 Selecting a signed commit shows a **Signature** row in the commit details:
 
@@ -421,6 +432,9 @@ opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep 
 file; every other change stays where it is, and "Restore staged changes" later restages only
 that file. For an untracked file, untracked files are always included. One file at a time: the
 change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
+If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
+the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
+link away first).
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
@@ -670,7 +684,8 @@ What the tool compares:
 
 - an unstaged change: the staged (index) version against the file in your working tree, which
   you can edit in the tool
-- a staged change: the last commit against the staged version
+- a staged change: the last commit against the staged version (the old name for a staged
+  rename)
 - a commit's file: the commit's first parent against the commit (the old name for a rename)
 - a compare: the left side against the right side (or the working tree file)
 

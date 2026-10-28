@@ -30,6 +30,52 @@
 - **UI copy, exactly:** `Waiting for the signing program…` (CommitBox status line while signing; same Cancel button as hooks); `Renamed from {oldPath}` (existing copy, now also for staged renames).
 - **CHANGELOG** entries land in Task Z1 under `## [Unreleased]` → `### Fixed` (and a `### Security` subsection). The pre-push hook blocks a push touching `crates/`/`frontend/src/` without it, so push only after Z1.
 
+## Pre-flight notes
+
+Reconciled with the code on 2026-10-28 (audit grep re-run on 0632de19: no forced checkout beyond
+the spec's table). Where plan and code disagreed the code won; deviations, in task order:
+
+- **S1/S2 — baseline scan.** A forced checkout also *deletes* what the current HEAD/index track
+  and the target lacks: `reset --hard` to a commit without `d/f`, with `d` linked out, deleted
+  the outside `f` (new probe row, now `reset_hard_to_a_commit_without_the_folder_ancestor_…`).
+  So every call site uses `worktree_guard::prepare_forced_checkout`, which scans the target
+  **plus** HEAD and the index (same `paths` filter) before `clear_hazards`.
+- **S1 — types.** `Hazard` holds a `PathBuf`; `scan` reads a tree through an in-memory `Index`
+  (no UTF-8 assumption, no `Tree::walk` panic on non-UTF-8 roots); the `paths` filter is generic
+  over `AsRef<[u8]>` so `abort_merge`'s byte paths are filtered exactly. `clear_hazards`
+  re-checks that each path is still a link before removing it.
+- **S1 — `ensure_no_symlinked_parent`** stays as is (it propagates non-`NotFound` I/O errors,
+  `has_symlinked_ancestor` does not); only `stash.rs`'s copy moved.
+- **S4 — reads too.** Undo snapshots (`build_worktree_tree`) and `verify` read `d/f` through a
+  linked `d`; `read_worktree_file` now takes `(workdir, rel)` and returns `None` below a
+  symlinked folder (also used by the path-limited stash). `write_worktree_file` clears a linked
+  folder on the way (`clear_symlinked_ancestors`), `remove_existing` never deletes below one and
+  `prune_empty_parents` stops at a link. The plan's "redo deletes `d/x.txt`" scenario with an
+  *untracked* file hits a pre-existing, unrelated refusal (a folder holding untracked files is not
+  replaced by a file); the test uses the tracked `d/f`.
+- **S5** — `resolve_whole_file` also goes through the guard (the probe found it safe; one rule
+  for every forced checkout). `abort_merge` leaves a non-UTF-8 added path in place instead of
+  removing it.
+- **S9** — 40 rows: the probe table plus the reset-to-commit-without-folder row,
+  `resolve_conflict_ancestor_is_refused` and "discard the linked folder itself removes only the
+  link". Mutation check: disabling the reset and abort-merge guards fails 8 rows.
+- **S8** — stress test: 0 leaks / 200k reads with `open_beneath`; 89,965 leaks with a plain
+  `File::open`. The Windows variant was compile- and clippy-checked against
+  `x86_64-pc-windows-gnu` with git2 stubbed out (no mingw on the dev box); CI is the real check.
+- **D2** — `diff_tree_to_workdir` (no index) already yields the conflicted file's hunks, so the
+  `Patch::from_blob_and_buffer` fallback was not needed and `open_beneath` is not used there.
+- **D3** — `staged_kind` checked `is_index_modified` before `is_index_renamed`; libgit2 sets
+  both for a rename with edits, which showed as "Modified". Renamed now wins.
+  `DiffSourceDto::Staged { oldPath }` was wired in D3 (the enum change does not compile
+  otherwise). The worker routes `get_working_diff(staged, old_path)` to
+  `diff::staged_rename_diff`; `working_diff` keeps its signature.
+- **D5** — the VSCode extension host validates `open_diff_tool` sources itself
+  (`sidecarBridge.requireDiffSource`, `toolUris.diffSides`); both now accept and use
+  `Staged.oldPath` (a bare `{kind:"Staged"}` is still accepted). `DiffPane` passes `oldPath` to
+  `getWorkingDiff` only for a staged rename.
+- Pre-existing flake seen once: `signing_ssh::unlisted_ssh_signer_is_good_untrusted` (passed on
+  every rerun, before P2 touched signing).
+
 ## Review Focus
 
 1. **Nothing outside the repo is ever written, deleted or read through a link.** `tests/symlink_write_through.rs` (Task S9) is the matrix of every worktree-writing operation × {leaf, ancestor}; each asserts the outside files are byte-identical and present.
