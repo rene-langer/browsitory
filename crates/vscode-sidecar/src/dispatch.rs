@@ -91,6 +91,10 @@ pub fn dispatch(
         "get_external_tool_settings" => get_external_tool_settings(),
         "set_external_tool_settings" => set_external_tool_settings(params),
         "get_git_tools" => get_git_tools(params, repos),
+        "get_file_sides" => get_file_sides(params, repos),
+        "list_recent_authors" => list_recent_authors(params, repos),
+        "get_commit_message_settings" => get_commit_message_settings(),
+        "set_commit_message_settings" => set_commit_message_settings(params),
         "mark_resolved" => mark_resolved(params, repos),
         "resolve_whole_file" => resolve_whole_file(params, repos),
         "read_file_version" => read_file_version(params, repos),
@@ -1318,6 +1322,175 @@ struct CommitMessageParams {
     message: String,
     #[serde(default)]
     no_verify: bool,
+    /// Appended before the hooks run; absent means none.
+    #[serde(default)]
+    trailers: Vec<TrailerDto>,
+    /// `amend_commit` only: replaces HEAD's author name and email.
+    #[serde(default)]
+    author: Option<SignatureInputDto>,
+}
+
+#[derive(Deserialize)]
+struct TrailerDto {
+    key: String,
+    value: String,
+}
+
+fn trailers(dtos: Vec<TrailerDto>) -> Vec<git_core::commit::Trailer> {
+    dtos.into_iter()
+        .map(|dto| git_core::commit::Trailer {
+            key: dto.key,
+            value: dto.value,
+        })
+        .collect()
+}
+
+#[derive(Serialize, Deserialize)]
+struct SignatureInputDto {
+    name: String,
+    email: String,
+}
+
+fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoPathParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let authors: Vec<SignatureInputDto> = worker_handle(repos, &params.repo_path)?
+        .list_recent_authors()?
+        .into_iter()
+        .map(|a| SignatureInputDto {
+            name: a.name,
+            email: a.email,
+        })
+        .collect();
+    serde_json::to_value(authors).map_err(|error| error.to_string())
+}
+
+/// Which two sides of a diff (`RepoClient`'s `DiffSource`).
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+enum DiffSourceDto {
+    Unstaged,
+    Staged,
+    #[serde(rename_all = "camelCase")]
+    Commit {
+        commit_id: String,
+        old_path: Option<String>,
+    },
+    /// `toId: null` is the working tree.
+    #[serde(rename_all = "camelCase")]
+    Range {
+        from_id: String,
+        to_id: Option<String>,
+        old_path: Option<String>,
+    },
+}
+
+impl From<DiffSourceDto> for git_core::tools::DiffSource {
+    fn from(dto: DiffSourceDto) -> Self {
+        match dto {
+            DiffSourceDto::Unstaged => Self::Unstaged,
+            DiffSourceDto::Staged => Self::Staged,
+            DiffSourceDto::Commit {
+                commit_id,
+                old_path,
+            } => Self::Commit {
+                commit_id,
+                old_path,
+            },
+            DiffSourceDto::Range {
+                from_id,
+                to_id,
+                old_path,
+            } => Self::Range {
+                from_id,
+                to_id,
+                old_path,
+            },
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileSidesParams {
+    repo_path: String,
+    path: String,
+    source: DiffSourceDto,
+}
+
+/// One side for the image preview; `mime` is sniffed from the bytes (`null`: not an image).
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum FileSideDto {
+    Missing,
+    TooLarge {
+        size: u64,
+    },
+    Loaded {
+        size: u64,
+        base64: String,
+        mime: Option<&'static str>,
+    },
+}
+
+impl From<git_core::diff::FileSide> for FileSideDto {
+    fn from(side: git_core::diff::FileSide) -> Self {
+        match side {
+            git_core::diff::FileSide::Missing => Self::Missing,
+            git_core::diff::FileSide::TooLarge { size } => Self::TooLarge { size },
+            git_core::diff::FileSide::Loaded { bytes } => Self::Loaded {
+                size: bytes.len() as u64,
+                mime: git_core::diff::sniff_image_mime(&bytes),
+                base64: repo_service::base64::encode(&bytes),
+            },
+        }
+    }
+}
+
+fn get_file_sides(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: FileSidesParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    let sides = worker_handle(repos, &params.repo_path)?
+        .get_file_sides(params.path, params.source.into())?;
+    Ok(serde_json::json!({
+        "old": FileSideDto::from(sides.old),
+        "new": FileSideDto::from(sides.new),
+    }))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitMessageSettingsDto {
+    summary_limit: u32,
+    body_ruler: u32,
+    show_ruler: bool,
+}
+
+#[derive(Deserialize)]
+struct SetCommitMessageSettingsParams {
+    settings: CommitMessageSettingsDto,
+}
+
+fn get_commit_message_settings() -> Result<Value, String> {
+    let s = config::get_commit_message_settings().map_err(|error| error.to_string())?;
+    serde_json::to_value(CommitMessageSettingsDto {
+        summary_limit: s.summary_limit,
+        body_ruler: s.body_ruler,
+        show_ruler: s.show_ruler,
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn set_commit_message_settings(params: Value) -> Result<Value, String> {
+    let params: SetCommitMessageSettingsParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    config::set_commit_message_settings(&config::CommitMessageSettings {
+        summary_limit: params.settings.summary_limit,
+        body_ruler: params.settings.body_ruler,
+        show_ruler: params.settings.show_ruler,
+    })
+    .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
 }
 
 /// A commit/amend result: a failing gate hook is data the UI renders, not an error.
@@ -1407,7 +1580,7 @@ fn commit(
     let outcome = worker_handle(repos, &params.repo_path)?.commit(
         params.message,
         params.no_verify,
-        Vec::new(),
+        trailers(params.trailers),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
@@ -2617,8 +2790,11 @@ fn amend_commit(
     let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
         params.message,
         params.no_verify,
-        None,
-        Vec::new(),
+        params.author.map(|a| git_core::commit::SignatureInput {
+            name: a.name,
+            email: a.email,
+        }),
+        trailers(params.trailers),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())

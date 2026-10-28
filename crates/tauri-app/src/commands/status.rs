@@ -317,17 +317,24 @@ pub async fn ignore_path(
     worker_handle(&state, &repo_path)?.ignore_path(pattern)
 }
 
+/// `trailers` (absent: none) are appended before the hooks run.
 #[tauri::command]
 pub async fn commit(
     repo_path: String,
     message: String,
     no_verify: bool,
+    trailers: Option<Vec<super::TrailerDto>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CommitOutcomeDto, String> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.commit(message, no_verify, Vec::new(), event_tx)?,
+        worker_handle(&state, &repo_path)?.commit(
+            message,
+            no_verify,
+            super::trailers_from(trailers),
+            event_tx,
+        )?,
     ))
 }

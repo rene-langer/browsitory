@@ -1,6 +1,7 @@
 use super::{
-    emit_hook_events, worker_handle, AppState, CommitOutcomeDto, HeadInfoDto, PickOutcomeDto,
-    ResetModeDto, SequenceAbortDto, SequenceOutcomeDto,
+    emit_hook_events, trailers_from, worker_handle, AppState, CommitOutcomeDto, HeadInfoDto,
+    PickOutcomeDto, ResetModeDto, SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto,
+    TrailerDto,
 };
 use tauri::{AppHandle, State};
 
@@ -14,11 +15,15 @@ pub async fn get_head_info(
     ))
 }
 
+/// `author` replaces HEAD's author name and email (keeping its time); `trailers` (absent: none)
+/// are appended before the hooks run.
 #[tauri::command]
 pub async fn amend_commit(
     repo_path: String,
     message: String,
     no_verify: bool,
+    author: Option<SignatureInputDto>,
+    trailers: Option<Vec<TrailerDto>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CommitOutcomeDto, String> {
@@ -28,11 +33,24 @@ pub async fn amend_commit(
         worker_handle(&state, &repo_path)?.amend_commit(
             message,
             no_verify,
-            None,
-            Vec::new(),
+            author.map(Into::into),
+            trailers_from(trailers),
             event_tx,
         )?,
     ))
+}
+
+/// The commit box's co-author suggestions.
+#[tauri::command]
+pub async fn list_recent_authors(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SignatureInputDto>, String> {
+    Ok(worker_handle(&state, &repo_path)?
+        .list_recent_authors()?
+        .into_iter()
+        .map(Into::into)
+        .collect())
 }
 
 #[tauri::command]
