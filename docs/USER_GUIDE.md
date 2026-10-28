@@ -438,7 +438,8 @@ link away first). So do switching branches, merging, cherry-picking, reverting, 
 applying a stash and pulling, which could otherwise create files through the link — also when
 nothing tracked the link's name but the operation would create files below it. The message names
 the link: "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
-Staging a file below such a link refuses too ("'d/f' is beyond a symbolic link."), like git.
+Staging or discarding a file below such a link refuses too ("'d/f' is beyond a symbolic link."),
+like git; **Stage all** stages the link itself in place of the folder.
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there

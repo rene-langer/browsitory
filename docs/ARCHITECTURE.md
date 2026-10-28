@@ -366,8 +366,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   committed folder link}, refusals included, so a future switch to a forced checkout is caught.
 - Submodule update refuses when the submodule path or a folder above it is a symlink (libgit2
   would clone through it); nested updates check each nested path the same way.
-- `stage_file`, `stage_hunk` and `stage_lines` refuse a path below a symlinked folder like git
-  ("'d/f' is beyond a symbolic link."): the index→workdir diff would read through the link.
+- `stage_file`, `stage_hunk` and `stage_lines` (and the discard variants) refuse a path below a
+  symlinked folder like git ("'d/f' is beyond a symbolic link."): the index→workdir diff would
+  read through the link. Staging the link itself replaces the folder's index entries (`git add
+  -A`), after which such a path has nothing left to stage and `stage_file` returns `Ok` — so
+  "Stage all", which stages each unstaged path in status order (`d` before `d/f`), stages the
+  typechange.
 - The forced-checkout path filter follows `core.ignorecase` like libgit2's pathspecs.
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or
   the refusal check) and libgit2's write; libgit2 has no `openat`-style checkout. Likewise

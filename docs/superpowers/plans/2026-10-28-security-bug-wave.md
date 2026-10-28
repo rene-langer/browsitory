@@ -97,7 +97,12 @@ the spec's table). Where plan and code disagreed the code won; deviations, in ta
   ancestor. (4, user decision) staging below a linked folder refuses like git
   (`StageError::BeyondSymlink`), for hunks and lines too. (6) hardlinks documented as residual
   risk. (7) one shared directory cache per guard call, no file stats for the refusal: 100k
-  files, release, 1.1 s → 0.24 s (refuse) and 1.15 s → 0.6 s (forced). Matrix: 82 rows (was 49).
+  files, release, 1.1 s → 0.24 s (refuse) and 1.15 s → 0.6 s (forced). Follow-up user
+  decisions: "Stage all" stages the link in place of the folder (`stage_file` of the link
+  removes the folder's entries; a path below it with no index entry left is a no-op), discard
+  below a linked folder says "beyond a symbolic link"; the git-style directory/file conflict for
+  a merge adding below a committed folder link is a follow-up (refused for now). Matrix: 86 rows
+  (was 49).
 - Pre-existing flake seen once: `signing_ssh::unlisted_ssh_signer_is_good_untrusted` (passed on
   every rerun, before P2 touched signing).
 

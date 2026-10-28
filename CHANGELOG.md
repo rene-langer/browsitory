@@ -180,8 +180,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   folder ("'d' is a symbolic link where the repository has a folder…"); git's own safe checkout
   could otherwise create a new file through the link, overwriting a file outside the repository.
 - Undo/redo snapshots and their checks no longer read a file through a symbolic link that
-  replaced a folder. Staging a file (or a hunk or lines of it) below such a link refuses like git
-  ("'d/f' is beyond a symbolic link.") instead of reading the link's target.
+  replaced a folder. Staging or discarding a file (or a hunk or lines of it) below such a link
+  refuses like git ("'d/f' is beyond a symbolic link.") instead of reading the link's target.
+  **Stage all** (or staging the link itself) stages the link in place of the folder, like
+  `git add -A`.
 - Those refusals also cover a symbolic link nothing in the repository tracks, when the operation
   would create files below it (a cherry-pick could overwrite a file outside the repository), and
   a merge, cherry-pick, revert or rebase step that would add a file below a folder the branch
