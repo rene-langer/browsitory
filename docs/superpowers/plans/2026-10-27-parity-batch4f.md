@@ -55,6 +55,15 @@ disagreed):
   interior `.` and (Windows) `:`; a work tree symlink is diffed as its target text; a path
   through a directory symlink out of the work tree and a conflicted symlink/submodule are
   refused for tools; `file_version_contents` checks the size from the object header.
+- **Frontend/extension deviations:** the `browsitory-file:` query is base64url JSON (VSCode's
+  `Uri` decodes `%` escapes once more), and `parseFileVersionUri` checks every field strictly
+  and that the visible path matches; launch params are validated in the host before the sidecar
+  is asked (-32602), and `open_in_editor` rejects a non-positive line; the Close button lives in
+  the `PreferencesDialog` shell (so 4g's section adds no second Close), and
+  `ExternalToolsSection` has no `onClose`; `AppCommands.onCloneRepository`/`onNewRepository`
+  are optional so "Preferences…" also shows in VSCode; file menus keep 4c's "Stash file…"
+  before the tool items; `ReadOnlyFileSection` takes `externalTools` + `toolSource`; the new
+  palette commands sit in the "Repositories" and "Diff" groups.
 - **Hermetic tests (#111):** `tests/tools.rs` points libgit2's system/XDG/global search paths
   at an empty dir for the whole binary; the sidecar git-tools test runs the sidecar with a
   temp `HOME`; the repo-service round trips use error paths that are checked before config.
