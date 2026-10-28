@@ -10,6 +10,63 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-27-parity-batch4g-design.md`
 
+## Pre-flight notes (Part A implementation, 2026-10-28)
+
+Part A landed on `feat/sm-parity-batch4g-1` (not `feat/parity-batch4g-1-conflicts-picks`), on
+top of 4a–4f. Drift found and deviations taken (the code wins where the plan disagreed):
+
+- **`mark_resolved` already existed (4f)** with `force`, `MarkResolvedOutcome`, a stricter
+  `has_conflict_markers` (marker followed by a space or line end), Tauri/sidecar/`RepoClient`
+  methods and a confirm dialog in `DiffPane`'s file section. Reused as is: Task A1 only added
+  `ConflictSide`, `resolve_whole_file` and `MergeError::UnsupportedEntry`. The wire result
+  stays 4f's plain string (`"Resolved" | "MarkersRemain"`), not the plan's `{ kind }` object,
+  and the markers confirm keeps 4f's copy ("Conflict markers remain in {path}. Mark it resolved
+  anyway?" / **Mark resolved**): the pane header's **Mark resolved** calls the section's existing
+  flow, so the merge-tool notice and the pane share one dialog. `ConflictResolutionPane` takes
+  `onMarkResolved: () => void` and both new props are optional.
+- **4c changed `start_merge`** (`MergeOptions`): fixtures call it with
+  `MergeOptions::default()`; 4c's `pop_stash` exists, so the stash-pop whole-file test was added.
+- **4e hooks.** Decision: sequence steps, including the step **Continue** commits, run no
+  hooks, matching 4e's rule for single cherry-pick/revert (and the spec's overlap table). Real
+  git (checked with git 2.53) runs `prepare-commit-msg` + `post-commit` on a clean
+  `git cherry-pick` and `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` on
+  `git cherry-pick --continue`. Running hooks on Continue would need 4e's hook progress/cancel
+  plumbing and a "Continue without hooks" retry; left as a follow-up. A single conflicted pick
+  finished through the commit box still runs commit hooks (4e).
+- **Continue's message** is `MERGE_MSG` cleaned with `git2::message_prettify(_, '#')`, because
+  libgit2 appends `#Conflicts:` comment lines that git's commit cleanup would strip.
+- **Validation of the stored state against the repository** (beyond the plan): `load` also
+  rejects ids that are not commits of this repository and `skipped` ids outside `commits`, and
+  logs a bad file once (not on every command). At use time, Continue refuses an unrelated paused
+  pick (`CHERRY_PICK_HEAD`/`REVERT_HEAD` not the sequence's current commit, or the other kind)
+  with `OperationInProgress`, and refuses staged changes before retrying a step
+  (`DirtyIndex`). Abort aborts only its own paused step, never rewinds while another operation is
+  paused, and otherwise forgets the sequence with `rewound: false`. A CLI `git cherry-pick
+  --abort` leaves the sequence stored; Continue then re-runs that step.
+- **An error after a step was staged** (a signer failure leaves `CHERRY_PICK_HEAD`) keeps the
+  state even on the first step, so Continue can finish it; `state: None` on error only when the
+  repository is untouched.
+- **Worker gates** are per-arm `history::refused_during_sequence(&repo, &store, &reply)` checks
+  rather than a pre-dispatch helper. `persist` reports a failed save on a conflict stop as an
+  error explaining how to finish by hand.
+- **Undo:** `ContinueSequence`/`AbortSequence` are not recordable, so `assert_held!` (which
+  requires a plan) can't cover them; a separate `ending_commands_have_their_reply_held` test
+  covers them (and `AbortMerge`/`AbortRebase`/`RebaseContinue`).
+- **4d graph:** the pick items come after the rebase items and 4d's "Compare these commits".
+  They are only rendered when the new `onCherryPickMany`/`onRevertMany` props are passed.
+- **Frontend toolbar role:** `Toolbar` renders `role="group"`, so the pane header is
+  `group "Whole file"`.
+- **Tab close (A10):** the plan asked to treat a sequence like a rebase in the unmount busy
+  guard. Not done: the sequence lives on disk (that is the point), so a closed tab loses
+  nothing; it still joins `repositoryOperationDisabled` (and so blocks closing the active tab,
+  like a merge).
+- **Palette:** while a sequence is stored, "Abort merge" is replaced by "Abort cherry-pick" /
+  "Abort revert". Palette Continue/Abort don't toast (as rebase continue doesn't).
+- **#108 (rebase lost on restart), reusable pieces:** `SequenceStore` (atomic versioned JSON
+  under `<gitdir>/browsitory/`, validate-on-load, log-once) and the "stored state counts as
+  in progress / gates the worker / `HeadInfo` field" pattern would carry over to a persisted
+  `RebaseState` almost unchanged.
+
 ## Global Constraints
 
 - No new Rust or npm dependency in either part; `docs/LICENSE_COMPLIANCE.md` is untouched. `git-core` stays serde-free.

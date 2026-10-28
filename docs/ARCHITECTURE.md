@@ -237,6 +237,34 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   newer search or `cancel_search` stops an older one without going through the command queue
   (same reasoning as `CancelRegistry`).
 
+## Cherry-pick sequences
+
+- `git-core::pick` is a pure state machine: `cherry_pick_many`/`revert_many`/`continue_sequence`
+  take and return a `SequenceState` (`SequenceRun { outcome, state }`, `state: Some` = "keep
+  this", `None` = "no sequence any more"); `git-core` has no persistence and no serde.
+- `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
+  `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
+  like `undo.json`), written only when a sequence stops and deleted when it completes or is
+  aborted. On load it must parse, have the current version, and name commits that exist in the
+  repository; anything else is logged once and treated as absent, never fatal.
+- Whether the stored state still matches the repository is checked when it is used, so a stale
+  sequence stays visible and abortable: Continue requires git's paused pick (`CHERRY_PICK_HEAD` /
+  `REVERT_HEAD`) to be the sequence's current commit, and HEAD to be where the stop left it (or
+  one commit further, if the user committed the step); otherwise `OperationInProgress` /
+  `HeadMoved`. With git state clean and HEAD unchanged (an error stop, or `git cherry-pick
+  --abort` from a terminal) Continue retries the step. Abort aborts only its own paused step,
+  rewinds only when HEAD is still at the stop point and git has nothing else in progress, and
+  otherwise just forgets the sequence (`rewound: false`).
+- A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
+  blocks `CherryPick`/`RevertCommit`/`CherryPickMany`/`RevertMany`/`StartMerge`/`StartRebase`/
+  `AmendCommit` in the worker, and is reported as `HeadInfo.sequence`. `AbortMerge` aborts the
+  whole sequence when one is stored, so a stale frontend can't strand the file. The pending undo
+  entry is in memory, so a sequence finished after an app restart is not undoable as one step.
+- Empty steps are skipped (git stops for `--skip`). Steps, including the one Continue commits,
+  run no hooks, matching Browsitory's single cherry-pick/revert. Real git runs
+  `prepare-commit-msg`/`post-commit` on a clean pick and the full commit hooks on
+  `--continue`.
+
 ## Git hooks
 
 - `git-core::hooks` finds a hook in `core.hooksPath` (relative to the worktree root) or
