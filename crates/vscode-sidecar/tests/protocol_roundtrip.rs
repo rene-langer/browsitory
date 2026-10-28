@@ -119,6 +119,11 @@ fn init_repo() -> (tempfile::TempDir, git2::Repository) {
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();
     config.set_bool("commit.gpgSign", false).unwrap();
+    // Hermetic line endings (#111): a global core.autocrlf=true (Git for Windows' default) would
+    // check files out with CRLF.
+    config.set_bool("core.autocrlf", false).unwrap();
+    config.set_str("core.eol", "lf").unwrap();
+    config.set_bool("core.safecrlf", false).unwrap();
     // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
     let hooks = repo.path().join("hooks");
     config

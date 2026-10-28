@@ -1669,6 +1669,8 @@ mod tests {
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
             config.set_bool("core.autocrlf", false).unwrap();
+            config.set_str("core.eol", "lf").unwrap();
+            config.set_bool("core.safecrlf", false).unwrap();
             config.set_bool("commit.gpgSign", false).unwrap();
             // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
             let hooks = repo.path().join("hooks");

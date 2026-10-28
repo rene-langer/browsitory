@@ -10,6 +10,8 @@ pub fn init_repo() -> (TempDir, Repository) {
         let mut config = repo.config().expect("repo config");
         config.set_str("user.name", "Test User").unwrap();
         config.set_bool("core.autocrlf", false).unwrap();
+        config.set_str("core.eol", "lf").unwrap();
+        config.set_bool("core.safecrlf", false).unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         config.set_bool("commit.gpgSign", false).unwrap();
         // Pin the hooks dir (to git's default) so a developer's global `core.hooksPath` never
