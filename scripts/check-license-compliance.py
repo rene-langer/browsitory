@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "LICENSE_COMPLIANCE.md"
 
-WORKSPACE_CRATES = {"git-core", "config", "repo-service", "tauri-app", "vscode-sidecar"}
+WORKSPACE_CRATES = {"git-core", "config", "repo-service", "tauri-app", "vscode-sidecar", "test-support"}
 
 
 def rust_deps() -> set[str]:
