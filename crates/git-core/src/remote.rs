@@ -897,6 +897,8 @@ pub fn pull_after_fetch(
         return Ok(PullOutcome::Diverged { upstream_ref });
     }
 
+    // Safe checkouts create files through a symlinked tracked folder (#114).
+    crate::worktree_guard::refuse_linked_folders(repo)?;
     let local_ref = format!("refs/heads/{local_branch}");
     let mut checkout = CheckoutBuilder::new();
     checkout.safe();

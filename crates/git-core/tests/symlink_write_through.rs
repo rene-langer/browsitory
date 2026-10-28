@@ -203,9 +203,10 @@ fn stash_pop_ancestor_is_refused() {
     f.link_ancestor();
     let result = git_core::stash::pop_stash(&mut f.repo, 0, None, false);
     assert!(
-        matches!(result, Err(StashError::WouldOverwrite)),
+        matches!(&result, Err(StashError::Git(e)) if is_checkout_conflict(e)),
         "{result:?}"
     );
+    assert_eq!(git_core::stash::list_stashes(&mut f.repo).unwrap().len(), 1);
     f.untouched();
 }
 
@@ -630,4 +631,148 @@ fn abort_rebase_ancestor_never_writes_through() {
     git_core::rebase::abort_rebase(&f.repo, state).unwrap();
     f.untouched();
     assert_eq!(common::read(f.path(), "d/f"), "inner\n");
+}
+
+// --- Safe checkouts that *add* a file below the linked folder ------------------------------
+//
+// libgit2's safe strategy does not count a new file below a symlinked tracked folder as a
+// conflict and creates (or truncates) it through the link. Every safe operation refuses first.
+
+/// `other` adds `d/new.txt`; the outside folder already holds a `new.txt` that must survive.
+fn adds_below_linked_folder() -> (Fx, String) {
+    let f = fx();
+    let other = f.side_branch(&[("d/new.txt", "NEW\n")]);
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    (f, other)
+}
+
+fn precious_kept(f: &Fx) {
+    f.untouched();
+    assert_eq!(
+        std::fs::read_to_string(f.out.path().join("new.txt")).unwrap(),
+        "PRECIOUS\n"
+    );
+}
+
+#[test]
+fn switch_branch_adding_below_the_ancestor_is_refused() {
+    let (f, _) = adds_below_linked_folder();
+    let result = git_core::branch::switch_branch(&f.repo, "other");
+    assert!(
+        matches!(&result, Err(BranchError::Git(e)) if is_checkout_conflict(e)),
+        "{result:?}"
+    );
+    precious_kept(&f);
+}
+
+#[test]
+fn checkout_commit_adding_below_the_ancestor_is_refused() {
+    let (f, other) = adds_below_linked_folder();
+    let result = git_core::branch::checkout_commit(&f.repo, &other);
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn merge_fast_forward_adding_below_the_ancestor_is_refused() {
+    let (f, _) = adds_below_linked_folder();
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default());
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn merge_non_fast_forward_adding_below_the_ancestor_is_refused() {
+    let f = fx();
+    f.side_branch(&[("d/new.txt", "NEW\n")]);
+    f.commit(&[("a.txt", "main\n")], "main");
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default());
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn squash_merge_adding_below_the_ancestor_is_refused() {
+    let f = fx();
+    f.side_branch(&[("d/new.txt", "NEW\n")]);
+    f.commit(&[("a.txt", "main\n")], "main");
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    let opts = MergeOptions {
+        squash: true,
+        ..MergeOptions::default()
+    };
+    let result = git_core::merge::start_merge(&f.repo, "other", opts);
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn cherry_pick_adding_below_the_ancestor_is_refused() {
+    let (f, other) = adds_below_linked_folder();
+    let result = git_core::pick::cherry_pick(&f.repo, &other, None);
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn revert_adding_below_the_ancestor_is_refused() {
+    let f = fx();
+    let removes = f.commit(&[("d/new.txt", "NEW\n")], "adds");
+    std::fs::remove_file(f.path().join("d/new.txt")).unwrap();
+    let mut index = f.repo.index().unwrap();
+    index
+        .remove_path(std::path::Path::new("d/new.txt"))
+        .unwrap();
+    index.write().unwrap();
+    let removal = {
+        let sig = f.repo.signature().unwrap();
+        let tree = f.repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let head = f.repo.head().unwrap().peel_to_commit().unwrap();
+        f.repo
+            .commit(Some("HEAD"), &sig, &sig, "removes", &tree, &[&head])
+            .unwrap()
+            .to_string()
+    };
+    let _ = removes;
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    let result = git_core::pick::revert(&f.repo, &removal, None);
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn stash_apply_adding_below_the_ancestor_is_refused() {
+    let mut f = fx();
+    common::write_file(f.path(), "d/new.txt", "NEW\n");
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    let result = git_core::stash::apply_stash(&mut f.repo, 0, None, false);
+    assert!(result.is_err(), "{result:?}");
+    precious_kept(&f);
+}
+
+#[test]
+fn start_rebase_adding_below_the_ancestor_is_refused() {
+    let f = fx();
+    let base = f.head();
+    let second = f.commit(&[("a.txt", "second\n")], "second");
+    git_core::branch::create_branch(&f.repo, "onto", &base).unwrap();
+    let onto = f.commit(&[("d/new.txt", "NEW\n")], "onto");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
+    f.link_ancestor();
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: second,
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let result = git_core::rebase::start_rebase(&f.repo, &onto, plan);
+    assert!(result.is_err(), "{:?}", result.map(|(_, r)| r));
+    precious_kept(&f);
 }

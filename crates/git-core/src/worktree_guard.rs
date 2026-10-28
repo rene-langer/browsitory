@@ -195,6 +195,39 @@ where
     Ok(())
 }
 
+/// Refuses, as a checkout conflict, while a symlink stands where HEAD or the index tracks a
+/// folder. libgit2's *safe* checkouts (switch, checkout, merge, cherry-pick, revert, rebase,
+/// stash apply, pull) refuse to modify a file below such a link but still *create* new ones
+/// through it, truncating whatever the link's target folder holds under that name. Call it right
+/// before each of them. (A link where nothing tracked a folder already conflicts in libgit2.)
+pub(crate) fn refuse_linked_folders(repo: &git2::Repository) -> Result<(), git2::Error> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(());
+    };
+    const ALL: Option<&[&str]> = None;
+    let mut hazards = Vec::new();
+    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
+        hazards.extend(scan(workdir, &GuardSource::Tree(&head_tree), ALL)?);
+    }
+    let index = repo.index()?;
+    hazards.extend(scan(workdir, &GuardSource::Index(&index), ALL)?);
+    match hazards.into_iter().find_map(|hazard| match hazard {
+        Hazard::Ancestor(dir) => Some(dir),
+        Hazard::Leaf(_) => None,
+    }) {
+        Some(dir) => Err(git2::Error::new(
+            git2::ErrorCode::Conflict,
+            git2::ErrorClass::Checkout,
+            format!(
+                "'{}' is a symbolic link where the repository has a folder. Move the link away or \
+                 restore the folder first.",
+                dir.display()
+            ),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// Removes the symlink (or Windows junction) `full` itself.
 fn remove_link(full: &Path) -> io::Result<()> {
     match std::fs::remove_file(full) {

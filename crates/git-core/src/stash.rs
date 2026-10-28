@@ -520,6 +520,8 @@ pub fn apply_stash(
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
     }
+    // Safe checkouts create files through a symlinked tracked folder (#114).
+    crate::worktree_guard::refuse_linked_folders(repo)?;
     let mut options = git2::StashApplyOptions::new();
     if restore_index {
         options.reinstantiate_index();

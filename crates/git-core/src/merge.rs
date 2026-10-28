@@ -106,6 +106,8 @@ pub fn start_merge(
         return Ok(MergeOutcome::UpToDate);
     }
 
+    // Safe checkouts create files through a symlinked tracked folder (#114).
+    crate::worktree_guard::refuse_linked_folders(repo)?;
     if opts.squash {
         return squash_merge(repo, &their_annotated, their_commit.id());
     }

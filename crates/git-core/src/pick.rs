@@ -264,6 +264,8 @@ fn step(
     // CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG by then; state was Clean on entry (checked by
     // the caller), so clearing those files restores exactly the prior state without touching
     // user files.
+    // Safe checkouts create files through a symlinked tracked folder (#114).
+    crate::worktree_guard::refuse_linked_folders(repo)?;
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();
@@ -668,6 +670,8 @@ pub fn abort_sequence(
     }
     if head_id == state.expected_head && state.expected_head != state.original_head {
         let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
+        // Safe checkouts create files through a symlinked tracked folder (#114).
+        crate::worktree_guard::refuse_linked_folders(repo)?;
         repo.checkout_tree(original.as_object(), None)?;
         let reflog = match state.kind {
             SequenceKind::CherryPick => "cherry-pick: abort",

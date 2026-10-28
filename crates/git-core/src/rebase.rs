@@ -190,6 +190,8 @@ pub fn start_rebase(
     // Checking out before detaching HEAD means a refused checkout (modified/untracked files in
     // the way) leaves the repo exactly as it was — the same safety ordering
     // `branch::switch_branch` and `merge::start_merge`'s fast-forward path already use.
+    // Safe checkouts create files through a symlinked tracked folder (#114).
+    crate::worktree_guard::refuse_linked_folders(repo)?;
     repo.checkout_tree(onto_commit.as_object(), None)?;
     repo.set_head_detached(onto_commit.id())?;
 
@@ -269,6 +271,8 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
             state.group_start_parent = Some(repo.head()?.peel_to_commit()?.id());
         }
 
+        // Safe checkouts create files through a symlinked tracked folder (#114).
+        crate::worktree_guard::refuse_linked_folders(repo)?;
         repo.cherrypick(&commit, None)?;
 
         if repo.index()?.has_conflicts() {
