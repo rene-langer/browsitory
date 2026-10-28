@@ -717,3 +717,48 @@ fn discard_hunk_of_d_never_uses_a_hunk_of_d_slash_inner() {
     );
     assert_eq!(workdir_content(dir.path(), "d/inner.txt"), "inner\n");
 }
+
+// --- Review round 2: staging below a symlinked folder refuses like git ---
+
+#[cfg(unix)]
+fn d_f_still_staged_as_committed(repo: &git2::Repository) {
+    let index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d/f.txt"), 0).unwrap();
+    assert_eq!(entry.id, repo.blob(b"a\nb\nc\n").unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn stage_hunk_below_a_symlinked_parent_is_refused() {
+    let (_dir, repo, _outside) = setup_symlinked_parent();
+    let hunks = working_diff(&repo, "d/f.txt", false, &DiffOptions::default()).unwrap();
+    let h = &hunks[0];
+    let result = git_core::stage::stage_hunk(&repo, "d/f.txt", h.old_start, h.new_start, 3);
+    assert!(
+        matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f.txt"),
+        "{result:?}"
+    );
+    d_f_still_staged_as_committed(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn stage_lines_below_a_symlinked_parent_is_refused() {
+    let (_dir, repo, _outside) = setup_symlinked_parent();
+    let hunks = working_diff(&repo, "d/f.txt", false, &DiffOptions::default()).unwrap();
+    let h = &hunks[0];
+    let first_changed = changed(h)[0];
+    let result = stage_lines(
+        &repo,
+        "d/f.txt",
+        h.old_start,
+        h.new_start,
+        3,
+        &[first_changed],
+    );
+    assert!(
+        matches!(result, Err(StageError::BeyondSymlink(_))),
+        "{result:?}"
+    );
+    d_f_still_staged_as_committed(&repo);
+}

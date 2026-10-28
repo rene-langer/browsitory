@@ -593,20 +593,19 @@ fn unstaging_a_staged_rename_unstages_both_paths() {
 
 #[test]
 #[cfg(unix)]
-fn staging_a_file_below_a_symlinked_folder_stages_its_deletion_never_the_outside_file() {
+fn staging_a_file_below_a_symlinked_folder_is_refused_like_git() {
     let out = common::outside_dir();
     let (dir, repo) = init_repo();
     write_file(dir.path(), "d/f", "inner\n");
     common::commit_all(&repo, "base");
     common::replace_with_link(dir.path(), "d", out.path());
 
-    stage_file(&repo, "d/f").unwrap();
+    let error = stage_file(&repo, "d/f").unwrap_err();
 
-    assert!(repo
-        .index()
-        .unwrap()
-        .get_path(std::path::Path::new("d/f"), 0)
-        .is_none());
+    assert_eq!(error.to_string(), "'d/f' is beyond a symbolic link.");
+    let index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
+    assert_eq!(entry.id, repo.blob(b"inner\n").unwrap());
     common::assert_outside_untouched(out.path());
 }
 

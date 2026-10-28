@@ -30,6 +30,8 @@ pub enum StageError {
     SelectionNotApplicable,
     #[error("That path is outside the repository.")]
     InvalidPath,
+    #[error("'{0}' is beyond a symbolic link.")]
+    BeyondSymlink(String),
     #[error("Ignore pattern can't be empty or span several lines.")]
     InvalidPattern,
     #[error("{0} is a folder (for example a nested repository) and wasn't discarded.")]
@@ -58,20 +60,28 @@ impl From<LinePatchError> for StageError {
 }
 
 /// Stages the file as it is in the work tree, or its deletion when it is gone. A path below a
-/// symlinked folder is gone for git (staging it would read the link's target, possibly outside
-/// the repository), and a symlink is staged as a link even when it dangles.
+/// symlinked folder is refused like git ("beyond a symbolic link"): staging it would read the
+/// link's target, possibly outside the repository. A symlink is staged as a link even when it
+/// dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    refuse_beyond_symlink(workdir, path)?;
     let mut index = repo.index()?;
-    let present = !crate::worktree_guard::has_symlinked_ancestor(workdir, path)
-        && workdir.join(rel).symlink_metadata().is_ok();
-    if present {
+    if workdir.join(rel).symlink_metadata().is_ok() {
         index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;
     }
     index.write()?;
+    Ok(())
+}
+
+/// git's "'d/f' is beyond a symbolic link" for a path below a symlinked folder.
+fn refuse_beyond_symlink(workdir: &Path, path: &str) -> Result<(), StageError> {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
+        return Err(StageError::BeyondSymlink(path.to_string()));
+    }
     Ok(())
 }
 
@@ -384,6 +394,12 @@ fn apply_selection(
     selection: Selection,
     target: Target,
 ) -> Result<(), StageError> {
+    if matches!(target, Target::Stage) {
+        let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+        checked_relative(path)?;
+        // The index→workdir diff reads through the link; git refuses the path instead.
+        refuse_beyond_symlink(workdir, path)?;
+    }
     let (staged_side, direction, location) = match target {
         Target::Stage => (false, Direction::Forward, git2::ApplyLocation::Index),
         Target::Unstage => (true, Direction::Reverse, git2::ApplyLocation::Index),

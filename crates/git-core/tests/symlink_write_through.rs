@@ -1355,3 +1355,43 @@ fn submodule_update_below_a_linked_folder_is_refused() {
     );
     outside_gained_nothing(&f);
 }
+
+// --- Staging below a symlinked folder (review round 2) -------------------------------------
+//
+// git refuses ("beyond a symbolic link"); staging must neither read the outside file nor stage
+// a deletion the user never made.
+
+fn d_f_still_staged(f: &Fx) {
+    let index = f.repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
+    assert_eq!(entry.id, f.repo.blob(b"inner\n").unwrap());
+}
+
+#[test]
+fn stage_file_ancestor_is_refused() {
+    let f = fx();
+    f.link_ancestor();
+    let result = git_core::stage::stage_file(&f.repo, "d/f");
+    assert!(
+        matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f"),
+        "{result:?}"
+    );
+    d_f_still_staged(&f);
+    f.untouched();
+}
+
+#[test]
+fn stage_hunk_ancestor_is_refused() {
+    let f = fx();
+    f.link_ancestor();
+    let hunks = git_core::diff::working_diff(&f.repo, "d/f", false, &Default::default()).unwrap();
+    for hunk in hunks {
+        let result = git_core::stage::stage_hunk(&f.repo, "d/f", hunk.old_start, hunk.new_start, 3);
+        assert!(
+            matches!(result, Err(StageError::BeyondSymlink(_))),
+            "{result:?}"
+        );
+    }
+    d_f_still_staged(&f);
+    f.untouched();
+}
