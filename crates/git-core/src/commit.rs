@@ -75,8 +75,8 @@ fn is_blank(line: &str) -> bool {
 /// every line of it is a `Key: value` trailer (or a whitespace-led continuation of one), and the
 /// new lines are appended to it; otherwise a blank line and a new block follow the message.
 /// Trailing blank lines are dropped. Lines starting with `#` are message text (nothing strips
-/// them in Browsitory), so trailers always go at the very end. A trailer already in the block (same key, any
-/// case, and same value) is not added again. No trailers leaves `message` byte-identical, and so
+/// them in Browsitory), so trailers always go at the very end. A trailer already in the block (same key
+/// and value, both ignoring ASCII case, as git compares them) is not added again. No trailers leaves `message` byte-identical, and so
 /// does a call whose every trailer is already there. A blank `message` with trailers is
 /// [`CommitError::EmptyMessage`]: trailers alone must not turn an empty message into a commit.
 pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, CommitError> {
@@ -130,7 +130,11 @@ pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, Co
         .collect();
     let mut new_lines = Vec::new();
     for (key, value, line) in lines_to_add {
-        if present.iter().any(|(k, v)| *k == key && *v == value) {
+        // Like git's `addIfDifferent`: key and value both compared ignoring ASCII case.
+        if present
+            .iter()
+            .any(|(k, v)| *k == key && v.eq_ignore_ascii_case(&value))
+        {
             continue;
         }
         present.push((key, value));
@@ -590,6 +594,9 @@ mod tests {
         assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
         // Key case and spacing don't make a different trailer, as in `git interpret-trailers`.
         let message = "Fix\n\nco-authored-by:Ada <ada@x.org>\n";
+        assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
+        // Value case doesn't either: git compares trailer values with `strcasecmp`.
+        let message = "Fix\n\nCo-authored-by: ADA <ADA@x.org>\n";
         assert_eq!(append_trailers(message, &[co(ADA)]).unwrap(), message);
         // Twice in one call: added once.
         assert_eq!(
