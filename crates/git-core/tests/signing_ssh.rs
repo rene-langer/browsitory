@@ -273,6 +273,7 @@ fn commit_and_amend_are_signed_with_unchanged_reflog() {
     let amended = git_core::commit::amend_head(
         &repo,
         "add a, amended",
+        None,
         git_core::hooks::HookOptions::default(),
     )
     .unwrap();

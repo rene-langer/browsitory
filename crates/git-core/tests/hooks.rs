@@ -326,13 +326,14 @@ fn amend_runs_the_commit_hooks() {
         "echo no >&2; exit 1",
     );
 
-    let error = amend_head(&repo, "amended", HookOptions::default()).unwrap_err();
+    let error = amend_head(&repo, "amended", None, HookOptions::default()).unwrap_err();
     assert!(matches!(error, CommitError::HookFailed { ref hook, .. } if hook == "pre-commit"));
     assert_eq!(repo.head().unwrap().target().unwrap(), before);
 
     amend_head(
         &repo,
         "amended",
+        None,
         HookOptions {
             no_verify: true,
             ..HookOptions::default()
@@ -776,7 +777,7 @@ fn a_commit_hook_that_cannot_start_is_a_retryable_hook_failure() {
         },
     )
     .unwrap();
-    let error = amend_head(&repo, "y", HookOptions::default()).unwrap_err();
+    let error = amend_head(&repo, "y", None, HookOptions::default()).unwrap_err();
     assert!(matches!(error, CommitError::HookFailed { ref hook, .. } if hook == "pre-commit"));
 }
 

@@ -144,6 +144,7 @@ pub(super) fn amend(
     let result = git_core::commit::amend_head(
         repo,
         &message,
+        None,
         git_core::hooks::HookOptions {
             no_verify,
             cancel: Some(&cancel),
