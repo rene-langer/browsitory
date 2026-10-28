@@ -1,3 +1,4 @@
+use crate::worktree_guard::has_symlinked_ancestor;
 use git2::{ErrorClass, ErrorCode, Repository, StashFlags};
 use thiserror::Error;
 
@@ -382,10 +383,10 @@ fn save_path_limited_stash(
         if has_symlinked_ancestor(&workdir, path) {
             continue;
         }
-        let full = workdir.join(path);
-        if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            std::fs::remove_file(&full)?;
-        }
+        crate::worktree_guard::clear_hazards(
+            &workdir,
+            &[crate::worktree_guard::Hazard::Leaf(path.into())],
+        )?;
         checkout_paths.push(path.as_str());
     }
     // 3. Tracked paths back to HEAD (or to the index with `keep_index`).
@@ -403,19 +404,6 @@ fn save_path_limited_stash(
         }
     }
     Ok(())
-}
-
-/// True when a directory on the way to `path` (relative to `workdir`) is a symlink.
-fn has_symlinked_ancestor(workdir: &std::path::Path, path: &str) -> bool {
-    let mut current = workdir.to_path_buf();
-    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
-    for component in components.iter().take(components.len().saturating_sub(1)) {
-        current.push(component);
-        if std::fs::symlink_metadata(&current).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            return true;
-        }
-    }
-    false
 }
 
 /// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);

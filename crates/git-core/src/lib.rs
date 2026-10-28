@@ -26,3 +26,4 @@ pub mod submodule;
 pub mod tools;
 pub mod undo;
 pub mod worktree;
+pub(crate) mod worktree_guard;
