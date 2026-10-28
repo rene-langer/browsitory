@@ -354,6 +354,19 @@ pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
     false
 }
 
+/// Refuses when `rel` itself or a folder on the way to it (below `workdir`) is a symlink, for a
+/// whole folder that is about to be written, such as a submodule's checkout.
+pub(crate) fn refuse_linked_path(workdir: &Path, rel: &Path) -> Result<(), LinkedFolder> {
+    let mut current = PathBuf::new();
+    for component in rel.components() {
+        current.push(component);
+        if is_link(&workdir.join(&current)) {
+            return Err(LinkedFolder(git_path(&current)));
+        }
+    }
+    Ok(())
+}
+
 /// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
 /// `rel` lands in a real directory inside the repository.
 pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {

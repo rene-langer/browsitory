@@ -1280,3 +1280,78 @@ fn switch_branch_with_an_untracked_link_nothing_brings_in_still_works() {
     f.nothing_outside();
     assert!(common::is_link(f.path(), "e"));
 }
+
+// --- Submodule update (review round 2) -----------------------------------------------------
+
+/// Adds a submodule at `path` (cloned from a fresh repo), commits it, then removes its checkout
+/// and module dir and replaces `link` (the path itself or a folder above it) with a link to the
+/// outside folder.
+fn submodule_behind_link(path: &str, link: &str) -> Fx {
+    let f = fx();
+    let source = TempDir::new().unwrap();
+    {
+        let child = Repository::init(source.path()).unwrap();
+        let mut config = child.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        common::write_file(source.path(), "subfile", "s\n");
+        common::commit_all(&child, "child");
+    }
+    let mut sub = f
+        .repo
+        .submodule(
+            source.path().to_str().unwrap(),
+            std::path::Path::new(path),
+            true,
+        )
+        .unwrap();
+    sub.clone(None).unwrap();
+    sub.add_finalize().unwrap();
+    drop(sub);
+    common::commit_all(&f.repo, "adds the submodule");
+    std::fs::remove_dir_all(f.path().join(path)).unwrap();
+    let _ = std::fs::remove_dir_all(f.repo.path().join("modules"));
+    common::replace_with_link(f.path(), link, f.out.path());
+    std::mem::forget(source);
+    f
+}
+
+fn outside_gained_nothing(f: &Fx) {
+    f.untouched();
+    let names: Vec<_> = std::fs::read_dir(f.out.path())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+}
+
+#[test]
+fn submodule_update_through_a_linked_submodule_path_is_refused() {
+    let f = submodule_behind_link("sub", "sub");
+    git_core::submodule::init_submodule(&f.repo, "sub").unwrap();
+    let result = git_core::submodule::update_submodule(&f.repo, "sub", false);
+    match result {
+        Err(error @ git_core::submodule::SubmoduleError::LinkedFolder(_)) => assert_eq!(
+            error.to_string(),
+            "'sub' is a symbolic link where the repository has a folder. Remove or rename it first."
+        ),
+        other => panic!("{other:?}"),
+    }
+    outside_gained_nothing(&f);
+}
+
+#[test]
+fn submodule_update_below_a_linked_folder_is_refused() {
+    let f = submodule_behind_link("a/sub", "a");
+    git_core::submodule::init_submodule(&f.repo, "a/sub").unwrap();
+    let result = git_core::submodule::update_submodule(&f.repo, "a/sub", false);
+    assert!(
+        matches!(
+            result,
+            Err(git_core::submodule::SubmoduleError::LinkedFolder(_))
+        ),
+        "{result:?}"
+    );
+    outside_gained_nothing(&f);
+}
