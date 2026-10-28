@@ -401,12 +401,39 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(unlisten).toHaveBeenCalledTimes(2);
   });
 
+  it("sends mainline and the sequence and whole-file methods", async () => {
+    vi.mocked(invoke).mockResolvedValue({ kind: "Committed", commitId: "c" });
+    await tauriRepoClient.revertCommit("/r", "m", 2);
+    expect(invoke).toHaveBeenLastCalledWith("revert_commit", { repoPath: "/r", commitId: "m", mainline: 2 });
+    await tauriRepoClient.cherryPick("/r", "m", 1);
+    expect(invoke).toHaveBeenLastCalledWith("cherry_pick", { repoPath: "/r", commitId: "m", mainline: 1 });
+
+    vi.mocked(invoke).mockResolvedValue({ kind: "Completed", applied: 2, skipped: [] });
+    await expect(tauriRepoClient.cherryPickMany("/r", ["a", "b"])).resolves.toEqual({
+      kind: "Completed",
+      applied: 2,
+      skipped: [],
+    });
+    expect(invoke).toHaveBeenLastCalledWith("cherry_pick_many", { repoPath: "/r", commitIds: ["a", "b"] });
+    await tauriRepoClient.revertMany("/r", ["a"]);
+    expect(invoke).toHaveBeenLastCalledWith("revert_many", { repoPath: "/r", commitIds: ["a"] });
+    await tauriRepoClient.continueSequence("/r");
+    expect(invoke).toHaveBeenLastCalledWith("continue_sequence", { repoPath: "/r" });
+    vi.mocked(invoke).mockResolvedValue({ rewound: true });
+    await expect(tauriRepoClient.abortSequence("/r")).resolves.toEqual({ rewound: true });
+    expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r" });
+
+    vi.mocked(invoke).mockResolvedValue(null);
+    await tauriRepoClient.resolveWholeFile("/r", "a.txt", "Ours");
+    expect(invoke).toHaveBeenLastCalledWith("resolve_whole_file", { repoPath: "/r", path: "a.txt", side: "Ours" });
+  });
+
   it("invokes the history-rewrite commands with camelCase args", async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     await tauriRepoClient.cherryPick("/repo", "abc");
-    expect(invoke).toHaveBeenLastCalledWith("cherry_pick", { repoPath: "/repo", commitId: "abc" });
+    expect(invoke).toHaveBeenLastCalledWith("cherry_pick", { repoPath: "/repo", commitId: "abc", mainline: null });
     await tauriRepoClient.revertCommit("/repo", "abc");
-    expect(invoke).toHaveBeenLastCalledWith("revert_commit", { repoPath: "/repo", commitId: "abc" });
+    expect(invoke).toHaveBeenLastCalledWith("revert_commit", { repoPath: "/repo", commitId: "abc", mainline: null });
     await tauriRepoClient.resetToCommit("/repo", "abc", "hard");
     expect(invoke).toHaveBeenLastCalledWith("reset_to_commit", { repoPath: "/repo", commitId: "abc", mode: "hard" });
     await tauriRepoClient.checkoutCommit("/repo", "abc");

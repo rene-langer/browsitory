@@ -472,7 +472,7 @@ export interface CommitHooksControls {
   onCancel: () => void;
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null };
 const noop = () => {};
 const noAmend = async () => false;
 

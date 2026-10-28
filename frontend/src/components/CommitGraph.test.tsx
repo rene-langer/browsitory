@@ -42,7 +42,7 @@ const NO_HEAD = {
   headPushed: false,
   operation: null,
   squashMessage: null,
-  commitHooks: [] as string[],
+  commitHooks: [] as string[], sequence: null,
 } as const;
 const historyProps = {
   headInfo: NO_HEAD,
@@ -1159,7 +1159,7 @@ describe("CommitGraph — tag badges", () => {
         commits={tagged}
         selectedRow="uncommitted"
         pending={false}
-        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }}
+        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }}
         currentBranch="main"
         {...handlers}
         {...overrides}

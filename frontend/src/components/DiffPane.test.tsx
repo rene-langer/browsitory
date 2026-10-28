@@ -96,7 +96,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
@@ -125,6 +125,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     openDiffTool: async () => {},
     openMergeTool: async () => "Unresolved" as const,
     markResolved: async () => "Resolved" as const,
+    resolveWholeFile: async () => {},
+    cherryPickMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    revertMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    continueSequence: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    abortSequence: async () => ({ rewound: true }),
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
@@ -229,7 +234,7 @@ describe("DiffPane", () => {
       const onCommitMessageFocused = vi.fn();
       renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
         amendMode: true,
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
         focusCommitMessage: true,
         onCommitMessageFocused,
       });
@@ -771,7 +776,7 @@ describe("DiffPane", () => {
           headPushed: false,
           operation: null,
           squashMessage: "Squashed commit of the following:\n",
-          commitHooks: [],
+          commitHooks: [], sequence: null,
         },
       });
 

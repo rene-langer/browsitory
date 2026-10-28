@@ -324,7 +324,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     addRemoteDraftOpen: false,
     stashes: [],
     mergeMessage: null,
-    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
     forcePushOffer: null,
     forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),

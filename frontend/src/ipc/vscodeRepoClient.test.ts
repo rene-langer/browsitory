@@ -118,6 +118,13 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.discardFile("/repo", "f.txt"), "discard_file", { repoPath: "/repo", path: "f.txt" }, null],
       [() => vscodeRepoClient.discardAllUnstaged("/repo", ["a.txt"]), "discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt"] }, null],
       [() => vscodeRepoClient.ignorePath("/repo", "*.log"), "ignore_path", { repoPath: "/repo", pattern: "*.log" }, null],
+      [() => vscodeRepoClient.cherryPick("/r", "m", 2), "cherry_pick", { repoPath: "/r", commitId: "m", mainline: 2 }, { kind: "Committed", commitId: "c" }],
+      [() => vscodeRepoClient.revertCommit("/r", "m", 1), "revert_commit", { repoPath: "/r", commitId: "m", mainline: 1 }, { kind: "Committed", commitId: "c" }],
+      [() => vscodeRepoClient.cherryPickMany("/r", ["a", "b"]), "cherry_pick_many", { repoPath: "/r", commitIds: ["a", "b"] }, { kind: "Completed", applied: 2, skipped: [] }],
+      [() => vscodeRepoClient.revertMany("/r", ["a"]), "revert_many", { repoPath: "/r", commitIds: ["a"] }, { kind: "Completed", applied: 1, skipped: [] }],
+      [() => vscodeRepoClient.continueSequence("/r"), "continue_sequence", { repoPath: "/r" }, { kind: "Completed", applied: 1, skipped: [] }],
+      [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r" }, { rewound: false }],
+      [() => vscodeRepoClient.resolveWholeFile("/r", "a.txt", "Theirs"), "resolve_whole_file", { repoPath: "/r", path: "a.txt", side: "Theirs" }, null],
       [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }],
       [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true } }, null],
     ] as const;
@@ -1184,11 +1191,11 @@ describe("vscodeRepoClient", () => {
     respond(2, null);
     await p2;
     const p3 = vscodeRepoClient.cherryPick("/repo", "abc");
-    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 3, method: "cherry_pick", params: { repoPath: "/repo", commitId: "abc" } });
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 3, method: "cherry_pick", params: { repoPath: "/repo", commitId: "abc", mainline: null } });
     respond(3, null);
     await p3;
     const p4 = vscodeRepoClient.revertCommit("/repo", "abc");
-    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 4, method: "revert_commit", params: { repoPath: "/repo", commitId: "abc" } });
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 4, method: "revert_commit", params: { repoPath: "/repo", commitId: "abc", mainline: null } });
     respond(4, null);
     await p4;
     const p5 = vscodeRepoClient.resetToCommit("/repo", "abc", "soft");
