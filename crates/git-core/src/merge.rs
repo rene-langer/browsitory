@@ -332,6 +332,64 @@ pub fn resolve_conflict(
     Ok(())
 }
 
+/// What `mark_resolved` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkResolvedOutcome {
+    /// The work tree file was staged, which cleared the conflict.
+    Resolved,
+    /// Not staged: the file still has `<<<<<<<` / `>>>>>>>` lines. Ask, then call again with
+    /// `force`.
+    MarkersRemain,
+}
+
+/// Stages the work tree file of a conflicted path (or its deletion, when the file is gone),
+/// which clears its conflict entries, like `git add` after a merge tool. Without `force`, a
+/// file that still contains conflict markers is left alone and reported. Not recorded for
+/// undo, like `resolve_conflict`.
+pub fn mark_resolved(
+    repo: &Repository,
+    path: &str,
+    force: bool,
+) -> Result<MarkResolvedOutcome, MergeError> {
+    if !crate::launch::is_safe_relative(path) {
+        return Err(MergeError::NoConflict(path.to_string()));
+    }
+    find_conflict(repo, path)?;
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    let full = workdir.join(path);
+    let meta = std::fs::symlink_metadata(&full).ok();
+    if !force
+        && meta.as_ref().is_some_and(|meta| meta.is_file())
+        && has_conflict_markers(&std::fs::read(&full)?)
+    {
+        return Ok(MarkResolvedOutcome::MarkersRemain);
+    }
+    let mut index = repo.index()?;
+    if meta.is_some() {
+        index.add_path(Path::new(path))?;
+    } else {
+        index.remove_path(Path::new(path))?;
+    }
+    index.write()?;
+    Ok(MarkResolvedOutcome::Resolved)
+}
+
+/// A line starting with `<<<<<<<` or `>>>>>>>` followed by a space or the line end. `=======`
+/// alone is not a marker (it is also a Markdown/RST underline). Binary files (a NUL in the
+/// first 8000 bytes, git's heuristic) are never reported.
+pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
+    if content.iter().take(8000).any(|b| *b == 0) {
+        return false;
+    }
+    content.split(|b| *b == b'\n').any(|line| {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        [&b"<<<<<<<"[..], &b">>>>>>>"[..]].iter().any(|marker| {
+            line.strip_prefix(*marker)
+                .is_some_and(|rest| rest.is_empty() || rest[0] == b' ')
+        })
+    })
+}
+
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
     let in_operation = matches!(
@@ -457,4 +515,20 @@ pub fn resolve_add_delete_conflict(
     }
     index.write()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conflict_markers_are_seven_angle_brackets_at_a_line_start() {
+        assert!(has_conflict_markers(b"a\n<<<<<<< HEAD\nb\n"));
+        assert!(has_conflict_markers(b"a\r\n>>>>>>>\r\n"));
+        assert!(has_conflict_markers(b">>>>>>>"));
+        assert!(!has_conflict_markers(b"Title\n=======\n"));
+        assert!(!has_conflict_markers(b"x <<<<<<< y\n"));
+        assert!(!has_conflict_markers(b"<<<<<<<<< nine\n"));
+        assert!(!has_conflict_markers(b"\0binary\n<<<<<<< x\n"));
+    }
 }

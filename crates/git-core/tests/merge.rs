@@ -242,6 +242,73 @@ fn resolve_conflict_rejects_a_git_relative_path_even_though_it_resolves_under_th
 }
 
 #[test]
+fn mark_resolved_stages_a_clean_file_and_clears_the_conflict() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(
+        dir.path(),
+        "shared.txt",
+        "line one\nmerged two\nline three\n",
+    );
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert!(!repo.index().unwrap().has_conflicts());
+    let staged = repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new("shared.txt"), 0)
+        .unwrap();
+    assert_eq!(
+        repo.find_blob(staged.id).unwrap().content(),
+        b"line one\nmerged two\nline three\n"
+    );
+}
+
+#[test]
+fn mark_resolved_reports_markers_and_keeps_the_conflict() {
+    let (_dir, repo) = make_conflicted_repo();
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::MarkersRemain);
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn mark_resolved_with_force_stages_despite_markers() {
+    let (_dir, repo) = make_conflicted_repo();
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", true).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn mark_resolved_does_not_mistake_a_markdown_underline_for_a_marker() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "shared.txt", "Title\n=======\n\ntext\n");
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+}
+
+#[test]
+fn mark_resolved_stages_a_deletion_when_the_file_was_removed() {
+    let (dir, repo) = make_conflicted_repo();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    let index = repo.index().unwrap();
+    assert!(!index.has_conflicts());
+    assert!(index
+        .get_path(std::path::Path::new("shared.txt"), 0)
+        .is_none());
+}
+
+#[test]
+fn mark_resolved_rejects_a_path_without_a_conflict() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "other.txt", "x\n");
+    let err = git_core::merge::mark_resolved(&repo, "other.txt", false).unwrap_err();
+    assert_eq!(err.to_string(), "no conflict found for path 'other.txt'");
+}
+
+#[test]
 fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
     let (dir, repo) = make_conflicted_repo();
 
