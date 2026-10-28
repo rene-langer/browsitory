@@ -142,7 +142,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   **Preferences → Commit message**.
 - **Add co-author** picks from the repository's recent authors (or takes a typed
   `Name <email>`) and adds `Co-authored-by:` trailers, after any existing trailers and without
-  duplicates. They also apply to **Commit without hooks**.
+  duplicates (compared ignoring case, as git does). An empty message is still refused when
+  co-authors are set. **Commit without hooks** and **Amend without hooks** use the co-authors
+  (and, when amending, the author) shown when you retry (#139).
 - Amending shows an editable **Author** field; the original author date is kept and the
   committer stays you.
 
@@ -150,6 +152,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A commit that fails (for example because of a hook) no longer clears the message you typed
   (#109).
+- VS Code: a large image preview no longer freezes the extension host for seconds while its
+  data arrives from the backend.
+- The image preview no longer hangs the repository if a working-tree file is replaced by a named
+  pipe while it is being read.
 
 - Merge in the "Pull has diverged" dialog failed with "reference not found" (#104).
 - "Drop stash" in the command palette dropped the stash without asking; it now shows the stash
