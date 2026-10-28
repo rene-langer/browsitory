@@ -102,6 +102,7 @@ pub fn get_external_tool_settings() -> Result<ExternalToolSettingsDto, String> {
 
 #[tauri::command]
 pub fn set_external_tool_settings(settings: ExternalToolSettingsDto) -> Result<(), String> {
+    launch::check_tool_commands(settings.editor.as_deref(), settings.terminal.as_deref())?;
     config::set_external_tool_settings(&settings.into()).map_err(|e| e.to_string())
 }
 

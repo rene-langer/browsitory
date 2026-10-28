@@ -1103,6 +1103,10 @@ fn get_external_tool_settings() -> Result<Value, String> {
 fn set_external_tool_settings(params: Value) -> Result<Value, String> {
     let params: SetExternalToolSettingsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
+    git_core::launch::check_tool_commands(
+        params.settings.editor.as_deref(),
+        params.settings.terminal.as_deref(),
+    )?;
     config::set_external_tool_settings(&params.settings.into())
         .map_err(|error| error.to_string())?;
     Ok(Value::Null)

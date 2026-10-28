@@ -2285,6 +2285,15 @@ fn external_tool_settings_and_git_tools_round_trip_through_the_sidecar() {
         serde_json::json!({"settings": {"editor": "code", "terminal": null}}),
     );
     assert_eq!(set["result"], serde_json::Value::Null);
+    let invalid = sidecar.call(
+        30,
+        "set_external_tool_settings",
+        serde_json::json!({"settings": {"editor": "code \"{file}", "terminal": null}}),
+    );
+    assert_eq!(
+        invalid["error"]["message"],
+        "Editor command: The command has an unclosed quote."
+    );
     let got = sidecar.call(3, "get_external_tool_settings", serde_json::json!({}));
     assert_eq!(
         got["result"],

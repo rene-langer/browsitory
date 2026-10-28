@@ -538,6 +538,18 @@ pub fn reveal_target(workdir: &Path, rel: Option<&str>) -> Result<PathBuf, OpenE
     Ok(nearest_existing(workdir, &shown))
 }
 
+/// Checks the editor and terminal commands from Preferences before they are saved: each must
+/// split into words with this OS's rules (blank means "system default" and is fine).
+pub fn check_tool_commands(editor: Option<&str>, terminal: Option<&str>) -> Result<(), String> {
+    for (label, command) in [("Editor command", editor), ("Terminal command", terminal)] {
+        if let Some(command) = command.map(str::trim).filter(|c| !c.is_empty()) {
+            process::split_command_line(command, CommandStyle::native())
+                .map_err(|error| format!("{label}: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Starts `invocation` detached, with `cwd` as its working directory. `argv[0]` is resolved to
 /// an absolute path on `PATH` first, so a program in the work tree can never shadow it.
 pub fn run_invocation(invocation: &Invocation, cwd: &Path) -> Result<(), OpenError> {
@@ -711,6 +723,20 @@ mod tests {
         assert!(may_execute(Path::new("x.terminal"), Os::MacOs, false));
         assert!(!may_execute(Path::new("notes.txt"), Os::MacOs, false));
         assert!(!may_execute(Path::new("Makefile"), Os::Linux, false));
+    }
+
+    #[test]
+    fn tool_settings_are_checked_before_they_are_saved() {
+        assert!(check_tool_commands(None, None).is_ok());
+        assert!(check_tool_commands(Some("  "), Some("kitty --directory {dir}")).is_ok());
+        assert_eq!(
+            check_tool_commands(Some("code \"{file}"), None).unwrap_err(),
+            "Editor command: The command has an unclosed quote."
+        );
+        assert_eq!(
+            check_tool_commands(None, Some("kitty \"x")).unwrap_err(),
+            "Terminal command: The command has an unclosed quote."
+        );
     }
 
     #[test]
