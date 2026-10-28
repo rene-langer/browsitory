@@ -266,7 +266,7 @@ fn step(
     // CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG by then; state was Clean on entry (checked by
     // the caller), so clearing those files restores exactly the prior state without touching
     // user files.
-    // Safe checkouts create files through a symlinked tracked folder (#114).
+    // Safe checkouts create files through a symlinked folder (#114).
     // The step writes its merged result; scan that (an untracked link counts too).
     let merged = match kind {
         Kind::CherryPick => repo.cherrypick_commit(target, head, mainline.unwrap_or(0), None)?,
@@ -682,7 +682,7 @@ pub fn abort_sequence(
     }
     if head_id == state.expected_head && state.expected_head != state.original_head {
         let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
-        // Safe checkouts create files through a symlinked tracked folder (#114).
+        // Safe checkouts create files through a symlinked folder (#114).
         let tree = original.tree()?;
         crate::worktree_guard::refuse_linked_folders::<PickError>(
             repo,

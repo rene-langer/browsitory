@@ -899,7 +899,7 @@ pub fn pull_after_fetch(
         return Ok(PullOutcome::Diverged { upstream_ref });
     }
 
-    // Safe checkouts create files through a symlinked tracked folder (#114).
+    // Safe checkouts create files through a symlinked folder (#114).
     let upstream_tree = upstream_commit.tree()?;
     crate::worktree_guard::refuse_linked_folders::<RemoteError>(
         repo,
