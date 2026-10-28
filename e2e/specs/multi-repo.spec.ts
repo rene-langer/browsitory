@@ -20,7 +20,7 @@ describe("Browsitory multi-repo tabs", () => {
     await browser.execute((el) => (el as HTMLElement).click(), secondRepoRow);
 
     await browser.waitUntil(
-      async () => (await $$('[role="tab"]')).length === 2,
+      async () => (await (await $$('[role="tab"]')).length) === 2,
       { timeout: 10000, timeoutMsg: "expected a second tab after opening the second repo" },
     );
 
@@ -54,7 +54,7 @@ describe("Browsitory multi-repo tabs", () => {
       await $(`//button[@role="tab" and @title="${E2E_SECOND_REPO_PATH}"]/following-sibling::button[1]`),
     );
     await browser.waitUntil(
-      async () => (await $$('[role="tab"]')).length === 1,
+      async () => (await (await $$('[role="tab"]')).length) === 1,
       { timeout: 10000, timeoutMsg: "expected the second tab to close" },
     );
   });

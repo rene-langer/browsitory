@@ -44,7 +44,7 @@ describe("Browsitory hunk staging", () => {
     await browser.execute((el) => (el as HTMLElement).click(), stageHunkButtons[0]);
 
     await browser.waitUntil(
-      async () => (await $$("button=Stage hunk")).length === 1,
+      async () => (await (await $$("button=Stage hunk")).length) === 1,
       { timeout: 10000, timeoutMsg: "expected only one unstaged hunk to remain after staging the other" },
     );
 
