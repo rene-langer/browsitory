@@ -1057,3 +1057,74 @@ describe("undo commands", () => {
     expect(commands.find((c) => c.id === "undo")).toBeUndefined();
   });
 });
+
+describe("preferences and external tool commands", () => {
+  const tools = () => ({
+    onOpenTerminal: vi.fn(),
+    onRevealRepository: vi.fn(),
+    onOpenCurrentFileInEditor: vi.fn(),
+    onOpenCurrentFileInDiffTool: vi.fn(),
+  });
+  const diffCommands = (currentFile: string | null) => ({
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true },
+    update: vi.fn(),
+    currentFile,
+    requestDiscardCurrentFile: vi.fn(),
+    requestDiscardAllUnstaged: vi.fn(),
+    openCurrentFileHistory: vi.fn(),
+  });
+  const build = (state: ReturnType<typeof makeAppState>, currentFile: string | null, toolCommands: ReturnType<typeof tools>) =>
+    buildCommands(
+      state,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      diffCommands(currentFile),
+      undefined,
+      undefined,
+      undefined,
+      toolCommands,
+    );
+
+  it("adds Preferences… with the app commands", () => {
+    const onOpenPreferences = vi.fn();
+    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+      onCloneRepository: vi.fn(),
+      onNewRepository: vi.fn(),
+      onOpenPreferences,
+    });
+    const preferences = commands.find((c) => c.label === "Preferences…");
+    expect(preferences?.keywords).toEqual(expect.arrayContaining(["settings", "editor", "terminal"]));
+    preferences!.run();
+    expect(onOpenPreferences).toHaveBeenCalled();
+  });
+
+  it("adds tool commands, with current-file ones only when there is a current file", () => {
+    const toolCommands = tools();
+    const without = build(makeAppState(), null, toolCommands).map((c) => c.label);
+    expect(without).toEqual(expect.arrayContaining(["Open terminal here", "Reveal repository"]));
+    expect(without).not.toContain("Open current file in editor");
+    expect(without).not.toContain("Open current file in diff tool");
+
+    const commands = build(makeAppState(), "a.ts", toolCommands);
+    for (const label of ["Open terminal here", "Reveal repository", "Open current file in editor", "Open current file in diff tool"]) {
+      commands.find((c) => c.label === label)!.run();
+    }
+    expect(toolCommands.onOpenTerminal).toHaveBeenCalled();
+    expect(toolCommands.onRevealRepository).toHaveBeenCalled();
+    expect(toolCommands.onOpenCurrentFileInEditor).toHaveBeenCalled();
+    expect(toolCommands.onOpenCurrentFileInDiffTool).toHaveBeenCalled();
+    expect(commandGroup("open-terminal")).toBe("Repositories");
+    expect(commandGroup("open-current-file-in-diff-tool")).toBe("Diff");
+  });
+
+  it("keeps tool commands while an operation is running", () => {
+    const labels = build(makeAppState({ pending: true }), "a.ts", tools()).map((c) => c.label);
+    expect(labels).toEqual(
+      expect.arrayContaining(["Open terminal here", "Reveal repository", "Open current file in editor"]),
+    );
+  });
+});
