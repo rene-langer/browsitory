@@ -77,6 +77,67 @@ top of 4a–4f. Drift found and deviations taken (the code wins where the plan d
   in progress / gates the worker / `HeadInfo` field" pattern would carry over to a persisted
   `RebaseState` almost unchanged.
 
+## Pre-flight notes (Part B implementation, 2026-10-28)
+
+Part B lands on `feat/sm-parity-batch4g-2` (not `feat/parity-batch4g-2-image-commit-polish`),
+branched from `main` at e43c236 (4a–4g-1 merged). Drift found and deviations taken (the code
+wins where the plan disagreed):
+
+- **4e hook signatures.** `commit(repo, message, hooks: HookOptions)` and
+  `amend_head(repo, message, hooks)` already take 4e's `HookOptions` (with `no_verify`).
+  `commit` keeps its signature (about 30 test callers, one production caller); the worker
+  appends the trailers with `append_trailers` *before* calling it, so `prepare-commit-msg` and
+  `commit-msg` see the full message (as `git commit --trailer` does). `amend_head` gains
+  `author: Option<&SignatureInput>` before `hooks`; its trailers are appended by the worker the
+  same way. `CommitError::InvalidAuthor` carries no field.
+- **4e outcomes and retry.** Commit/amend return `CommitOutcome` (`HookFailed` is not an
+  error). `RepoClient.commit(repoPath, message, noVerify, trailers?)` and
+  `amendCommit(repoPath, message, noVerify, options?)` keep 4e's `noVerify` and add the new
+  argument after it; the transports always send `trailers: []` / `author: null`. 4e's
+  `HookRetry` carries the trailers (`commit`) and the amend options (`amend`), so "Commit/Amend
+  without hooks" replays them. `CommitBox.onCommit(message, trailers)` and
+  `amend.onAmend(message, options)` still resolve `boolean` (4e's `submitting` guard and
+  "message kept until the commit lands" stay). Co-author chips clear when the commit lands, or
+  with the message on 4e's `clearCommitMessage` request after a retried commit.
+- **4e amend draft.** Entering amend mode already stashes the typed message (`stashed`); the
+  co-author chips are stashed with it (`CommitDraft.stashedCoAuthors`), so amend starts with no
+  chips and leaving amend (or a landed amend) restores them. The edited Author text is also part
+  of the draft (`amendAuthor`).
+- **4f `DiffSource` instead of a new `SidesTarget`.** 4f added `git_core::tools::DiffSource`
+  (`Unstaged | Staged | Commit { commit_id, old_path } | Range { from_id, to_id: Option, old_path }`)
+  with Tauri/sidecar DTOs and a frontend type, describing exactly the two sides of every diff
+  the UI shows. `file_sides(repo, &DiffSource, path, cap)` takes it, so the image preview covers
+  the uncommitted view, commits, stashes (a stash is diffed as its commit, like
+  `getCommitDiff`), and 4d's compare views (commit ↔ commit, branch, and commit ↔ working tree)
+  with no extra target kinds. Wire: `get_file_sides { repoPath, path, source }`.
+- **Content sniffing (beyond the spec, on review direction).** The spec detected images by
+  extension only. Now the extension only decides which files *try* a preview; the backend sniffs
+  each loaded side's magic bytes (`git_core::diff::sniff_image_mime`: PNG, JPEG, GIF, WebP, and
+  SVG by its root element) and the DTO carries `mime: string | null`. The frontend builds the
+  `data:` URL from the sniffed MIME only, from a fixed allowlist, and shows "Can't display this
+  image" when it is `null`. SVG still only ever goes through `<img>`.
+- **Working-tree side.** Besides a symlinked file, a file reached through a directory symlink
+  out of the work tree (4f's `launch::parent_stays_inside`) is `Missing`, and the read is
+  bounded (`take(cap + 1)`) so a file that grows after the size check is still `TooLarge`.
+  Paths are checked with 4f's `launch::is_safe_relative`.
+- **4f Preferences.** `PreferencesDialog` is a shell of independent `PreferencesSection`s
+  (a `fieldset`, so `role="group"`). The new `CommitMessageSection` is a sibling of
+  `ExternalToolsSection` in `App`; numbers save on blur (clamped), the checkbox on change.
+- **4f config.** `[commit_message]` goes right after `[tools]` (both tables precede the
+  array-of-tables fields).
+- **4f/4d read-only sections.** Commit, stash and compare diffs all render through 4f's
+  `ReadOnlyFileSection`, so the preview is added there once (a `previewSource: DiffSource` prop;
+  4f's `toolSource` is only passed when external tools are wired, which the stash view isn't).
+- **4g-1.** Sequence steps and Continue commit through `git-core::pick`, not `commit`; the
+  commit box's co-author chips are hidden while a message is seeded (merge, pick, revert or
+  sequence pause), and no trailers are sent then.
+- **Trailers and comment lines.** Browsitory commits the message as typed (like
+  `git commit -m`, comment lines are kept). As `git interpret-trailers` does, trailing comment
+  lines (`#…`) and blank lines are ignored when finding the trailer block, and the trailers go
+  before them. Continuation lines (leading whitespace) count as part of the preceding trailer.
+- **User decisions:** the message field is monospace while the ruler is on; co-authors are
+  chips that become `Co-authored-by:` trailers.
+
 ## Global Constraints
 
 - No new Rust or npm dependency in either part; `docs/LICENSE_COMPLIANCE.md` is untouched. `git-core` stays serde-free.
