@@ -182,6 +182,21 @@ pub fn working_diff(
     hunks_from_diff(&diff, &[path])
 }
 
+/// The staged diff of a rename from `old_path` to `new_path` (HEAD → index), with rename
+/// detection so edits show as edits rather than a whole-file add. A pure rename yields no hunks.
+pub fn staged_rename_diff(
+    repo: &Repository,
+    old_path: &str,
+    new_path: &str,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let mut git_opts = literal_path_options(new_path, Some(old_path), opts);
+    let mut diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut git_opts))?;
+    detect_renames(&mut diff)?;
+    hunks_from_diff(&diff, &[old_path, new_path])
+}
+
 /// Diff for one path between `commit_id` and its first parent (or an empty tree, for a
 /// commit with no parent). Merge commits are diffed against their first parent only — no
 /// combined/conflict view; fine, since Phase 1 has no merge UI.
@@ -568,15 +583,18 @@ pub fn file_sides(
         | DiffSource::Range {
             old_path: Some(old),
             ..
+        }
+        | DiffSource::Staged {
+            old_path: Some(old),
         } => check_relative(old)?,
         _ => rel,
     };
     let (old, new) = match source {
         DiffSource::Unstaged => (index_side(repo, rel, cap)?, workdir_side(repo, rel, cap)?),
-        DiffSource::Staged => {
+        DiffSource::Staged { .. } => {
             let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
             (
-                tree_side(repo, head_tree.as_ref(), rel, cap)?,
+                tree_side(repo, head_tree.as_ref(), old_rel, cap)?,
                 index_side(repo, rel, cap)?,
             )
         }

@@ -207,8 +207,25 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let target = head_commit.as_ref().map(|c| c.as_object());
-    repo.reset_default(target, [path])?;
+    // A staged rename unstages as a whole: resetting only the new path would leave the old one
+    // staged as deleted (#137).
+    let mut paths = vec![path.to_string()];
+    if let Some(old) = staged_rename_source(repo, path)? {
+        paths.push(old);
+    }
+    repo.reset_default(target, paths.iter())?;
     Ok(())
+}
+
+/// The old path of the staged rename whose new path is `path`, if any.
+fn staged_rename_source(repo: &git2::Repository, path: &str) -> Result<Option<String>, StageError> {
+    let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
+    Ok(entries
+        .into_iter()
+        .find(|entry| {
+            entry.staged && entry.kind == crate::status::StatusKind::Renamed && entry.path == path
+        })
+        .and_then(|entry| entry.old_path))
 }
 
 /// Stages one whole hunk of the index→workdir diff, identified by the `(old_start, new_start)`

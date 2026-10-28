@@ -1005,7 +1005,12 @@ pub(crate) fn trailers_from(dtos: Option<Vec<TrailerDto>>) -> Vec<git_core::comm
 #[serde(tag = "kind")]
 pub enum DiffSourceDto {
     Unstaged,
-    Staged,
+    /// `oldPath` (optional, default `null`): a staged rename's HEAD-side path.
+    #[serde(rename_all = "camelCase")]
+    Staged {
+        #[serde(default)]
+        old_path: Option<String>,
+    },
     #[serde(rename_all = "camelCase")]
     Commit {
         commit_id: String,
@@ -1024,7 +1029,7 @@ impl From<DiffSourceDto> for git_core::tools::DiffSource {
     fn from(dto: DiffSourceDto) -> Self {
         match dto {
             DiffSourceDto::Unstaged => Self::Unstaged,
-            DiffSourceDto::Staged => Self::Staged,
+            DiffSourceDto::Staged { old_path } => Self::Staged { old_path },
             DiffSourceDto::Commit {
                 commit_id,
                 old_path,
@@ -2019,7 +2024,13 @@ mod tests {
         );
         assert_eq!(
             parse(serde_json::json!({"kind": "Staged"})),
-            DiffSource::Staged
+            DiffSource::Staged { old_path: None }
+        );
+        assert_eq!(
+            parse(serde_json::json!({"kind": "Staged", "oldPath": "a.png"})),
+            DiffSource::Staged {
+                old_path: Some("a.png".into())
+            }
         );
         assert_eq!(
             parse(serde_json::json!({"kind": "Commit", "commitId": "abc", "oldPath": null})),

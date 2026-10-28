@@ -441,7 +441,13 @@ fn side_files_are_private() {
     commit_all(&repo, "base");
     let (_c, config) = diff_config(&repo);
     let root = TempDir::new().unwrap();
-    let prepared = prepare(&repo, &config, "a.txt", DiffSource::Staged, root.path());
+    let prepared = prepare(
+        &repo,
+        &config,
+        "a.txt",
+        DiffSource::Staged { old_path: None },
+        root.path(),
+    );
     let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&prepared.temp_dir), 0o700);
     assert_eq!(mode(&env(&prepared.invocation.env, "LOCAL")), 0o600);
@@ -476,7 +482,10 @@ fn staged_commit_and_range_diffs_write_both_sides() {
         )
     };
 
-    assert_eq!(sides(DiffSource::Staged), ("v2\n".into(), "v3\n".into()));
+    assert_eq!(
+        sides(DiffSource::Staged { old_path: None }),
+        ("v2\n".into(), "v3\n".into())
+    );
     assert_eq!(
         sides(DiffSource::Commit {
             commit_id: renamed.clone(),
@@ -595,8 +604,14 @@ fn a_tool_that_cannot_be_found_leaves_no_temp_dir() {
         ],
     );
     let root = TempDir::new().unwrap();
-    let err = prepare_diff_tool_with(&repo, &config, "a.txt", &DiffSource::Staged, root.path())
-        .unwrap_err();
+    let err = prepare_diff_tool_with(
+        &repo,
+        &config,
+        "a.txt",
+        &DiffSource::Staged { old_path: None },
+        root.path(),
+    )
+    .unwrap_err();
     assert_eq!(
         err.to_string(),
         "Couldn't find the program 'browsitory-no-such-meld'."
@@ -911,4 +926,35 @@ mod spawning {
         launch_diff_tool(prepared, Duration::from_millis(200)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(2));
     }
+}
+
+#[test]
+fn a_staged_rename_reads_the_head_side_from_the_old_path() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "v1\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+    write_file(dir.path(), "new.txt", "v1 edited\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.txt")).unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+    let (_c, config) = diff_config(&repo);
+    let root = TempDir::new().unwrap();
+
+    let prepared = prepare(
+        &repo,
+        &config,
+        "new.txt",
+        DiffSource::Staged {
+            old_path: Some("old.txt".into()),
+        },
+        root.path(),
+    );
+
+    assert_eq!(read(&env(&prepared.invocation.env, "LOCAL")), "v1\n");
+    assert_eq!(
+        read(&env(&prepared.invocation.env, "REMOTE")),
+        "v1 edited\n"
+    );
 }

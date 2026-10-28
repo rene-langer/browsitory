@@ -626,8 +626,8 @@ pub fn git_tools(repo: &Repository) -> Result<GitTools, ToolError> {
 pub enum DiffSource {
     /// Index ↔ work tree file.
     Unstaged,
-    /// HEAD ↔ index.
-    Staged,
+    /// HEAD ↔ index; `old_path` is the HEAD side's path of a staged rename.
+    Staged { old_path: Option<String> },
     /// First parent ↔ commit.
     Commit {
         commit_id: String,
@@ -890,7 +890,11 @@ pub fn prepare_diff_tool_with(
     let tool = resolve_tool(config, ToolKind::Diff)?;
     let (local_version, remote_version, local_path) = match source {
         DiffSource::Unstaged => (FileVersion::Index, None, path),
-        DiffSource::Staged => (FileVersion::Head, Some(FileVersion::Index), path),
+        DiffSource::Staged { old_path } => (
+            FileVersion::Head,
+            Some(FileVersion::Index),
+            old_path.as_deref().unwrap_or(path),
+        ),
         DiffSource::Commit {
             commit_id,
             old_path,

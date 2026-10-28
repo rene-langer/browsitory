@@ -1370,7 +1370,12 @@ fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
 #[serde(tag = "kind")]
 enum DiffSourceDto {
     Unstaged,
-    Staged,
+    /// `oldPath` (optional, default `null`): a staged rename's HEAD-side path.
+    #[serde(rename_all = "camelCase")]
+    Staged {
+        #[serde(default)]
+        old_path: Option<String>,
+    },
     #[serde(rename_all = "camelCase")]
     Commit {
         commit_id: String,
@@ -1389,7 +1394,7 @@ impl From<DiffSourceDto> for git_core::tools::DiffSource {
     fn from(dto: DiffSourceDto) -> Self {
         match dto {
             DiffSourceDto::Unstaged => Self::Unstaged,
-            DiffSourceDto::Staged => Self::Staged,
+            DiffSourceDto::Staged { old_path } => Self::Staged { old_path },
             DiffSourceDto::Commit {
                 commit_id,
                 old_path,

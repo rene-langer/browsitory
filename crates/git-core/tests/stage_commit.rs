@@ -562,3 +562,31 @@ impl git_core::hooks::HookReporter for Recorderless {
     ) {
     }
 }
+
+#[test]
+fn unstaging_a_staged_rename_unstages_both_paths() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "one\ntwo\nthree\n");
+    common::commit_all(&repo, "base");
+    std::fs::rename(dir.path().join("old.txt"), dir.path().join("new.txt")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("old.txt")).unwrap();
+    index.add_path(std::path::Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+
+    unstage_file(&repo, "new.txt").unwrap();
+
+    let mut entries = git_core::status::status(&repo).unwrap();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    assert!(entries.iter().all(|entry| !entry.staged), "{entries:?}");
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (entry.path.as_str(), entry.kind))
+            .collect::<Vec<_>>(),
+        vec![
+            ("new.txt", StatusKind::New),
+            ("old.txt", StatusKind::Deleted)
+        ]
+    );
+}
