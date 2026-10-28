@@ -245,6 +245,8 @@ pub(crate) enum Command {
     Commit {
         message: String,
         no_verify: bool,
+        /// Appended to `message` before the hooks run (`Co-authored-by` from the commit box).
+        trailers: Vec<git_core::commit::Trailer>,
         operation_id: String,
         events: Sender<HookEvent>,
         reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
@@ -469,6 +471,15 @@ pub(crate) enum Command {
     GetGitTools {
         reply: Sender<Result<git_core::tools::GitTools, String>>,
     },
+    /// Both sides of `path` in `source`, for the image preview (`MAX_PREVIEW_BYTES` each).
+    GetFileSides {
+        path: String,
+        source: git_core::tools::DiffSource,
+        reply: Sender<Result<git_core::diff::FileSides, String>>,
+    },
+    ListRecentAuthors {
+        reply: Sender<Result<Vec<git_core::commit::SignatureInput>, String>>,
+    },
     CheckMergeTarget {
         path: String,
         reply: Sender<Result<(), String>>,
@@ -519,6 +530,9 @@ pub(crate) enum Command {
     AmendCommit {
         message: String,
         no_verify: bool,
+        /// Replaces the author's name and email (the author time is kept).
+        author: Option<git_core::commit::SignatureInput>,
+        trailers: Vec<git_core::commit::Trailer>,
         operation_id: String,
         events: Sender<HookEvent>,
         reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
@@ -962,6 +976,7 @@ impl Worker {
                     Command::Commit {
                         message,
                         no_verify,
+                        trailers,
                         operation_id,
                         events,
                         reply,
@@ -969,6 +984,7 @@ impl Worker {
                         &mut repo,
                         message,
                         no_verify,
+                        trailers,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1146,6 +1162,8 @@ impl Worker {
                     Command::AmendCommit {
                         message,
                         no_verify,
+                        author,
+                        trailers,
                         operation_id,
                         events,
                         reply,
@@ -1153,6 +1171,8 @@ impl Worker {
                         &repo,
                         message,
                         no_verify,
+                        author,
+                        trailers,
                         remote::TransferOp {
                             id: operation_id,
                             cancelled: &cancelled,
@@ -1239,6 +1259,12 @@ impl Worker {
                         tools::prepare_merge_tool(&repo, path, reply)
                     }
                     Command::GetGitTools { reply } => tools::git_tools(&repo, reply),
+                    Command::GetFileSides {
+                        path,
+                        source,
+                        reply,
+                    } => tools::file_sides(&repo, path, source, reply),
+                    Command::ListRecentAuthors { reply } => history::recent_authors(&repo, reply),
                     Command::CheckMergeTarget { path, reply } => {
                         tools::check_merge_target(&repo, path, reply)
                     }
@@ -1703,7 +1729,9 @@ mod tests {
         let undo_before = handle.get_undo_state().unwrap().undo;
         let (events_tx, events_rx) = mpsc::channel();
 
-        let outcome = handle.commit("msg".into(), false, events_tx).unwrap();
+        let outcome = handle
+            .commit("msg".into(), false, Vec::new(), events_tx)
+            .unwrap();
 
         assert_eq!(
             outcome,
@@ -1742,7 +1770,7 @@ mod tests {
         });
         let started = std::time::Instant::now();
 
-        let result = handle.commit("msg".into(), false, events_tx);
+        let result = handle.commit("msg".into(), false, Vec::new(), events_tx);
 
         cancel_thread.join().unwrap();
         assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
@@ -1917,20 +1945,207 @@ mod tests {
         let handle = worker.handle();
 
         let failed = handle
-            .amend_commit("amended".into(), false, mpsc::channel().0)
+            .amend_commit("amended".into(), false, None, Vec::new(), mpsc::channel().0)
             .unwrap();
         assert!(matches!(
             failed,
             git_core::commit::CommitOutcome::HookFailed { .. }
         ));
         let outcome = handle
-            .amend_commit("amended".into(), true, mpsc::channel().0)
+            .amend_commit("amended".into(), true, None, Vec::new(), mpsc::channel().0)
             .unwrap();
 
         assert!(matches!(
             outcome,
             git_core::commit::CommitOutcome::Committed { .. }
         ));
+    }
+
+    fn co_author(value: &str) -> git_core::commit::Trailer {
+        git_core::commit::Trailer {
+            key: "Co-authored-by".into(),
+            value: value.into(),
+        }
+    }
+
+    fn head_commit_message(repo: &Repository) -> String {
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .message()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn get_file_sides_returns_both_sides_of_an_unstaged_edit() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "img.png", "foo");
+        commit_all(&repo, "first");
+        write_file(dir.path(), "img.png", "foobar");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let sides = worker
+            .handle()
+            .get_file_sides("img.png".into(), git_core::tools::DiffSource::Unstaged)
+            .unwrap();
+        assert_eq!(
+            sides.old,
+            git_core::diff::FileSide::Loaded {
+                bytes: b"foo".to_vec()
+            }
+        );
+        assert_eq!(
+            sides.new,
+            git_core::diff::FileSide::Loaded {
+                bytes: b"foobar".to_vec()
+            }
+        );
+        assert!(worker
+            .handle()
+            .get_file_sides("../x.png".into(), git_core::tools::DiffSource::Unstaged)
+            .unwrap_err()
+            .contains("path must be relative to the repository"));
+    }
+
+    #[test]
+    fn commit_appends_trailers_and_refuses_an_invalid_one() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+
+        let bad = git_core::commit::Trailer {
+            key: "Bad key".into(),
+            value: "x".into(),
+        };
+        assert_eq!(
+            handle
+                .commit("Add a".into(), false, vec![bad], mpsc::channel().0)
+                .unwrap_err(),
+            "Invalid trailer \"Bad key: x\"."
+        );
+        assert!(repo.head().is_err(), "nothing was committed");
+
+        let outcome = handle
+            .commit(
+                "Add a".into(),
+                false,
+                vec![co_author("Ada <ada@x.org>")],
+                mpsc::channel().0,
+            )
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(
+            head_commit_message(&repo),
+            "Add a\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_commit_msg_hook_sees_the_trailers() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        let seen = dir.path().join("seen.txt");
+        install_hook(
+            &repo,
+            "commit-msg",
+            &format!("cp \"$1\" '{}'", seen.display()),
+        );
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+        handle
+            .commit(
+                "Add a".into(),
+                false,
+                vec![co_author("Ada <ada@x.org>")],
+                mpsc::channel().0,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&seen).unwrap(),
+            "Add a\n\nCo-authored-by: Ada <ada@x.org>\n"
+        );
+    }
+
+    #[test]
+    fn amend_commit_overrides_the_author_and_appends_trailers() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .amend_commit(
+                "first".into(),
+                false,
+                Some(git_core::commit::SignatureInput {
+                    name: "Ada".into(),
+                    email: "ada@x.org".into(),
+                }),
+                vec![co_author("Bob <bob@x.org>")],
+                mpsc::channel().0,
+            )
+            .unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.author().name().ok(), Some("Ada"));
+        assert_eq!(head.author().email().ok(), Some("ada@x.org"));
+        assert_eq!(head.committer().name().ok(), Some("Test User"));
+        assert_eq!(
+            head.message().ok(),
+            Some("first\n\nCo-authored-by: Bob <bob@x.org>\n")
+        );
+        drop(head);
+
+        let before = repo.head().unwrap().target();
+        assert_eq!(
+            handle
+                .amend_commit(
+                    "first".into(),
+                    false,
+                    Some(git_core::commit::SignatureInput {
+                        name: "Ada".into(),
+                        email: "".into(),
+                    }),
+                    Vec::new(),
+                    mpsc::channel().0,
+                )
+                .unwrap_err(),
+            "Invalid author. Use a name and an email address."
+        );
+        assert_eq!(repo.head().unwrap().target(), before);
+    }
+
+    #[test]
+    fn list_recent_authors_excludes_the_current_user() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "mine");
+        write_file(dir.path(), "b.txt", "b");
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("b.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let ada = git2::Signature::now("Ada", "ada@x.org").unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &ada, &ada, "hers", &tree, &[&parent])
+                .unwrap();
+        }
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        assert_eq!(
+            worker.handle().list_recent_authors().unwrap(),
+            vec![git_core::commit::SignatureInput {
+                name: "Ada".into(),
+                email: "ada@x.org".into()
+            }]
+        );
     }
 
     fn write_file(dir: &Path, relative_path: &str, contents: &str) {
@@ -2037,7 +2252,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle.stage_file("new.txt".into()).unwrap();
-        let result = handle.commit("message".into(), false, mpsc::channel().0);
+        let result = handle.commit("message".into(), false, Vec::new(), mpsc::channel().0);
 
         assert!(result.is_ok());
         assert!(handle.get_status().unwrap().is_empty());
@@ -2232,7 +2447,7 @@ mod tests {
 
         assert_eq!(
             handle
-                .commit("x".into(), false, mpsc::channel().0)
+                .commit("x".into(), false, Vec::new(), mpsc::channel().0)
                 .unwrap_err(),
             busy
         );
@@ -2523,7 +2738,7 @@ mod tests {
         let handle = worker.handle();
         handle.stage_file("b.txt".into()).unwrap();
         let undo_before = handle.get_undo_state().unwrap().undo;
-        let result = handle.commit("signed?".into(), false, mpsc::channel().0);
+        let result = handle.commit("signed?".into(), false, Vec::new(), mpsc::channel().0);
 
         assert_eq!(
             result.unwrap_err(),
@@ -4335,7 +4550,13 @@ mod tests {
         ));
 
         handle
-            .amend_commit("side, amended".into(), false, mpsc::channel().0)
+            .amend_commit(
+                "side, amended".into(),
+                false,
+                None,
+                Vec::new(),
+                mpsc::channel().0,
+            )
             .unwrap();
         let picked = handle.get_head_info().unwrap().head_id.unwrap();
 
@@ -4590,7 +4811,7 @@ mod tests {
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
         handle
-            .commit("Merge feature".into(), false, mpsc::channel().0)
+            .commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
             .unwrap();
         assert_eq!(
             handle.get_undo_state().unwrap(),

@@ -1407,6 +1407,7 @@ fn commit(
     let outcome = worker_handle(repos, &params.repo_path)?.commit(
         params.message,
         params.no_verify,
+        Vec::new(),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
@@ -2616,6 +2617,8 @@ fn amend_commit(
     let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
         params.message,
         params.no_verify,
+        None,
+        Vec::new(),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())

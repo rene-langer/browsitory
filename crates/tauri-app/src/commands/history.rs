@@ -25,7 +25,13 @@ pub async fn amend_commit(
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.amend_commit(message, no_verify, event_tx)?,
+        worker_handle(&state, &repo_path)?.amend_commit(
+            message,
+            no_verify,
+            None,
+            Vec::new(),
+            event_tx,
+        )?,
     ))
 }
 
