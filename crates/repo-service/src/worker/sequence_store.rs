@@ -9,10 +9,14 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use git2::{Oid, Repository};
-use git_core::pick::{SequenceKind, SequenceState};
+use git_core::pick::{OriginalRef, SequenceKind, SequenceState};
 use serde::{Deserialize, Serialize};
 
-const FORMAT_VERSION: u32 = 1;
+/// 2 added `stoppedOnConflict` and `originalRef`. A version 1 file still loads: it counts as an
+/// error stop (Continue then needs HEAD unmoved) with an unknown original ref (Abort never
+/// rewinds), the cautious reading of what it doesn't say.
+const FORMAT_VERSION: u32 = 2;
+const OLDEST_READABLE_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
 enum StoredKind {
@@ -30,6 +34,18 @@ struct StoredSequence {
     skipped: Vec<String>,
     original_head: String,
     expected_head: String,
+    #[serde(default)]
+    stopped_on_conflict: bool,
+    /// Full ref name, `null` for a detached HEAD; absent in version 1 (unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_ref: Option<StoredRef>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", content = "name")]
+enum StoredRef {
+    Branch(String),
+    Detached,
 }
 
 impl From<&SequenceState> for StoredSequence {
@@ -45,6 +61,12 @@ impl From<&SequenceState> for StoredSequence {
             skipped: state.skipped.clone(),
             original_head: state.original_head.clone(),
             expected_head: state.expected_head.clone(),
+            stopped_on_conflict: state.stopped_on_conflict,
+            original_ref: match &state.original_ref {
+                OriginalRef::Branch(name) => Some(StoredRef::Branch(name.clone())),
+                OriginalRef::Detached => Some(StoredRef::Detached),
+                OriginalRef::Unknown => None,
+            },
         }
     }
 }
@@ -61,6 +83,12 @@ impl From<StoredSequence> for SequenceState {
             skipped: stored.skipped,
             original_head: stored.original_head,
             expected_head: stored.expected_head,
+            stopped_on_conflict: stored.stopped_on_conflict,
+            original_ref: match stored.original_ref {
+                Some(StoredRef::Branch(name)) => OriginalRef::Branch(name),
+                Some(StoredRef::Detached) => OriginalRef::Detached,
+                None => OriginalRef::Unknown,
+            },
         }
     }
 }
@@ -97,7 +125,7 @@ impl SequenceStore {
             Ok(stored) => stored,
             Err(error) => return self.ignore(format!("malformed: {error}")),
         };
-        if stored.version != FORMAT_VERSION {
+        if !(OLDEST_READABLE_VERSION..=FORMAT_VERSION).contains(&stored.version) {
             return self.ignore(format!("unknown version {}", stored.version));
         }
         let state = SequenceState::from(stored);
@@ -216,6 +244,8 @@ mod tests {
             skipped: vec![ids[1].clone()],
             original_head: ids[2].clone(),
             expected_head: ids[2].clone(),
+            stopped_on_conflict: true,
+            original_ref: OriginalRef::Branch("refs/heads/main".into()),
         }
     }
 
@@ -266,7 +296,7 @@ mod tests {
             r#"{"version":1}"#.to_string(),
             r#"{"version":1,"kind":"Rebase","commits":[],"next":0,"skipped":[],"originalHead":"","expectedHead":""}"#.to_string(),
             format!(
-                r#"{{"version":2,"kind":"CherryPick","commits":["{0}"],"next":0,"skipped":[],"originalHead":"{0}","expectedHead":"{0}"}}"#,
+                r#"{{"version":3,"kind":"CherryPick","commits":["{0}"],"next":0,"skipped":[],"originalHead":"{0}","expectedHead":"{0}"}}"#,
                 ids[0]
             ),
         ] {
@@ -325,13 +355,49 @@ mod tests {
     }
 
     #[test]
+    fn a_version_1_file_loads_as_an_error_stop_with_an_unknown_ref() {
+        let (_dir, repo, ids) = repo_with_commits();
+        let store = SequenceStore::open(&repo);
+        fs::create_dir_all(repo.path().join("browsitory")).unwrap();
+        fs::write(
+            file(&repo),
+            format!(
+                r#"{{"version":1,"kind":"CherryPick","commits":["{0}"],"next":0,"skipped":[],"originalHead":"{0}","expectedHead":"{0}"}}"#,
+                ids[0]
+            ),
+        )
+        .unwrap();
+        let state = store.load(&repo).unwrap();
+        assert!(!state.stopped_on_conflict);
+        assert_eq!(state.original_ref, OriginalRef::Unknown);
+        assert_eq!(state.kind, SequenceKind::CherryPick);
+    }
+
+    #[test]
+    fn a_detached_original_head_round_trips() {
+        let (_dir, repo, ids) = repo_with_commits();
+        let store = SequenceStore::open(&repo);
+        let detached = SequenceState {
+            original_ref: OriginalRef::Detached,
+            ..state(&ids)
+        };
+        store.save(&detached).unwrap();
+        assert_eq!(store.load(&repo), Some(detached));
+    }
+
+    #[test]
     fn the_wire_format_is_camel_case_with_a_version() {
         let (_dir, repo, ids) = repo_with_commits();
         let store = SequenceStore::open(&repo);
         store.save(&state(&ids)).unwrap();
         let json: serde_json::Value =
             serde_json::from_slice(&fs::read(file(&repo)).unwrap()).unwrap();
-        assert_eq!(json["version"], 1);
+        assert_eq!(json["version"], 2);
+        assert_eq!(json["stoppedOnConflict"], true);
+        assert_eq!(
+            json["originalRef"],
+            serde_json::json!({ "kind": "Branch", "name": "refs/heads/main" })
+        );
         assert_eq!(json["kind"], "Revert");
         assert_eq!(json["next"], 1);
         assert_eq!(json["commits"], serde_json::json!([ids[1], ids[0]]));

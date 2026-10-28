@@ -584,3 +584,217 @@ fn head_info_from_git_core_never_reports_a_sequence() {
     let (_dir, repo, _ids, _state) = paused(true);
     assert_eq!(git_core::repo::head_info(&repo).unwrap().sequence, None);
 }
+
+// --- Review fixes (PR #132) ---
+
+/// Commits whatever is in the work tree with an author distinct from every fixture commit.
+fn commit_as_someone_else(repo: &Repository, message: &str) {
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let sig = git2::Signature::new(
+        "Someone Else",
+        "else@example.com",
+        &git2::Time::new(1000, 0),
+    )
+    .unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .unwrap();
+}
+
+#[test]
+fn an_unrelated_commit_after_a_terminal_abort_is_not_taken_for_the_step() {
+    let (dir, repo, _ids, state) = paused(true);
+    git_core::merge::abort_merge(&repo).unwrap(); // `git cherry-pick --abort`
+    common::write_file(dir.path(), "unrelated.txt", "x\n");
+    commit_as_someone_else(&repo, "unrelated");
+    let run = continue_sequence(&repo, state.clone());
+    assert!(
+        matches!(run.outcome, Err(PickError::HeadMoved)),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(run.state, Some(state));
+}
+
+#[test]
+fn after_an_error_stop_any_new_commit_is_head_moved() {
+    let (dir, repo, ids) = side_branch(false, true);
+    common::write_file(dir.path(), "three.txt", "mine\n");
+    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    assert!(!state.stopped_on_conflict);
+    std::fs::remove_file(dir.path().join("three.txt")).unwrap();
+    common::write_file(dir.path(), "notes.txt", "user work\n");
+    commit_as_someone_else(&repo, "user work");
+    let run = continue_sequence(&repo, state);
+    assert!(matches!(run.outcome, Err(PickError::HeadMoved)));
+}
+
+#[test]
+fn a_revert_step_committed_by_hand_is_recognised_by_its_message() {
+    let (dir, mut repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "one\n");
+    common::commit_all(&repo, "one");
+    common::write_file(dir.path(), "a.txt", "two\n");
+    common::commit_all(&repo, "two");
+    let two = head(&repo);
+    common::write_file(dir.path(), "b.txt", "b\n");
+    common::commit_all(&repo, "add b");
+    let add_b = head(&repo);
+    common::write_file(dir.path(), "a.txt", "three\n");
+    common::commit_all(&repo, "three");
+    let run = revert_many(&repo, &[two, add_b]);
+    let state = run.state.unwrap();
+    assert!(state.stopped_on_conflict);
+    common::write_file(dir.path(), "a.txt", "resolved\n");
+    stage(&repo, "a.txt");
+    // Finished by hand: with git's message (it names the reverted commit) it counts as the
+    // step; with a message of the user's own it doesn't.
+    let git_message = git_core::merge::merge_message(&repo).unwrap();
+    let before = head(&repo);
+    git_core::commit::commit(
+        &mut repo,
+        "my own words",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+    let run = continue_sequence(&repo, state.clone());
+    assert!(matches!(run.outcome, Err(PickError::HeadMoved)));
+
+    // Same stop, finished with git's message instead.
+    repo.reset(
+        repo.find_object(Oid::from_str(&before).unwrap(), None)
+            .as_ref()
+            .unwrap(),
+        git2::ResetType::Soft,
+        None,
+    )
+    .unwrap();
+    let mut index = repo.index().unwrap();
+    index.write().unwrap();
+    git_core::commit::commit(
+        &mut repo,
+        &git_message,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+    let run = continue_sequence(&repo, state);
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 2,
+            skipped: vec![]
+        }
+    );
+}
+
+#[test]
+fn continue_reads_an_index_staged_by_another_process() {
+    let (dir, repo, _ids, state) = paused(true);
+    // The index is loaded in `repo`; resolve and stage through a second handle, as a terminal
+    // `git add` would.
+    let other = Repository::open(dir.path()).unwrap();
+    common::write_file(dir.path(), "shared.txt", "resolved\n");
+    stage(&other, "shared.txt");
+    let run = continue_sequence(&repo, state);
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 3,
+            skipped: vec![]
+        }
+    );
+}
+
+#[test]
+fn abort_does_not_rewind_a_branch_switched_to_after_the_stop() {
+    let (_dir, repo, ids) = side_branch(true, true);
+    let original = head(&repo);
+    let base_ref = base_branch_ref(&repo);
+    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    git_core::merge::abort_merge(&repo).unwrap();
+    // `git switch -c other`: same commit, different branch.
+    {
+        let tip = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("other", &tip, false).unwrap();
+    }
+    repo.set_head("refs/heads/other").unwrap();
+    let landed = head(&repo);
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+    assert!(!abort.rewound);
+    assert_eq!(head(&repo), landed);
+    assert_eq!(
+        repo.find_reference(&base_ref)
+            .unwrap()
+            .target()
+            .unwrap()
+            .to_string(),
+        landed
+    );
+    assert_ne!(landed, original);
+}
+
+#[test]
+fn abort_cleans_up_a_conflict_whose_pick_head_was_deleted() {
+    let (dir, repo, _ids, state) = paused(true);
+    let original = state.original_head.clone();
+    std::fs::remove_file(repo.path().join("CHERRY_PICK_HEAD")).unwrap();
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    assert!(repo.index().unwrap().has_conflicts());
+
+    let run = continue_sequence(&repo, state.clone());
+    assert!(matches!(run.outcome, Err(PickError::UnresolvedConflicts)));
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+    assert!(abort.rewound);
+    assert_eq!(head(&repo), original);
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "ours\n"
+    );
+}
+
+#[test]
+fn reverting_a_revert_reapplies_like_git() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "add a");
+    let add_a = head(&repo);
+    git_core::pick::revert(&repo, &add_a, None).unwrap();
+    let revert = head(&repo);
+    git_core::pick::revert(&repo, &revert, None).unwrap();
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        tip.message().unwrap(),
+        format!("Reapply \"add a\"\n\nThis reverts commit {revert}.\n")
+    );
+    // In a sequence too; and a revert of a "Reapply" is a plain Revert again.
+    let reapply = head(&repo);
+    let run = revert_many(&repo, &[reapply]);
+    assert!(run.outcome.is_ok());
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        tip.summary().unwrap().unwrap(),
+        "Revert \"Reapply \"add a\"\""
+    );
+}
+
+#[test]
+fn reverting_a_revert_of_a_revert_stays_a_revert() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "Revert \"Revert \"x\"\"");
+    let id = head(&repo);
+    git_core::pick::revert(&repo, &id, None).unwrap();
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        tip.summary().unwrap().unwrap(),
+        "Revert \"Revert \"Revert \"x\"\"\""
+    );
+}

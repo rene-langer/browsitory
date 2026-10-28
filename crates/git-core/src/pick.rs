@@ -102,6 +102,21 @@ pub struct SequenceState {
     pub original_head: String,
     /// HEAD just before the stopped step ran.
     pub expected_head: String,
+    /// The stop was a conflict (git paused the step), not an error. Only then may the user
+    /// finish the step outside Browsitory: after an error stop, Continue needs HEAD unmoved.
+    pub stopped_on_conflict: bool,
+    /// What HEAD was when the sequence started; Abort rewinds only while HEAD is still that.
+    pub original_ref: OriginalRef,
+}
+
+/// The ref HEAD named when a sequence started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OriginalRef {
+    /// A branch, by full ref name (`refs/heads/main`).
+    Branch(String),
+    Detached,
+    /// Not recorded (a state saved by an older version): Abort never rewinds.
+    Unknown,
 }
 
 impl SequenceState {
@@ -203,7 +218,11 @@ fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
         }
         Err(error) => return Err(error.into()),
     };
-    let staged = repo.diff_tree_to_index(Some(&head.tree()?), None, None)?;
+    let index = fresh_index(repo)?;
+    if index.has_conflicts() {
+        return Err(PickError::UnresolvedConflicts);
+    }
+    let staged = repo.diff_tree_to_index(Some(&head.tree()?), Some(&index), None)?;
     if staged.deltas().len() > 0 {
         return Err(PickError::DirtyIndex);
     }
@@ -315,9 +334,14 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
         .and_then(|m| target.parent_id(m as usize - 1).ok())
         .map(|parent| format!(", reversing\nchanges made to {parent}"))
         .unwrap_or_default();
+    let summary = target.summary().ok().flatten().unwrap_or("");
+    // git (2.43+): reverting `Revert "x"` says `Reapply "x"`, but never for `Revert "Revert ...`.
+    let subject = match summary.strip_prefix("Revert \"") {
+        Some(rest) if !rest.starts_with("Revert \"") => format!("Reapply \"{rest}"),
+        _ => format!("Revert \"{summary}\""),
+    };
     format!(
-        "Revert \"{}\"\n\nThis reverts commit {}{reversing}.\n",
-        target.summary().ok().flatten().unwrap_or(""),
+        "{subject}\n\nThis reverts commit {}{reversing}.\n",
         target.id()
     )
 }
@@ -361,6 +385,10 @@ fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
     if kind == SequenceKind::Revert {
         commits.reverse();
     }
+    let original_ref = match head_ref(repo) {
+        Ok(original_ref) => original_ref,
+        Err(error) => return SequenceRun::failed(error),
+    };
     let head_id = head.id().to_string();
     run(
         repo,
@@ -371,8 +399,29 @@ fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
             skipped: Vec::new(),
             original_head: head_id.clone(),
             expected_head: head_id,
+            stopped_on_conflict: false,
+            original_ref,
         },
     )
+}
+
+fn head_ref(repo: &Repository) -> Result<OriginalRef, git2::Error> {
+    if repo.head_detached()? {
+        return Ok(OriginalRef::Detached);
+    }
+    let head = repo.head()?;
+    Ok(head
+        .name()
+        .map(|name| OriginalRef::Branch(name.to_string()))
+        .unwrap_or(OriginalRef::Unknown))
+}
+
+/// The repository's index, re-read from disk if another process (a terminal `git add`) changed
+/// it since libgit2 loaded it.
+fn fresh_index(repo: &Repository) -> Result<git2::Index, git2::Error> {
+    let mut index = repo.index()?;
+    index.read(false)?;
+    Ok(index)
 }
 
 /// Runs the steps from `state.next` on. HEAD is the base of each step (the caller made sure it
@@ -392,15 +441,17 @@ fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
                 state.next += 1;
             }
             Ok(StepResult::Conflicted(files)) => {
+                state.stopped_on_conflict = true;
                 return SequenceRun {
                     outcome: Ok(SequenceOutcome::Conflicted {
                         files,
                         progress: state.progress(),
                     }),
                     state: Some(state),
-                }
+                };
             }
             Err(error) => {
+                state.stopped_on_conflict = false;
                 let untouched = state.next == 0
                     && state.skipped.is_empty()
                     && state.expected_head == state.original_head
@@ -482,7 +533,7 @@ fn finish_paused(repo: &Repository, state: &mut SequenceState) -> Result<(), Pic
     if !is_own_paused_step(repo, state) {
         return Err(PickError::OperationInProgress);
     }
-    let mut index = repo.index()?;
+    let mut index = fresh_index(repo)?;
     if index.has_conflicts() {
         return Err(PickError::UnresolvedConflicts);
     }
@@ -541,15 +592,42 @@ fn resume_clean(repo: &Repository, state: &mut SequenceState) -> Result<(), Pick
         // Stopped on an error (or the paused step was aborted outside): retry the step.
         return Ok(());
     }
-    if head.parent_count() == 1
-        && head.parent_id(0).map(|id| id.to_string()).ok().as_deref()
-            == Some(state.expected_head.as_str())
-    {
-        // The user committed the paused step some other way.
+    if state.stopped_on_conflict && is_step_committed_by_hand(repo, &head, state)? {
         state.next += 1;
         return Ok(());
     }
     Err(PickError::HeadMoved)
+}
+
+/// After a conflict stop, the user may finish the step outside Browsitory (`git commit` in a
+/// terminal). HEAD counts as that step only when it is exactly one commit past the stop, git's
+/// paused state is gone, and it is recognisably the step: a cherry-pick keeps the picked
+/// commit's author (name, email and time); a revert's message names the reverted commit.
+fn is_step_committed_by_hand(
+    repo: &Repository,
+    head: &Commit<'_>,
+    state: &SequenceState,
+) -> Result<bool, PickError> {
+    if head.parent_count() != 1 || head.parent_id(0)?.to_string() != state.expected_head {
+        return Ok(false);
+    }
+    let pick_head_gone = ["CHERRY_PICK_HEAD", "REVERT_HEAD"]
+        .iter()
+        .all(|name| repo.find_reference(name).is_err());
+    if !pick_head_gone {
+        return Ok(false);
+    }
+    let target = repo.find_commit(Oid::from_str(&state.commits[state.next])?)?;
+    Ok(match state.kind {
+        SequenceKind::CherryPick => {
+            let (ours, theirs) = (head.author(), target.author());
+            ours.name_bytes() == theirs.name_bytes()
+                && ours.email_bytes() == theirs.email_bytes()
+                && ours.when() == theirs.when()
+        }
+        SequenceKind::Revert => String::from_utf8_lossy(head.message_bytes())
+            .contains(&format!("This reverts commit {}", target.id())),
+    })
 }
 
 /// Ends a stopped sequence. A paused step of this sequence is aborted like `git cherry-pick
@@ -562,12 +640,28 @@ pub fn abort_sequence(
     repo: &Repository,
     state: &SequenceState,
 ) -> Result<SequenceAbort, PickError> {
+    let head_id = repo.head()?.peel_to_commit()?.id().to_string();
     if is_own_paused_step(repo, state) {
         crate::merge::abort_merge(repo)?;
+    } else if repo.state() == RepositoryState::Clean
+        && head_id == state.expected_head
+        && fresh_index(repo)?.has_conflicts()
+    {
+        // The step's conflict without its CHERRY_PICK_HEAD/REVERT_HEAD (deleted outside):
+        // still ours to clean up, like `git cherry-pick --abort` would have.
+        crate::merge::abort_merge(repo)?;
     }
-    let head_id = repo.head()?.peel_to_commit()?.id().to_string();
     if repo.state() != RepositoryState::Clean {
         // Someone else's operation is paused here; don't pull HEAD from under it.
+        return Ok(SequenceAbort {
+            rewound: head_id == state.original_head,
+        });
+    }
+    let same_ref =
+        head_ref(repo)? == state.original_ref && state.original_ref != OriginalRef::Unknown;
+    if !same_ref {
+        // HEAD now names another branch (or detached/attached changed): rewinding would move
+        // a ref the sequence never touched.
         return Ok(SequenceAbort {
             rewound: head_id == state.original_head,
         });
