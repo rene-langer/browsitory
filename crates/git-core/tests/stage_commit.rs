@@ -590,3 +590,44 @@ fn unstaging_a_staged_rename_unstages_both_paths() {
         ]
     );
 }
+
+#[test]
+#[cfg(unix)]
+fn staging_a_file_below_a_symlinked_folder_stages_its_deletion_never_the_outside_file() {
+    let out = common::outside_dir();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d/f", "inner\n");
+    common::commit_all(&repo, "base");
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    stage_file(&repo, "d/f").unwrap();
+
+    assert!(repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new("d/f"), 0)
+        .is_none());
+    common::assert_outside_untouched(out.path());
+}
+
+#[test]
+#[cfg(unix)]
+fn staging_a_dangling_symlink_stages_the_link() {
+    let (dir, repo) = init_repo();
+    std::os::unix::fs::symlink("nowhere", dir.path().join("l")).unwrap();
+
+    stage_file(&repo, "l").unwrap();
+
+    let entry = repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new("l"), 0)
+        .unwrap();
+    assert_eq!(entry.mode, 0o120000);
+}
+
+#[test]
+fn staging_rejects_a_path_outside_the_repository() {
+    let (_dir, repo) = init_repo();
+    assert!(stage_file(&repo, "../x").is_err());
+}

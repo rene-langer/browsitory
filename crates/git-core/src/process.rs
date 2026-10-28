@@ -316,6 +316,9 @@ pub(crate) struct SplitCaptured {
     pub stdout_overflowed: bool,
     /// The last `stderr_limit` bytes of stderr.
     pub stderr: String,
+    /// Both pipes reached end-of-file. False when a process that inherited them (a background
+    /// grandchild) kept them open past `DRAIN_GRACE`: `stdout` may then be incomplete.
+    pub drained: bool,
 }
 
 /// Like `run_captured`, but with stdout and stderr kept apart, for programs whose stdout is data
@@ -397,9 +400,11 @@ pub(crate) fn run_captured_split(
     let (status, timed_out) = wait_bounded(&mut child, cancel, timeout)?;
     // Both drains, sharing one grace period.
     let deadline = Instant::now() + DRAIN_GRACE;
+    let mut drained = true;
     for _ in 0..2 {
         let left = deadline.saturating_duration_since(Instant::now());
         if done_rx.recv_timeout(left).is_err() {
+            drained = false;
             break;
         }
     }
@@ -415,6 +420,7 @@ pub(crate) fn run_captured_split(
         stdout,
         stdout_overflowed,
         stderr: stderr.into_text(),
+        drained,
     })
 }
 
@@ -1148,6 +1154,7 @@ mod tests {
         )
         .unwrap();
         assert!(captured.success);
+        assert!(captured.drained);
         assert_eq!(captured.stdout, b"out");
         assert_eq!(captured.stderr, "err");
         assert!(!captured.stdout_overflowed);

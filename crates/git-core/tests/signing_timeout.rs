@@ -174,3 +174,23 @@ fn a_hung_verifier_reports_an_error_status() {
     );
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+
+#[test]
+fn a_signer_whose_output_never_finishes_fails_instead_of_truncating() {
+    // A background grandchild keeps stdout open past the drain grace: what was read so far
+    // may be incomplete, so it is not used as a signature.
+    let bin = tempfile::TempDir::new().unwrap();
+    let (_dir, repo) = signing_repo(&script(
+        bin.path(),
+        "gpg",
+        &format!("{FAKE_SIGNATURE}\nsleep 4 &"),
+    ));
+
+    let result = try_commit(&repo, &SignOptions::default());
+
+    let error = result.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Signing failed: the signing program's output did not finish."
+    );
+}

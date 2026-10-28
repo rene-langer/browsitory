@@ -79,13 +79,23 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 
 /// `path` (git's `/`-separated bytes) is one of `paths` or below one of them, the way a forced
 /// checkout with `CheckoutBuilder::path` + `disable_pathspec_match` selects it.
-fn selected<P: AsRef<[u8]>>(path: &[u8], paths: &[P]) -> bool {
+/// With `ignore_case` (`core.ignorecase`, as libgit2's pathspec matching) ASCII case is ignored.
+fn selected<P: AsRef<[u8]>>(path: &[u8], paths: &[P], ignore_case: bool) -> bool {
+    let same = |a: &[u8], b: &[u8]| {
+        if ignore_case {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    };
     paths.iter().any(|wanted| {
         let mut wanted = wanted.as_ref();
         while let Some(rest) = wanted.strip_suffix(b"/") {
             wanted = rest;
         }
-        path == wanted || (path.starts_with(wanted) && path.get(wanted.len()) == Some(&b'/'))
+        path.len() >= wanted.len()
+            && same(&path[..wanted.len()], wanted)
+            && (path.len() == wanted.len() || path[wanted.len()] == b'/')
     })
 }
 
@@ -99,6 +109,16 @@ pub(crate) fn scan<P: AsRef<[u8]>>(
     workdir: &Path,
     source: &GuardSource,
     paths: Option<&[P]>,
+) -> Result<Vec<Hazard>, git2::Error> {
+    scan_with_case(workdir, source, paths, false)
+}
+
+/// `scan` with the `paths` filter ignoring ASCII case when `ignore_case`.
+fn scan_with_case<P: AsRef<[u8]>>(
+    workdir: &Path,
+    source: &GuardSource,
+    paths: Option<&[P]>,
+    ignore_case: bool,
 ) -> Result<Vec<Hazard>, git2::Error> {
     let owned;
     let index: &git2::Index = match source {
@@ -116,7 +136,7 @@ pub(crate) fn scan<P: AsRef<[u8]>>(
         if entry.mode == MODE_GITLINK {
             continue;
         }
-        if paths.is_some_and(|paths| !selected(&entry.path, paths)) {
+        if paths.is_some_and(|paths| !selected(&entry.path, paths, ignore_case)) {
             continue;
         }
         let rel = path_from_bytes(&entry.path);
@@ -182,15 +202,31 @@ where
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
+    // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
+    // filter here, or `TC` would scan nothing for a tracked `tc`.
+    let ignore_case = repo
+        .config()
+        .and_then(|config| config.get_bool("core.ignorecase"))
+        .unwrap_or(false);
     let mut hazards = BTreeSet::new();
     if let Some(target) = target {
-        hazards.extend(scan(workdir, target, paths)?);
+        hazards.extend(scan_with_case(workdir, target, paths, ignore_case)?);
     }
     if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
-        hazards.extend(scan(workdir, &GuardSource::Tree(&head_tree), paths)?);
+        hazards.extend(scan_with_case(
+            workdir,
+            &GuardSource::Tree(&head_tree),
+            paths,
+            ignore_case,
+        )?);
     }
     let index = repo.index()?;
-    hazards.extend(scan(workdir, &GuardSource::Index(&index), paths)?);
+    hazards.extend(scan_with_case(
+        workdir,
+        &GuardSource::Index(&index),
+        paths,
+        ignore_case,
+    )?);
     clear_hazards(workdir, &hazards.into_iter().collect::<Vec<_>>())?;
     Ok(())
 }
@@ -244,11 +280,16 @@ fn remove_link(full: &Path) -> io::Result<()> {
     }
 }
 
-/// True when a directory on the way to `path` (relative to `workdir`) is a symlink.
+/// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
+/// a path that is not plain relative (`..`, absolute, a Windows prefix) counts as one.
 pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
+    let rel = Path::new(path);
+    if !plain_relative(rel) {
+        return true;
+    }
     let mut current = workdir.to_path_buf();
-    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
-    for component in components.iter().take(components.len().saturating_sub(1)) {
+    let components: Vec<_> = rel.components().collect();
+    for component in &components[..components.len() - 1] {
         current.push(component);
         if is_link(&current) {
             return true;
@@ -260,9 +301,16 @@ pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
 /// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
 /// `rel` lands in a real directory inside the repository.
 pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
+    let rel = Path::new(rel);
+    if !plain_relative(rel) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must be relative to the repository",
+        ));
+    }
     let mut current = workdir.to_path_buf();
-    let components: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
-    for component in components.iter().take(components.len().saturating_sub(1)) {
+    let components: Vec<_> = rel.components().collect();
+    for component in &components[..components.len() - 1] {
         current.push(component);
         match entry_kind(&current) {
             Entry::Dir => {}
@@ -673,6 +721,27 @@ mod tests {
         assert!(!write_beneath(dir.path(), "d/f", b"x").unwrap());
         assert!(!write_beneath(dir.path(), "d/../tc", b"x").unwrap());
         assert_outside_untouched(out.path());
+    }
+
+    #[test]
+    fn selected_matches_paths_and_folders_and_honours_ignore_case() {
+        assert!(selected(b"d/f", &["d"], false));
+        assert!(selected(b"d/f", &["d/"], false));
+        assert!(selected(b"tc", &["tc"], false));
+        assert!(!selected(b"tcx", &["tc"], false));
+        assert!(!selected(b"tc", &["TC"], false));
+        assert!(selected(b"tc", &["TC"], true));
+        assert!(selected(b"D/f", &["d"], true));
+        assert!(!selected(b"d", &["d/f"], true));
+    }
+
+    #[test]
+    fn odd_paths_count_as_beyond_a_link() {
+        let (dir, _repo) = repo();
+        assert!(has_symlinked_ancestor(dir.path(), "../x"));
+        assert!(has_symlinked_ancestor(dir.path(), "/etc/passwd"));
+        assert!(!has_symlinked_ancestor(dir.path(), "d/f"));
+        assert!(clear_symlinked_ancestors(dir.path(), "../x").is_err());
     }
 
     #[test]

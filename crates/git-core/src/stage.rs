@@ -57,10 +57,16 @@ impl From<LinePatchError> for StageError {
     }
 }
 
+/// Stages the file as it is in the work tree, or its deletion when it is gone. A path below a
+/// symlinked folder is gone for git (staging it would read the link's target, possibly outside
+/// the repository), and a symlink is staged as a link even when it dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let mut index = repo.index()?;
-    if workdir.join(path).exists() {
+    let present = !crate::worktree_guard::has_symlinked_ancestor(workdir, path)
+        && workdir.join(rel).symlink_metadata().is_ok();
+    if present {
         index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;

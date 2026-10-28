@@ -151,6 +151,11 @@ pub(crate) fn run_program(
             seconds: opts.timeout.as_secs(),
         });
     }
+    if !captured.drained {
+        return Err(SignError::SignerFailed(
+            "the signing program's output did not finish.".to_string(),
+        ));
+    }
     if captured.stdout_overflowed {
         return Err(SignError::SignerFailed(format!(
             "the signature was larger than {SIGNATURE_LIMIT} bytes."
