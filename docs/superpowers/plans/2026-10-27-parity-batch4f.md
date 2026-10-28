@@ -20,6 +20,45 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-27-parity-batch4f-design.md`
 
+## Pre-flight notes (implementation, 2026-10-28)
+
+Drift found after rebasing on 4a–4e, and deviations taken (the code wins where the plan
+disagreed):
+
+- **`git-core::process` already existed (4e)**, with `run_captured`, `TailBuffer`,
+  `clean_output` and the Windows `sh.exe` lookup in `hooks.rs`. Task 1 extended that module
+  (now `pub mod process`) instead of creating it: `CommandStyle`, `split_command_line`,
+  `find_program(_in)`, `SpawnSpec`/`spawn`/`spawn_detached`, `drain_tail` (into 4e's
+  `TailBuffer`), `tail_text` (via `clean_output`). 4e's `find_on_path`/`find_sh` moved here as
+  `process::find_sh` (Windows), reusing `hooks::sh_candidates`; the plan's
+  `git_sh_candidates`/`find_git_sh` were not added. `REPO_PINNING_ENV` moved here too and is
+  removed from every spawned tool, not only hooks.
+- **4d replaced `CommitFileSection`** with `ReadOnlyFileSection`, shared by commit sections
+  and `CompareDiffPane`. The commit-file menu lives there; compare files use
+  `DiffSource::Range`. Because 4d's compare-with-working-tree has no `toId`, **`Range.toId` is
+  nullable** (`null` = the work tree file).
+- **Security (reviewer decision):** tool settings are read from **system/XDG/global git config
+  only**. A repository's own `.git/config` (and files it includes) can neither pick
+  `diff.tool`/`merge.tool` nor change `cmd`/`path`/`trustExitCode`; when only the repository
+  sets a tool, `ToolError::RepositoryConfigIgnored` explains it (and Preferences shows it as the
+  row's problem, source `Local`). Tests therefore configure tools at the global level through
+  an explicit `git2::Config` (`prepare_*_with(repo, config, …, root)` replaces the plan's
+  `prepare_*_in(…, root)`), and `git_tools_from(config)` backs `git_tools(repo)`.
+- **Temp dirs:** one `browsitory-tool-<random>` directory per launch directly in the temp dir
+  (0700 from creation, files `O_EXCL` 0600 with sanitized names), instead of a shared
+  `temp/browsitory-tools/` parent that another local user could pre-create. The sweep only
+  touches `browsitory-tool-*` directories and never follows symlinks.
+- **Hardening beyond the plan:** `find_program` skips relative `PATH` entries, relative
+  explicit paths and (Unix) non-executable files; with no editor, a file is also refused by
+  `#!`/ELF/PE/Mach-O magic and by its symlink target, and the runnable-extension lists are
+  longer (scripts, `.reg`, `.terminal`, `.fileloc`, …); `resolve_in_workdir` also refuses
+  interior `.` and (Windows) `:`; a work tree symlink is diffed as its target text; a path
+  through a directory symlink out of the work tree and a conflicted symlink/submodule are
+  refused for tools; `file_version_contents` checks the size from the object header.
+- **Hermetic tests (#111):** `tests/tools.rs` points libgit2's system/XDG/global search paths
+  at an empty dir for the whole binary; the sidecar git-tools test runs the sidecar with a
+  temp `HOME`; the repo-service round trips use error paths that are checked before config.
+
 ## Global Constraints
 
 - No new Rust or npm dependency. `docs/LICENSE_COMPLIANCE.md` is untouched. Reveal and open-with-default come from `tauri_plugin_opener::{reveal_item_in_dir, open_path}`, which are already in the dependency tree.
