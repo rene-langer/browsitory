@@ -2,7 +2,8 @@
 //! `docs/superpowers/specs/2026-10-19-parity-batch3c-design.md`.
 
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::time::Duration;
 
 use git2::{Commit, ErrorCode, Oid, Repository, Signature, Tree};
 use thiserror::Error;
@@ -30,10 +31,43 @@ pub enum SignError {
     SignerNotFound(String),
     #[error("Signing failed: {0}")]
     SignerFailed(String),
+    #[error("The signing program did not finish within {seconds} s. If it is waiting for a passphrase, unlock your key and try again.")]
+    TimedOut { seconds: u64 },
+    #[error("Signing was cancelled.")]
+    Cancelled,
     #[error(transparent)]
     Git(#[from] git2::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// How long a signer may take: long enough for a pinentry passphrase prompt (gpg-agent's own
+/// default is about a minute), short enough that a hung signer does not block the repository.
+pub const SIGN_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a verifier may take; the history view shows an error status after that.
+pub const VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
+/// A signature larger than this is an error, never silently truncated.
+const SIGNATURE_LIMIT: usize = 1 << 20;
+const STDERR_LIMIT: usize = 64 << 10;
+
+fn never_cancelled() -> bool {
+    false
+}
+
+/// Bounds for running the signing program.
+pub struct SignOptions<'a> {
+    /// Checked while the signer runs; `true` kills it (`SignError::Cancelled`).
+    pub cancel: &'a dyn Fn() -> bool,
+    pub timeout: Duration,
+}
+
+impl Default for SignOptions<'_> {
+    fn default() -> Self {
+        Self {
+            cancel: &never_cancelled,
+            timeout: SIGN_TIMEOUT,
+        }
+    }
 }
 
 fn config_string(config: &git2::Config, key: &str) -> Option<String> {
@@ -83,45 +117,49 @@ pub(crate) struct ProgramOutput {
     pub stderr: String,
 }
 
-/// Runs `program args…` with `stdin` piped in and stdout/stderr captured; no TTY, no console
-/// window on Windows. Stdin is written from a separate thread so a signer that writes a lot to
-/// stderr before reading all of stdin cannot deadlock against us.
+/// Runs `program args…` with `stdin` piped in and stdout/stderr captured apart; no TTY, no
+/// console window on Windows. Bounded by `opts`: on timeout or cancel the program (and on Unix
+/// its process group) is killed. Stdout larger than `SIGNATURE_LIMIT` is an error, never a
+/// truncated result.
 pub(crate) fn run_program(
     program: &str,
     args: &[&str],
     stdin: &[u8],
+    opts: &SignOptions<'_>,
 ) -> Result<ProgramOutput, SignError> {
     let mut command = Command::new(program);
-    command
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = command.spawn().map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
+    command.args(args);
+    let captured = crate::process::run_captured_split(
+        command,
+        Some(stdin),
+        opts.cancel,
+        opts.timeout,
+        SIGNATURE_LIMIT,
+        STDERR_LIMIT,
+    )
+    .map_err(|error| match error {
+        crate::process::RunError::Spawn(error) if error.kind() == std::io::ErrorKind::NotFound => {
             SignError::SignerNotFound(program.to_string())
-        } else {
+        }
+        crate::process::RunError::Spawn(error) | crate::process::RunError::Wait(error) => {
             SignError::Io(error)
         }
+        crate::process::RunError::Cancelled => SignError::Cancelled,
     })?;
-    let mut child_stdin = child.stdin.take().expect("stdin is piped");
-    let input = stdin.to_vec();
-    let writer = std::thread::spawn(move || {
-        // A signer that exits early closes its end; that is reported through its exit status.
-        let _ = child_stdin.write_all(&input);
-    });
-    let output = child.wait_with_output()?;
-    let _ = writer.join();
+    if captured.timed_out {
+        return Err(SignError::TimedOut {
+            seconds: opts.timeout.as_secs(),
+        });
+    }
+    if captured.stdout_overflowed {
+        return Err(SignError::SignerFailed(format!(
+            "the signature was larger than {SIGNATURE_LIMIT} bytes."
+        )));
+    }
     Ok(ProgramOutput {
-        status_success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        status_success: captured.success,
+        stdout: String::from_utf8_lossy(&captured.stdout).into_owned(),
+        stderr: captured.stderr,
     })
 }
 
@@ -162,11 +200,21 @@ fn expand_tilde(path: &str) -> std::path::PathBuf {
 }
 
 /// Detached, ASCII-armored signature over `buffer`. `committer` supplies gpg's default key
-/// (`Name <email>`) when `user.signingKey` is unset, as git does.
+/// (`Name <email>`) when `user.signingKey` is unset, as git does. Bounded by `SIGN_TIMEOUT`.
 pub fn sign_buffer(
     config: &SigningConfig,
     committer: &Signature<'_>,
     buffer: &[u8],
+) -> Result<String, SignError> {
+    sign_buffer_with(config, committer, buffer, &SignOptions::default())
+}
+
+/// `sign_buffer` with an explicit timeout and cancel check.
+pub fn sign_buffer_with(
+    config: &SigningConfig,
+    committer: &Signature<'_>,
+    buffer: &[u8],
+    opts: &SignOptions<'_>,
 ) -> Result<String, SignError> {
     match config.format {
         SignatureFormat::OpenPgp => {
@@ -177,7 +225,12 @@ pub fn sign_buffer(
                     committer.email().unwrap_or_default()
                 )
             });
-            let output = run_program(&config.program, &["--status-fd=2", "-bsau", &key], buffer)?;
+            let output = run_program(
+                &config.program,
+                &["--status-fd=2", "-bsau", &key],
+                buffer,
+                opts,
+            )?;
             if !output.status_success || !output.stderr.contains("[GNUPG:] SIG_CREATED ") {
                 return Err(SignError::SignerFailed(stderr_tail(&output.stderr)));
             }
@@ -203,7 +256,7 @@ pub fn sign_buffer(
             if use_agent {
                 args.push("-U");
             }
-            let output = run_program(&config.program, &args, buffer)?;
+            let output = run_program(&config.program, &args, buffer, opts)?;
             if !output.status_success || !output.stdout.contains("-----BEGIN SSH SIGNATURE-----") {
                 return Err(SignError::SignerFailed(stderr_tail(&output.stderr)));
             }
@@ -257,6 +310,7 @@ fn move_head(repo: &Repository, oid: Oid, update: &HeadUpdate<'_>) -> Result<(),
 /// The single entry point for every commit `git-core` creates for the user. Writes the commit
 /// object (signed when `commit.gpgSign` asks for it), then, when `head_update` is set, moves HEAD.
 /// The signer runs before any ref moves, so a signing failure changes nothing.
+/// The signer is bounded by `SIGN_TIMEOUT` and never cancelled; see `create_commit_with`.
 #[allow(clippy::too_many_arguments)]
 pub fn create_commit(
     repo: &Repository,
@@ -267,11 +321,35 @@ pub fn create_commit(
     tree: &Tree<'_>,
     parents: &[&Commit<'_>],
 ) -> Result<Oid, SignError> {
+    create_commit_with(
+        repo,
+        head_update,
+        author,
+        committer,
+        message,
+        tree,
+        parents,
+        &SignOptions::default(),
+    )
+}
+
+/// `create_commit` with an explicit signer timeout and cancel check.
+#[allow(clippy::too_many_arguments)]
+pub fn create_commit_with(
+    repo: &Repository,
+    head_update: Option<HeadUpdate<'_>>,
+    author: &Signature<'_>,
+    committer: &Signature<'_>,
+    message: &str,
+    tree: &Tree<'_>,
+    parents: &[&Commit<'_>],
+    opts: &SignOptions<'_>,
+) -> Result<Oid, SignError> {
     let oid = match signing_config(repo)? {
         None => repo.commit(None, author, committer, message, tree, parents)?,
         Some(config) => {
             let buffer = repo.commit_create_buffer(author, committer, message, tree, parents)?;
-            let signature = sign_buffer(&config, committer, &buffer)?;
+            let signature = sign_buffer_with(&config, committer, &buffer, opts)?;
             let content = std::str::from_utf8(&buffer).map_err(|_| {
                 SignError::Git(git2::Error::from_str("commit buffer is not valid UTF-8"))
             })?;
@@ -330,8 +408,23 @@ impl CommitSignature {
 }
 
 /// Signature status of `commit_id`. Only repository-level failures (bad id, unreadable object)
-/// are `Err`; a missing or failing verifier program is an `Error` status.
+/// are `Err`; a missing, failing or hung verifier program is an `Error` status (the verifier is
+/// stopped after `VERIFY_TIMEOUT`).
 pub fn verify_commit(repo: &Repository, commit_id: &str) -> Result<CommitSignature, SignError> {
+    verify_commit_with(repo, commit_id, VERIFY_TIMEOUT)
+}
+
+/// `verify_commit` with an explicit verifier timeout (for tests and callers needing a shorter
+/// bound).
+pub fn verify_commit_with(
+    repo: &Repository,
+    commit_id: &str,
+    timeout: Duration,
+) -> Result<CommitSignature, SignError> {
+    let opts = SignOptions {
+        timeout,
+        ..SignOptions::default()
+    };
     let oid = Oid::from_str(commit_id)?;
     repo.find_commit(oid)?;
     let (signature, data) = match repo.extract_signature(&oid, None) {
@@ -356,11 +449,11 @@ pub fn verify_commit(repo: &Repository, commit_id: &str) -> Result<CommitSignatu
     sig_file.flush()?;
     let sig_path = sig_file.path().to_string_lossy().into_owned();
     let result = match format {
-        SignatureFormat::OpenPgp => verify_gpg(&program, &sig_path, &data),
+        SignatureFormat::OpenPgp => verify_gpg(&program, &sig_path, &data, &opts),
         SignatureFormat::Ssh => {
             let allowed = config_string(&config, "gpg.ssh.allowedSignersFile")
                 .map(|path| expand_tilde(&path).to_string_lossy().into_owned());
-            verify_ssh(&program, &sig_path, allowed.as_deref(), &data)
+            verify_ssh(&program, &sig_path, allowed.as_deref(), &data, &opts)
         }
     };
     match result {
@@ -370,12 +463,27 @@ pub fn verify_commit(repo: &Repository, commit_id: &str) -> Result<CommitSignatu
             format!("{program} was not found"),
         )),
         Err(SignError::Io(error)) => Ok(CommitSignature::error(Some(format), error.to_string())),
+        Err(SignError::TimedOut { .. }) => Ok(CommitSignature::error(
+            Some(format),
+            format!("{program} timed out"),
+        )),
+        Err(SignError::SignerFailed(detail)) => Ok(CommitSignature::error(Some(format), detail)),
         Err(other) => Err(other),
     }
 }
 
-fn verify_gpg(program: &str, sig_path: &str, data: &[u8]) -> Result<CommitSignature, SignError> {
-    let output = run_program(program, &["--status-fd=1", "--verify", sig_path, "-"], data)?;
+fn verify_gpg(
+    program: &str,
+    sig_path: &str,
+    data: &[u8],
+    opts: &SignOptions<'_>,
+) -> Result<CommitSignature, SignError> {
+    let output = run_program(
+        program,
+        &["--status-fd=1", "--verify", sig_path, "-"],
+        data,
+        opts,
+    )?;
     Ok(parse_gpg_status(&output.stdout, &output.stderr))
 }
 
@@ -463,6 +571,7 @@ fn verify_ssh(
     sig_path: &str,
     allowed: Option<&str>,
     data: &[u8],
+    opts: &SignOptions<'_>,
 ) -> Result<CommitSignature, SignError> {
     let format = Some(SignatureFormat::Ssh);
     if let Some(allowed) = allowed {
@@ -470,6 +579,7 @@ fn verify_ssh(
             program,
             &["-Y", "find-principals", "-f", allowed, "-s", sig_path],
             &[],
+            opts,
         )?;
         let principal = found
             .stdout
@@ -484,6 +594,7 @@ fn verify_ssh(
                     "-Y", "verify", "-n", "git", "-f", allowed, "-I", principal, "-s", sig_path,
                 ],
                 data,
+                opts,
             )?;
             let text = format!("{}\n{}", verified.stdout, verified.stderr);
             let mut result = if verified.status_success {
@@ -500,6 +611,7 @@ fn verify_ssh(
         program,
         &["-Y", "check-novalidate", "-n", "git", "-s", sig_path],
         data,
+        opts,
     )?;
     let text = format!("{}\n{}", checked.stdout, checked.stderr);
     let mut result = if checked.status_success {
