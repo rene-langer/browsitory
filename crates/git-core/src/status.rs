@@ -102,15 +102,16 @@ fn delta_paths(delta: Option<&git2::DiffDelta<'_>>, fallback: &str) -> (String, 
     (new, old)
 }
 
+/// A rename with edits carries both the renamed and the modified flag; it is a rename.
 fn staged_kind(flags: git2::Status) -> Option<StatusKind> {
-    if flags.is_index_new() {
+    if flags.is_index_renamed() {
+        Some(StatusKind::Renamed)
+    } else if flags.is_index_new() {
         Some(StatusKind::New)
     } else if flags.is_index_modified() {
         Some(StatusKind::Modified)
     } else if flags.is_index_deleted() {
         Some(StatusKind::Deleted)
-    } else if flags.is_index_renamed() {
-        Some(StatusKind::Renamed)
     } else if flags.is_index_typechange() {
         Some(StatusKind::TypeChange)
     } else {

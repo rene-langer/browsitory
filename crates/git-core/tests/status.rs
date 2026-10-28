@@ -214,3 +214,23 @@ fn reports_a_conflicted_file_as_conflicted() {
     assert_eq!(entries[0].path, "shared.txt");
     assert_eq!(entries[0].kind, StatusKind::Conflicted);
 }
+
+#[test]
+fn a_staged_rename_with_edits_is_still_a_rename() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "one\ntwo\nthree\nfour\n");
+    commit_all(&repo, "initial commit");
+    std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+    write_file(dir.path(), "new.txt", "one\nTWO\nthree\nfour\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.txt")).unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+
+    let entries = git_core::status::status(&repo).unwrap();
+
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].kind, StatusKind::Renamed);
+    assert_eq!(entries[0].path, "new.txt");
+    assert_eq!(entries[0].old_path.as_deref(), Some("old.txt"));
+}
