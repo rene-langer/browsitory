@@ -147,6 +147,15 @@ impl Default for DiffSettings {
 
 const MAX_CONTEXT_LINES: u32 = 20;
 
+/// External editor/terminal commands, persisted as the `[tools]` TOML table. `None` means "use
+/// the system default". Diff/merge tools are not here; they come from the user's git config.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalToolSettings {
+    pub editor: Option<String>,
+    pub terminal: Option<String>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -155,13 +164,15 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
-    // `diff` serializes as a TOML `[diff]` table. Tables must follow plain `key = value`
-    // lines, so it sits after the plain keys.
+    // `diff` and `tools` serialize as TOML tables (`[diff]`, `[tools]`). Tables must follow
+    // plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
     // section, so they must remain last.
     #[serde(default)]
     diff: DiffSettings,
+    #[serde(default)]
+    tools: ExternalToolSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -268,6 +279,40 @@ pub fn set_diff_settings_at(
     config.diff = DiffSettings {
         context_lines: settings.context_lines.min(MAX_CONTEXT_LINES),
         ..*settings
+    };
+    write_config(config_file, &config)
+}
+
+pub fn get_external_tool_settings() -> Result<ExternalToolSettings, ConfigError> {
+    get_external_tool_settings_at(&config_file_path()?)
+}
+
+pub fn set_external_tool_settings(settings: &ExternalToolSettings) -> Result<(), ConfigError> {
+    set_external_tool_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_external_tool_settings_at(
+    config_file: &Path,
+) -> Result<ExternalToolSettings, ConfigError> {
+    Ok(read_config(config_file)?.tools)
+}
+
+/// Trims both commands; blank ones are stored as unset.
+pub fn set_external_tool_settings_at(
+    config_file: &Path,
+    settings: &ExternalToolSettings,
+) -> Result<(), ConfigError> {
+    let clean = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let mut config = read_config(config_file)?;
+    config.tools = ExternalToolSettings {
+        editor: clean(&settings.editor),
+        terminal: clean(&settings.terminal),
     };
     write_config(config_file, &config)
 }
