@@ -1,5 +1,5 @@
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { conflictReason } from "../lib/operationStatus";
+import { conflictReason, sequenceNoun } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -520,6 +520,8 @@ export function DiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  onSequenceContinue = noop,
+  onSequenceAbort = noop,
   commits,
   refreshGeneration = 0,
   initialCommitDraft,
@@ -610,6 +612,9 @@ export function DiffPane({
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
+  // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
+  onSequenceContinue?: () => void;
+  onSequenceAbort?: () => void;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -650,6 +655,8 @@ export function DiffPane({
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
+        onSequenceContinue={onSequenceContinue}
+        onSequenceAbort={onSequenceAbort}
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         onCommitDraftChange={onCommitDraftChange}
@@ -749,6 +756,8 @@ function UncommittedDiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  onSequenceContinue = noop,
+  onSequenceAbort = noop,
   refreshGeneration,
   discardRequest: discardRequestProp,
   onDiscardRequestChange,
@@ -814,6 +823,9 @@ function UncommittedDiffPane({
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
+  // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
+  onSequenceContinue?: () => void;
+  onSequenceAbort?: () => void;
 }) {
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
@@ -1154,14 +1166,28 @@ function UncommittedDiffPane({
         <SplitButton
           label="Stash"
           onClick={onSaveStash}
-          disabled={status.length === 0 || rebaseProgress !== null}
+          disabled={status.length === 0 || rebaseProgress !== null || headInfo.sequence !== null}
           menuLabel="More stash options"
           items={[
             { label: "Stash all", onSelect: () => onSaveStash() },
             { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
           ]}
         />
-        {rebaseProgress !== null ? (
+        {headInfo.sequence !== null ? (
+          // A stopped cherry-pick/revert sequence: no editable message per step; Continue
+          // commits the resolved step with its MERGE_MSG, like rebase continue.
+          <RebaseProgressPanel
+            currentStep={headInfo.sequence.currentStep}
+            totalSteps={headInfo.sequence.totalSteps}
+            disabled={conflictCount > 0}
+            disabledReason={conflictReason(conflictCount)}
+            onContinue={onSequenceContinue}
+            onAbort={onSequenceAbort}
+            title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
+            continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
+            abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
+          />
+        ) : rebaseProgress !== null ? (
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
             totalSteps={rebaseProgress.totalSteps}
@@ -1198,7 +1224,11 @@ function UncommittedDiffPane({
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
             amend={{
-              available: headInfo.headId !== null && headInfo.operation === null && mergeMessage === null,
+              available:
+                headInfo.headId !== null &&
+                headInfo.operation === null &&
+                headInfo.sequence === null &&
+                mergeMessage === null,
               on: amendMode,
               headMessage,
               pushed: headInfo.headPushed,

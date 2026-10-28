@@ -430,6 +430,41 @@ describe("buildCommands", () => {
     expect(withMerge.some((c) => c.id === "merge-abort")).toBe(true);
   });
 
+  it("offers Continue/Abort for a stopped cherry-pick or revert sequence, and hides other operations", () => {
+    const none = buildCommands(makeAppState());
+    expect(none.some((c) => c.id === "continue-sequence" || c.id === "abort-sequence")).toBe(false);
+
+    const base = makeAppState();
+    const appState = makeAppState({
+      headInfo: {
+        ...base.state.headInfo,
+        operation: "Revert",
+        sequence: { kind: "Revert", currentStep: 2, totalSteps: 3, currentCommit: "c" },
+      },
+      mergeMessage: "Revert \"x\"",
+    });
+    const commands = buildCommands(appState);
+    const cont = commands.find((c) => c.id === "continue-sequence");
+    const abort = commands.find((c) => c.id === "abort-sequence");
+    expect(cont?.label).toBe("Continue revert");
+    expect(abort?.label).toBe("Abort revert");
+    // The plain "Abort merge" would abort only the paused step's git state.
+    expect(commands.some((c) => c.id === "merge-abort")).toBe(false);
+    expect(commands.some((c) => c.id === "pull")).toBe(false);
+    cont?.run();
+    abort?.run();
+    expect(appState.continueSequence).toHaveBeenCalled();
+    expect(appState.abortSequence).toHaveBeenCalled();
+
+    const picking = buildCommands(
+      makeAppState({
+        headInfo: { ...base.state.headInfo, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c" } },
+      }),
+    );
+    expect(picking.find((c) => c.id === "continue-sequence")?.label).toBe("Continue cherry-pick");
+    expect(picking.find((c) => c.id === "abort-sequence")?.label).toBe("Abort cherry-pick");
+  });
+
   it("includes apply/drop per stash", () => {
     const appState = makeAppState();
     const commands = buildCommands(appState);

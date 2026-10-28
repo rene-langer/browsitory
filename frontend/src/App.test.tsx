@@ -909,6 +909,54 @@ describe("App", () => {
       expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
     });
 
+    it("shows a stored sequence in the strip, continues it, and blocks other picks meanwhile", async () => {
+      const sequence = { kind: "CherryPick" as const, currentStep: 1, totalSteps: 2, currentCommit: "c1" };
+      let stored: typeof sequence | null = sequence;
+      const continueSequence = vi.fn(async () => {
+        stored = null;
+        return { kind: "Completed" as const, applied: 2, skipped: [] };
+      });
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored }),
+            continueSequence,
+          })}
+        />,
+      );
+
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Cherry-picking 1/2");
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a"));
+      expect(await screen.findByText("Cherry-picked 2 commits")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("status", { name: "Operation status" })).toBeNull());
+    });
+
+    it("aborts through abortSequence and says when HEAD was left alone", async () => {
+      const sequence = { kind: "Revert" as const, currentStep: 2, totalSteps: 2, currentCommit: "c1" };
+      const abortSequence = vi.fn(async () => ({ rewound: false }));
+      const abortMerge = vi.fn(async () => {});
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence }),
+            abortSequence,
+            abortMerge,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort revert" }));
+      await waitFor(() => expect(abortSequence).toHaveBeenCalledWith("/repos/a"));
+      expect(abortMerge).not.toHaveBeenCalled();
+      expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+    });
+
     it("toasts a finished multi-commit revert with its skipped count", async () => {
       const revertMany = vi.fn(async () => ({ kind: "Completed" as const, applied: 1, skipped: ["c1"] }));
       render(<App client={pickClient({ revertMany })} />);

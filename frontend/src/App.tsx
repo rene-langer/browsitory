@@ -54,7 +54,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { pickToast, sequenceToast } from "./lib/operationStatus";
+import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -240,7 +240,8 @@ function RepoWorkspace({
     appState.state.pending ||
     appState.state.transfer !== null ||
     appState.state.mergeMessage !== null ||
-    appState.state.rebaseProgress !== null;
+    appState.state.rebaseProgress !== null ||
+    appState.state.headInfo.sequence !== null;
 
   const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
   const { pending, transfer } = appState.state;
@@ -345,6 +346,10 @@ function RepoWorkspace({
     ? "Another action is in progress."
     : appState.state.transfer !== null
       ? "A transfer is in progress."
+      : appState.state.headInfo.sequence !== null
+        ? appState.state.headInfo.sequence.kind === "CherryPick"
+          ? "A cherry-pick is in progress."
+          : "A revert is in progress."
       : appState.state.mergeMessage !== null
         ? appState.state.headInfo.operation === "CherryPick"
           ? "A cherry-pick is in progress."
@@ -397,6 +402,23 @@ function RepoWorkspace({
     },
     [dismissError, pushToast],
   );
+  // A stopped multi-commit cherry-pick/revert: Continue and Abort from the strip, the commit
+  // dock and the palette. Every Abort goes through `abortSequence` while one is stored, so the
+  // sequence file never outlives the operation (the worker's AbortMerge is the backstop).
+  const sequenceKind = appState.state.headInfo.sequence?.kind ?? null;
+  const { continueSequence: continueStoredSequence, abortSequence: abortStoredSequence, abortMerge } = appState;
+  const continueSequence = useCallback(() => {
+    if (sequenceKind === null) return;
+    void runPickAction(continueStoredSequence, (outcome) => sequenceToast(sequenceKind, outcome));
+  }, [continueStoredSequence, runPickAction, sequenceKind]);
+  const abortSequence = useCallback(() => {
+    if (sequenceKind === null) return;
+    void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
+  }, [abortStoredSequence, runPickAction, sequenceKind]);
+  const abortMergeOrSequence = useCallback(() => {
+    if (sequenceKind !== null) abortSequence();
+    else void abortMerge();
+  }, [abortSequence, abortMerge, sequenceKind]);
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
   // for the upstream's remote, else the current branch's own name.
@@ -477,9 +499,12 @@ function RepoWorkspace({
         merging={appState.state.mergeMessage !== null}
         operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
+        sequence={appState.state.headInfo.sequence}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
-        onAbortMerge={appState.abortMerge}
+        onAbortMerge={abortMergeOrSequence}
         onAbortRebase={appState.abortRebase}
+        onContinueSequence={continueSequence}
+        onAbortSequence={abortSequence}
       />
       {externalTools.error !== null && (
         <div className={styles.errorLayer}>
@@ -977,7 +1002,9 @@ function RepoWorkspace({
                   onResolveConflict={appState.resolveConflict}
                   onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
                   mergeMessage={appState.state.mergeMessage}
-                  onAbortMerge={appState.abortMerge}
+                  onAbortMerge={abortMergeOrSequence}
+                  onSequenceContinue={continueSequence}
+                  onSequenceAbort={abortSequence}
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}

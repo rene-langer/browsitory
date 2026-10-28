@@ -80,4 +80,27 @@ describe("RebaseProgressPanel", () => {
     expect(button).toBeDisabled();
     expect(button).toHaveAccessibleDescription("Resolve 2 conflicts to continue");
   });
+
+  it("takes custom labels for a cherry-pick or revert sequence", () => {
+    const onContinue = vi.fn();
+    const onAbort = vi.fn();
+    render(
+      <RebaseProgressPanel
+        currentStep={2}
+        totalSteps={5}
+        disabled={false}
+        onContinue={onContinue}
+        onAbort={onAbort}
+        title="Cherry-pick in progress"
+        continueLabel="Continue cherry-pick"
+        abortLabel="Abort cherry-pick"
+      />,
+    );
+    expect(screen.getByText("Cherry-pick in progress")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue cherry-pick" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abort cherry-pick" }));
+    expect(onContinue).toHaveBeenCalled();
+    expect(onAbort).toHaveBeenCalled();
+    expect(screen.queryByText("Rebase in progress")).toBeNull();
+  });
 });

@@ -9,6 +9,9 @@ export function RebaseProgressPanel({
   disabledReason,
   onContinue,
   onAbort,
+  title = "Rebase in progress",
+  continueLabel = "Continue rebase",
+  abortLabel = "Abort rebase",
 }: {
   currentStep: number;
   totalSteps: number;
@@ -17,9 +20,13 @@ export function RebaseProgressPanel({
   disabledReason?: string;
   onContinue: () => void;
   onAbort: () => void;
+  /** Also used for a cherry-pick/revert sequence ("Cherry-pick in progress", ...). */
+  title?: string;
+  continueLabel?: string;
+  abortLabel?: string;
 }) {
   return (
-    <Panel title="Rebase in progress">
+    <Panel title={title}>
       <p>
         Step {currentStep} of {totalSteps}
       </p>
@@ -34,9 +41,9 @@ export function RebaseProgressPanel({
           disabled={disabled}
           aria-describedby={disabled && disabledReason !== undefined ? "rebase-continue-reason" : undefined}
         >
-          Continue rebase
+          {continueLabel}
         </button>
-        <button onClick={onAbort}>Abort rebase</button>
+        <button onClick={onAbort}>{abortLabel}</button>
       </Toolbar>
     </Panel>
   );

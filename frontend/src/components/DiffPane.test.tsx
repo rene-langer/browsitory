@@ -792,6 +792,39 @@ describe("DiffPane", () => {
       expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
     });
 
+    it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
+      const onSequenceContinue = vi.fn();
+      const onSequenceAbort = vi.fn();
+      const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence };
+      const { unmount } = renderUncommitted(
+        fakeClient({ getConflictHunks: async () => [] }),
+        [...status, { path: "c.txt", staged: false, kind: "Conflicted" }],
+        { headInfo, onSequenceContinue, onSequenceAbort },
+      );
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByText("Cherry-pick in progress")).toBeInTheDocument();
+      expect(within(dock).getByText("Step 2 of 5")).toBeInTheDocument();
+      expect(within(dock).getByRole("button", { name: "Continue cherry-pick" })).toBeDisabled();
+      expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
+      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
+      fireEvent.click(within(dock).getByRole("button", { name: "Abort cherry-pick" }));
+      expect(onSequenceAbort).toHaveBeenCalled();
+      unmount();
+
+      // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" } },
+        onSequenceContinue,
+        onSequenceAbort,
+      });
+      const revertDock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(revertDock).getByText("Revert in progress")).toBeInTheDocument();
+      fireEvent.click(within(revertDock).getByRole("button", { name: "Continue revert" }));
+      expect(onSequenceContinue).toHaveBeenCalled();
+    });
+
     it("keeps the commit box in the pinned commit-actions group", () => {
       renderUncommitted(fakeClient({}), status);
 
