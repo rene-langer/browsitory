@@ -25,12 +25,119 @@ pub enum PickError {
     EmptyResult,
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
+    #[error("Select at least one commit.")]
+    NothingSelected,
+    #[error("Resolve all conflicts before continuing.")]
+    UnresolvedConflicts,
+    #[error("HEAD moved since the cherry-pick paused. Abort it and start again.")]
+    HeadMoved,
+    #[error("{0}")]
+    Merge(#[from] crate::merge::MergeError),
 }
 
 #[derive(Clone, Copy)]
 enum Kind {
     CherryPick,
     Revert,
+}
+
+impl From<SequenceKind> for Kind {
+    fn from(kind: SequenceKind) -> Self {
+        match kind {
+            SequenceKind::CherryPick => Kind::CherryPick,
+            SequenceKind::Revert => Kind::Revert,
+        }
+    }
+}
+
+/// Which operation a multi-commit sequence runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SequenceKind {
+    CherryPick,
+    Revert,
+}
+
+/// Where a stopped sequence is: `current_step` is 1-based.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceProgress {
+    pub kind: SequenceKind,
+    pub current_step: usize,
+    pub total_steps: usize,
+    pub current_commit: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceOutcome {
+    /// Every step ran. `skipped` holds the commits whose changes were already on the branch
+    /// (their step came out empty), in application order.
+    Completed {
+        applied: usize,
+        skipped: Vec<String>,
+    },
+    /// Paused on a conflict in `progress.current_commit` (git state `CherryPick`/`Revert`).
+    Conflicted {
+        files: Vec<String>,
+        progress: SequenceProgress,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceAbort {
+    /// HEAD went back to where the sequence started. `false` when HEAD had been moved elsewhere
+    /// since the sequence stopped, so it was left alone.
+    pub rewound: bool,
+}
+
+/// A stopped sequence, enough to continue or abort it later. `git-core` never stores it;
+/// `repo-service` persists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceState {
+    pub kind: SequenceKind,
+    /// Application order (oldest-first for cherry-pick, newest-first for revert).
+    pub commits: Vec<String>,
+    /// Index of the stopped step.
+    pub next: usize,
+    pub skipped: Vec<String>,
+    /// HEAD before the first step; Abort returns here.
+    pub original_head: String,
+    /// HEAD just before the stopped step ran.
+    pub expected_head: String,
+}
+
+impl SequenceState {
+    pub fn progress(&self) -> SequenceProgress {
+        SequenceProgress {
+            kind: self.kind,
+            current_step: self.next + 1,
+            total_steps: self.commits.len(),
+            current_commit: self.commits.get(self.next).cloned().unwrap_or_default(),
+        }
+    }
+}
+
+/// The result of running (part of) a sequence. `state` is `Some` when the sequence stopped and
+/// must be kept (a conflict, or an error after something landed), `None` when there is no
+/// sequence any more (it completed, or failed before changing anything).
+#[derive(Debug)]
+pub struct SequenceRun {
+    pub outcome: Result<SequenceOutcome, PickError>,
+    pub state: Option<SequenceState>,
+}
+
+impl SequenceRun {
+    fn failed(error: impl Into<PickError>) -> Self {
+        Self {
+            outcome: Err(error.into()),
+            state: None,
+        }
+    }
+
+    fn stopped(error: impl Into<PickError>, state: SequenceState) -> Self {
+        Self {
+            outcome: Err(error.into()),
+            state: Some(state),
+        }
+    }
 }
 
 /// What one pick/revert step did.
@@ -213,4 +320,273 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
         target.summary().ok().flatten().unwrap_or(""),
         target.id()
     )
+}
+
+/// Cherry-picks `ids_oldest_first` in that order as one sequence. Each clean step is committed
+/// with the original author and message; a step whose result is empty is skipped. A conflict
+/// stops the sequence (git state `CherryPick`, like a single pick) and returns its state for
+/// `continue_sequence`/`abort_sequence`. Merge commits are refused up front. Like
+/// `cherry_pick`, steps run no commit hooks.
+pub fn cherry_pick_many(repo: &Repository, ids_oldest_first: &[String]) -> SequenceRun {
+    start(repo, ids_oldest_first, SequenceKind::CherryPick)
+}
+
+/// Reverts `ids_oldest_first` newest-first (like `git revert A..B`), otherwise as
+/// `cherry_pick_many`.
+pub fn revert_many(repo: &Repository, ids_oldest_first: &[String]) -> SequenceRun {
+    start(repo, ids_oldest_first, SequenceKind::Revert)
+}
+
+fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
+    if ids.is_empty() {
+        return SequenceRun::failed(PickError::NothingSelected);
+    }
+    let head = match check_ready(repo) {
+        Ok(head) => head,
+        Err(error) => return SequenceRun::failed(error),
+    };
+    for id in ids {
+        let target = match Oid::from_str(id).and_then(|oid| repo.find_commit(oid)) {
+            Ok(target) => target,
+            Err(error) => return SequenceRun::failed(error),
+        };
+        if target.parent_count() > 1 {
+            return SequenceRun::failed(PickError::MainlineRequired);
+        }
+    }
+    if let Err(error) = check_signing(repo) {
+        return SequenceRun::failed(error);
+    }
+    let mut commits = ids.to_vec();
+    if kind == SequenceKind::Revert {
+        commits.reverse();
+    }
+    let head_id = head.id().to_string();
+    run(
+        repo,
+        SequenceState {
+            kind,
+            commits,
+            next: 0,
+            skipped: Vec::new(),
+            original_head: head_id.clone(),
+            expected_head: head_id,
+        },
+    )
+}
+
+/// Runs the steps from `state.next` on. HEAD is the base of each step (the caller made sure it
+/// is `state.expected_head` or one commit further for a step the user finished).
+fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
+    while state.next < state.commits.len() {
+        let result = (|| {
+            let head = repo.head()?.peel_to_commit()?;
+            state.expected_head = head.id().to_string();
+            let target = repo.find_commit(Oid::from_str(&state.commits[state.next])?)?;
+            step(repo, &head, &target, state.kind.into(), None)
+        })();
+        match result {
+            Ok(StepResult::Committed(_)) => state.next += 1,
+            Ok(StepResult::Empty) => {
+                state.skipped.push(state.commits[state.next].clone());
+                state.next += 1;
+            }
+            Ok(StepResult::Conflicted(files)) => {
+                return SequenceRun {
+                    outcome: Ok(SequenceOutcome::Conflicted {
+                        files,
+                        progress: state.progress(),
+                    }),
+                    state: Some(state),
+                }
+            }
+            Err(error) => {
+                let untouched = state.next == 0
+                    && state.skipped.is_empty()
+                    && state.expected_head == state.original_head
+                    && repo.state() == RepositoryState::Clean;
+                return if untouched {
+                    SequenceRun::failed(error)
+                } else {
+                    SequenceRun::stopped(error, state)
+                };
+            }
+        }
+    }
+    SequenceRun {
+        outcome: Ok(SequenceOutcome::Completed {
+            applied: state.commits.len() - state.skipped.len(),
+            skipped: state.skipped,
+        }),
+        state: None,
+    }
+}
+
+/// Goes on with a stopped sequence. When it stopped on a conflict, the resolved step is
+/// committed first (author and `MERGE_MSG` like `git cherry-pick --continue`, or skipped when
+/// the resolution left nothing to commit); when it stopped on an error, that step is retried.
+/// A step the user committed some other way (HEAD is one commit past the stop) counts as done.
+/// Anything else that moved HEAD is `HeadMoved`, and an unrelated paused operation is
+/// `OperationInProgress`; both keep the state so the sequence can still be aborted. Commits
+/// made here run no hooks, like every sequence step.
+pub fn continue_sequence(repo: &Repository, mut state: SequenceState) -> SequenceRun {
+    if state.next >= state.commits.len() {
+        return SequenceRun::stopped(
+            git2::Error::from_str("the stored sequence has no step left"),
+            state,
+        );
+    }
+    if let Err(error) = check_signing(repo) {
+        return SequenceRun::stopped(error, state);
+    }
+    let resumed = match repo.state() {
+        RepositoryState::CherryPick
+        | RepositoryState::CherryPickSequence
+        | RepositoryState::Revert
+        | RepositoryState::RevertSequence => finish_paused(repo, &mut state),
+        RepositoryState::Clean => resume_clean(repo, &mut state),
+        _ => Err(PickError::OperationInProgress),
+    };
+    match resumed {
+        Ok(()) => run(repo, state),
+        Err(error) => SequenceRun::stopped(error, state),
+    }
+}
+
+/// True when git's paused pick/revert is this sequence's current step (not one started some
+/// other way, e.g. from a terminal).
+fn is_own_paused_step(repo: &Repository, state: &SequenceState) -> bool {
+    let (expected_state, head_file) = match state.kind {
+        SequenceKind::CherryPick => (
+            [
+                RepositoryState::CherryPick,
+                RepositoryState::CherryPickSequence,
+            ],
+            "CHERRY_PICK_HEAD",
+        ),
+        SequenceKind::Revert => (
+            [RepositoryState::Revert, RepositoryState::RevertSequence],
+            "REVERT_HEAD",
+        ),
+    };
+    expected_state.contains(&repo.state())
+        && repo
+            .find_reference(head_file)
+            .ok()
+            .and_then(|reference| reference.target())
+            .map(|oid| oid.to_string())
+            == state.commits.get(state.next).cloned()
+}
+
+fn finish_paused(repo: &Repository, state: &mut SequenceState) -> Result<(), PickError> {
+    if !is_own_paused_step(repo, state) {
+        return Err(PickError::OperationInProgress);
+    }
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        return Err(PickError::UnresolvedConflicts);
+    }
+    let head = repo.head()?.peel_to_commit()?;
+    if head.id().to_string() != state.expected_head {
+        return Err(PickError::HeadMoved);
+    }
+    let current = state.commits[state.next].clone();
+    let tree_id = index.write_tree()?;
+    if tree_id == head.tree_id() {
+        repo.cleanup_state()?;
+        state.skipped.push(current);
+        state.next += 1;
+        return Ok(());
+    }
+    let target = repo.find_commit(Oid::from_str(&current)?)?;
+    let tree = repo.find_tree(tree_id)?;
+    let committer = repo.signature()?;
+    // libgit2's MERGE_MSG lists the conflicts as `#` comment lines; strip them like git's
+    // default commit cleanup does.
+    let message = repo
+        .message()
+        .ok()
+        .and_then(|message| git2::message_prettify(message, Some(b'#')).ok())
+        .filter(|message| !message.trim().is_empty());
+    let (author, message) = match state.kind {
+        SequenceKind::CherryPick => (
+            target.author().to_owned(),
+            message.unwrap_or_else(|| String::from_utf8_lossy(target.message_bytes()).into_owned()),
+        ),
+        SequenceKind::Revert => (
+            committer.clone(),
+            message.unwrap_or_else(|| revert_message(&target, None)),
+        ),
+    };
+    crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(head.id()),
+            reflog_operation: "commit",
+        }),
+        &author,
+        &committer,
+        &message,
+        &tree,
+        &[&head],
+    )?;
+    repo.cleanup_state()?;
+    state.next += 1;
+    Ok(())
+}
+
+fn resume_clean(repo: &Repository, state: &mut SequenceState) -> Result<(), PickError> {
+    let head = check_ready(repo)?;
+    if head.id().to_string() == state.expected_head {
+        // Stopped on an error (or the paused step was aborted outside): retry the step.
+        return Ok(());
+    }
+    if head.parent_count() == 1
+        && head.parent_id(0).map(|id| id.to_string()).ok().as_deref()
+            == Some(state.expected_head.as_str())
+    {
+        // The user committed the paused step some other way.
+        state.next += 1;
+        return Ok(());
+    }
+    Err(PickError::HeadMoved)
+}
+
+/// Ends a stopped sequence. A paused step of this sequence is aborted like `git cherry-pick
+/// --abort` (unrelated edits survive). If HEAD is still where the sequence stopped, the steps
+/// that landed are undone by checking out the original HEAD (libgit2's SAFE strategy: a local
+/// edit in the way is an error, and Abort can be retried) and moving the branch (or detached
+/// HEAD) back. When HEAD was moved elsewhere, or another operation is paused, nothing is moved
+/// (`rewound: false`). The caller forgets the state only on `Ok`.
+pub fn abort_sequence(
+    repo: &Repository,
+    state: &SequenceState,
+) -> Result<SequenceAbort, PickError> {
+    if is_own_paused_step(repo, state) {
+        crate::merge::abort_merge(repo)?;
+    }
+    let head_id = repo.head()?.peel_to_commit()?.id().to_string();
+    if repo.state() != RepositoryState::Clean {
+        // Someone else's operation is paused here; don't pull HEAD from under it.
+        return Ok(SequenceAbort {
+            rewound: head_id == state.original_head,
+        });
+    }
+    if head_id == state.expected_head && state.expected_head != state.original_head {
+        let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
+        repo.checkout_tree(original.as_object(), None)?;
+        let reflog = match state.kind {
+            SequenceKind::CherryPick => "cherry-pick: abort",
+            SequenceKind::Revert => "revert: abort",
+        };
+        if repo.head_detached()? {
+            repo.set_head_detached(original.id())?;
+        } else {
+            repo.head()?.set_target(original.id(), reflog)?;
+        }
+        return Ok(SequenceAbort { rewound: true });
+    }
+    Ok(SequenceAbort {
+        rewound: head_id == state.original_head,
+    })
 }

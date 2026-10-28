@@ -2407,6 +2407,7 @@ mod tests {
             operation: Some(git_core::repo::OperationKind::CherryPick),
             squash_message: None,
             commit_hooks: vec!["pre-commit".into()],
+            sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
@@ -2419,6 +2420,7 @@ mod tests {
             operation: None,
             squash_message: Some("Squashed commit of the following:\n".into()),
             commit_hooks: vec![],
+            sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
