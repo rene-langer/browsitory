@@ -2046,6 +2046,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_empty_message_with_trailers_is_refused_for_commit_and_amend() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.stage_file("a.txt".into()).unwrap();
+
+        assert_eq!(
+            handle
+                .commit(
+                    " \n\n".into(),
+                    false,
+                    vec![co_author("Ada <ada@x.org>")],
+                    mpsc::channel().0,
+                )
+                .unwrap_err(),
+            "Aborting commit due to empty commit message."
+        );
+        assert!(repo.head().is_err(), "nothing was committed");
+
+        handle
+            .commit("Add a".into(), false, vec![], mpsc::channel().0)
+            .unwrap();
+        let before = repo.head().unwrap().target();
+        assert_eq!(
+            handle
+                .amend_commit(
+                    "".into(),
+                    false,
+                    None,
+                    vec![co_author("Ada <ada@x.org>")],
+                    mpsc::channel().0,
+                )
+                .unwrap_err(),
+            "Aborting commit due to empty commit message."
+        );
+        assert_eq!(
+            repo.head().unwrap().target(),
+            before,
+            "HEAD was not amended"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_commit_msg_hook_sees_the_trailers() {

@@ -77,10 +77,14 @@ fn is_blank(line: &str) -> bool {
 /// Trailing blank lines are dropped. Lines starting with `#` are message text (nothing strips
 /// them in Browsitory), so trailers always go at the very end. A trailer already in the block (same key, any
 /// case, and same value) is not added again. No trailers leaves `message` byte-identical, and so
-/// does a call whose every trailer is already there.
+/// does a call whose every trailer is already there. A blank `message` with trailers is
+/// [`CommitError::EmptyMessage`]: trailers alone must not turn an empty message into a commit.
 pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, CommitError> {
     if trailers.is_empty() {
         return Ok(message.to_string());
+    }
+    if message.trim().is_empty() {
+        return Err(CommitError::EmptyMessage);
     }
     let mut lines_to_add: Vec<(String, String, String)> = Vec::new();
     for trailer in trailers {
@@ -561,10 +565,10 @@ mod tests {
             .unwrap(),
             "Fix bug\n\nBody text.\n\nCo-authored-by: Ada <ada@x.org>\nCo-authored-by: Bob <bob@x.org>\n"
         );
-        assert_eq!(
-            append_trailers("  \n", &[co(ADA)]).unwrap(),
-            "Co-authored-by: Ada <ada@x.org>\n"
-        );
+        assert!(matches!(
+            append_trailers("  \n", &[co(ADA)]),
+            Err(CommitError::EmptyMessage)
+        ));
     }
 
     #[test]
