@@ -600,7 +600,10 @@ fn discard_hunk_does_not_write_through_a_symlinked_parent() {
     let hunks = working_diff(&repo, "d/f.txt", false, &DiffOptions::default()).unwrap();
     let h = &hunks[0];
     let result = git_core::stage::discard_hunk(&repo, "d/f.txt", h.old_start, h.new_start, 3);
-    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert!(
+        matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f.txt"),
+        "{result:?}"
+    );
     assert_eq!(workdir_content(outside.path(), "f.txt"), "a\nB\nc\n");
 }
 
@@ -619,7 +622,10 @@ fn discard_lines_does_not_write_through_a_symlinked_parent() {
         3,
         &[first_changed],
     );
-    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert!(
+        matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f.txt"),
+        "{result:?}"
+    );
     assert_eq!(workdir_content(outside.path(), "f.txt"), "a\nB\nc\n");
 }
 

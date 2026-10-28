@@ -237,7 +237,10 @@ fn discard_file_ancestor_is_refused() {
     let f = fx();
     f.link_ancestor();
     let result = git_core::stage::discard_file(&f.repo, "d/f");
-    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert!(
+        matches!(result, Err(StageError::BeyondSymlink(_))),
+        "{result:?}"
+    );
     f.untouched();
 }
 

@@ -224,7 +224,7 @@ fn discard_file_does_not_delete_through_a_symlinked_directory() {
     std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
     assert!(matches!(
         discard_file(&repo, "link/victim.txt"),
-        Err(StageError::InvalidPath)
+        Err(StageError::BeyondSymlink(_))
     ));
     assert!(outside.path().join("victim.txt").exists());
 }
@@ -249,7 +249,10 @@ fn setup_symlinked_parent() -> (tempfile::TempDir, git2::Repository, tempfile::T
 fn discard_file_does_not_write_a_tracked_file_through_a_symlinked_parent() {
     let (_dir, repo, outside) = setup_symlinked_parent();
     let result = discard_file(&repo, "d/f.txt");
-    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert!(
+        matches!(result, Err(StageError::BeyondSymlink(_))),
+        "{result:?}"
+    );
     assert_eq!(read(outside.path(), "f.txt"), "outside\n");
 }
 
@@ -352,7 +355,7 @@ fn discard_file_still_refuses_a_path_beyond_a_symlinked_directory() {
     common::replace_with_link(dir.path(), "d", out.path());
     assert!(matches!(
         discard_file(&repo, "d/f"),
-        Err(StageError::InvalidPath)
+        Err(StageError::BeyondSymlink(_))
     ));
     common::assert_outside_untouched(out.path());
 }

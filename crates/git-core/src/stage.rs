@@ -121,6 +121,7 @@ pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(
 pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    refuse_beyond_symlink(workdir, path)?;
     ensure_no_symlinked_parent(workdir, rel)?;
     let index = repo.index()?;
     if index.get_path(rel, 0).is_some() {
@@ -415,6 +416,7 @@ fn apply_selection(
     let hunk = find_hunk(&diff, path, old_start, new_start)?;
     if matches!(target, Target::Discard) {
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+        refuse_beyond_symlink(workdir, path)?;
         ensure_no_symlinked_parent(workdir, checked_relative(path)?)?;
     }
     let all_changed: Vec<u32>;
