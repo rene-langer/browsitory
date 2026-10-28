@@ -1605,6 +1605,60 @@ describe("App external tools", () => {
     }
   });
 
+  it.each([
+    ["Edit remote origin…", "Edit origin"],
+    ["Manage credentials for origin…", "Credentials for origin"],
+    ["Remove remote origin…", "Remove remote confirmation"],
+  ])("the palette's %s dialog is visible while the sidebar is collapsed (narrow window)", async (option, name) => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 800 });
+    try {
+      const { container } = render(
+        <App
+          client={toolsClient({
+            listRemotes: async () => [
+              { name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null },
+            ],
+          })}
+        />,
+      );
+      await screen.findByRole("tab", { name: "a" });
+      await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+      const sidebarPane = screen.getByRole("separator", { name: "Sidebar width", hidden: true }).previousElementSibling;
+      await waitFor(() => expect(sidebarPane).toHaveAttribute("hidden"));
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      const input = await screen.findByRole("combobox", { name: "Command palette" });
+      fireEvent.change(input, { target: { value: option.replace("…", "") } });
+      fireEvent.click(await screen.findByRole("option", { name: option }));
+      const dialog = await screen.findByRole("dialog", { name, hidden: true });
+      // `showModal()` inside a `display: none` ancestor is a 0×0 modal that makes the page inert.
+      expect(dialog.closest("[hidden]")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: originalInnerWidth });
+    }
+  });
+
+  it("closes an open Edit remote dialog with a notice when a refresh no longer lists its remote", async () => {
+    let remotes = [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }];
+    const { container } = render(<App client={toolsClient({ listRemotes: async () => remotes })} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "Edit remote origin" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Edit remote origin…" }));
+    await screen.findByRole("dialog", { name: "Edit origin", hidden: true });
+    remotes = [];
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette", hidden: true }), {
+      target: { value: "Refresh" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Refresh", hidden: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit origin", hidden: true })).toBeNull());
+    expect(await screen.findByText("Remote origin was removed or renamed.")).toBeInTheDocument();
+  });
+
   it("shows only the VSCode note in VSCode", async () => {
     render(<App client={toolsClient()} toolHost="vscode" />);
     await screen.findByRole("tab", { name: "a" });

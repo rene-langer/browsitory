@@ -20,8 +20,7 @@ import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import type { RemoteDialog } from "../state/useAppState";
-import { EditRemoteDialog } from "./EditRemoteDialog";
-import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
+import { RemoteDialogs } from "./RemoteDialogs";
 import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
@@ -198,7 +197,8 @@ export function BranchTree({
   /**
    * The open remote dialog (Edit / Credentials / Remove), controlled by app state so the palette
    * can open it. Controlled when `onRemoteDialogChange` is given, local state otherwise (same
-   * pattern as `DiffPane`'s `discardRequest`).
+   * pattern as `DiffPane`'s `discardRequest`). Controlled, the owner renders the dialogs
+   * (`RemoteDialogs`); uncontrolled, this tree does.
    */
   remoteDialog?: RemoteDialog | null;
   onRemoteDialogChange?: (dialog: RemoteDialog | null) => void;
@@ -226,22 +226,6 @@ export function BranchTree({
   const [localRemoteDialog, setLocalRemoteDialog] = useState<RemoteDialog | null>(null);
   const remoteDialog = onRemoteDialogChange !== undefined ? (remoteDialogProp ?? null) : localRemoteDialog;
   const setRemoteDialog = onRemoteDialogChange ?? setLocalRemoteDialog;
-  // The open dialog's remote. Kept as a snapshot while the dialog stays open: rename and remove
-  // update `remotes` optimistically, before the request settles (and roll back on failure), and
-  // the dialog must not unmount — losing what the user typed — in between. `undefined` when no
-  // dialog is open, or it was opened for a remote that doesn't exist.
-  const liveDialogRemote = remoteDialog === null ? undefined : remotes.find((r) => r.name === remoteDialog.remoteName);
-  const [dialogSnapshot, setDialogSnapshot] = useState<{ dialog: RemoteDialog; remote: RemoteInfo } | null>(null);
-  if (remoteDialog === null) {
-    if (dialogSnapshot !== null) setDialogSnapshot(null);
-  } else if (
-    liveDialogRemote !== undefined &&
-    (dialogSnapshot?.dialog !== remoteDialog || dialogSnapshot.remote !== liveDialogRemote)
-  ) {
-    setDialogSnapshot({ dialog: remoteDialog, remote: liveDialogRemote });
-  }
-  const dialogRemote =
-    liveDialogRemote ?? (dialogSnapshot !== null && dialogSnapshot.dialog === remoteDialog ? dialogSnapshot.remote : undefined);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
@@ -1220,50 +1204,20 @@ export function BranchTree({
           </FormDialog>
         )}
       </AccordionSection>
-      {/* Remote dialogs sit outside the accordion body so the palette can open them while the
-          Branches section is collapsed (its body is not rendered then). */}
-      {remoteDialog?.kind === "remove" && dialogRemote !== undefined && (() => {
-        // Computed now, not when the menu item was clicked: upstreams may change meanwhile.
-        const affected = remoteUpstreams[dialogRemote.name] ?? [];
-        const clearUpstreams = affected.length > 0;
-        return (
-          <ConfirmDialog
-            ariaLabel="Remove remote confirmation"
-            message={
-              clearUpstreams ? (
-                <p>
-                  Remove {dialogRemote.name} and clear upstreams for{" "}
-                  {affected.map((item) => item.localBranch).join(", ")}?
-                </p>
-              ) : (
-                <p>Remove remote {dialogRemote.name}?</p>
-              )
-            }
-            confirmLabel="Confirm remove"
-            confirmDisabled={operationDisabled}
-            onConfirm={() => {
-              void onRemoveRemote(dialogRemote.name, clearUpstreams).then(() => setRemoteDialog(null));
-            }}
-            onCancel={() => setRemoteDialog(null)}
-          />
-        );
-      })()}
-      {remoteDialog?.kind === "edit" && dialogRemote !== undefined && (
-        <EditRemoteDialog
-          key={remoteDialog.remoteName}
-          remote={dialogRemote}
-          onRename={onRenameRemote}
-          onUpdateUrls={onUpdateRemoteUrls}
-          onClose={() => setRemoteDialog(null)}
-        />
-      )}
-      {remoteDialog?.kind === "credentials" && dialogRemote !== undefined && (
-        <RemoteCredentialsDialog
-          key={remoteDialog.remoteName}
-          remote={dialogRemote}
-          onSetAuthMode={onSetRemoteAuthMode}
+      {/* Controlled (`App`), the dialogs render at app level: this tree sits in the sidebar, which
+          stays mounted but `hidden` while collapsed, and a modal there would be invisible. */}
+      {onRemoteDialogChange === undefined && (
+        <RemoteDialogs
+          remoteDialog={remoteDialog}
+          remotes={remotes}
+          remoteUpstreams={remoteUpstreams}
+          operationDisabled={operationDisabled}
+          onRenameRemote={onRenameRemote}
+          onUpdateRemoteUrls={onUpdateRemoteUrls}
+          onRemoveRemote={onRemoveRemote}
           onSaveHttpsCredential={onSaveHttpsCredential}
           onForgetHttpsCredential={onForgetHttpsCredential}
+          onSetRemoteAuthMode={onSetRemoteAuthMode}
           onClose={() => setRemoteDialog(null)}
         />
       )}

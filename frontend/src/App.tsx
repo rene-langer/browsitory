@@ -42,6 +42,7 @@ import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
+import { RemoteDialogs } from "./components/RemoteDialogs";
 import type { RepoClient, Trailer } from "./ipc/RepoClient";
 import { coAuthorTrailers, parsePerson } from "./lib/people";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
@@ -606,6 +607,23 @@ function RepoWorkspace({
             void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream)
           }
           onCancel={appState.closePushDialog}
+        />
+      )}
+      {active && (
+        // Here, not in `BranchTree`: the sidebar stays mounted but `hidden` while collapsed.
+        <RemoteDialogs
+          remoteDialog={appState.state.remoteDialog}
+          remotes={appState.state.remotes}
+          remoteUpstreams={appState.state.remoteUpstreams}
+          operationDisabled={repositoryOperationDisabled}
+          onRenameRemote={appState.renameRemote}
+          onUpdateRemoteUrls={appState.updateRemoteUrls}
+          onRemoveRemote={appState.removeRemote}
+          onSaveHttpsCredential={appState.saveHttpsCredential}
+          onForgetHttpsCredential={appState.forgetHttpsCredential}
+          onSetRemoteAuthMode={appState.setRemoteAuthMode}
+          onClose={appState.closeRemoteDialog}
+          onRemoteGone={(name) => pushToast(`Remote ${name} was removed or renamed.`)}
         />
       )}
       {active && appState.state.deleteRemoteBranchDialog !== null && (

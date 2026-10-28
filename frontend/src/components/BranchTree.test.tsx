@@ -1,8 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
-import { useState } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
-import type { RemoteDialog } from "../state/useAppState";
 import { BranchTree } from "./BranchTree";
 
 type IsOptional<T, K extends keyof T> = Pick<T, K> extends Required<Pick<T, K>> ? false : true;
@@ -17,10 +15,6 @@ type BranchTreeProps = Parameters<typeof BranchTree>[0];
 function renderTree(overrides: Partial<BranchTreeProps> = {}) {
   const props = treeProps(overrides);
   return { ...render(<BranchTree {...props} />), props };
-}
-
-function renderTreeElement(overrides: Partial<BranchTreeProps>) {
-  return <BranchTree {...treeProps(overrides)} />;
 }
 
 function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
@@ -1475,17 +1469,6 @@ describe("BranchTree — controlled remote dialogs", () => {
   const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
   beforeEach(() => localStorage.clear());
 
-  it.each([
-    ["edit", "Edit origin"],
-    ["credentials", "Credentials for origin"],
-    ["remove", "Remove remote confirmation"],
-  ] as const)("renders the %s dialog from props even while Branches is collapsed", async (kind, name) => {
-    localStorage.setItem("sidebar-branches", "closed");
-    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
-    expect(screen.queryByRole("button", { name: "origin" })).toBeNull(); // body not rendered
-    expect(await screen.findByRole("dialog", { name, hidden: true })).toBeInTheDocument();
-  });
-
   it("menu items report the dialog through onRemoteDialogChange when controlled", () => {
     const onRemoteDialogChange = vi.fn();
     renderTree({ remotes: [origin], remoteDialog: null, onRemoteDialogChange });
@@ -1495,77 +1478,9 @@ describe("BranchTree — controlled remote dialogs", () => {
     expect(screen.queryByRole("dialog", { name: "Credentials for origin", hidden: true })).toBeNull();
   });
 
-  it("closing a controlled dialog reports null", () => {
-    const onRemoteDialogChange = vi.fn();
-    renderTree({ remotes: [origin], remoteDialog: { kind: "edit", remoteName: "origin" }, onRemoteDialogChange });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", hidden: true }));
-    expect(onRemoteDialogChange).toHaveBeenCalledWith(null);
-  });
-
-  it("renders nothing for a dialog whose remote is gone", () => {
-    renderTree({ remotes: [], remoteDialog: { kind: "edit", remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
-    expect(screen.queryByRole("dialog", { name: "Edit origin", hidden: true })).toBeNull();
-  });
-
-  it("asks to clear upstreams based on the upstreams when the confirmation renders", () => {
-    const props = {
-      remotes: [origin],
-      remoteDialog: { kind: "remove" as const, remoteName: "origin" },
-      onRemoteDialogChange: vi.fn(),
-    };
-    const { rerender, props: full } = renderTree({ ...props, remoteUpstreams: {} });
-    expect(screen.getByText("Remove remote origin?")).toBeInTheDocument();
-    rerender(
-      <BranchTree
-        {...full}
-        remoteUpstreams={{ origin: [{ localBranch: "main", remoteName: "origin", remoteBranch: "main" }] }}
-      />,
-    );
-    expect(screen.getByText(/clear upstreams for main/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
-    expect(full.onRemoveRemote).toHaveBeenCalledWith("origin", true);
-  });
-
-  // `renameRemote` is optimistic: `remotes` already holds the new name while the request runs, and
-  // a failure rolls it back. The dialog must stay mounted with what the user typed throughout.
-  function RenameHarness({ result }: { result: boolean }) {
-    const [remotes, setRemotes] = useState([origin]);
-    const [dialog, setDialog] = useState<RemoteDialog | null>({ kind: "edit", remoteName: "origin" });
-    const props = {
-      remotes,
-      remoteDialog: dialog,
-      onRemoteDialogChange: setDialog,
-      onRenameRemote: async (oldName: string, newName: string) => {
-        setRemotes((prev) => prev.map((r) => (r.name === oldName ? { ...r, name: newName } : r)));
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        if (!result) setRemotes((prev) => prev.map((r) => (r.name === newName ? { ...r, name: oldName } : r)));
-        return result;
-      },
-      onUpdateRemoteUrls: updateUrls,
-    };
-    return renderTreeElement(props);
-  }
-  const updateUrls = vi.fn().mockResolvedValue(undefined);
-
-  it.each([true, false])("the Edit dialog stays open with the typed values while a rename runs (succeeds: %s)", async (result) => {
-    updateUrls.mockClear();
-    render(<RenameHarness result={result} />);
-    const dialog = screen.getByRole("dialog", { name: "Edit origin", hidden: true });
-    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "upstream" } });
-    fireEvent.change(within(dialog).getByLabelText("Fetch URL"), { target: { value: "../new.git" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
-    // Mid-rename (remotes already renamed optimistically): same dialog, same typed values.
-    expect(screen.getByRole("dialog", { name: "Edit origin", hidden: true })).toBe(dialog);
-    expect(within(dialog).getByLabelText("Fetch URL")).toHaveValue("../new.git");
-    if (result) {
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: /^Edit /, hidden: true })).toBeNull());
-      expect(updateUrls).toHaveBeenCalledWith("upstream", "../new.git", null);
-    } else {
-      await waitFor(() => expect(within(dialog).getByLabelText("Remote name")).toHaveValue("upstream"));
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(screen.getByRole("dialog", { name: "Edit origin", hidden: true })).toBe(dialog);
-      expect(within(dialog).getByLabelText("Fetch URL")).toHaveValue("../new.git");
-      expect(updateUrls).not.toHaveBeenCalled();
-    }
+  // The owner (`App`) renders them outside the sidebar, which is `hidden` while collapsed.
+  it.each(["edit", "credentials", "remove"] as const)("leaves the controlled %s dialog to its owner", (kind) => {
+    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 });
