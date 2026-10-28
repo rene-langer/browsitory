@@ -1404,6 +1404,8 @@ describe("App external tools", () => {
     await waitFor(() => expect(screen.getByLabelText("Editor command")).toHaveValue("code"));
     expect(getExternalToolSettings).toHaveBeenCalled();
     expect(getGitTools).toHaveBeenCalledWith("/repos/a");
+    expect(screen.getByRole("group", { name: "Commit message" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Ruler column" })).toHaveValue(72));
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Preferences" })).toBeNull();

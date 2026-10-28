@@ -82,3 +82,13 @@
   justify-content: flex-end;
   margin-top: var(--space-3);
 }
+
+.number {
+  width: 6em;
+}
+
+.checkbox {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}

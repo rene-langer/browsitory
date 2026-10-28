@@ -45,7 +45,7 @@ import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog"
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
-import { ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
+import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
 import { useExternalTools } from "./state/useExternalTools";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { upstreamPushBranch } from "./lib/pushTarget";
@@ -58,6 +58,7 @@ import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
+import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -1057,7 +1058,9 @@ export default function App(props: {
 }) {
   return (
     <DiffSettingsProvider client={props.client}>
-      <AppContent {...props} />
+      <CommitMessageSettingsProvider client={props.client}>
+        <AppContent {...props} />
+      </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
   );
 }
@@ -1357,6 +1360,7 @@ function AppContent({
       {preferencesOpen && (
         <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
           <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
+          <CommitMessageSection />
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (

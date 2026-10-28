@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { GitConfigSource, GitToolInfo, GitTools, RepoClient } from "../ipc/RepoClient";
+import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
@@ -30,6 +31,70 @@ export function PreferencesSection({ title, children }: { title: string; childre
       <legend className={styles.legend}>{title}</legend>
       {children}
     </fieldset>
+  );
+}
+
+/** A 10–200 number field that saves on blur (or Enter), clamped by the settings hook. */
+function ColumnField({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
+  // Local text while typing; `null` shows the saved value.
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    setDraft(null);
+    const parsed = Number(draft);
+    if (draft.trim() !== "" && Number.isFinite(parsed) && parsed !== value) onCommit(parsed);
+  };
+  return (
+    <Field label={label}>
+      {(props) => (
+        <input
+          {...props}
+          type="number"
+          min={10}
+          max={200}
+          step={1}
+          className={styles.number}
+          value={draft ?? String(value)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commit();
+          }}
+        />
+      )}
+    </Field>
+  );
+}
+
+/** "Commit message": the summary length counter's limit and the body ruler. */
+export function CommitMessageSection() {
+  const { settings, update, error, dismissError } = useCommitMessageSettingsContext();
+  return (
+    <PreferencesSection title="Commit message">
+      <ColumnField
+        label="Summary length limit"
+        value={settings.summaryLimit}
+        onCommit={(summaryLimit) => update({ summaryLimit })}
+      />
+      <ColumnField label="Ruler column" value={settings.bodyRuler} onCommit={(bodyRuler) => update({ bodyRuler })} />
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.showRuler}
+          onChange={(event) => update({ showRuler: event.target.checked })}
+        />
+        Show ruler
+      </label>
+      <p className={styles.hint}>The message field uses a monospace font while the ruler is shown.</p>
+      {error !== null && (
+        <p role="alert" className={styles.problem}>
+          {error}{" "}
+          <button type="button" onClick={dismissError}>
+            Dismiss
+          </button>
+        </p>
+      )}
+    </PreferencesSection>
   );
 }
 
