@@ -35,7 +35,7 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         // libgit2's hard reset writes (and deletes) through a symlink that replaced a tracked
         // file or folder; remove such links first, like git (#114).
         let tree = target.tree()?;
-        crate::worktree_guard::prepare_forced_checkout::<ResetError>(
+        crate::worktree_guard::prepare_forced_checkout::<ResetError, &str>(
             repo,
             Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
             None,

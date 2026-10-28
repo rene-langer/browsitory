@@ -109,7 +109,7 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     let index = repo.index()?;
     if index.get_path(rel, 0).is_some() {
         // A forced checkout writes through a symlink that replaced the file (#114).
-        crate::worktree_guard::prepare_forced_checkout::<StageError>(
+        crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
             repo,
             Some(&crate::worktree_guard::GuardSource::Index(&index)),
             Some(&[path.to_string()]),

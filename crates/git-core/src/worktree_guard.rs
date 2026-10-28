@@ -79,9 +79,12 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 
 /// `path` (git's `/`-separated bytes) is one of `paths` or below one of them, the way a forced
 /// checkout with `CheckoutBuilder::path` + `disable_pathspec_match` selects it.
-fn selected(path: &[u8], paths: &[String]) -> bool {
+fn selected<P: AsRef<[u8]>>(path: &[u8], paths: &[P]) -> bool {
     paths.iter().any(|wanted| {
-        let wanted = wanted.trim_end_matches('/').as_bytes();
+        let mut wanted = wanted.as_ref();
+        while let Some(rest) = wanted.strip_suffix(b"/") {
+            wanted = rest;
+        }
         path == wanted || (path.starts_with(wanted) && path.get(wanted.len()) == Some(&b'/'))
     })
 }
@@ -92,10 +95,10 @@ fn selected(path: &[u8], paths: &[String]) -> bool {
 /// A source entry that is itself a symlink is not a leaf hazard (libgit2 unlinks and recreates
 /// links, which never follows), and submodule entries are skipped. A symlink no source path goes
 /// through is the user's and is never reported.
-pub(crate) fn scan(
+pub(crate) fn scan<P: AsRef<[u8]>>(
     workdir: &Path,
     source: &GuardSource,
-    paths: Option<&[String]>,
+    paths: Option<&[P]>,
 ) -> Result<Vec<Hazard>, git2::Error> {
     let owned;
     let index: &git2::Index = match source {
@@ -167,13 +170,14 @@ pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()
 /// and the target lacks (`d/f` through a symlinked `d` would delete a file outside the
 /// repository). Call immediately before the checkout, after anything that must record the
 /// links (a stash).
-pub(crate) fn prepare_forced_checkout<E>(
+pub(crate) fn prepare_forced_checkout<E, P>(
     repo: &git2::Repository,
     target: Option<&GuardSource>,
-    paths: Option<&[String]>,
+    paths: Option<&[P]>,
 ) -> Result<(), E>
 where
     E: From<git2::Error> + From<io::Error>,
+    P: AsRef<[u8]>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
@@ -428,6 +432,8 @@ fn final_path(file: &std::fs::File) -> io::Result<PathBuf> {
 mod tests {
     use super::*;
     use git2::Repository;
+
+    const ALL: Option<&[&str]> = None;
     use tempfile::TempDir;
 
     fn write(dir: &Path, rel: &str, contents: &str) {
@@ -512,13 +518,13 @@ mod tests {
         link_tc_and_d(dir.path(), out.path());
         let tree = head_tree(&repo);
 
-        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), None).unwrap();
+        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), ALL).unwrap();
         assert_eq!(
             hazards,
             vec![Hazard::Leaf("tc".into()), Hazard::Ancestor("d".into())]
         );
         let index = repo.index().unwrap();
-        let from_index = scan(dir.path(), &GuardSource::Index(&index), None).unwrap();
+        let from_index = scan(dir.path(), &GuardSource::Index(&index), ALL).unwrap();
         assert_eq!(from_index, hazards);
     }
 
@@ -533,7 +539,7 @@ mod tests {
         std::os::unix::fs::symlink(out.path(), dir.path().join("a/b")).unwrap();
         let tree = head_tree(&repo);
 
-        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), None).unwrap();
+        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), ALL).unwrap();
         assert_eq!(hazards, vec![Hazard::Ancestor("a/b".into())]);
     }
 
@@ -545,7 +551,7 @@ mod tests {
         commit_all(&repo);
         let tree = head_tree(&repo);
 
-        assert!(scan(dir.path(), &GuardSource::Tree(&tree), None)
+        assert!(scan(dir.path(), &GuardSource::Tree(&tree), ALL)
             .unwrap()
             .is_empty());
     }
@@ -558,7 +564,7 @@ mod tests {
         std::os::unix::fs::symlink(out.path(), dir.path().join("extra")).unwrap();
         let tree = head_tree(&repo);
 
-        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), None).unwrap();
+        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), ALL).unwrap();
         assert!(hazards.is_empty());
         clear_hazards(dir.path(), &hazards).unwrap();
         assert!(is_link(&dir.path().join("extra")));
@@ -588,7 +594,7 @@ mod tests {
         link_tc_and_d(dir.path(), out.path());
         let tree = head_tree(&repo);
 
-        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), None).unwrap();
+        let hazards = scan(dir.path(), &GuardSource::Tree(&tree), ALL).unwrap();
         clear_hazards(dir.path(), &hazards).unwrap();
 
         assert!(std::fs::symlink_metadata(dir.path().join("tc")).is_err());
@@ -640,7 +646,7 @@ mod tests {
     fn scan_on_a_clean_worktree_is_empty() {
         let (dir, repo) = repo();
         let tree = head_tree(&repo);
-        assert!(scan(dir.path(), &GuardSource::Tree(&tree), None)
+        assert!(scan(dir.path(), &GuardSource::Tree(&tree), ALL)
             .unwrap()
             .is_empty());
     }

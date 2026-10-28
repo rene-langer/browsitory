@@ -340,7 +340,10 @@ pub fn resolve_conflict(
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     ensure_inside_workdir(workdir, path)?;
-    std::fs::write(workdir.join(path), resolved_content)?;
+    // Never through a symlink that replaced the file (#114).
+    if !crate::worktree_guard::write_beneath(workdir, path, resolved_content.as_bytes())? {
+        return Err(MergeError::SymlinkedFolder(path.to_string()));
+    }
 
     let mut index = repo.index()?;
     index.add_path(Path::new(path))?;
@@ -387,6 +390,12 @@ pub fn resolve_whole_file(
     };
     match chosen {
         Some(_) => {
+            let index = repo.index()?;
+            crate::worktree_guard::prepare_forced_checkout::<MergeError, _>(
+                repo,
+                Some(&crate::worktree_guard::GuardSource::Index(&index)),
+                Some(&[path]),
+            )?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force().disable_pathspec_match(true).path(path);
             match side {
@@ -399,12 +408,7 @@ pub fn resolve_whole_file(
             index.write()?;
         }
         None => {
-            match std::fs::remove_file(workdir.join(path)) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(error.into())
-                }
-                _ => {}
-            }
+            crate::worktree_guard::remove_beneath(workdir, path)?;
             let mut index = repo.index()?;
             index.remove_path(Path::new(path))?;
             index.write()?;
@@ -510,17 +514,22 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     index.write()?;
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    // The forced checkout below writes through a symlink that replaced a touched file or a
+    // folder on the way to one (#114): remove such links first, like git.
+    crate::worktree_guard::prepare_forced_checkout::<MergeError, _>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(&head_tree)),
+        Some(&touched),
+    )?;
     let mut to_checkout = Vec::new();
     for path in touched {
         let rel = path_from_bytes(&path);
         if head_tree.get_path(&rel).is_ok() {
             to_checkout.push(path);
-        } else {
-            // Added by the operation: not in HEAD, so remove it.
-            let full = workdir.join(&rel);
-            if full.is_file() {
-                std::fs::remove_file(full)?;
-            }
+        } else if let Ok(rel) = std::str::from_utf8(&path) {
+            // Added by the operation: not in HEAD, so remove it, never through a link and never
+            // a folder.
+            crate::worktree_guard::remove_beneath(workdir, rel)?;
         }
     }
     if !to_checkout.is_empty() {
@@ -585,14 +594,16 @@ pub fn resolve_add_delete_conflict(
     match entry {
         Some(entry) => {
             let blob = repo.find_blob(entry.id)?;
-            std::fs::write(workdir.join(path), blob.content())?;
+            if !crate::worktree_guard::write_beneath(workdir, path, blob.content())? {
+                return Err(MergeError::SymlinkedFolder(path.to_string()));
+            }
             index.add_path(Path::new(path))?;
         }
         None => {
             // Ignore a missing file — the case where the chosen side already means
             // "deleted" (e.g. `Theirs` when `their` is `None`), so there's nothing on disk
             // to remove in the first place.
-            let _ = std::fs::remove_file(workdir.join(path));
+            let _ = crate::worktree_guard::remove_beneath(workdir, path);
             index.remove_path(Path::new(path))?;
         }
     }

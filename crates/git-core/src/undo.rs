@@ -580,7 +580,7 @@ impl WorktreeChange {
         // A forced checkout writes through a symlink that replaced a file or folder (#114).
         let index = repo.index()?;
         let paths: Vec<String> = self.from_index.iter().cloned().collect();
-        crate::worktree_guard::prepare_forced_checkout::<UndoError>(
+        crate::worktree_guard::prepare_forced_checkout::<UndoError, _>(
             repo,
             Some(&crate::worktree_guard::GuardSource::Index(&index)),
             Some(&paths),
