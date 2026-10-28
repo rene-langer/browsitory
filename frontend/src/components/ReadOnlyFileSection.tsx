@@ -13,7 +13,7 @@ import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
-import { menuAnchor } from "../lib/menuKeys";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 
 /**
@@ -138,6 +138,16 @@ export function ReadOnlyFileSection({
             : (event) => {
                 event.preventDefault();
                 setMenu(menuAnchor(event, event.currentTarget));
+              }
+        }        // The Menu key or Shift+F10 on any header control (collapse, Blame, History, "…") opens the
+        // file menu at the header; Escape then returns to that control (`ContextMenu`).
+        onKeyDown={
+          tools === null
+            ? undefined
+            : (event) => {
+                if (!isMenuKey(event)) return;
+                event.preventDefault();
+                setMenu(rectAnchor(event.currentTarget));
               }
         }
       >

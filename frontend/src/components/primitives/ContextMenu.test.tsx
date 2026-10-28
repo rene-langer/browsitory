@@ -412,4 +412,18 @@ describe("ContextMenu focus and keys", () => {
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
     expect(onAncestorKey).not.toHaveBeenCalled();
   });
+
+  it("swallows the Menu key and Shift+F10 inside the menu", () => {
+    const onAncestorKey = vi.fn();
+    render(
+      <div onKeyDown={onAncestorKey}>
+        <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />
+      </div>,
+    );
+    const item = screen.getByRole("menuitem", { name: "One" });
+    expect(fireEvent.keyDown(item, { key: "ContextMenu" })).toBe(false);
+    expect(fireEvent.keyDown(item, { key: "F10", shiftKey: true })).toBe(false);
+    expect(onAncestorKey).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
 });

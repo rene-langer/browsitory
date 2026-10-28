@@ -466,6 +466,20 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it("opens the menu of the row holding focus, not the selected row", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        const other = screen.getByRole("button", { name: "Stage logs/run.log" });
+        other.focus();
+
+        const prevented = !fireEvent.keyDown(other, { key: "ContextMenu" });
+
+        expect(prevented).toBe(true);
+        expect(screen.getByRole("menuitem", { name: "Ignore all *.log" })).toBeInTheDocument();
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(other).toHaveFocus();
+      });
+
       it("keeps list key bindings out of an open menu", () => {
         const onStageFile = vi.fn();
         const onUnstageFile = vi.fn();

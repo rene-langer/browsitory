@@ -1024,11 +1024,13 @@ function UncommittedDiffPane({
       event.preventDefault();
       toggleStageSelected(entries);
     } else if (isMenuKey(event)) {
-      // Opens the selected row's actions menu by activating its "⋯" button (conflicted and staged
-      // rows have none, so this is then a no-op).
-      const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
-        '[aria-selected="true"] button[aria-haspopup="menu"]',
-      );
+      // Opens a row's actions menu by activating its "⋯" button: the row holding focus when focus
+      // is on one of its controls (Tab can put it on a row that isn't selected), else the
+      // selected row. A row without a "⋯" (no actions for it) makes this a no-op.
+      const row =
+        (event.target as HTMLElement).closest('[role="option"]') ??
+        event.currentTarget.querySelector('[aria-selected="true"]');
+      const trigger = row?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]') ?? null;
       if (trigger !== null) {
         event.preventDefault();
         trigger.click();

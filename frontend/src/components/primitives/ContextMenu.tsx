@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Check } from "lucide-react";
+import { isMenuKey } from "../../lib/menuKeys";
 import styles from "./ContextMenu.module.css";
 
 export interface ContextMenuItem {
@@ -157,6 +158,12 @@ export function ContextMenu({
   }
 
   function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLUListElement>) {
+    if (isMenuKey(event)) {
+      // Already open: the key must not reach a row or list underneath and open another menu.
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     switch (event.key) {
       case "Escape":
         // Stopped so ancestor handlers (the graph's "Escape collapses a multi-selection") don't
