@@ -423,7 +423,7 @@ export function DiffPane({
   focusCommitMessage = false,
   onCommitMessageFocused,
   commitHooks,
-  clearCommitMessage = false,
+  clearCommitMessage = null,
   onCommitMessageCleared,
   rebaseProgress,
   onRebaseContinue,
@@ -503,7 +503,7 @@ export function DiffPane({
   // `headInfo.commitHooks`); omitted, neither shows.
   commitHooks?: CommitHooksControls;
   // One-shot CommitBox clear request (see its `clearMessage`).
-  clearCommitMessage?: boolean;
+  clearCommitMessage?: string | null;
   onCommitMessageCleared?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
@@ -638,7 +638,7 @@ function UncommittedDiffPane({
   focusCommitMessage = false,
   onCommitMessageFocused,
   commitHooks,
-  clearCommitMessage = false,
+  clearCommitMessage = null,
   onCommitMessageCleared,
   rebaseProgress,
   onRebaseContinue,
@@ -696,7 +696,7 @@ function UncommittedDiffPane({
   // `headInfo.commitHooks`); omitted, neither shows.
   commitHooks?: CommitHooksControls;
   // One-shot CommitBox clear request (see its `clearMessage`).
-  clearCommitMessage?: boolean;
+  clearCommitMessage?: string | null;
   onCommitMessageCleared?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;

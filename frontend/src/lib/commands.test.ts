@@ -65,7 +65,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       skipHooks: false,
       hookRun: null,
       hookFailure: null,
-      clearCommitMessage: false,
+      clearCommitMessage: null,
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,

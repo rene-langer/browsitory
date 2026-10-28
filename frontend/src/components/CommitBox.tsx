@@ -32,7 +32,7 @@ export function CommitBox({
   focusMessage = false,
   onFocusMessageHandled,
   hooks,
-  clearMessage = false,
+  clearMessage = null,
   onClearMessageHandled,
 }: {
   /**
@@ -71,10 +71,12 @@ export function CommitBox({
     onCancel: () => void;
   };
   /**
-   * One-shot request to clear the message (a commit retried from the hook-failure dialog landed);
-   * `onClearMessageHandled` then lets the owner reset it.
+   * One-shot request to clear the message, carrying the committed text (a commit retried from the
+   * hook-failure dialog landed). Only a field (or stashed pre-amend draft) still holding exactly
+   * that text is cleared, so text typed meanwhile survives. `onClearMessageHandled` then lets the
+   * owner reset it.
    */
-  clearMessage?: boolean;
+  clearMessage?: string | null;
   onClearMessageHandled?: () => void;
   /** Amend-last-commit mode; omit to hide the toggle entirely. */
   amend?: {
@@ -151,10 +153,11 @@ export function CommitBox({
   }, [focusMessage, focusReady, onFocusMessageHandled]);
 
   useEffect(() => {
-    if (!clearMessage) return;
+    if (clearMessage === null) return;
     // One-shot clear requested by the owner, acknowledged right away.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMessage("");
+    setMessage((current) => (current === clearMessage ? "" : current));
+    setStashedDraft((stashed) => (stashed === clearMessage ? "" : stashed));
     setLastSeeded("");
     onClearMessageHandled?.();
   }, [clearMessage, onClearMessageHandled]);

@@ -165,6 +165,8 @@ function RepoWorkspace({
       const draft = getCommitDraft(repoPath);
       if (draft !== undefined && draft.message === message) {
         onCommitDraftChange(repoPath, { ...draft, message: "", lastSeeded: "" });
+      } else if (draft !== undefined && draft.stashed === message) {
+        onCommitDraftChange(repoPath, { ...draft, stashed: "" });
       }
     },
     [getCommitDraft, onCommitDraftChange, repoPath],
@@ -183,7 +185,12 @@ function RepoWorkspace({
   const retryWithCurrentMessage = useCallback(
     async (retry: HookRetry) => {
       if (retry.kind === "push") return retryWithoutHooks(retry);
-      const current = getCommitDraft(repoPath)?.message ?? "";
+      // In amend mode the box shows HEAD's message and the commit draft is stashed: a commit
+      // retry takes the stashed draft, an amend retry only the amend-mode text.
+      const draft = getCommitDraft(repoPath);
+      const amending = draft?.stashed != null;
+      const current =
+        retry.kind === "commit" ? ((amending ? draft?.stashed : draft?.message) ?? "") : amending ? (draft?.message ?? "") : "";
       const message = current.trim() === "" ? retry.message : current;
       const ok = await retryWithoutHooks({ ...retry, message });
       if (ok && retry.kind === "commit") clearCommittedDraft(message);

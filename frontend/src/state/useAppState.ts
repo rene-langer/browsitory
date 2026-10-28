@@ -118,9 +118,10 @@ export interface AppState {
   hookRun: { operationId: string; hook: string } | null;
   // The last failed gate hook: its output, and the request to retry without hooks.
   hookFailure: HookFailure | null;
-  // One-shot request for CommitBox to clear its message (a commit retried from the hook dialog
-  // landed; CommitBox did not submit it, so it cannot know).
-  clearCommitMessage: boolean;
+  // One-shot request for CommitBox to clear its message, carrying the committed text (a commit
+  // retried from the hook dialog landed; CommitBox did not submit it, so it cannot know).
+  // CommitBox clears only if the box still holds exactly that text.
+  clearCommitMessage: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
@@ -330,7 +331,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     skipHooks: false,
     hookRun: null,
     hookFailure: null,
-    clearCommitMessage: false,
+    clearCommitMessage: null,
     rebaseProgress: null,
     rebaseOnto: null,
     rebasePreset: null,
@@ -609,7 +610,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       setState((prev) => ({ ...prev, hookFailure: null, error: null }));
       if (retry.kind === "commit") {
         const ok = await commit(retry.message, true);
-        if (ok) setState((prev) => ({ ...prev, clearCommitMessage: true }));
+        if (ok) setState((prev) => ({ ...prev, clearCommitMessage: retry.message }));
         return ok;
       }
       if (retry.kind === "amend") {

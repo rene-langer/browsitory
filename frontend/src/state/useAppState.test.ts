@@ -4498,9 +4498,9 @@ describe("git hooks", () => {
     expect(commit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "msg", true);
     expect(result.current.state.hookFailure).toBeNull();
     expect(result.current.state.error).toBeNull();
-    expect(result.current.state.clearCommitMessage).toBe(true);
+    expect(result.current.state.clearCommitMessage).toBe("msg");
     act(() => result.current.clearCommitMessageHandled());
-    expect(result.current.state.clearCommitMessage).toBe(false);
+    expect(result.current.state.clearCommitMessage).toBeNull();
   });
 
   it("stores an amend hook failure and retries it as an amend", async () => {
@@ -4518,7 +4518,7 @@ describe("git hooks", () => {
 
     expect(amendCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, "m", true);
     expect(result.current.state.amendMode).toBe(false);
-    expect(result.current.state.clearCommitMessage).toBe(false);
+    expect(result.current.state.clearCommitMessage).toBeNull();
   });
 
   it("skip hooks applies to the next commit only", async () => {

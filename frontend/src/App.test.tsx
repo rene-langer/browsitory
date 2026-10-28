@@ -702,6 +702,42 @@ describe("App", () => {
     await waitFor(() => expect(box).toHaveValue(""));
   });
 
+  it("retries a failed commit with the commit message even after switching to amend mode", async () => {
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "no\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"] }),
+      getCommitMessage: async () => "HEAD's message",
+      commit,
+    });
+    render(<App client={client} />);
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: new work" } });
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+
+    fireEvent.click(screen.getByLabelText("Amend last commit"));
+    await waitFor(() => expect(box).toHaveValue("HEAD's message"));
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Commit without hooks" }));
+
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: new work", true));
+  });
+
   it("publishes the current branch from the sync bar through the Push dialog", async () => {
     const pushBranch = vi.fn(async () => "push-1");
     const client = fakeClient({

@@ -53,7 +53,7 @@ const BASE_STATE: AppState = {
   skipHooks: false,
   hookRun: null,
   hookFailure: null,
-  clearCommitMessage: false,
+  clearCommitMessage: null,
   undoState: { undo: null, redo: null },
 };
 

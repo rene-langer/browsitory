@@ -53,7 +53,7 @@ export function useHookActions(
   const openHookFailure = useCallback(() => setDialogOpen(true), [setDialogOpen]);
   const closeHookFailure = useCallback(() => setDialogOpen(false), [setDialogOpen]);
   const clearCommitMessageHandled = useCallback(
-    () => setState((prev) => ({ ...prev, clearCommitMessage: false })),
+    () => setState((prev) => ({ ...prev, clearCommitMessage: null })),
     [setState],
   );
   return { setSkipHooks, cancelHookRun, openHookFailure, closeHookFailure, clearCommitMessageHandled };

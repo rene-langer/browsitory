@@ -97,21 +97,36 @@ describe("CommitBox", () => {
     expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
   });
 
-  it("clears the message on a one-shot request", () => {
+  it("clears the message on a one-shot request only if it still holds the committed text", () => {
     const onClearMessageHandled = vi.fn();
     const { rerender } = render(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "kept" } });
+    const box = screen.getByLabelText("Commit message");
+    fireEvent.change(box, { target: { value: "committed, then edited" } });
     rerender(
       <CommitBox
         onCommit={async () => true}
         disabled={false}
         onAbortMerge={() => {}}
-        clearMessage
+        clearMessage="committed"
         onClearMessageHandled={onClearMessageHandled}
       />,
     );
-    expect(screen.getByLabelText("Commit message")).toHaveValue("");
-    expect(onClearMessageHandled).toHaveBeenCalled();
+    expect(box).toHaveValue("committed, then edited");
+    expect(onClearMessageHandled).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(box, { target: { value: "committed" } });
+    rerender(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} clearMessage={null} />);
+    rerender(
+      <CommitBox
+        onCommit={async () => true}
+        disabled={false}
+        onAbortMerge={() => {}}
+        clearMessage="committed"
+        onClearMessageHandled={onClearMessageHandled}
+      />,
+    );
+    expect(box).toHaveValue("");
+    expect(onClearMessageHandled).toHaveBeenCalledTimes(2);
   });
 
   // AUD-2026-09-05-FE-002: the textarea previously relied on `placeholder` alone for its
