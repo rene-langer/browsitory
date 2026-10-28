@@ -184,6 +184,69 @@ fn kill_and_reap(child: &mut Child) -> std::io::Result<ExitStatus> {
     child.wait()
 }
 
+/// On Unix the program leads its own process group, so timeout/cancel can kill the whole tree;
+/// on Windows it gets no console window.
+fn own_group_without_window(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Known limitation: launched from a terminal, a program that reads `/dev/tty` from this
+        // background group is stopped by SIGTTIN until cancel/timeout (a new session would avoid
+        // it but needs `setsid`).
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+/// Writes `stdin` from its own thread so a program that prints a lot before reading stdin cannot
+/// deadlock against us. A program that exits without reading closes its end (EPIPE, ignored);
+/// that is reported through its exit status.
+fn feed_stdin(child: &mut Child, stdin: Option<&[u8]>) {
+    if let Some(input) = stdin {
+        if let Some(mut child_stdin) = child.stdin.take() {
+            let input = input.to_vec();
+            std::thread::spawn(move || {
+                let _ = child_stdin.write_all(&input);
+            });
+        }
+    }
+}
+
+/// Polls `child` for exit, `cancel()` and the deadline. On cancel or timeout the program (and on
+/// Unix its process group) is killed and reaped. Returns the exit status and whether it timed out.
+fn wait_bounded(
+    child: &mut Child,
+    cancel: &dyn Fn() -> bool,
+    timeout: Duration,
+) -> Result<(ExitStatus, bool), RunError> {
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok((status, false)),
+            Ok(None) => {}
+            Err(error) => {
+                let _ = kill_and_reap(child);
+                return Err(RunError::Wait(error));
+            }
+        }
+        if cancel() {
+            let _ = kill_and_reap(child);
+            return Err(RunError::Cancelled);
+        }
+        if started.elapsed() >= timeout {
+            return kill_and_reap(child)
+                .map(|status| (status, true))
+                .map_err(RunError::Wait);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
 pub(crate) fn run_captured(
     mut command: Command,
     stdin: Option<&[u8]>,
@@ -201,20 +264,7 @@ pub(crate) fn run_captured(
         })
         .stdout(writer)
         .stderr(writer_for_stderr);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // Own group, so timeout/cancel can kill the whole tree. Known limitation: launched from a
-        // terminal, a program that reads `/dev/tty` from this background group is stopped by
-        // SIGTTIN until cancel/timeout (a new session would avoid it but needs `libc`).
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    own_group_without_window(&mut command);
     let spawned = spawn_retrying(&mut command);
     // `command` still owns the pipe's write ends; until they close the reader never sees EOF.
     drop(command);
@@ -241,39 +291,8 @@ pub(crate) fn run_captured(
             let _ = done_tx.send(());
         });
     }
-    if let Some(input) = stdin {
-        if let Some(mut child_stdin) = child.stdin.take() {
-            let input = input.to_vec();
-            // Written from its own thread so a program that prints a lot before reading stdin
-            // cannot deadlock against us. A program that exits without reading closes its end
-            // (EPIPE, ignored); that is reported through its exit status.
-            std::thread::spawn(move || {
-                let _ = child_stdin.write_all(&input);
-            });
-        }
-    }
-
-    let started = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {}
-            Err(error) => {
-                let _ = kill_and_reap(&mut child);
-                return Err(RunError::Wait(error));
-            }
-        }
-        if cancel() {
-            let _ = kill_and_reap(&mut child);
-            return Err(RunError::Cancelled);
-        }
-        if started.elapsed() >= timeout {
-            timed_out = true;
-            break kill_and_reap(&mut child).map_err(RunError::Wait)?;
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    };
+    feed_stdin(&mut child, stdin);
+    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout)?;
     let _ = done_rx.recv_timeout(DRAIN_GRACE);
     let collected = std::mem::replace(
         &mut *buffer.lock().unwrap_or_else(|error| error.into_inner()),
@@ -283,6 +302,119 @@ pub(crate) fn run_captured(
         success: status.success() && !timed_out,
         output: collected.into_text(),
         timed_out,
+    })
+}
+
+/// What `run_captured_split` collected.
+#[derive(Debug)]
+pub(crate) struct SplitCaptured {
+    pub success: bool,
+    pub timed_out: bool,
+    /// The first `stdout_limit` bytes of stdout.
+    pub stdout: Vec<u8>,
+    /// More than `stdout_limit` bytes arrived: `stdout` is incomplete.
+    pub stdout_overflowed: bool,
+    /// The last `stderr_limit` bytes of stderr.
+    pub stderr: String,
+}
+
+/// Like `run_captured`, but with stdout and stderr kept apart, for programs whose stdout is data
+/// (a signature) and whose stderr is diagnostics. Stdout keeps its *head* and reports overflow,
+/// so a caller never mistakes a truncated result for a complete one; stderr keeps its tail.
+pub(crate) fn run_captured_split(
+    mut command: Command,
+    stdin: Option<&[u8]>,
+    cancel: &dyn Fn() -> bool,
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<SplitCaptured, RunError> {
+    command
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    own_group_without_window(&mut command);
+    let mut child = spawn_retrying(&mut command).map_err(RunError::Spawn)?;
+    drop(command);
+
+    // Both pipes drain continuously, so a chatty program never blocks on a full pipe.
+    let (done_tx, done_rx) = mpsc::channel();
+    let head = Arc::new(Mutex::new((Vec::new(), false)));
+    if let Some(mut out) = child.stdout.take() {
+        let head = Arc::clone(&head);
+        let done_tx = done_tx.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match out.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        let mut head = head.lock().unwrap_or_else(|error| error.into_inner());
+                        let (bytes, overflowed) = &mut *head;
+                        let room = stdout_limit.saturating_sub(bytes.len());
+                        bytes.extend_from_slice(&chunk[..read.min(room)]);
+                        if read > room {
+                            *overflowed = true;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
+            }
+            let _ = done_tx.send(());
+        });
+    } else {
+        let _ = done_tx.send(());
+    }
+    let tail = Arc::new(Mutex::new(TailBuffer::new(stderr_limit)));
+    if let Some(mut err) = child.stderr.take() {
+        let tail = Arc::clone(&tail);
+        let done_tx = done_tx.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match err.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(read) => tail
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .push(&chunk[..read]),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
+            }
+            let _ = done_tx.send(());
+        });
+    } else {
+        let _ = done_tx.send(());
+    }
+    drop(done_tx);
+    feed_stdin(&mut child, stdin);
+    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout)?;
+    // Both drains, sharing one grace period.
+    let deadline = Instant::now() + DRAIN_GRACE;
+    for _ in 0..2 {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if done_rx.recv_timeout(left).is_err() {
+            break;
+        }
+    }
+    let (stdout, stdout_overflowed) =
+        std::mem::take(&mut *head.lock().unwrap_or_else(|error| error.into_inner()));
+    let stderr = std::mem::replace(
+        &mut *tail.lock().unwrap_or_else(|error| error.into_inner()),
+        TailBuffer::new(0),
+    );
+    Ok(SplitCaptured {
+        success: status.success() && !timed_out,
+        timed_out,
+        stdout,
+        stdout_overflowed,
+        stderr: stderr.into_text(),
     })
 }
 
@@ -996,6 +1128,106 @@ mod tests {
             None,
             &|| false,
             Duration::from_secs(1),
+            1024,
+        );
+        assert!(
+            matches!(result, Err(RunError::Spawn(ref error)) if error.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_keeps_stdout_and_stderr_apart() {
+        let captured = run_captured_split(
+            sh("printf out; printf err >&2"),
+            None,
+            &|| false,
+            Duration::from_secs(30),
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.success);
+        assert_eq!(captured.stdout, b"out");
+        assert_eq!(captured.stderr, "err");
+        assert!(!captured.stdout_overflowed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_feeds_stdin() {
+        let captured = run_captured_split(
+            sh("cat"),
+            Some(b"payload"),
+            &|| false,
+            Duration::from_secs(30),
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(captured.stdout, b"payload");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_times_out_and_kills_the_group() {
+        let started = Instant::now();
+        let captured = run_captured_split(
+            sh("sleep 30 & echo started; sleep 30"),
+            None,
+            &|| false,
+            Duration::from_millis(300),
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        assert!(!captured.success);
+        assert_eq!(captured.stdout, b"started\n");
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_cancel_stops_the_program() {
+        let started = Instant::now();
+        let result = run_captured_split(
+            sh("sleep 30"),
+            None,
+            &|| started.elapsed() > Duration::from_millis(100),
+            Duration::from_secs(60),
+            1024,
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_reports_stdout_overflow_and_keeps_the_head() {
+        let captured = run_captured_split(
+            sh("head -c 2000 /dev/zero; echo tail >&2"),
+            None,
+            &|| false,
+            Duration::from_secs(30),
+            1000,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.stdout_overflowed);
+        assert_eq!(captured.stdout.len(), 1000);
+        assert_eq!(captured.stderr, "tail\n");
+    }
+
+    #[test]
+    fn split_spawn_failure_is_a_spawn_error() {
+        let result = run_captured_split(
+            Command::new("browsitory-no-such-program"),
+            None,
+            &|| false,
+            Duration::from_secs(1),
+            1024,
             1024,
         );
         assert!(
