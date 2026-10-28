@@ -2,6 +2,40 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Pre-flight notes (T0, recorded during implementation)
+
+User decisions: D1 A, D2 B, D3 A (tree widget is follow-up #143), D4 A, D5 A, D6 A — all as
+recommended, so no "Decisions assumed" variant applies.
+
+- **Branch state:** `feat/keyboard-context-menus` already sat on `origin/main` (`cd68b124`); no
+  checkout or rebase was needed.
+- **Names:** every grep in Step 2 matched the plan (props, `RowContextMenu`, the remote dialog
+  state, `openAddRemoteDraft`, the three inline Menu-key checks, the remotes loop, `COMMAND_GROUPS`).
+- **Baseline:** green (1478 frontend tests, lint clean). The first full run after Task 4 hit the
+  #135 race in `App.test.tsx` "opens the shortcut sheet on ?" (key fired before the active
+  workspace mounted); fixed in its own commit with the #135 pattern.
+
+Deviations from the tasks below (code won where they disagreed):
+
+- **Task 2:** `ContextMenu` also swallows the Menu key and Shift+F10 inside an open menu
+  (`preventDefault` + `stopPropagation`), so the key cannot reach a row or list underneath and
+  open a second menu (DiffPane and ReadOnlyFileSection render their menu inside the row).
+- **Task 3:** `ListRow` only gets the key handler on standalone rows, which already require
+  `onClick`; every `onOpenMenu` caller has one, so "attach when `onClick` *or* `onOpenMenu`" was
+  not needed.
+- **Task 4:** the remote folder header also carries `aria-keyshortcuts`. The folder "…" stays
+  visible while its menu is open (`aria-expanded="true"`).
+- **Task 5:** with focus inside a changed-file row, the Menu key opens *that* row's menu or
+  nothing (no fallback to the selected row's menu).
+- **Task 6:** the dialog-internal tests moved from `BranchTree.test.tsx` into the two new
+  component tests; `BranchTree.test.tsx` keeps one smoke test per dialog plus the controlled
+  tests. A dialog whose remote is gone renders nothing (the state is not cleared by
+  `removeRemote`). A successful rename in Edit re-targets `remoteDialog` to the new name, so the
+  dialog does not vanish while the URLs are saved. Added an `App.test.tsx` test for the palette
+  opening Edit remote with Branches collapsed.
+- **Task 9:** the E2E spec has a third test, Shift+F10 on a remote folder header. Shift+F10 works
+  through WebKitGTK's WebDriver, so no Menu-key fallback was needed.
+
 **Goal:** Every context-menu action is reachable and usable from the keyboard (Menu key / Shift+F10 on every row that has a menu, a complete APG menu pattern in `ContextMenu`, focus returning to the trigger), and the command palette gains "Edit remote", "Manage credentials", "Remove remote" and "Check out tag". Closes issue #44.
 
 **Architecture:** Frontend only. A small `lib/menuKeys.ts` (`isMenuKey`, `menuAnchor`, `rectAnchor`) is shared by every menu trigger. `ContextMenu` captures its trigger on first render and restores focus to it on Escape, Tab and activation, and adds Tab-closes, explicit Enter/Space, typeahead and native-menu suppression. `ListRow` gains `onOpenMenu`, which wires both right-click and the keyboard for standalone rows; `BranchTree` rows and remote folder headers use it. Remote dialogs (edit, credentials, remove) move into app state (`remoteDialog`) and into two extracted components rendered outside the Branches accordion body, so the palette can open them while the section is collapsed.
