@@ -1066,3 +1066,112 @@ fn resolve_whole_file_refuses_a_symlink_conflict() {
         "'link' is a symlink or submodule conflict. Resolve it with git."
     );
 }
+
+#[test]
+fn resolve_whole_file_handles_a_binary_conflict() {
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("img.bin"), b"\0base\0").unwrap();
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    std::fs::write(dir.path().join("img.bin"), b"\0feature\0").unwrap();
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    std::fs::write(dir.path().join("img.bin"), b"\0main\0").unwrap();
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    assert!(
+        repo.index().unwrap().has_conflicts(),
+        "fixture must conflict"
+    );
+
+    git_core::merge::resolve_whole_file(&repo, "img.bin", ConflictSide::Theirs).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("img.bin")).unwrap(),
+        b"\0feature\0"
+    );
+    assert_eq!(staged_blob(&repo, "img.bin").unwrap(), b"\0feature\0");
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn resolve_whole_file_handles_an_add_add_conflict() {
+    for (side, expected) in [
+        (ConflictSide::Ours, "main\n"),
+        (ConflictSide::Theirs, "feature\n"),
+    ] {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "base\n");
+        commit_all(&repo, "base");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "new.txt", "feature\n");
+        commit_all(&repo, "feature adds");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "new.txt", "main\n");
+        commit_all(&repo, "main adds");
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+        assert!(
+            repo.index().unwrap().has_conflicts(),
+            "fixture must conflict"
+        );
+
+        git_core::merge::resolve_whole_file(&repo, "new.txt", side).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("new.txt")).unwrap(),
+            expected
+        );
+        assert!(!repo.index().unwrap().has_conflicts());
+    }
+}
+
+/// `sub/shared.txt` conflicts; then `sub` is replaced by a symlink to a folder outside the
+/// repository. No resolution may write or delete through it.
+#[cfg(unix)]
+#[test]
+fn conflict_resolution_never_writes_through_a_symlinked_folder() {
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "sub/shared.txt", "base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "sub/shared.txt", "feature\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "sub/shared.txt", "main\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(outside.path().join("shared.txt"), "outside\n").unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("sub")).unwrap();
+
+    for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+        assert!(matches!(
+            git_core::merge::resolve_whole_file(&repo, "sub/shared.txt", side),
+            Err(MergeError::SymlinkedFolder(_))
+        ));
+    }
+    assert!(matches!(
+        git_core::merge::resolve_conflict(&repo, "sub/shared.txt", "x\n"),
+        Err(MergeError::SymlinkedFolder(_))
+    ));
+    assert!(matches!(
+        git_core::merge::mark_resolved(&repo, "sub/shared.txt", true),
+        Err(MergeError::SymlinkedFolder(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("shared.txt")).unwrap(),
+        "outside\n"
+    );
+    assert!(repo.index().unwrap().has_conflicts());
+}

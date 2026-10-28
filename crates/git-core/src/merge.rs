@@ -24,6 +24,19 @@ pub enum MergeError {
     NotFastForward(String),
     #[error("'{0}' is a symlink or submodule conflict. Resolve it with git.")]
     UnsupportedEntry(String),
+    #[error("'{0}' is inside a symlinked folder; resolve it with git.")]
+    SymlinkedFolder(String),
+}
+
+/// Refuses a path whose existing parent folders include a symlink, so a resolution can never
+/// write or delete outside the work tree through one.
+fn ensure_inside_workdir(workdir: &Path, path: &str) -> Result<(), MergeError> {
+    crate::stage::ensure_no_symlinked_parent(workdir, Path::new(path)).map_err(
+        |error| match error {
+            crate::stage::StageError::Io(error) => MergeError::Io(error),
+            _ => MergeError::SymlinkedFolder(path.to_string()),
+        },
+    )
 }
 
 /// How "Merge into current branch" may move the branch, like `git merge --ff`, `--no-ff`
@@ -326,6 +339,7 @@ pub fn resolve_conflict(
     find_conflict(repo, path)?;
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     std::fs::write(workdir.join(path), resolved_content)?;
 
     let mut index = repo.index()?;
@@ -366,6 +380,7 @@ pub fn resolve_whole_file(
         return Err(MergeError::UnsupportedEntry(path.to_string()));
     }
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     let chosen = match side {
         ConflictSide::Ours => conflict.our.as_ref(),
         ConflictSide::Theirs => conflict.their.as_ref(),
@@ -422,6 +437,7 @@ pub fn mark_resolved(
     }
     find_conflict(repo, path)?;
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     let full = workdir.join(path);
     let meta = std::fs::symlink_metadata(&full).ok();
     if !force
@@ -557,6 +573,7 @@ pub fn resolve_add_delete_conflict(
         return Err(MergeError::NotAnAddDeleteConflict(path.to_string()));
     }
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     let mut index = repo.index()?;
 
     let entry = match choice {
