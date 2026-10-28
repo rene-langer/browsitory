@@ -488,7 +488,7 @@ commits** or **Revert N commits** (in the right-click menu and the bar under the
 you select them in doesn't matter: cherry-picks apply oldest first, reverts newest first (like
 `git revert A..B`). Each commit keeps its own message and author. A commit whose changes are
 already on the branch is skipped, and the result says so ("Cherry-picked 2 commits, skipped 1
-already applied"). Merge commits have to be picked one at a time, so the actions are disabled
+with no changes"). Reverting a revert is called "Reapply …", as in git. Merge commits have to be picked one at a time, so the actions are disabled
 when the selection holds one.
 
 A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" and the commit area
@@ -498,11 +498,19 @@ resolved step and goes on. If you resolve a step so that nothing is left to comm
 **Use ours (whole file)** on its only change), that step is skipped. A sequence that stops for
 another reason (say an untracked file is in the way) also shows **Continue**, which retries the
 step. The paused sequence is kept on disk, so it is still there after you close and reopen the
-app. While it is paused, other cherry-picks, merges, rebases and amend are unavailable.
+app. While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
+branch switching, pull and stash apply/pop are unavailable.
+
+If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
+**Continue** recognises it when it is exactly that step: one commit on top of where the sequence
+stopped, with the picked commit's author (for a cherry-pick) or git's "This reverts commit …"
+message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
+means HEAD moved, and Continue refuses.
 
 **Abort** puts the branch back where it was before the first commit was applied, keeping
-unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for example by a commit
-or reset in a terminal), Abort only ends the sequence and leaves HEAD alone, and says so.
+unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for example by a commit,
+reset or branch switch in a terminal), Abort only ends the sequence and leaves HEAD and every
+branch alone, and says so.
 Continue refuses in that case. A whole sequence is one **Undo** step; an aborted one leaves
 nothing to undo. Like a single cherry-pick, the steps of a sequence (including the one
 **Continue** commits) run no commit hooks.

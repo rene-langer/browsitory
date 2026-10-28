@@ -62,6 +62,16 @@ top of 4a–4f. Drift found and deviations taken (the code wins where the plan d
   like a merge).
 - **Palette:** while a sequence is stored, "Abort merge" is replaced by "Abort cherry-pick" /
   "Abort revert". Palette Continue/Abort don't toast (as rebase continue doesn't).
+- **Review fixes (PR #132):** `SequenceState` gained `stopped_on_conflict` and `original_ref`
+  (`sequence.json` version 2; version 1 still loads, cautiously). Only a conflict stop accepts a
+  step committed by hand, and only when it is recognisably that step; Abort rewinds only the ref
+  the sequence started on and cleans up a conflict whose `CHERRY_PICK_HEAD` was deleted;
+  Continue/Abort re-read the index; reverting a revert says `Reapply "…"`; conflict resolutions
+  refuse symlinked parent folders (`MergeError::SymlinkedFolder`); the worker gate (now one
+  `gate_during_sequence` before dispatch) also covers commit, reset, checkout, switch, pull,
+  stash apply/pop and reflog restore; the undo label counts applied commits; Continue/Abort are
+  disabled while pending; the toast says "skipped N with no changes" / "Nothing to
+  cherry-pick: …" instead of "already applied".
 - **#108 (rebase lost on restart), reusable pieces:** `SequenceStore` (atomic versioned JSON
   under `<gitdir>/browsitory/`, validate-on-load, log-once) and the "stored state counts as
   in progress / gates the worker / `HeadInfo` field" pattern would carry over to a persisted

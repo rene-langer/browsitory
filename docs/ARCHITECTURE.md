@@ -245,19 +245,25 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
-  aborted. On load it must parse, have the current version, and name commits that exist in the
-  repository; anything else is logged once and treated as absent, never fatal.
+  aborted. On load it must parse, have a known version (2; a version 1 file loads as an error
+  stop with an unknown original ref), and name commits that exist in the repository; anything
+  else is logged once and treated as absent, never fatal.
 - Whether the stored state still matches the repository is checked when it is used, so a stale
   sequence stays visible and abortable: Continue requires git's paused pick (`CHERRY_PICK_HEAD` /
-  `REVERT_HEAD`) to be the sequence's current commit, and HEAD to be where the stop left it (or
-  one commit further, if the user committed the step); otherwise `OperationInProgress` /
-  `HeadMoved`. With git state clean and HEAD unchanged (an error stop, or `git cherry-pick
-  --abort` from a terminal) Continue retries the step. Abort aborts only its own paused step,
-  rewinds only when HEAD is still at the stop point and git has nothing else in progress, and
-  otherwise just forgets the sequence (`rewound: false`).
+  `REVERT_HEAD`) to be the sequence's current commit, and HEAD to be where the stop left it;
+  otherwise `OperationInProgress` / `HeadMoved`. With git state clean and HEAD unchanged (an
+  error stop, or `git cherry-pick --abort` from a terminal) Continue retries the step. Only a
+  conflict stop (`stoppedOnConflict`) accepts HEAD one commit further as the step finished by
+  hand, and only if git's pick state is gone and the commit is recognisably the step (same
+  author name/email/time for a cherry-pick; "This reverts commit <id>" for a revert). The index
+  is re-read before use, so a terminal `git add` is seen. Abort aborts its own paused step (or
+  the step's conflicts if `CHERRY_PICK_HEAD` was deleted), rewinds only when HEAD still names
+  the ref the sequence started on (`originalRef`) and is still at the stop point and git has
+  nothing else in progress, and otherwise just forgets the sequence (`rewound: false`).
 - A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
-  blocks `CherryPick`/`RevertCommit`/`CherryPickMany`/`RevertMany`/`StartMerge`/`StartRebase`/
-  `AmendCommit` in the worker, and is reported as `HeadInfo.sequence`. `AbortMerge` aborts the
+  blocks picks, merge, rebase, commit/amend, reset, checkout, branch switch, pull, stash
+  apply/pop and reflog restore in the worker (`history::gate_during_sequence`), and is reported
+  as `HeadInfo.sequence`. The undo entry is labelled with the number of commits applied. `AbortMerge` aborts the
   whole sequence when one is stored, so a stale frontend can't strand the file. The pending undo
   entry is in memory, so a sequence finished after an app restart is not undoable as one step.
 - Empty steps are skipped (git stops for `--skip`). Steps, including the one Continue commits,

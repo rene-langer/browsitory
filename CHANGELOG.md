@@ -123,8 +123,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   add/delete and binary conflicts, in merges, cherry-picks, reverts, rebases and stash pops.
 - Select several commits in the graph to **Cherry-pick N commits** or **Revert N commits** as one
   operation. A conflict pauses it; the status strip shows "Cherry-picking 2/5" with **Continue**
-  and **Abort**, and it survives an app restart. Commits whose changes are already on the branch
-  are skipped and counted in the result. One undo step covers the whole sequence.
+  and **Abort**, and it survives an app restart. Commits that would change nothing (already on
+  the branch) are skipped and counted in the result. One undo step covers the whole sequence.
+  Reverting a revert is called "Reapply …", as in git.
 - Merge commits can be cherry-picked or reverted: **Cherry-pick…** / **Revert…** asks which
   parent to apply them against.
 - Fixed: a cherry-pick or revert that stopped on a conflict no longer shows a "Cherry-picked" /
