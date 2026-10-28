@@ -53,6 +53,10 @@ describe("Browsitory keyboard context menus", () => {
     await browser.keys(["Shift", "F10"]);
     const menu = await $("[role='menu']");
     await menu.waitForExist({ timeout: 10000 });
+    // Exactly one menu: a native contextmenu that WebKitGTK may fire after the key (on keyup) must
+    // not open a second one. Give it a moment to arrive before counting.
+    await browser.pause(300);
+    expect(await $$("[role='menu']")).toHaveLength(1);
     // Checkout is disabled on the current branch, so Rename is the first focusable item.
     expect(await browser.execute(() => document.activeElement?.textContent)).toBe("Rename");
 
@@ -63,8 +67,6 @@ describe("Browsitory keyboard context menus", () => {
     await browser.keys(["Escape"]);
     await menu.waitForExist({ reverse: true, timeout: 10000 });
     expect(await browser.execute((el) => document.activeElement === (el as Element), row)).toBe(true);
-    // Exactly one menu: a native contextmenu following the key must not have opened a second.
-    expect(await $$("[role='menu']")).toHaveLength(0);
   });
 
   it("opens a remote folder's menu from the keyboard", async () => {
@@ -76,8 +78,9 @@ describe("Browsitory keyboard context menus", () => {
     await browser.keys(["Shift", "F10"]);
     const menu = await $("[role='menu']");
     await menu.waitForExist({ timeout: 10000 });
-    expect(await browser.execute(() => document.activeElement?.getAttribute("role"))).toBe("menuitem");
+    await browser.pause(300);
     expect(await $$("[role='menu']")).toHaveLength(1);
+    expect(await browser.execute(() => document.activeElement?.getAttribute("role"))).toBe("menuitem");
 
     await browser.keys(["Escape"]);
     await menu.waitForExist({ reverse: true, timeout: 10000 });
