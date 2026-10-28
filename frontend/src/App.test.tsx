@@ -525,12 +525,14 @@ describe("App", () => {
       listStashes: async () => [],
     });
 
-    render(<App client={client} />);
+    const { container } = render(<App client={client} />);
     await screen.findByRole("tab", { name: "a" });
+    // The ? listener lives in the active RepoWorkspace, which mounts after the tabs (#135).
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
 
     fireEvent.keyDown(window, { key: "?" });
 
-    expect(screen.getByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
   });
 
   it("does not open the shortcut sheet on ? while typing in a text field", async () => {
