@@ -825,6 +825,17 @@ describe("DiffPane", () => {
       expect(onSequenceContinue).toHaveBeenCalled();
     });
 
+    it("disables the sequence's Continue and Abort while an action is pending", () => {
+      const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence },
+        sequencePending: true,
+      });
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: "Continue revert" })).toBeDisabled();
+      expect(within(dock).getByRole("button", { name: "Abort revert" })).toBeDisabled();
+    });
+
     it("keeps the commit box in the pinned commit-actions group", () => {
       renderUncommitted(fakeClient({}), status);
 

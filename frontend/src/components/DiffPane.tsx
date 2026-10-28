@@ -522,6 +522,7 @@ export function DiffPane({
   onRebaseAbort,
   onSequenceContinue = noop,
   onSequenceAbort = noop,
+  sequencePending = false,
   commits,
   refreshGeneration = 0,
   initialCommitDraft,
@@ -615,6 +616,8 @@ export function DiffPane({
   // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
   onSequenceContinue?: () => void;
   onSequenceAbort?: () => void;
+  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
+  sequencePending?: boolean;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -657,6 +660,7 @@ export function DiffPane({
         onRebaseAbort={onRebaseAbort}
         onSequenceContinue={onSequenceContinue}
         onSequenceAbort={onSequenceAbort}
+        sequencePending={sequencePending}
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         onCommitDraftChange={onCommitDraftChange}
@@ -758,6 +762,7 @@ function UncommittedDiffPane({
   onRebaseAbort,
   onSequenceContinue = noop,
   onSequenceAbort = noop,
+  sequencePending = false,
   refreshGeneration,
   discardRequest: discardRequestProp,
   onDiscardRequestChange,
@@ -826,6 +831,8 @@ function UncommittedDiffPane({
   // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
   onSequenceContinue?: () => void;
   onSequenceAbort?: () => void;
+  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
+  sequencePending?: boolean;
 }) {
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
@@ -1179,10 +1186,11 @@ function UncommittedDiffPane({
           <RebaseProgressPanel
             currentStep={headInfo.sequence.currentStep}
             totalSteps={headInfo.sequence.totalSteps}
-            disabled={conflictCount > 0}
+            disabled={sequencePending || conflictCount > 0}
             disabledReason={conflictReason(conflictCount)}
             onContinue={onSequenceContinue}
             onAbort={onSequenceAbort}
+            abortDisabled={sequencePending}
             title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
             continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
             abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}

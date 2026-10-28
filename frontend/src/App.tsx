@@ -500,6 +500,7 @@ function RepoWorkspace({
         operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
         sequence={appState.state.headInfo.sequence}
+        pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={abortMergeOrSequence}
         onAbortRebase={appState.abortRebase}
@@ -1005,6 +1006,7 @@ function RepoWorkspace({
                   onAbortMerge={abortMergeOrSequence}
                   onSequenceContinue={continueSequence}
                   onSequenceAbort={abortSequence}
+                  sequencePending={appState.state.pending}
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}

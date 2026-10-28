@@ -966,7 +966,7 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Revert 2 commits" }));
 
       await waitFor(() => expect(revertMany).toHaveBeenCalledWith("/repos/a", ["c1", "c2"]));
-      expect(await screen.findByText("Reverted 1 commit, skipped 1 already applied")).toBeInTheDocument();
+      expect(await screen.findByText("Reverted 1 commit, skipped 1 with no changes")).toBeInTheDocument();
     });
   });
 

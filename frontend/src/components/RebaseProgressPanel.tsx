@@ -12,6 +12,7 @@ export function RebaseProgressPanel({
   title = "Rebase in progress",
   continueLabel = "Continue rebase",
   abortLabel = "Abort rebase",
+  abortDisabled = false,
 }: {
   currentStep: number;
   totalSteps: number;
@@ -24,6 +25,7 @@ export function RebaseProgressPanel({
   title?: string;
   continueLabel?: string;
   abortLabel?: string;
+  abortDisabled?: boolean;
 }) {
   return (
     <Panel title={title}>
@@ -43,7 +45,9 @@ export function RebaseProgressPanel({
         >
           {continueLabel}
         </button>
-        <button onClick={onAbort}>{abortLabel}</button>
+        <button onClick={onAbort} disabled={abortDisabled}>
+          {abortLabel}
+        </button>
       </Toolbar>
     </Panel>
   );

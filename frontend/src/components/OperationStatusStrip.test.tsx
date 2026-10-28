@@ -110,4 +110,23 @@ describe("OperationStatusStrip", () => {
     expect(onContinueSequence).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Abort revert" })).toBeInTheDocument();
   });
+
+  it("disables sequence Continue and Abort while an action is pending", () => {
+    render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={null}
+        sequence={{ kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c" }}
+        conflictCount={0}
+        pending
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueSequence={noop}
+        onAbortSequence={noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toBeDisabled();
+  });
 });

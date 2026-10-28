@@ -20,10 +20,13 @@ describe("operationStatus", () => {
     expect(sequenceToast("CherryPick", { kind: "Completed", applied: 3, skipped: [] })).toBe("Cherry-picked 3 commits");
     expect(sequenceToast("Revert", { kind: "Completed", applied: 1, skipped: [] })).toBe("Reverted 1 commit");
     expect(sequenceToast("CherryPick", { kind: "Completed", applied: 2, skipped: ["x"] })).toBe(
-      "Cherry-picked 2 commits, skipped 1 already applied",
+      "Cherry-picked 2 commits, skipped 1 with no changes",
     );
     expect(sequenceToast("Revert", { kind: "Completed", applied: 0, skipped: ["x", "y"] })).toBe(
-      "Reverted 0 commits, skipped 2 already applied",
+      "Nothing to revert: 2 commits had no changes",
+    );
+    expect(sequenceToast("CherryPick", { kind: "Completed", applied: 0, skipped: ["x"] })).toBe(
+      "Nothing to cherry-pick: 1 commit had no changes",
     );
     expect(
       sequenceToast("CherryPick", {

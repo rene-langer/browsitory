@@ -26,12 +26,20 @@ export function pickToast(kind: SequenceKind, outcome: PickOutcome): string | nu
   return outcome.kind === "Committed" ? pastTense(kind) : null;
 }
 
-/** Success toast for a finished sequence; `null` while it is paused on a conflict. */
+/**
+ * Result toast for a finished sequence; `null` while it is paused on a conflict. Skipped steps
+ * came out empty, either because the branch already had their changes or because a conflict
+ * was resolved to nothing, so they are "with no changes", not "already applied".
+ */
 export function sequenceToast(kind: SequenceKind, outcome: SequenceOutcome): string | null {
   if (outcome.kind !== "Completed") return null;
-  const commits = `${outcome.applied} ${outcome.applied === 1 ? "commit" : "commits"}`;
-  const skipped = outcome.skipped.length > 0 ? `, skipped ${outcome.skipped.length} already applied` : "";
-  return `${pastTense(kind)} ${commits}${skipped}`;
+  const count = (n: number) => `${n} ${n === 1 ? "commit" : "commits"}`;
+  const skipped = outcome.skipped.length;
+  if (outcome.applied === 0) {
+    return `Nothing to ${sequenceNoun(kind)}: ${count(skipped)} had no changes`;
+  }
+  const suffix = skipped > 0 ? `, skipped ${skipped} with no changes` : "";
+  return `${pastTense(kind)} ${count(outcome.applied)}${suffix}`;
 }
 
 export function abortToast(kind: SequenceKind, abort: SequenceAbort): string {

@@ -14,6 +14,7 @@ export function OperationStatusStrip({
   rebaseProgress,
   sequence = null,
   conflictCount,
+  pending = false,
   onAbortMerge,
   onAbortRebase,
   onContinueSequence,
@@ -24,6 +25,8 @@ export function OperationStatusStrip({
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   sequence?: SequenceProgress | null;
   conflictCount: number;
+  /** An action is running: Continue/Abort are disabled so a second click can't double-submit. */
+  pending?: boolean;
   onAbortMerge: () => void;
   onAbortRebase: () => void;
   onContinueSequence?: () => void;
@@ -36,10 +39,15 @@ export function OperationStatusStrip({
         <strong>{sequenceLabel(sequence)}</strong>
         <span>{reason ?? "No conflicts remaining"}</span>
         <span className={styles.spacer} />
-        <button type="button" disabled={conflictCount > 0} title={reason} onClick={onContinueSequence}>
+        <button
+          type="button"
+          disabled={pending || conflictCount > 0}
+          title={reason}
+          onClick={onContinueSequence}
+        >
           Continue
         </button>
-        <button type="button" onClick={onAbortSequence}>
+        <button type="button" disabled={pending} onClick={onAbortSequence}>
           Abort {sequenceNoun(sequence.kind)}
         </button>
       </div>
