@@ -4,6 +4,11 @@ import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import { toCloneError } from "./RepoClient";
 import type {
+  AmendOptions,
+  CommitMessageSettings,
+  FileSides,
+  SignatureInput,
+  Trailer,
   DiffSource,
   ExternalToolSettings,
   GitTools,
@@ -178,9 +183,9 @@ export const tauriRepoClient: RepoClient = {
   ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => loggedInvoke<DiffSettings>("get_diff_settings"),
   setDiffSettings: (settings: DiffSettings) => loggedInvoke("set_diff_settings", { settings }),
-  commit: async (repoPath: string, message: string, noVerify: boolean) => {
+  commit: async (repoPath: string, message: string, noVerify: boolean, trailers: Trailer[] = []) => {
     await hookListenersReady;
-    return loggedInvoke<CommitOutcome>("commit", { repoPath, message, noVerify });
+    return loggedInvoke<CommitOutcome>("commit", { repoPath, message, noVerify, trailers });
   },
   listBranches: (repoPath: string) => loggedInvoke<BranchInfo[]>("list_branches", { repoPath }),
   createBranch: (repoPath: string, name: string, startPoint: string) =>
@@ -328,10 +333,22 @@ export const tauriRepoClient: RepoClient = {
   abortMerge: (repoPath: string) => loggedInvoke("abort_merge", { repoPath }),
   getMergeMessage: (repoPath: string) => loggedInvoke<string | null>("get_merge_message", { repoPath }),
   getHeadInfo: (repoPath: string) => loggedInvoke<HeadInfo>("get_head_info", { repoPath }),
-  amendCommit: async (repoPath: string, message: string, noVerify: boolean) => {
+  amendCommit: async (repoPath: string, message: string, noVerify: boolean, options?: AmendOptions) => {
     await hookListenersReady;
-    return loggedInvoke<CommitOutcome>("amend_commit", { repoPath, message, noVerify });
+    return loggedInvoke<CommitOutcome>("amend_commit", {
+      repoPath,
+      message,
+      noVerify,
+      author: options?.author ?? null,
+      trailers: options?.trailers ?? [],
+    });
   },
+  getFileSides: (repoPath: string, path: string, source: DiffSource) =>
+    loggedInvoke<FileSides>("get_file_sides", { repoPath, path, source }),
+  listRecentAuthors: (repoPath: string) => loggedInvoke<SignatureInput[]>("list_recent_authors", { repoPath }),
+  getCommitMessageSettings: () => loggedInvoke<CommitMessageSettings>("get_commit_message_settings"),
+  setCommitMessageSettings: (settings: CommitMessageSettings) =>
+    loggedInvoke("set_commit_message_settings", { settings }),
   getUndoState: (repoPath: string) => loggedInvoke<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => loggedInvoke<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => loggedInvoke<UndoOutcome>("redo_last", { repoPath }),

@@ -125,6 +125,12 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.continueSequence("/r"), "continue_sequence", { repoPath: "/r" }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r" }, { rewound: false }],
       [() => vscodeRepoClient.resolveWholeFile("/r", "a.txt", "Theirs"), "resolve_whole_file", { repoPath: "/r", path: "a.txt", side: "Theirs" }, null],
+      [() => vscodeRepoClient.getFileSides("/r", "a.png", { kind: "Commit", commitId: "c", oldPath: "b.png" }), "get_file_sides", { repoPath: "/r", path: "a.png", source: { kind: "Commit", commitId: "c", oldPath: "b.png" } }, { old: { kind: "Missing" }, new: { kind: "Missing" } }],
+      [() => vscodeRepoClient.listRecentAuthors("/r"), "list_recent_authors", { repoPath: "/r" }, [{ name: "Ada", email: "ada@x.org" }]],
+      [() => vscodeRepoClient.getCommitMessageSettings(), "get_commit_message_settings", {}, { summaryLimit: 50, bodyRuler: 72, showRuler: true }],
+      [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
+      [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
+      [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }],
       [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true } }, null],
     ] as const;
@@ -459,7 +465,7 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "commit",
-      params: { repoPath: "/repo", message: "message", noVerify: true },
+      params: { repoPath: "/repo", message: "message", noVerify: true, trailers: [] },
     });
     respond(1, { kind: "Committed", commitId: "abc123" });
     await expect(promise).resolves.toEqual({ kind: "Committed", commitId: "abc123" });
@@ -1187,7 +1193,7 @@ describe("vscodeRepoClient", () => {
     respond(1, null);
     await p1;
     const p2 = vscodeRepoClient.amendCommit("/repo", "msg", false);
-    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, method: "amend_commit", params: { repoPath: "/repo", message: "msg", noVerify: false } });
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, method: "amend_commit", params: { repoPath: "/repo", message: "msg", noVerify: false, author: null, trailers: [] } });
     respond(2, null);
     await p2;
     const p3 = vscodeRepoClient.cherryPick("/repo", "abc");

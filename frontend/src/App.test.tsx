@@ -154,6 +154,10 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
+    getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
+    listRecentAuthors: async () => [],
+    getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
+    setCommitMessageSettings: async () => {},
     logFrontendError: unused,
     ...overrides,
   };

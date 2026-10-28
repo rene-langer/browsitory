@@ -292,7 +292,36 @@ describe("tauriRepoClient transfer progress subscription", () => {
       hook: "pre-commit",
       output: "no\n",
     });
-    expect(invoke).toHaveBeenCalledWith("commit", { repoPath: TEST_REPO_PATH, message: "msg", noVerify: true });
+    expect(invoke).toHaveBeenCalledWith("commit", { repoPath: TEST_REPO_PATH, message: "msg", noVerify: true, trailers: [] });
+  });
+
+  it("passes commit trailers and amend options through, with explicit defaults", async () => {
+    vi.mocked(invoke).mockResolvedValue({ kind: "Committed", commitId: "c" });
+    const trailers = [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }];
+    await tauriRepoClient.commit("/r", "m", false, trailers);
+    expect(invoke).toHaveBeenLastCalledWith("commit", { repoPath: "/r", message: "m", noVerify: false, trailers });
+    await tauriRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers });
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", {
+      repoPath: "/r",
+      message: "m",
+      noVerify: true,
+      author: { name: "Ada", email: "ada@x.org" },
+      trailers,
+    });
+  });
+
+  it("invokes the file sides, recent authors and commit message settings commands", async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await tauriRepoClient.getFileSides("/r", "a.png", { kind: "Unstaged" });
+    expect(invoke).toHaveBeenLastCalledWith("get_file_sides", { repoPath: "/r", path: "a.png", source: { kind: "Unstaged" } });
+    await tauriRepoClient.listRecentAuthors("/r");
+    expect(invoke).toHaveBeenLastCalledWith("list_recent_authors", { repoPath: "/r" });
+    await tauriRepoClient.getCommitMessageSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_commit_message_settings", undefined);
+    await tauriRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false });
+    expect(invoke).toHaveBeenLastCalledWith("set_commit_message_settings", {
+      settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false },
+    });
   });
 
   it("forwards hook-progress events and unregisters", async () => {
@@ -439,7 +468,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
     await tauriRepoClient.checkoutCommit("/repo", "abc");
     expect(invoke).toHaveBeenLastCalledWith("checkout_commit", { repoPath: "/repo", commitId: "abc" });
     await tauriRepoClient.amendCommit("/repo", "msg", false);
-    expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg", noVerify: false });
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", { repoPath: "/repo", message: "msg", noVerify: false, author: null, trailers: [] });
     await tauriRepoClient.getCommitSignature("/repo", "abc");
     expect(invoke).toHaveBeenLastCalledWith("get_commit_signature", { repoPath: "/repo", commitId: "abc" });
     await tauriRepoClient.getUndoState("/repo");
