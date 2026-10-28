@@ -304,10 +304,21 @@ pub fn compare_working_tree(
     let mut git_opts = literal_path_options(path, old_path, opts);
     include_untracked_content(&mut git_opts);
     let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
+    let conflicted = diff
+        .deltas()
+        .any(|delta| delta.status() == git2::Delta::Conflicted && delta_is_one_of(&delta, &wanted));
+    if conflicted {
+        // The index holds conflict stages, so libgit2 reports the path without a patch (#117).
+        // Compare the commit with the working tree file itself, as `git diff <commit> -- path`
+        // does (filters still apply; a symlink is diffed as a link, never followed).
+        let mut git_opts = literal_path_options(path, old_path, opts);
+        include_untracked_content(&mut git_opts);
+        diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut git_opts))?;
+    }
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
     hunks_from_diff(&diff, &wanted)
 }
 

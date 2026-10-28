@@ -448,3 +448,61 @@ fn working_tree_compare_of_a_file_that_became_a_folder_shows_only_that_file() {
         vec![(DiffLineOrigin::Remove, "file d".to_string())]
     );
 }
+
+/// A merge stopped on a `c.txt` conflict; returns the base commit both branches started from.
+fn conflicted_merge(dir: &std::path::Path, repo: &git2::Repository) -> String {
+    write_file(dir, "c.txt", "one\ntwo\nthree\n");
+    commit_all(repo, "base");
+    let base = repo.head().unwrap().target().unwrap().to_string();
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(repo, "other", "HEAD").unwrap();
+    write_file(dir, "c.txt", "one\nother\nthree\n");
+    commit_all(repo, "other");
+    git_core::branch::switch_branch(repo, &main).unwrap();
+    write_file(dir, "c.txt", "one\nmain\nthree\n");
+    commit_all(repo, "main");
+    let outcome =
+        git_core::merge::start_merge(repo, "other", git_core::merge::MergeOptions::default())
+            .unwrap();
+    assert!(matches!(
+        outcome,
+        git_core::merge::MergeOutcome::Conflicted { .. }
+    ));
+    base
+}
+
+#[test]
+fn a_conflicted_file_compares_against_its_working_tree_content() {
+    let (dir, repo) = init_repo();
+    let base = conflicted_merge(dir.path(), &repo);
+
+    let hunks = compare_working_tree(&repo, &base, "c.txt", None, &DiffOptions::default()).unwrap();
+
+    assert!(!hunks.is_empty());
+    assert!(
+        edits(&hunks)
+            .iter()
+            .any(|(origin, line)| *origin == DiffLineOrigin::Add && line.starts_with("<<<<<<<")),
+        "{hunks:?}"
+    );
+    assert!(compare_working_tree_files(&repo, &base)
+        .unwrap()
+        .iter()
+        .any(|file| file.path == "c.txt"));
+}
+
+#[test]
+#[cfg(unix)]
+fn a_conflicted_path_replaced_by_a_symlink_is_not_read_through() {
+    let out = common::outside_dir();
+    let (dir, repo) = init_repo();
+    let base = conflicted_merge(dir.path(), &repo);
+    common::replace_with_link(dir.path(), "c.txt", &out.path().join("target.txt"));
+
+    let hunks = compare_working_tree(&repo, &base, "c.txt", None, &DiffOptions::default()).unwrap();
+
+    assert!(
+        !edits(&hunks).iter().any(|(_, line)| line == "OUTSIDE"),
+        "{hunks:?}"
+    );
+}
