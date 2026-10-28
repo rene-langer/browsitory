@@ -39,11 +39,13 @@ pub use forge::{
     save_forge_token,
 };
 pub use history::{
-    amend_commit, checkout_commit, cherry_pick, get_head_info, reset_to_commit, revert_commit,
+    abort_sequence, amend_commit, checkout_commit, cherry_pick, cherry_pick_many,
+    continue_sequence, get_head_info, reset_to_commit, revert_commit, revert_many,
 };
 pub use merge::{
     abort_merge, get_conflict_hunks, get_merge_message, get_merge_options, mark_resolved,
-    resolve_add_delete_conflict, resolve_conflict, set_merge_options, start_merge,
+    resolve_add_delete_conflict, resolve_conflict, resolve_whole_file, set_merge_options,
+    start_merge,
 };
 pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
@@ -611,6 +613,7 @@ pub struct HeadInfoDto {
     pub operation: Option<&'static str>,
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
+    pub sequence: Option<SequenceProgressDto>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -627,6 +630,85 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             }),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
+            sequence: info.sequence.map(SequenceProgressDto::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SequenceProgressDto {
+    pub kind: &'static str,
+    pub current_step: usize,
+    pub total_steps: usize,
+    pub current_commit: String,
+}
+
+impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
+    fn from(progress: git_core::pick::SequenceProgress) -> Self {
+        Self {
+            kind: match progress.kind {
+                git_core::pick::SequenceKind::CherryPick => "CherryPick",
+                git_core::pick::SequenceKind::Revert => "Revert",
+            },
+            current_step: progress.current_step,
+            total_steps: progress.total_steps,
+            current_commit: progress.current_commit,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum SequenceOutcomeDto {
+    Completed {
+        applied: usize,
+        skipped: Vec<String>,
+    },
+    Conflicted {
+        files: Vec<String>,
+        progress: SequenceProgressDto,
+    },
+}
+
+impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
+    fn from(outcome: git_core::pick::SequenceOutcome) -> Self {
+        match outcome {
+            git_core::pick::SequenceOutcome::Completed { applied, skipped } => {
+                Self::Completed { applied, skipped }
+            }
+            git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
+                files,
+                progress: progress.into(),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct SequenceAbortDto {
+    pub rewound: bool,
+}
+
+impl From<git_core::pick::SequenceAbort> for SequenceAbortDto {
+    fn from(abort: git_core::pick::SequenceAbort) -> Self {
+        Self {
+            rewound: abort.rewound,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub enum ConflictSideDto {
+    Ours,
+    Theirs,
+}
+
+impl From<ConflictSideDto> for git_core::merge::ConflictSide {
+    fn from(side: ConflictSideDto) -> Self {
+        match side {
+            ConflictSideDto::Ours => Self::Ours,
+            ConflictSideDto::Theirs => Self::Theirs,
         }
     }
 }
@@ -2407,10 +2489,11 @@ mod tests {
             operation: Some(git_core::repo::OperationKind::CherryPick),
             squash_message: None,
             commit_hooks: vec!["pre-commit".into()],
+            sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"]})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
@@ -2419,10 +2502,90 @@ mod tests {
             operation: None,
             squash_message: Some("Squashed commit of the following:\n".into()),
             commit_hooks: vec![],
+            sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
             serde_json::json!("Squashed commit of the following:\n")
+        );
+    }
+
+    #[test]
+    fn sequence_outcome_and_progress_dtos_serialize_tagged_camel_case() {
+        use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
+        let progress = SequenceProgress {
+            kind: SequenceKind::CherryPick,
+            current_step: 2,
+            total_steps: 5,
+            current_commit: "abc".into(),
+        };
+        let conflicted = serde_json::to_value(super::SequenceOutcomeDto::from(
+            SequenceOutcome::Conflicted {
+                files: vec!["a.txt".into()],
+                progress: progress.clone(),
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            conflicted,
+            serde_json::json!({
+                "kind": "Conflicted",
+                "files": ["a.txt"],
+                "progress": { "kind": "CherryPick", "currentStep": 2, "totalSteps": 5, "currentCommit": "abc" }
+            })
+        );
+        let completed = serde_json::to_value(super::SequenceOutcomeDto::from(
+            SequenceOutcome::Completed {
+                applied: 2,
+                skipped: vec!["s".into()],
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            completed,
+            serde_json::json!({ "kind": "Completed", "applied": 2, "skipped": ["s"] })
+        );
+
+        let head = |sequence| {
+            serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
+                head_id: None,
+                detached_at: None,
+                head_pushed: false,
+                operation: None,
+                squash_message: None,
+                commit_hooks: vec![],
+                sequence,
+            }))
+            .unwrap()
+        };
+        let reverting = head(Some(SequenceProgress {
+            kind: SequenceKind::Revert,
+            ..progress
+        }));
+        assert_eq!(reverting["sequence"]["kind"], "Revert");
+        assert_eq!(reverting["sequence"]["currentStep"], 2);
+        let none = head(None);
+        assert!(none.as_object().unwrap().contains_key("sequence"));
+        assert_eq!(none["sequence"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn sequence_abort_dto_and_conflict_side_input() {
+        assert_eq!(
+            serde_json::to_value(super::SequenceAbortDto::from(
+                git_core::pick::SequenceAbort { rewound: false }
+            ))
+            .unwrap(),
+            serde_json::json!({ "rewound": false })
+        );
+        let side: super::ConflictSideDto =
+            serde_json::from_value(serde_json::json!("Theirs")).unwrap();
+        assert_eq!(
+            git_core::merge::ConflictSide::from(side),
+            git_core::merge::ConflictSide::Theirs
+        );
+        assert!(
+            serde_json::from_value::<super::ConflictSideDto>(serde_json::json!("Base")).is_err()
         );
     }
 

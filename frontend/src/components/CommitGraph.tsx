@@ -18,6 +18,7 @@ import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ResetDialog } from "./ResetDialog";
+import { ParentPickerDialog } from "./ParentPickerDialog";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
@@ -39,6 +40,8 @@ export function CommitGraph({
   currentBranch,
   onCherryPick,
   onRevert,
+  onCherryPickMany,
+  onRevertMany,
   onCheckoutCommit,
   onResetToCommit,
   onEditHeadMessage,
@@ -69,8 +72,13 @@ export function CommitGraph({
   headInfo: HeadInfo;
   // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
   currentBranch: string | null;
-  onCherryPick: (commitId: string) => void;
-  onRevert: (commitId: string) => void;
+  // `mainline` is the 1-based parent a merge commit is applied against (from the parent
+  // picker), `null` for any other commit.
+  onCherryPick: (commitId: string, mainline: number | null) => void;
+  onRevert: (commitId: string, mainline: number | null) => void;
+  /** Multi-selection "Cherry-pick N commits" / "Revert N commits"; ids oldest-first. */
+  onCherryPickMany?: (commitIdsOldestFirst: string[]) => void;
+  onRevertMany?: (commitIdsOldestFirst: string[]) => void;
   onCheckoutCommit: (commitId: string) => void;
   onResetToCommit: (commitId: string, mode: ResetMode) => void;
   onEditHeadMessage: () => void;
@@ -104,6 +112,9 @@ export function CommitGraph({
     y: number;
   } | null>(null);
   const [resetTarget, setResetTarget] = useState<GraphCommit | null>(null);
+  const [parentPicker, setParentPicker] = useState<{ action: "Cherry-pick" | "Revert"; commit: GraphCommit } | null>(
+    null,
+  );
   const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
   const [tagToDelete, setTagToDelete] = useState<string | null>(null);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
@@ -150,8 +161,17 @@ export function CommitGraph({
     const items: ContextMenuItem[] = [
       { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) },
       { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending },
-      { label: "Cherry-pick", onSelect: () => onCherryPick(commitId), disabled: pending || isHead || isMerge },
-      { label: "Revert", onSelect: () => onRevert(commitId), disabled: pending || isMerge },
+      // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
+      isMerge && commit !== undefined
+        ? {
+            label: "Cherry-pick…",
+            onSelect: () => setParentPicker({ action: "Cherry-pick", commit }),
+            disabled: pending || isHead,
+          }
+        : { label: "Cherry-pick", onSelect: () => onCherryPick(commitId, null), disabled: pending || isHead },
+      isMerge && commit !== undefined
+        ? { label: "Revert…", onSelect: () => setParentPicker({ action: "Revert", commit }), disabled: pending }
+        : { label: "Revert", onSelect: () => onRevert(commitId, null), disabled: pending },
       { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
       {
         label: `Reset ${currentBranch ?? "HEAD"} to here…`,
@@ -341,7 +361,40 @@ export function CommitGraph({
     const [fromId, toId] = firstIndex > secondIndex ? [first, second] : [second, first];
     return { label: "Compare these commits", onSelect: () => onCompareCommits(fromId, toId) };
   })();
-  const multiSelectItems: ContextMenuItem[] = compareItem === null ? rebaseItems : [...rebaseItems, compareItem];
+  // Several commits as one cherry-pick/revert sequence. Unlike the rebase items they don't need
+  // a rebasable plan (root commits are fine), only no merge commit: one mainline can't sensibly
+  // apply to several merges.
+  const pickItems: ContextMenuItem[] = (() => {
+    if (!multiSelected || (onCherryPickMany === undefined && onRevertMany === undefined)) return [];
+    const count = effectiveSelection.ids.size;
+    // Graph order is newest first; the backend wants oldest first.
+    const selected = commits.filter((commit) => effectiveSelection.ids.has(commit.id)).reverse();
+    const idsOldestFirst = selected.map((commit) => commit.id);
+    const hasMerge = selected.some((commit) => commit.parentIds.length > 1);
+    const items: ContextMenuItem[] = [];
+    if (onCherryPickMany !== undefined) {
+      items.push({
+        label: `Cherry-pick ${count} commits`,
+        onSelect: () => onCherryPickMany(idsOldestFirst),
+        disabled: pending || hasMerge,
+        title: hasMerge ? "Cherry-pick merge commits one at a time." : undefined,
+      });
+    }
+    if (onRevertMany !== undefined) {
+      items.push({
+        label: `Revert ${count} commits`,
+        onSelect: () => onRevertMany(idsOldestFirst),
+        disabled: pending || hasMerge,
+        title: hasMerge ? "Revert merge commits one at a time." : undefined,
+      });
+    }
+    return items;
+  })();
+  const multiSelectItems: ContextMenuItem[] = [
+    ...rebaseItems,
+    ...(compareItem === null ? [] : [compareItem]),
+    ...pickItems,
+  ];
 
   const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   // `null` means "show every remote badge" — skip building the membership set entirely in that
@@ -458,6 +511,20 @@ export function CommitGraph({
         confirmDisabled={pending}
         onConfirm={() => void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null))}
         onCancel={() => setTagToDelete(null)}
+      />
+    )}
+    {parentPicker !== null && (
+      <ParentPickerDialog
+        action={parentPicker.action}
+        commit={parentPicker.commit}
+        commits={commits}
+        onConfirm={(mainline) => {
+          const { action, commit } = parentPicker;
+          setParentPicker(null);
+          if (action === "Cherry-pick") onCherryPick(commit.id, mainline);
+          else onRevert(commit.id, mainline);
+        }}
+        onCancel={() => setParentPicker(null)}
       />
     )}
     {resetTarget !== null && currentBranch !== null && (

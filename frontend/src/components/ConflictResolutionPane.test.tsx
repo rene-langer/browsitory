@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ConflictSegment, RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
@@ -142,6 +142,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     openDiffTool: async () => {},
     openMergeTool: async () => "Unresolved" as const,
     markResolved: async () => "Resolved" as const,
+    resolveWholeFile: async () => {},
+    cherryPickMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    revertMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    continueSequence: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    abortSequence: async () => ({ rewound: true }),
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
@@ -354,5 +359,64 @@ describe("ConflictResolutionPane", () => {
     await waitFor(() => screen.getByRole("alert"));
     expect(screen.getByRole("alert")).toHaveTextContent("network error");
     expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
+  });
+});
+
+describe("ConflictResolutionPane whole-file header", () => {
+  function renderPane(getConflictHunks: RepoClient["getConflictHunks"]) {
+    const onResolveWholeFile = vi.fn();
+    const onMarkResolved = vi.fn();
+    render(
+      <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ getConflictHunks })}
+        path="shared.txt"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+        onResolveWholeFile={onResolveWholeFile}
+        onMarkResolved={onMarkResolved}
+      />,
+    );
+    return { onResolveWholeFile, onMarkResolved };
+  }
+
+  it("offers whole-file ours/theirs and Mark resolved for a text conflict", async () => {
+    const { onResolveWholeFile, onMarkResolved } = renderPane(async () => segments);
+    const toolbar = await screen.findByRole("group", { name: "Whole file" });
+    const ours = within(toolbar).getByRole("button", { name: "Use ours (whole file)" });
+    await waitFor(() => expect(ours).toBeEnabled());
+    expect(ours).toHaveAttribute("title", "Replace the file with the current branch's version (HEAD).");
+    expect(within(toolbar).getByRole("button", { name: "Use theirs (whole file)" })).toHaveAttribute(
+      "title",
+      "Replace the file with the incoming version.",
+    );
+    fireEvent.click(ours);
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Use theirs (whole file)" }));
+    expect(onResolveWholeFile.mock.calls).toEqual([
+      ["shared.txt", "Ours"],
+      ["shared.txt", "Theirs"],
+    ]);
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Mark resolved" }));
+    expect(onMarkResolved).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the header until the conflict has loaded", () => {
+    renderPane(() => new Promise(() => {}));
+    expect(screen.getByRole("button", { name: "Use ours (whole file)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mark resolved" })).toBeDisabled();
+  });
+
+  it("keeps the header for add/delete conflicts next to their own buttons", async () => {
+    renderPane(() => Promise.reject("'x' is an add/delete conflict, not a text conflict"));
+    expect(await screen.findByRole("button", { name: "Keep our version" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Use theirs (whole file)" })).toBeEnabled();
+  });
+
+  it("keeps the header when the hunks fail for another reason (binary conflict)", async () => {
+    const { onResolveWholeFile } = renderPane(() => Promise.reject("stream did not contain valid UTF-8"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("stream did not contain valid UTF-8");
+    fireEvent.click(screen.getByRole("button", { name: "Use theirs (whole file)" }));
+    expect(onResolveWholeFile).toHaveBeenCalledWith("shared.txt", "Theirs");
   });
 });

@@ -110,7 +110,27 @@ export interface HeadInfo {
   squashMessage: string | null;
   /** Installed commit hooks that `noVerify` skips (`pre-commit`, `commit-msg`). */
   commitHooks: string[];
+  /** A stopped multi-commit cherry-pick/revert (stored, so it survives a restart). */
+  sequence: SequenceProgress | null;
 }
+export type SequenceKind = "CherryPick" | "Revert";
+/** `currentStep` is 1-based. */
+export interface SequenceProgress {
+  kind: SequenceKind;
+  currentStep: number;
+  totalSteps: number;
+  currentCommit: string;
+}
+/** `skipped`: commits whose changes were already on the branch (their step came out empty). */
+export type SequenceOutcome =
+  | { kind: "Completed"; applied: number; skipped: string[] }
+  | { kind: "Conflicted"; files: string[]; progress: SequenceProgress };
+/** `rewound: false`: HEAD had moved since the sequence stopped, so it was left where it is. */
+export interface SequenceAbort {
+  rewound: boolean;
+}
+/** Which side's whole file to keep: "Ours" = HEAD (stage 2), "Theirs" = the incoming commit. */
+export type ConflictSide = "Ours" | "Theirs";
 export interface UndoState {
   undo: string | null;
   redo: string | null;
@@ -619,13 +639,25 @@ export interface RepoClient {
   /** Refusals (`Nothing`, `RepositoryChanged`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
-  cherryPick(repoPath: string, commitId: string): Promise<PickOutcome>;
-  revertCommit(repoPath: string, commitId: string): Promise<PickOutcome>;
+  /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */
+  cherryPick(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;
+  revertCommit(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;
+  /**
+   * Picks several commits as one sequence. Ids are oldest-first; cherry-pick applies them in that
+   * order. A conflict pauses it (see `HeadInfo.sequence`) until `continueSequence`/`abortSequence`.
+   */
+  cherryPickMany(repoPath: string, commitIdsOldestFirst: string[]): Promise<SequenceOutcome>;
+  /** Like `cherryPickMany`, but reverts, newest-first (as `git revert A..B`). */
+  revertMany(repoPath: string, commitIdsOldestFirst: string[]): Promise<SequenceOutcome>;
+  continueSequence(repoPath: string): Promise<SequenceOutcome>;
+  abortSequence(repoPath: string): Promise<SequenceAbort>;
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(repoPath: string, commitId: string): Promise<void>;
   /** Resolves with the transfer operation id; progress arrives via `subscribeTransferProgress`. */
   forcePushCurrentBranch(repoPath: string, remoteName: string, noVerify: boolean): Promise<string>;
   resolveAddDeleteConflict(repoPath: string, path: string, choice: FileConflictChoice): Promise<void>;
+  /** Takes one side's whole file for any conflict shape (`git checkout --ours/--theirs` + add). */
+  resolveWholeFile(repoPath: string, path: string, side: ConflictSide): Promise<void>;
   commitsSince(repoPath: string, onto: string): Promise<RebasePlanCommit[]>;
   startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
   rebaseContinue(repoPath: string): Promise<RebaseStepResult>;

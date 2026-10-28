@@ -1,6 +1,7 @@
 use super::{Command, WorkerHandle};
 use git_core::merge::{
-    ConflictSegment, FileConflictChoice, MarkResolvedOutcome, MergeOptions, MergeOutcome,
+    ConflictSegment, ConflictSide, FileConflictChoice, MarkResolvedOutcome, MergeOptions,
+    MergeOutcome,
 };
 use std::sync::mpsc::Sender;
 pub(super) fn start(
@@ -71,7 +72,32 @@ pub(super) fn mark_resolved(
         git_core::merge::mark_resolved(repo, &path, force).map_err(|error| error.to_string()),
     );
 }
+pub(super) fn resolve_whole_file(
+    repo: &git2::Repository,
+    path: String,
+    side: ConflictSide,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::merge::resolve_whole_file(repo, &path, side).map_err(|error| error.to_string()),
+    );
+}
 impl WorkerHandle {
+    /// Resolves a conflicted file by taking one side's whole file (`git checkout --ours/--theirs`
+    /// + `git add`).
+    pub fn resolve_whole_file(&self, path: String, side: ConflictSide) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::ResolveWholeFile {
+                path,
+                side,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     /// Stages a conflicted file; without `force`, reports leftover conflict markers instead.
     pub fn mark_resolved(&self, path: String, force: bool) -> Result<MarkResolvedOutcome, String> {
         let (tx, rx) = std::sync::mpsc::channel();

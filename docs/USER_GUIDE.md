@@ -85,6 +85,23 @@ aside — expand **Stashes** in the sidebar to get them back.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
+### Resolving conflicts
+
+A merge, cherry-pick, revert, rebase or stash pop that conflicts lists the files as
+**Conflicted**. Click one to open the conflict pane:
+
+- For text conflicts, choose **Accept ours**, **Accept theirs** or **Accept both** for each
+  conflicting block, then **Save resolution**.
+- **Use ours (whole file)** keeps your current branch's version (HEAD) of the whole file and
+  **Use theirs (whole file)** takes the incoming version: the commit being merged, cherry-picked
+  or reverted, or the stash. During a rebase "ours" is the branch you are rebasing onto and
+  "theirs" the commit being replayed. These work for every conflict, including binary files and
+  files one side deleted (choosing the deleting side deletes the file). The file keeps the chosen
+  side's executable bit. Symlink and submodule conflicts have to be resolved with git.
+- **Mark resolved** stages the file as it is on disk, after you edited it yourself or in another
+  tool. If it still contains `<<<<<<<` / `>>>>>>>` conflict markers, Browsitory asks before
+  staging it. A deleted file is marked resolved as deleted.
+
 ### Staging individual lines
 
 In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add
@@ -200,7 +217,8 @@ saying so (use the "without hooks" retry to go ahead), and other hooks are skipp
 the time limit stop the hook's shell, but not programs it started.
 
 Rebase, cherry-pick, revert, undo/redo, stash, worktree creation and clone run no hooks.
-Finishing a paused merge, cherry-pick or revert with Commit runs the commit hooks.
+Finishing a paused merge, cherry-pick or revert with Commit runs the commit hooks; **Continue**
+on a multi-commit cherry-pick or revert does not.
 
 ## Browsing history and diffs
 
@@ -436,10 +454,12 @@ Right-click a commit in the graph:
   resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes it and
   keeps unrelated unstaged edits. A pick is refused if it would overwrite unstaged edits or if
   changes are staged. Picking a commit whose changes are already on the branch reports
-  "Nothing to apply — those changes are already on this branch." Merge commits can't be
-  cherry-picked yet.
+  "Nothing to apply — those changes are already on this branch." On a merge commit the item
+  reads **Cherry-pick…** and asks which parent to apply it against: parent 1 is usually the
+  branch that was merged into, so picking against it applies what the merge brought in.
 - **Revert** commits the inverse of that commit, with the same conflict flow (**Reverting**,
-  **Abort revert**). Merge commits can't be reverted yet.
+  **Abort revert**). On a merge commit, **Revert…** asks for the parent to keep (parent 1 undoes
+  what the merge brought in), and the message names it like `git revert -m` does.
 - **Checkout (detached)** checks the commit out without a branch. The sync bar shows
   **HEAD detached at …** and push and pull are disabled until you check out a branch.
 - **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes
@@ -463,8 +483,41 @@ your last fetch. Fetch and review before force pushing."). Like `git push --forc
 fetch between reviewing and pushing refreshes the lease, so review the remote branch after your
 last fetch, not before.
 
+**Several commits.** Select commits with Ctrl/Cmd+click or Shift+click, then **Cherry-pick N
+commits** or **Revert N commits** (in the right-click menu and the bar under the graph). The order
+you select them in doesn't matter: cherry-picks apply oldest first, reverts newest first (like
+`git revert A..B`). Each commit keeps its own message and author. A commit whose changes are
+already on the branch is skipped, and the result says so ("Cherry-picked 2 commits, skipped 1
+with no changes"). Reverting a revert is called "Reapply …", as in git. Merge commits have to be picked one at a time, so the actions are disabled
+when the selection holds one.
+
+A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" and the commit area
+shows **Continue cherry-pick** / **Abort cherry-pick** instead of the message box. Resolve the
+conflicts (see [Resolving conflicts](#resolving-conflicts)), then **Continue**; it commits the
+resolved step and goes on. If you resolve a step so that nothing is left to commit (for example
+**Use ours (whole file)** on its only change), that step is skipped. A sequence that stops for
+another reason (say an untracked file is in the way) also shows **Continue**, which retries the
+step. The paused sequence is kept on disk, so it is still there after you close and reopen the
+app. While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
+branch switching, pull and stash apply/pop are unavailable.
+
+If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
+**Continue** recognises it when it is exactly that step: one commit on top of where the sequence
+stopped, with the picked commit's author (for a cherry-pick) or git's "This reverts commit …"
+message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
+means HEAD moved, and Continue refuses.
+
+**Abort** puts the branch back where it was before the first commit was applied, keeping
+unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for example by a commit,
+reset or branch switch in a terminal), Abort only ends the sequence and leaves HEAD and every
+branch alone, and says so.
+Continue refuses in that case. A whole sequence is one **Undo** step; an aborted one leaves
+nothing to undo. Like a single cherry-pick, the steps of a sequence (including the one
+**Continue** commits) run no commit hooks.
+
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
-and to amend the last commit (where the commit menu offers them).
+and to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
+**Abort cherry-pick** (or revert) while a sequence is paused.
 
 ## Pull requests
 

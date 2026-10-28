@@ -229,7 +229,8 @@ export function buildCommands(
     state.pending ||
     state.transfer !== null ||
     state.mergeMessage !== null ||
-    state.rebaseProgress !== null;
+    state.rebaseProgress !== null ||
+    state.headInfo.sequence !== null;
 
   // Read-only, so available even while an operation is running.
   if (searchCommands !== undefined) {
@@ -348,7 +349,22 @@ export function buildCommands(
       run: () => void appState.abortRebase(),
     });
   }
-  if (state.mergeMessage !== null) {
+  const sequence = state.headInfo.sequence;
+  if (sequence !== null) {
+    const noun = sequence.kind === "CherryPick" ? "cherry-pick" : "revert";
+    commands.push({
+      id: "continue-sequence",
+      label: `Continue ${noun}`,
+      keywords: ["continue", "cherry", "pick", "revert", "sequence"],
+      run: () => void appState.continueSequence(),
+    });
+    commands.push({
+      id: "abort-sequence",
+      label: `Abort ${noun}`,
+      keywords: ["abort", "cancel", "cherry", "pick", "revert", "sequence"],
+      run: () => void appState.abortSequence(),
+    });
+  } else if (state.mergeMessage !== null) {
     commands.push({
       id: "merge-abort",
       label: "Abort merge",

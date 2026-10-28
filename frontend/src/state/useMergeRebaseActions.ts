@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type {
+  ConflictSide,
   FileConflictChoice,
   MarkResolvedOutcome,
   MergeOptions,
@@ -28,6 +29,8 @@ export interface MergeRebaseActions {
   mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
+  /** Takes one side's whole file for a conflicted path (any conflict shape). */
+  resolveWholeFile(path: string, side: ConflictSide): Promise<void>;
   /**
    * Stages a conflicted file as resolved. Without `force` a file that still has conflict markers
    * is left alone ("MarkersRemain"). `null` means it failed; the error is in `state.error`.
@@ -94,6 +97,10 @@ export function useMergeRebaseActions(
       runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice)),
     [client, runMutation, repoPath],
   );
+  const resolveWholeFile = useCallback(
+    (path: string, side: ConflictSide) => runMutation(() => client.resolveWholeFile(repoPath, path, side)),
+    [client, runMutation, repoPath],
+  );
   const markResolved = useCallback(
     async (path: string, force: boolean): Promise<MarkResolvedOutcome | null> => {
       let outcome: MarkResolvedOutcome | null = null;
@@ -155,6 +162,7 @@ export function useMergeRebaseActions(
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    resolveWholeFile,
     markResolved,
     abortMerge,
     openRebasePlanner,

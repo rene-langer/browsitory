@@ -22,6 +22,21 @@ pub enum MergeError {
     NotAnAddDeleteConflict(String),
     #[error("Can't fast-forward: '{0}' has diverged from the current branch.")]
     NotFastForward(String),
+    #[error("'{0}' is a symlink or submodule conflict. Resolve it with git.")]
+    UnsupportedEntry(String),
+    #[error("'{0}' is inside a symlinked folder; resolve it with git.")]
+    SymlinkedFolder(String),
+}
+
+/// Refuses a path whose existing parent folders include a symlink, so a resolution can never
+/// write or delete outside the work tree through one.
+fn ensure_inside_workdir(workdir: &Path, path: &str) -> Result<(), MergeError> {
+    crate::stage::ensure_no_symlinked_parent(workdir, Path::new(path)).map_err(
+        |error| match error {
+            crate::stage::StageError::Io(error) => MergeError::Io(error),
+            _ => MergeError::SymlinkedFolder(path.to_string()),
+        },
+    )
 }
 
 /// How "Merge into current branch" may move the branch, like `git merge --ff`, `--no-ff`
@@ -324,11 +339,77 @@ pub fn resolve_conflict(
     find_conflict(repo, path)?;
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     std::fs::write(workdir.join(path), resolved_content)?;
 
     let mut index = repo.index()?;
     index.add_path(Path::new(path))?;
     index.write()?;
+    Ok(())
+}
+
+/// Which side of a conflict to keep for a whole file, like `git checkout --ours/--theirs`.
+/// "Ours" is stage 2 (HEAD); "theirs" is stage 3, the incoming commit (during a rebase, the
+/// commit being replayed, so "ours" is the branch being rebased onto).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictSide {
+    Ours,
+    Theirs,
+}
+
+/// Resolves a conflicted path by taking one side's whole file: the chosen stage is checked out
+/// through libgit2 (so filters and the file mode apply, like `git checkout --ours`) and staged.
+/// When the chosen side deleted the file, the working file is removed and the deletion staged.
+/// Works for content, add/delete and binary conflicts in any operation (merge, cherry-pick,
+/// revert, rebase, stash). Symlink and submodule conflicts are refused. Not recorded for undo:
+/// the paused operation's entry covers it.
+pub fn resolve_whole_file(
+    repo: &Repository,
+    path: &str,
+    side: ConflictSide,
+) -> Result<(), MergeError> {
+    if !crate::launch::is_safe_relative(path) {
+        return Err(MergeError::NoConflict(path.to_string()));
+    }
+    let conflict = find_conflict(repo, path)?;
+    let unsupported = [&conflict.ancestor, &conflict.our, &conflict.their]
+        .into_iter()
+        .flatten()
+        .any(|entry| matches!(entry.mode, 0o120000 | 0o160000));
+    if unsupported {
+        return Err(MergeError::UnsupportedEntry(path.to_string()));
+    }
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
+    let chosen = match side {
+        ConflictSide::Ours => conflict.our.as_ref(),
+        ConflictSide::Theirs => conflict.their.as_ref(),
+    };
+    match chosen {
+        Some(_) => {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force().disable_pathspec_match(true).path(path);
+            match side {
+                ConflictSide::Ours => checkout.use_ours(true),
+                ConflictSide::Theirs => checkout.use_theirs(true),
+            };
+            repo.checkout_index(None, Some(&mut checkout))?;
+            let mut index = repo.index()?;
+            index.add_path(Path::new(path))?;
+            index.write()?;
+        }
+        None => {
+            match std::fs::remove_file(workdir.join(path)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into())
+                }
+                _ => {}
+            }
+            let mut index = repo.index()?;
+            index.remove_path(Path::new(path))?;
+            index.write()?;
+        }
+    }
     Ok(())
 }
 
@@ -356,6 +437,7 @@ pub fn mark_resolved(
     }
     find_conflict(repo, path)?;
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     let full = workdir.join(path);
     let meta = std::fs::symlink_metadata(&full).ok();
     if !force
@@ -491,6 +573,7 @@ pub fn resolve_add_delete_conflict(
         return Err(MergeError::NotAnAddDeleteConflict(path.to_string()));
     }
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    ensure_inside_workdir(workdir, path)?;
     let mut index = repo.index()?;
 
     let entry = match choice {

@@ -39,7 +39,7 @@ fn stage(repo: &git2::Repository, path: &str) {
 fn clean_cherry_pick_commits_with_original_message_and_author() {
     let (dir, repo, feature_tip) = repo_with_feature_branch();
     let before = repo.head().unwrap().target().unwrap();
-    let outcome = cherry_pick(&repo, &feature_tip).unwrap();
+    let outcome = cherry_pick(&repo, &feature_tip, None).unwrap();
     let PickOutcome::Committed { commit_id } = outcome else {
         panic!("expected commit")
     };
@@ -70,7 +70,7 @@ fn conflicting_cherry_pick_pauses_with_merge_msg_and_can_be_finished() {
     common::write_file(dir.path(), "shared.txt", "ours\n");
     common::commit_all(&repo, "ours edit");
 
-    let outcome = cherry_pick(&repo, &theirs).unwrap();
+    let outcome = cherry_pick(&repo, &theirs, None).unwrap();
 
     assert_eq!(
         outcome,
@@ -112,7 +112,7 @@ fn aborting_a_conflicted_cherry_pick_restores_head_and_files() {
     common::commit_all(&repo, "ours edit");
     let before = repo.head().unwrap().target().unwrap();
 
-    cherry_pick(&repo, &theirs).unwrap();
+    cherry_pick(&repo, &theirs, None).unwrap();
     abort_merge(&repo).unwrap();
 
     assert_eq!(repo.head().unwrap().target().unwrap(), before);
@@ -126,10 +126,10 @@ fn aborting_a_conflicted_cherry_pick_restores_head_and_files() {
 #[test]
 fn cherry_picking_an_already_applied_commit_is_empty_and_leaves_state_clean() {
     let (_dir, repo, feature_tip) = repo_with_feature_branch();
-    cherry_pick(&repo, &feature_tip).unwrap();
+    cherry_pick(&repo, &feature_tip, None).unwrap();
     let head_before = repo.head().unwrap().target().unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip),
+        cherry_pick(&repo, &feature_tip, None),
         Err(PickError::EmptyResult)
     ));
     assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
@@ -142,7 +142,7 @@ fn cherry_pick_refuses_staged_changes() {
     common::write_file(dir.path(), "staged.txt", "x\n");
     stage(&repo, "staged.txt");
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip),
+        cherry_pick(&repo, &feature_tip, None),
         Err(PickError::DirtyIndex)
     ));
 }
@@ -161,7 +161,7 @@ fn cherry_pick_never_overwrites_an_unstaged_edit_to_a_touched_file() {
         .unwrap();
     common::write_file(dir.path(), "shared.txt", "my unsaved work\n");
 
-    assert!(cherry_pick(&repo, &edit).is_err());
+    assert!(cherry_pick(&repo, &edit, None).is_err());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
         "my unsaved work\n"
@@ -183,17 +183,17 @@ fn cherry_pick_refuses_merge_commits_and_paused_operations() {
         .commit(None, &sig, &sig, "merge", &tree, &[&head, &other])
         .unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &merge_id.to_string()),
-        Err(PickError::MergeCommitUnsupported)
+        cherry_pick(&repo, &merge_id.to_string(), None),
+        Err(PickError::MainlineRequired)
     ));
     assert!(matches!(
-        revert(&repo, &merge_id.to_string()),
-        Err(PickError::MergeCommitUnsupported)
+        revert(&repo, &merge_id.to_string(), None),
+        Err(PickError::MainlineRequired)
     ));
 
     std::fs::write(repo.path().join("MERGE_HEAD"), format!("{}\n", head.id())).unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip),
+        cherry_pick(&repo, &feature_tip, None),
         Err(PickError::OperationInProgress)
     ));
     let _ = dir;
@@ -208,7 +208,7 @@ fn clean_revert_commits_the_inverse_with_the_standard_message() {
     common::commit_all(&repo, "add b");
     let target = repo.head().unwrap().target().unwrap();
 
-    let PickOutcome::Committed { .. } = revert(&repo, &target.to_string()).unwrap() else {
+    let PickOutcome::Committed { .. } = revert(&repo, &target.to_string(), None).unwrap() else {
         panic!("expected commit")
     };
 
@@ -232,7 +232,7 @@ fn conflicting_revert_pauses_in_revert_state() {
     common::write_file(dir.path(), "a.txt", "three\n");
     common::commit_all(&repo, "to three");
 
-    let outcome = revert(&repo, &target.to_string()).unwrap();
+    let outcome = revert(&repo, &target.to_string(), None).unwrap();
 
     assert_eq!(
         outcome,
@@ -278,7 +278,7 @@ fn aborting_a_conflicted_cherry_pick_keeps_unrelated_unstaged_edits() {
     common::write_file(dir.path(), "other.txt", "my unsaved other work\n");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs).unwrap(),
+        cherry_pick(&repo, &theirs, None).unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     abort_merge(&repo).unwrap();
@@ -298,7 +298,7 @@ fn aborting_a_conflicted_cherry_pick_keeps_unrelated_unstaged_edits() {
 fn aborting_after_resolving_and_staging_a_cherry_pick_still_works() {
     let (dir, repo, _) = repo_with_feature_branch();
     let theirs = conflicting_pick_setup(dir.path(), &repo);
-    cherry_pick(&repo, &theirs).unwrap();
+    cherry_pick(&repo, &theirs, None).unwrap();
     common::write_file(dir.path(), "shared.txt", "resolved\n");
     stage(&repo, "shared.txt");
 
@@ -331,7 +331,7 @@ fn abort_treats_conflicted_paths_literally_not_as_globs() {
     common::write_file(dir.path(), "a.txt", "my unsaved a work\n");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs).unwrap(),
+        cherry_pick(&repo, &theirs, None).unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     abort_merge(&repo).unwrap();
@@ -372,7 +372,7 @@ fn finishing_a_conflicted_cherry_pick_keeps_the_original_author() {
     common::commit_all(&repo, "ours edit");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs).unwrap(),
+        cherry_pick(&repo, &theirs, None).unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     common::write_file(dir.path(), "shared.txt", "resolved\n");
@@ -391,4 +391,131 @@ fn finishing_a_conflicted_cherry_pick_keeps_the_original_author() {
     assert_eq!(head.author().email().unwrap(), "other@example.com");
     assert_eq!(head.committer().name().unwrap(), "Test User");
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+/// base(a.txt) → main adds m.txt ; feature adds f.txt ; M = merge(main, feature) on the base
+/// branch. HEAD is left on a branch "target" at base.
+fn merge_commit_fixture() -> (tempfile::TempDir, git2::Repository, String, String) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "base\n");
+    common::commit_all(&repo, "base");
+    let base_ref = base_branch_ref(&repo);
+    let (merge_id, main_tip) = {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &base, false).unwrap();
+        repo.branch("target", &base, false).unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        common::write_file(dir.path(), "f.txt", "feature\n");
+        common::commit_all(&repo, "add f");
+        let feature = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.set_head(&base_ref).unwrap();
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true),
+        ))
+        .unwrap();
+        common::write_file(dir.path(), "m.txt", "main\n");
+        common::commit_all(&repo, "add m");
+        let main = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut merged = repo.merge_commits(&main, &feature, None).unwrap();
+        let tree = repo
+            .find_tree(merged.write_tree_to(&repo).unwrap())
+            .unwrap();
+        let sig = repo.signature().unwrap();
+        let merge = repo
+            .commit(
+                Some(&base_ref),
+                &sig,
+                &sig,
+                "merge feature",
+                &tree,
+                &[&main, &feature],
+            )
+            .unwrap();
+        (merge.to_string(), main.id().to_string())
+    };
+    repo.set_head("refs/heads/target").unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    (dir, repo, merge_id, main_tip)
+}
+
+#[test]
+fn a_merge_commit_needs_a_mainline() {
+    let (_dir, repo, merge, _) = merge_commit_fixture();
+    let before = repo.head().unwrap().target().unwrap();
+    assert!(matches!(
+        cherry_pick(&repo, &merge, None),
+        Err(PickError::MainlineRequired)
+    ));
+    assert!(matches!(
+        revert(&repo, &merge, None),
+        Err(PickError::MainlineRequired)
+    ));
+    assert_eq!(repo.head().unwrap().target().unwrap(), before);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn cherry_picking_a_merge_against_parent_one_applies_the_merged_side() {
+    let (dir, repo, merge, _) = merge_commit_fixture();
+    let outcome = cherry_pick(&repo, &merge, Some(1)).unwrap();
+    assert!(matches!(outcome, PickOutcome::Committed { .. }));
+    assert!(dir.path().join("f.txt").exists());
+    assert!(!dir.path().join("m.txt").exists());
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 1);
+    assert_eq!(head.message().unwrap(), "merge feature");
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn reverting_a_merge_against_parent_one_removes_the_merged_side_with_gits_message() {
+    let (dir, repo, merge, main_tip) = merge_commit_fixture();
+    // Put HEAD on the merge itself.
+    repo.set_head(&base_branch_ref(&repo)).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let outcome = revert(&repo, &merge, Some(1)).unwrap();
+    assert!(matches!(outcome, PickOutcome::Committed { .. }));
+    assert!(!dir.path().join("f.txt").exists());
+    assert!(dir.path().join("m.txt").exists());
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        head.message().unwrap(),
+        format!(
+            "Revert \"merge feature\"\n\nThis reverts commit {merge}, reversing\nchanges made to {main_tip}.\n"
+        )
+    );
+}
+
+#[test]
+fn an_out_of_range_or_needless_mainline_is_refused() {
+    let (_dir, repo, merge, main_tip) = merge_commit_fixture();
+    assert!(matches!(
+        cherry_pick(&repo, &merge, Some(3)),
+        Err(PickError::InvalidMainline { mainline: 3 })
+    ));
+    assert!(matches!(
+        cherry_pick(&repo, &merge, Some(0)),
+        Err(PickError::InvalidMainline { mainline: 0 })
+    ));
+    assert!(matches!(
+        cherry_pick(&repo, &main_tip, Some(1)),
+        Err(PickError::InvalidMainline { mainline: 1 })
+    ));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(
+        PickError::InvalidMainline { mainline: 3 }.to_string(),
+        "Parent 3 doesn't exist on this commit."
+    );
+    assert_eq!(
+        PickError::MainlineRequired.to_string(),
+        "This is a merge commit. Choose which parent to apply it against."
+    );
 }

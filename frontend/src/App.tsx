@@ -54,6 +54,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
+import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -239,7 +240,8 @@ function RepoWorkspace({
     appState.state.pending ||
     appState.state.transfer !== null ||
     appState.state.mergeMessage !== null ||
-    appState.state.rebaseProgress !== null;
+    appState.state.rebaseProgress !== null ||
+    appState.state.headInfo.sequence !== null;
 
   const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
   const { pending, transfer } = appState.state;
@@ -344,6 +346,10 @@ function RepoWorkspace({
     ? "Another action is in progress."
     : appState.state.transfer !== null
       ? "A transfer is in progress."
+      : appState.state.headInfo.sequence !== null
+        ? appState.state.headInfo.sequence.kind === "CherryPick"
+          ? "A cherry-pick is in progress."
+          : "A revert is in progress."
       : appState.state.mergeMessage !== null
         ? appState.state.headInfo.operation === "CherryPick"
           ? "A cherry-pick is in progress."
@@ -384,6 +390,35 @@ function RepoWorkspace({
       },
     [dismissError],
   );
+  // Cherry-pick/revert toasts come from the outcome, not from "no error": a pick that stopped on
+  // a conflict succeeded as a call but must not say "Cherry-picked" (#107).
+  const runPickAction = useCallback(
+    async <T,>(action: () => Promise<T | null>, toast: (result: T) => string | null) => {
+      dismissError();
+      const result = await action();
+      if (result === null || !mounted.current) return;
+      const message = toast(result);
+      if (message !== null) pushToast(message);
+    },
+    [dismissError, pushToast],
+  );
+  // A stopped multi-commit cherry-pick/revert: Continue and Abort from the strip, the commit
+  // dock and the palette. Every Abort goes through `abortSequence` while one is stored, so the
+  // sequence file never outlives the operation (the worker's AbortMerge is the backstop).
+  const sequenceKind = appState.state.headInfo.sequence?.kind ?? null;
+  const { continueSequence: continueStoredSequence, abortSequence: abortStoredSequence, abortMerge } = appState;
+  const continueSequence = useCallback(() => {
+    if (sequenceKind === null) return;
+    void runPickAction(continueStoredSequence, (outcome) => sequenceToast(sequenceKind, outcome));
+  }, [continueStoredSequence, runPickAction, sequenceKind]);
+  const abortSequence = useCallback(() => {
+    if (sequenceKind === null) return;
+    void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
+  }, [abortStoredSequence, runPickAction, sequenceKind]);
+  const abortMergeOrSequence = useCallback(() => {
+    if (sequenceKind !== null) abortSequence();
+    else void abortMerge();
+  }, [abortSequence, abortMerge, sequenceKind]);
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
   // for the upstream's remote, else the current branch's own name.
@@ -464,9 +499,13 @@ function RepoWorkspace({
         merging={appState.state.mergeMessage !== null}
         operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
+        sequence={appState.state.headInfo.sequence}
+        pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
-        onAbortMerge={appState.abortMerge}
+        onAbortMerge={abortMergeOrSequence}
         onAbortRebase={appState.abortRebase}
+        onContinueSequence={continueSequence}
+        onAbortSequence={abortSequence}
       />
       {externalTools.error !== null && (
         <div className={styles.errorLayer}>
@@ -861,8 +900,30 @@ function RepoWorkspace({
                       onRebaseSelection={appState.openRebaseSelection}
                       headInfo={appState.state.headInfo}
                       currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
-                      onCherryPick={announce("Cherry-picked", appState.cherryPick)}
-                      onRevert={announce("Reverted", appState.revertCommit)}
+                      onCherryPick={(commitId, mainline) =>
+                        void runPickAction(
+                          () => appState.cherryPick(commitId, mainline),
+                          (outcome) => pickToast("CherryPick", outcome),
+                        )
+                      }
+                      onRevert={(commitId, mainline) =>
+                        void runPickAction(
+                          () => appState.revertCommit(commitId, mainline),
+                          (outcome) => pickToast("Revert", outcome),
+                        )
+                      }
+                      onCherryPickMany={(ids) =>
+                        void runPickAction(
+                          () => appState.cherryPickMany(ids),
+                          (outcome) => sequenceToast("CherryPick", outcome),
+                        )
+                      }
+                      onRevertMany={(ids) =>
+                        void runPickAction(
+                          () => appState.revertMany(ids),
+                          (outcome) => sequenceToast("Revert", outcome),
+                        )
+                      }
                       onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
                       onResetToCommit={announce("Reset branch", appState.resetToCommit)}
                       onEditHeadMessage={() => {
@@ -914,6 +975,7 @@ function RepoWorkspace({
                   onOpenFileHistory={fileHistory.open}
                   externalTools={externalTools}
                   onMarkResolved={appState.markResolved}
+                  onResolveWholeFile={(path, side) => void appState.resolveWholeFile(path, side)}
                   status={appState.state.status}
                   refreshGeneration={appState.state.refreshGeneration}
                   discardRequest={discardRequest}
@@ -941,7 +1003,10 @@ function RepoWorkspace({
                   onResolveConflict={appState.resolveConflict}
                   onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
                   mergeMessage={appState.state.mergeMessage}
-                  onAbortMerge={appState.abortMerge}
+                  onAbortMerge={abortMergeOrSequence}
+                  onSequenceContinue={continueSequence}
+                  onSequenceAbort={abortSequence}
+                  sequencePending={appState.state.pending}
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}

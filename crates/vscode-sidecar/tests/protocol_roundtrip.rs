@@ -119,6 +119,11 @@ fn init_repo() -> (tempfile::TempDir, git2::Repository) {
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.com").unwrap();
     config.set_bool("commit.gpgSign", false).unwrap();
+    // Hermetic line endings (#111): a global core.autocrlf=true (Git for Windows' default) would
+    // check files out with CRLF.
+    config.set_bool("core.autocrlf", false).unwrap();
+    config.set_str("core.eol", "lf").unwrap();
+    config.set_bool("core.safecrlf", false).unwrap();
     // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
     let hooks = repo.path().join("hooks");
     config
@@ -2419,4 +2424,137 @@ fn mark_resolved_round_trips_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "path": "a.txt", "force": false}),
     );
     assert_eq!(outcome["result"], "Resolved");
+}
+
+#[test]
+fn cherry_pick_many_conflicts_then_continue_and_whole_file_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    {
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+    }
+    repo.set_head("refs/heads/feature").unwrap();
+    write_file(dir.path(), "a.txt", "feature\n");
+    commit_all(&repo, "feature edit");
+    let feature_tip = repo.head().unwrap().target().unwrap().to_string();
+    repo.set_head(&format!("refs/heads/{base}")).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "a.txt", "main\n");
+    commit_all(&repo, "main edit");
+
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+
+    let started = sidecar.call(
+        2,
+        "cherry_pick_many",
+        serde_json::json!({ "repoPath": repo_path, "commitIds": [feature_tip] }),
+    );
+    assert_eq!(started["result"]["kind"], "Conflicted");
+    assert_eq!(started["result"]["progress"]["totalSteps"], 1);
+    let head = sidecar.call(
+        3,
+        "get_head_info",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(head["result"]["sequence"]["currentStep"], 1);
+    assert_eq!(head["result"]["sequence"]["kind"], "CherryPick");
+
+    let refused = sidecar.call(
+        4,
+        "cherry_pick",
+        serde_json::json!({ "repoPath": repo_path, "commitId": feature_tip, "mainline": null }),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "Finish or abort the current merge/cherry-pick/revert/rebase first."
+    );
+    sidecar.call(
+        5,
+        "resolve_whole_file",
+        serde_json::json!({ "repoPath": repo_path, "path": "a.txt", "side": "Theirs" }),
+    );
+    let done = sidecar.call(
+        6,
+        "continue_sequence",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(
+        done["result"],
+        serde_json::json!({ "kind": "Completed", "applied": 1, "skipped": [] })
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "feature\n"
+    );
+    let aborted = sidecar.call(
+        7,
+        "abort_sequence",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(
+        aborted["error"]["message"],
+        "No cherry-pick or revert is in progress."
+    );
+    let reverted = sidecar.call(
+        8,
+        "revert_many",
+        serde_json::json!({ "repoPath": repo_path, "commitIds": [feature_tip] }),
+    );
+    assert_eq!(reverted["result"]["kind"], "Completed");
+    let head = sidecar.call(
+        9,
+        "get_head_info",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(head["result"]["sequence"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_merge_commit_is_picked_with_a_mainline_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    let merge_id = {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        let sig = repo.signature().unwrap();
+        let mut builder = repo.treebuilder(Some(&base.tree().unwrap())).unwrap();
+        builder
+            .insert("f.txt", repo.blob(b"f\n").unwrap(), 0o100644)
+            .unwrap();
+        let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+        let side = repo
+            .commit(None, &sig, &sig, "side", &tree, &[&base])
+            .unwrap();
+        let side = repo.find_commit(side).unwrap();
+        repo.commit(None, &sig, &sig, "merge side", &tree, &[&base, &side])
+            .unwrap()
+            .to_string()
+    };
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    let refused = sidecar.call(
+        2,
+        "cherry_pick",
+        serde_json::json!({ "repoPath": repo_path, "commitId": merge_id }),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "This is a merge commit. Choose which parent to apply it against."
+    );
+    let picked = sidecar.call(
+        3,
+        "cherry_pick",
+        serde_json::json!({ "repoPath": repo_path, "commitId": merge_id, "mainline": 1 }),
+    );
+    assert_eq!(picked["result"]["kind"], "Committed");
+    assert!(dir.path().join("f.txt").exists());
 }

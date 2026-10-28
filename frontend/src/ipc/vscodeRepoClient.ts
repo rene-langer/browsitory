@@ -48,6 +48,9 @@ import type {
   WorktreeInfo,
   HeadInfo,
   PickOutcome,
+  SequenceAbort,
+  SequenceOutcome,
+  ConflictSide,
   UndoOutcome,
   UndoState,
   ResetMode,
@@ -413,8 +416,17 @@ export const vscodeRepoClient: RepoClient = {
   getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),
-  cherryPick: (repoPath: string, commitId: string) => call<PickOutcome>("cherry_pick", { repoPath, commitId }),
-  revertCommit: (repoPath: string, commitId: string) => call<PickOutcome>("revert_commit", { repoPath, commitId }),
+  cherryPick: (repoPath: string, commitId: string, mainline?: number | null) =>
+    call<PickOutcome>("cherry_pick", { repoPath, commitId, mainline: mainline ?? null }),
+  revertCommit: (repoPath: string, commitId: string, mainline?: number | null) =>
+    call<PickOutcome>("revert_commit", { repoPath, commitId, mainline: mainline ?? null }),
+  cherryPickMany: (repoPath: string, commitIds: string[]) =>
+    call<SequenceOutcome>("cherry_pick_many", { repoPath, commitIds }),
+  revertMany: (repoPath: string, commitIds: string[]) => call<SequenceOutcome>("revert_many", { repoPath, commitIds }),
+  continueSequence: (repoPath: string) => call<SequenceOutcome>("continue_sequence", { repoPath }),
+  abortSequence: (repoPath: string) => call<SequenceAbort>("abort_sequence", { repoPath }),
+  resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
+    call<void>("resolve_whole_file", { repoPath, path, side }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
     call<void>("reset_to_commit", { repoPath, commitId, mode }),
   checkoutCommit: (repoPath: string, commitId: string) => call<void>("checkout_commit", { repoPath, commitId }),

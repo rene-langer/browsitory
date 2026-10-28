@@ -118,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -146,6 +146,11 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     openDiffTool: unused,
     openMergeTool: unused,
     markResolved: unused,
+    resolveWholeFile: unused,
+    cherryPickMany: unused,
+    revertMany: unused,
+    continueSequence: unused,
+    abortSequence: unused,
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
@@ -256,10 +261,15 @@ describe("App", () => {
       listStashes: async () => [],
     });
 
-    render(<App client={client} />);
+    const { container } = render(<App client={client} />);
 
     await screen.findByRole("tab", { name: "a" });
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
+    // The Ctrl/Cmd+W listener lives in the active RepoWorkspace, which mounts after the tabs
+    // render, and it ignores the key while the workspace is busy. Wait for both, or a keydown
+    // fired under load lands before the listener exists and is lost.
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    await waitFor(() => expect(screen.getAllByTitle("Close (Delete)")).toHaveLength(2));
 
     fireEvent.keyDown(window, { key: "w", ctrlKey: true });
 
@@ -724,7 +734,7 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"] }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null }),
       getCommitMessage: async () => "HEAD's message",
       commit,
     });
@@ -858,6 +868,110 @@ describe("App", () => {
       fireEvent.click(merge);
 
       expect(await screen.findByText(toast)).toBeInTheDocument();
+    });
+  });
+
+  describe("cherry-pick and revert toasts", () => {
+    const graph = [
+      { id: "c2", shortId: "c2", summary: "two", authorName: "A", authorEmail: "a@x", timestamp: 2, parentIds: ["c1"], branchRefs: ["main"], remoteBranchRefs: [] },
+      { id: "c1", shortId: "c1", summary: "one", authorName: "A", authorEmail: "a@x", timestamp: 1, parentIds: [], branchRefs: [], remoteBranchRefs: [] },
+    ];
+    function pickClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graph,
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listStashes: async () => [],
+        getGraphBranchSelection: async () => null,
+        getCommitFiles: async () => [],
+        getCommitMessage: async () => "two",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+        ...overrides,
+      });
+    }
+
+    it("says Cherry-picked only when the pick committed (#107)", async () => {
+      const cherryPick = vi
+        .fn<RepoClient["cherryPick"]>()
+        .mockResolvedValueOnce({ kind: "Conflicted", files: ["a.txt"] })
+        .mockResolvedValueOnce({ kind: "Committed", commitId: "c3" });
+      render(<App client={pickClient({ cherryPick })} />);
+
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
+      // Give a would-be toast every chance to render before asserting there is none.
+      await waitFor(() => expect(cherryPick).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(screen.queryByText("Cherry-picked")).toBeNull();
+
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+    });
+
+    it("shows a stored sequence in the strip, continues it, and blocks other picks meanwhile", async () => {
+      const sequence = { kind: "CherryPick" as const, currentStep: 1, totalSteps: 2, currentCommit: "c1" };
+      let stored: typeof sequence | null = sequence;
+      const continueSequence = vi.fn(async () => {
+        stored = null;
+        return { kind: "Completed" as const, applied: 2, skipped: [] };
+      });
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored }),
+            continueSequence,
+          })}
+        />,
+      );
+
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Cherry-picking 1/2");
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a"));
+      expect(await screen.findByText("Cherry-picked 2 commits")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("status", { name: "Operation status" })).toBeNull());
+    });
+
+    it("aborts through abortSequence and says when HEAD was left alone", async () => {
+      const sequence = { kind: "Revert" as const, currentStep: 2, totalSteps: 2, currentCommit: "c1" };
+      const abortSequence = vi.fn(async () => ({ rewound: false }));
+      const abortMerge = vi.fn(async () => {});
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence }),
+            abortSequence,
+            abortMerge,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort revert" }));
+      await waitFor(() => expect(abortSequence).toHaveBeenCalledWith("/repos/a"));
+      expect(abortMerge).not.toHaveBeenCalled();
+      expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+    });
+
+    it("toasts a finished multi-commit revert with its skipped count", async () => {
+      const revertMany = vi.fn(async () => ({ kind: "Completed" as const, applied: 1, skipped: ["c1"] }));
+      render(<App client={pickClient({ revertMany })} />);
+
+      fireEvent.click((await screen.findByText(/c2 two/)).closest("li")!);
+      fireEvent.click(screen.getByText(/c1 one/).closest("li")!, { ctrlKey: true });
+      fireEvent.click(screen.getByRole("button", { name: "Revert 2 commits" }));
+
+      await waitFor(() => expect(revertMany).toHaveBeenCalledWith("/repos/a", ["c1", "c2"]));
+      expect(await screen.findByText("Reverted 1 commit, skipped 1 with no changes")).toBeInTheDocument();
     });
   });
 

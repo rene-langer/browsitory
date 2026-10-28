@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   BranchInfo,
+  ConflictSide,
+  PickOutcome,
+  SequenceAbort,
+  SequenceOutcome,
   CreatePullRequest,
   FileConflictChoice,
   MarkResolvedOutcome,
@@ -251,6 +255,8 @@ export interface UseAppStateResult {
   mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
+  /** See `MergeRebaseActions.resolveWholeFile`. */
+  resolveWholeFile(path: string, side: ConflictSide): Promise<void>;
   /** See `MergeRebaseActions.markResolved`. */
   markResolved(path: string, force: boolean): Promise<MarkResolvedOutcome | null>;
   abortMerge(): Promise<void>;
@@ -260,8 +266,13 @@ export interface UseAppStateResult {
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
   abortRebase(): Promise<void>;
-  cherryPick(commitId: string): Promise<void>;
-  revertCommit(commitId: string): Promise<void>;
+  /** See `HistoryActions`: outcomes, or `null` on failure. */
+  cherryPick(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
+  revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
+  cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
+  revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
+  continueSequence(): Promise<SequenceOutcome | null>;
+  abortSequence(): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   amendCommit(message: string, noVerify: boolean): Promise<boolean>;
@@ -324,7 +335,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     addRemoteDraftOpen: false,
     stashes: [],
     mergeMessage: null,
-    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
     forcePushOffer: null,
     forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),
@@ -595,6 +606,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    resolveWholeFile,
     markResolved,
     abortMerge,
     openRebasePlanner,
@@ -605,7 +617,18 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     abortRebase,
   } = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const { cherryPick, revertCommit, resetToCommit, checkoutCommit, amendCommit, setAmendMode } =
+  const {
+    cherryPick,
+    revertCommit,
+    cherryPickMany,
+    revertMany,
+    continueSequence,
+    abortSequence,
+    resetToCommit,
+    checkoutCommit,
+    amendCommit,
+    setAmendMode,
+  } =
     useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
   const { setSkipHooks, cancelHookRun, openHookFailure, closeHookFailure, clearCommitMessageHandled } =
     useHookActions(client, repoPath, state.hookRun, setState);
@@ -716,6 +739,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    resolveWholeFile,
     markResolved,
     abortMerge,
     openRebasePlanner,
@@ -726,6 +750,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     abortRebase,
     cherryPick,
     revertCommit,
+    cherryPickMany,
+    revertMany,
+    continueSequence,
+    abortSequence,
     resetToCommit,
     checkoutCommit,
     amendCommit,

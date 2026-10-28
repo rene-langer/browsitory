@@ -1,12 +1,21 @@
 import { useCallback } from "react";
-import type { RepoClient, ResetMode } from "../ipc/RepoClient";
+import type { PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
 
 export interface HistoryActions {
-  cherryPick(commitId: string): Promise<void>;
-  revertCommit(commitId: string): Promise<void>;
+  /**
+   * Each resolves to the backend's outcome, or `null` when it failed (the error is in
+   * `state.error`). `mainline` (1-based parent) is required for merge commits.
+   */
+  cherryPick(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
+  revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
+  /** Ids oldest-first (graph order reversed); a conflict pauses the sequence. */
+  cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
+  revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
+  continueSequence(): Promise<SequenceOutcome | null>;
+  abortSequence(): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   // Resolves `true` once amended; see `StagingActions.commit`.
@@ -24,13 +33,43 @@ export function useHistoryActions(
   runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): HistoryActions {
+  // Runs `call` as a mutation and hands back its result; `null` when it threw (runMutation has
+  // put the error into `state.error`).
+  const withOutcome = useCallback(
+    async <T,>(call: () => Promise<T>): Promise<T | null> => {
+      let result: T | null = null;
+      await runMutation(async () => {
+        result = await call();
+      });
+      return result;
+    },
+    [runMutation],
+  );
   const cherryPick = useCallback(
-    (commitId: string) => runMutation(async () => void (await client.cherryPick(repoPath, commitId))),
-    [client, runMutation, repoPath],
+    (commitId: string, mainline?: number | null) =>
+      withOutcome(() => client.cherryPick(repoPath, commitId, mainline ?? null)),
+    [client, withOutcome, repoPath],
   );
   const revertCommit = useCallback(
-    (commitId: string) => runMutation(async () => void (await client.revertCommit(repoPath, commitId))),
-    [client, runMutation, repoPath],
+    (commitId: string, mainline?: number | null) =>
+      withOutcome(() => client.revertCommit(repoPath, commitId, mainline ?? null)),
+    [client, withOutcome, repoPath],
+  );
+  const cherryPickMany = useCallback(
+    (commitIds: string[]) => withOutcome(() => client.cherryPickMany(repoPath, commitIds)),
+    [client, withOutcome, repoPath],
+  );
+  const revertMany = useCallback(
+    (commitIds: string[]) => withOutcome(() => client.revertMany(repoPath, commitIds)),
+    [client, withOutcome, repoPath],
+  );
+  const continueSequence = useCallback(
+    () => withOutcome(() => client.continueSequence(repoPath)),
+    [client, withOutcome, repoPath],
+  );
+  const abortSequence = useCallback(
+    () => withOutcome(() => client.abortSequence(repoPath)),
+    [client, withOutcome, repoPath],
   );
   const resetToCommit = useCallback(
     (commitId: string, mode: ResetMode) => runMutation(() => client.resetToCommit(repoPath, commitId, mode)),
@@ -62,5 +101,16 @@ export function useHistoryActions(
     (on: boolean) => setState((prev) => ({ ...prev, amendMode: on })),
     [setState],
   );
-  return { cherryPick, revertCommit, resetToCommit, checkoutCommit, amendCommit, setAmendMode };
+  return {
+    cherryPick,
+    revertCommit,
+    cherryPickMany,
+    revertMany,
+    continueSequence,
+    abortSequence,
+    resetToCommit,
+    checkoutCommit,
+    amendCommit,
+    setAmendMode,
+  };
 }

@@ -96,7 +96,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
@@ -125,6 +125,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     openDiffTool: async () => {},
     openMergeTool: async () => "Unresolved" as const,
     markResolved: async () => "Resolved" as const,
+    resolveWholeFile: async () => {},
+    cherryPickMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    revertMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    continueSequence: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
+    abortSequence: async () => ({ rewound: true }),
     getExternalToolSettings: async () => ({ editor: null, terminal: null }),
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
@@ -229,7 +234,7 @@ describe("DiffPane", () => {
       const onCommitMessageFocused = vi.fn();
       renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
         amendMode: true,
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
         focusCommitMessage: true,
         onCommitMessageFocused,
       });
@@ -771,7 +776,7 @@ describe("DiffPane", () => {
           headPushed: false,
           operation: null,
           squashMessage: "Squashed commit of the following:\n",
-          commitHooks: [],
+          commitHooks: [], sequence: null,
         },
       });
 
@@ -785,6 +790,50 @@ describe("DiffPane", () => {
       const dock = screen.getByRole("group", { name: "Commit actions" });
       expect(within(dock).getByText("Stash")).toBeInTheDocument();
       expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
+    });
+
+    it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
+      const onSequenceContinue = vi.fn();
+      const onSequenceAbort = vi.fn();
+      const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence };
+      const { unmount } = renderUncommitted(
+        fakeClient({ getConflictHunks: async () => [] }),
+        [...status, { path: "c.txt", staged: false, kind: "Conflicted" }],
+        { headInfo, onSequenceContinue, onSequenceAbort },
+      );
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByText("Cherry-pick in progress")).toBeInTheDocument();
+      expect(within(dock).getByText("Step 2 of 5")).toBeInTheDocument();
+      expect(within(dock).getByRole("button", { name: "Continue cherry-pick" })).toBeDisabled();
+      expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
+      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
+      fireEvent.click(within(dock).getByRole("button", { name: "Abort cherry-pick" }));
+      expect(onSequenceAbort).toHaveBeenCalled();
+      unmount();
+
+      // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" } },
+        onSequenceContinue,
+        onSequenceAbort,
+      });
+      const revertDock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(revertDock).getByText("Revert in progress")).toBeInTheDocument();
+      fireEvent.click(within(revertDock).getByRole("button", { name: "Continue revert" }));
+      expect(onSequenceContinue).toHaveBeenCalled();
+    });
+
+    it("disables the sequence's Continue and Abort while an action is pending", () => {
+      const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence },
+        sequencePending: true,
+      });
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: "Continue revert" })).toBeDisabled();
+      expect(within(dock).getByRole("button", { name: "Abort revert" })).toBeDisabled();
     });
 
     it("keeps the commit box in the pinned commit-actions group", () => {
@@ -1881,7 +1930,7 @@ describe("DiffPane external tools", () => {
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("The merge tool finished.");
-    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Mark resolved" }));
     await waitFor(() => expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt"));
     expect(onMarkResolved).toHaveBeenCalledWith("c.txt", false);
   });
@@ -1897,7 +1946,7 @@ describe("DiffPane external tools", () => {
       onMarkResolved,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Mark resolved" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Conflict markers remain in c.txt. Mark it resolved anyway?");
     fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
@@ -1921,6 +1970,29 @@ describe("DiffPane external tools", () => {
     expect(await screen.findByText("Conflict markers remain in c.txt. Mark it resolved anyway?")).toBeInTheDocument();
     fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
     expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt");
+  });
+
+  it("the conflict pane's whole-file buttons and Mark resolved go through the section", async () => {
+    const onMarkResolved = vi
+      .fn<(path: string, force: boolean) => Promise<"Resolved" | "MarkersRemain" | null>>()
+      .mockResolvedValueOnce("MarkersRemain")
+      .mockResolvedValueOnce("Resolved");
+    const onResolveWholeFile = vi.fn();
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      onMarkResolved,
+      onResolveWholeFile,
+    });
+
+    const header = await screen.findByRole("group", { name: "Whole file" });
+    await waitFor(() => expect(within(header).getByRole("button", { name: "Use theirs (whole file)" })).toBeEnabled());
+    fireEvent.click(within(header).getByRole("button", { name: "Use theirs (whole file)" }));
+    expect(onResolveWholeFile).toHaveBeenCalledWith("c.txt", "Theirs");
+
+    fireEvent.click(within(header).getByRole("button", { name: "Mark resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Conflict markers remain in c.txt. Mark it resolved anyway?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
+    await waitFor(() => expect(onMarkResolved).toHaveBeenLastCalledWith("c.txt", true));
   });
 
   it("commit file sections have an actions menu with a commit diff source", async () => {

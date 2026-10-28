@@ -55,6 +55,9 @@ import type {
   WorktreeInfo,
   HeadInfo,
   PickOutcome,
+  SequenceAbort,
+  SequenceOutcome,
+  ConflictSide,
   UndoOutcome,
   UndoState,
   ResetMode,
@@ -332,8 +335,18 @@ export const tauriRepoClient: RepoClient = {
   getUndoState: (repoPath: string) => loggedInvoke<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => loggedInvoke<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => loggedInvoke<UndoOutcome>("redo_last", { repoPath }),
-  cherryPick: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("cherry_pick", { repoPath, commitId }),
-  revertCommit: (repoPath: string, commitId: string) => loggedInvoke<PickOutcome>("revert_commit", { repoPath, commitId }),
+  cherryPick: (repoPath: string, commitId: string, mainline?: number | null) =>
+    loggedInvoke<PickOutcome>("cherry_pick", { repoPath, commitId, mainline: mainline ?? null }),
+  revertCommit: (repoPath: string, commitId: string, mainline?: number | null) =>
+    loggedInvoke<PickOutcome>("revert_commit", { repoPath, commitId, mainline: mainline ?? null }),
+  cherryPickMany: (repoPath: string, commitIds: string[]) =>
+    loggedInvoke<SequenceOutcome>("cherry_pick_many", { repoPath, commitIds }),
+  revertMany: (repoPath: string, commitIds: string[]) =>
+    loggedInvoke<SequenceOutcome>("revert_many", { repoPath, commitIds }),
+  continueSequence: (repoPath: string) => loggedInvoke<SequenceOutcome>("continue_sequence", { repoPath }),
+  abortSequence: (repoPath: string) => loggedInvoke<SequenceAbort>("abort_sequence", { repoPath }),
+  resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
+    loggedInvoke<void>("resolve_whole_file", { repoPath, path, side }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
     loggedInvoke<void>("reset_to_commit", { repoPath, commitId, mode }),
   checkoutCommit: (repoPath: string, commitId: string) => loggedInvoke<void>("checkout_commit", { repoPath, commitId }),

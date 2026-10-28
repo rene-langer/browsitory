@@ -82,7 +82,7 @@ fn checked_relative(path: &str) -> Result<&Path, StageError> {
 
 /// Refuses `rel` when any of its existing leading components (inside `workdir`) is a symlink, so
 /// a working-tree write can never land outside the repository through a symlinked folder.
-fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(), StageError> {
+pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(), StageError> {
     let mut current = workdir.to_path_buf();
     let Some(parent) = rel.parent() else {
         return Ok(());

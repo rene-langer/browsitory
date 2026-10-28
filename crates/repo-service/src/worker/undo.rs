@@ -71,6 +71,10 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
             (format!("Cherry-pick {}", short(commit_id)), Full)
         }
         Command::RevertCommit { commit_id, .. } => (format!("Revert {}", short(commit_id)), Full),
+        Command::CherryPickMany { commit_ids, .. } => {
+            (count_label("Cherry-pick", commit_ids.len()), Full)
+        }
+        Command::RevertMany { commit_ids, .. } => (count_label("Revert", commit_ids.len()), Full),
         Command::StartMerge {
             branch_name,
             options,
@@ -98,6 +102,29 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
         _ => return None,
     };
     Some(UndoPlan { label, scope })
+}
+
+/// A finished sequence's undo entry names the commits it actually applied (skipped ones
+/// changed nothing), not the number selected.
+pub(super) fn relabel_sequence(
+    recorder: &mut UndoRecorder,
+    kind: git_core::pick::SequenceKind,
+    result: &Result<git_core::pick::SequenceOutcome, String>,
+) {
+    if let Ok(git_core::pick::SequenceOutcome::Completed { applied, .. }) = result {
+        let verb = match kind {
+            git_core::pick::SequenceKind::CherryPick => "Cherry-pick",
+            git_core::pick::SequenceKind::Revert => "Revert",
+        };
+        recorder.relabel(count_label(verb, *applied));
+    }
+}
+
+fn count_label(verb: &str, count: usize) -> String {
+    format!(
+        "{verb} {count} {}",
+        if count == 1 { "commit" } else { "commits" }
+    )
 }
 
 /// Char-based: an id that isn't a real hex oid (any user/IPC string) must not panic.
@@ -173,6 +200,15 @@ impl UndoRecorder {
             stacks,
             active: None,
             pending: None,
+        }
+    }
+
+    /// Renames the entry being recorded (the running command's, or the paused operation's).
+    pub fn relabel(&mut self, label: String) {
+        if let Some((plan, _)) = self.active.as_mut() {
+            plan.label = label;
+        } else if let Some((pending, _)) = self.pending.as_mut() {
+            *pending = label;
         }
     }
 
@@ -380,7 +416,8 @@ impl HeldReplies {
 
 /// Swaps the reply of every command that can change what the recorder snapshots: everything
 /// `plan_for` records, plus the commands that can end a pending operation (`RebaseContinue`,
-/// `AbortMerge`, `AbortRebase`). Guarded by `every_recordable_command_has_its_reply_held`.
+/// `AbortMerge`, `AbortRebase`, `ContinueSequence`, `AbortSequence`). Guarded by
+/// `every_recordable_command_has_its_reply_held` and `ending_commands_have_their_reply_held`.
 ///
 /// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
 /// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a `CommitOutcome`,
@@ -416,6 +453,10 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
         }
         Command::PullCurrentUpstream { reply, .. } => held.hold(reply),
         Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => held.hold(reply),
+        Command::CherryPickMany { reply, .. }
+        | Command::RevertMany { reply, .. }
+        | Command::ContinueSequence { reply } => held.hold(reply),
+        Command::AbortSequence { reply } => held.hold(reply),
         _ => {}
     }
 }
@@ -783,8 +824,20 @@ mod tests {
             commit_id: s(),
             mode: ResetMode::Hard
         });
-        assert_held!(CherryPick { commit_id: s() });
-        assert_held!(RevertCommit { commit_id: s() });
+        assert_held!(CherryPick {
+            commit_id: s(),
+            mainline: None
+        });
+        assert_held!(RevertCommit {
+            commit_id: s(),
+            mainline: Some(1)
+        });
+        assert_held!(CherryPickMany {
+            commit_ids: vec![s()]
+        });
+        assert_held!(RevertMany {
+            commit_ids: vec![s()]
+        });
         assert_held!(StartMerge {
             branch_name: s(),
             options: git_core::merge::MergeOptions::default()
@@ -801,6 +854,53 @@ mod tests {
             reference: s(),
             new_id: s()
         });
+    }
+
+    /// Not recordable themselves, but they can end a pending operation's entry.
+    #[test]
+    fn ending_commands_have_their_reply_held() {
+        macro_rules! assert_only_held {
+            ($variant:ident) => {{
+                let (reply, rx) = channel();
+                let mut command = Command::$variant { reply };
+                assert!(plan_for(&command).is_none());
+                let mut held = HeldReplies::default();
+                hold_reply(&mut command, &mut held);
+                drop(command);
+                assert_eq!(
+                    rx.try_recv().map(|_| ()),
+                    Err(std::sync::mpsc::TryRecvError::Empty),
+                    "{} reply was not held",
+                    stringify!($variant)
+                );
+                held.release();
+            }};
+        }
+        assert_only_held!(AbortMerge);
+        assert_only_held!(AbortRebase);
+        assert_only_held!(RebaseContinue);
+        assert_only_held!(ContinueSequence);
+        assert_only_held!(AbortSequence);
+    }
+
+    #[test]
+    fn sequences_are_labelled_by_count() {
+        let (tx, _rx) = channel();
+        assert_eq!(
+            label(Command::CherryPickMany {
+                commit_ids: vec!["a".into(), "b".into(), "c".into()],
+                reply: tx
+            }),
+            Some(("Cherry-pick 3 commits".into(), SnapshotScope::Full))
+        );
+        let (tx, _rx) = channel();
+        assert_eq!(
+            label(Command::RevertMany {
+                commit_ids: vec!["a".into()],
+                reply: tx
+            }),
+            Some(("Revert 1 commit".into(), SnapshotScope::Full))
+        );
     }
 
     #[test]

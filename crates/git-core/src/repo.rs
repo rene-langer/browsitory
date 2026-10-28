@@ -60,6 +60,9 @@ pub struct HeadInfo {
     /// Installed commit hooks that `--no-verify` skips (`pre-commit`, `commit-msg`); drives the
     /// "Skip hooks" checkbox.
     pub commit_hooks: Vec<String>,
+    /// A stopped multi-commit cherry-pick/revert. Filled by `repo-service` from its stored
+    /// sequence state; `git-core` has no persistence and always reports `None`.
+    pub sequence: Option<crate::pick::SequenceProgress>,
 }
 
 /// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. Rebase
@@ -85,6 +88,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 operation,
                 squash_message: crate::merge::squash_message(repo),
                 commit_hooks,
+                sequence: None,
             });
         }
         Err(error) => return Err(error.into()),
@@ -100,6 +104,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         operation,
         squash_message: crate::merge::squash_message(repo),
         commit_hooks,
+        sequence: None,
     })
 }
 

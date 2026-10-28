@@ -868,3 +868,310 @@ fn abort_after_a_conflicted_squash_clears_squash_msg() {
         "line one\nmain two\nline three\n"
     );
 }
+
+// --- Whole-file resolution (batch 4g) ---
+
+use git_core::merge::{ConflictSide, MergeError};
+
+fn staged_blob(repo: &git2::Repository, path: &str) -> Option<Vec<u8>> {
+    let index = repo.index().unwrap();
+    index
+        .get_path(std::path::Path::new(path), 0)
+        .map(|entry| repo.find_blob(entry.id).unwrap().content().to_vec())
+}
+
+#[test]
+fn resolve_whole_file_takes_ours_or_theirs_for_a_content_conflict() {
+    for (side, expected) in [
+        (ConflictSide::Ours, "line one\nmain two\nline three\n"),
+        (ConflictSide::Theirs, "line one\nfeature two\nline three\n"),
+    ] {
+        let (dir, repo) = make_conflicted_repo();
+        git_core::merge::resolve_whole_file(&repo, "shared.txt", side).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+            expected,
+            "{side:?}"
+        );
+        assert!(!repo.index().unwrap().has_conflicts());
+        assert_eq!(
+            staged_blob(&repo, "shared.txt").unwrap(),
+            expected.as_bytes()
+        );
+    }
+}
+
+#[test]
+fn resolve_whole_file_on_a_modify_delete_conflict_deletes_or_keeps() {
+    // ours (main) deleted shared.txt, theirs (feature) changed it to "v2\n".
+    let (dir, repo) = make_delete_modify_conflict();
+    git_core::merge::resolve_whole_file(&repo, "shared.txt", ConflictSide::Ours).unwrap();
+    assert!(!dir.path().join("shared.txt").exists());
+    assert!(staged_blob(&repo, "shared.txt").is_none());
+    assert!(!repo.index().unwrap().has_conflicts());
+
+    let (dir, repo) = make_delete_modify_conflict();
+    git_core::merge::resolve_whole_file(&repo, "shared.txt", ConflictSide::Theirs).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "v2\n"
+    );
+    assert_eq!(staged_blob(&repo, "shared.txt").unwrap(), b"v2\n");
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn resolve_whole_file_rejects_a_path_with_no_conflict() {
+    let (_dir, repo) = make_conflicted_repo();
+    assert!(matches!(
+        git_core::merge::resolve_whole_file(&repo, "nope.txt", ConflictSide::Ours),
+        Err(MergeError::NoConflict(_))
+    ));
+    assert!(matches!(
+        git_core::merge::resolve_whole_file(&repo, "../shared.txt", ConflictSide::Ours),
+        Err(MergeError::NoConflict(_))
+    ));
+}
+
+#[test]
+fn resolve_whole_file_leaves_other_conflicts_alone() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    write_file(dir.path(), "b.txt", "base\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "a.txt", "feature\n");
+    write_file(dir.path(), "b.txt", "feature\n");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "a.txt", "main\n");
+    write_file(dir.path(), "b.txt", "main\n");
+    commit_all(&repo, "main commit");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    let b_before = std::fs::read_to_string(dir.path().join("b.txt")).unwrap();
+
+    git_core::merge::resolve_whole_file(&repo, "a.txt", ConflictSide::Theirs).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "feature\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("b.txt")).unwrap(),
+        b_before
+    );
+    assert!(git_core::merge::conflict_hunks(&repo, "b.txt").is_ok());
+}
+
+#[test]
+fn resolve_whole_file_resolves_a_stash_pop_conflict() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "a.txt", "stashed\n");
+    git_core::stash::save_stash(&mut repo, &git_core::stash::StashOptions::default()).unwrap();
+    write_file(dir.path(), "a.txt", "committed\n");
+    commit_all(&repo, "committed");
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap();
+    assert!(matches!(
+        outcome,
+        git_core::stash::StashApplyOutcome::Conflicted { .. }
+    ));
+
+    git_core::merge::resolve_whole_file(&repo, "a.txt", ConflictSide::Theirs).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "stashed\n"
+    );
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_whole_file_keeps_the_chosen_sides_executable_bit() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    let script = dir.path().join("run.sh");
+    write_file(dir.path(), "run.sh", "echo base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "run.sh", "echo feature\n");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "run.sh", "echo main\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    assert!(
+        repo.index().unwrap().has_conflicts(),
+        "fixture must conflict"
+    );
+
+    git_core::merge::resolve_whole_file(&repo, "run.sh", ConflictSide::Theirs).unwrap();
+    assert_eq!(std::fs::read_to_string(&script).unwrap(), "echo feature\n");
+    assert_eq!(
+        std::fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+        0o111
+    );
+    let index = repo.index().unwrap();
+    assert_eq!(
+        index
+            .get_path(std::path::Path::new("run.sh"), 0)
+            .unwrap()
+            .mode,
+        0o100755
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_whole_file_refuses_a_symlink_conflict() {
+    let (dir, repo) = init_repo();
+    std::os::unix::fs::symlink("a", dir.path().join("link")).unwrap();
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    std::fs::remove_file(dir.path().join("link")).unwrap();
+    std::os::unix::fs::symlink("b", dir.path().join("link")).unwrap();
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    std::fs::remove_file(dir.path().join("link")).unwrap();
+    std::os::unix::fs::symlink("c", dir.path().join("link")).unwrap();
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    assert!(
+        repo.index().unwrap().has_conflicts(),
+        "fixture must conflict"
+    );
+
+    assert!(matches!(
+        git_core::merge::resolve_whole_file(&repo, "link", ConflictSide::Ours),
+        Err(MergeError::UnsupportedEntry(path)) if path == "link"
+    ));
+    assert!(repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        MergeError::UnsupportedEntry("link".into()).to_string(),
+        "'link' is a symlink or submodule conflict. Resolve it with git."
+    );
+}
+
+#[test]
+fn resolve_whole_file_handles_a_binary_conflict() {
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("img.bin"), b"\0base\0").unwrap();
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    std::fs::write(dir.path().join("img.bin"), b"\0feature\0").unwrap();
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    std::fs::write(dir.path().join("img.bin"), b"\0main\0").unwrap();
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    assert!(
+        repo.index().unwrap().has_conflicts(),
+        "fixture must conflict"
+    );
+
+    git_core::merge::resolve_whole_file(&repo, "img.bin", ConflictSide::Theirs).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("img.bin")).unwrap(),
+        b"\0feature\0"
+    );
+    assert_eq!(staged_blob(&repo, "img.bin").unwrap(), b"\0feature\0");
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn resolve_whole_file_handles_an_add_add_conflict() {
+    for (side, expected) in [
+        (ConflictSide::Ours, "main\n"),
+        (ConflictSide::Theirs, "feature\n"),
+    ] {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "base\n");
+        commit_all(&repo, "base");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "new.txt", "feature\n");
+        commit_all(&repo, "feature adds");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "new.txt", "main\n");
+        commit_all(&repo, "main adds");
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+        assert!(
+            repo.index().unwrap().has_conflicts(),
+            "fixture must conflict"
+        );
+
+        git_core::merge::resolve_whole_file(&repo, "new.txt", side).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("new.txt")).unwrap(),
+            expected
+        );
+        assert!(!repo.index().unwrap().has_conflicts());
+    }
+}
+
+/// `sub/shared.txt` conflicts; then `sub` is replaced by a symlink to a folder outside the
+/// repository. No resolution may write or delete through it.
+#[cfg(unix)]
+#[test]
+fn conflict_resolution_never_writes_through_a_symlinked_folder() {
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "sub/shared.txt", "base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "sub/shared.txt", "feature\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "sub/shared.txt", "main\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(outside.path().join("shared.txt"), "outside\n").unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("sub")).unwrap();
+
+    for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+        assert!(matches!(
+            git_core::merge::resolve_whole_file(&repo, "sub/shared.txt", side),
+            Err(MergeError::SymlinkedFolder(_))
+        ));
+    }
+    assert!(matches!(
+        git_core::merge::resolve_conflict(&repo, "sub/shared.txt", "x\n"),
+        Err(MergeError::SymlinkedFolder(_))
+    ));
+    assert!(matches!(
+        git_core::merge::mark_resolved(&repo, "sub/shared.txt", true),
+        Err(MergeError::SymlinkedFolder(_))
+    ));
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("shared.txt")).unwrap(),
+        "outside\n"
+    );
+    assert!(repo.index().unwrap().has_conflicts());
+}

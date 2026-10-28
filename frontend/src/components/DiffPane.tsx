@@ -1,5 +1,5 @@
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { conflictReason } from "../lib/operationStatus";
+import { conflictReason, sequenceNoun } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -21,6 +21,7 @@ import type {
   GraphCommit,
   HeadInfo,
   MarkResolvedOutcome,
+  ConflictSide,
   RepoClient,
   StashEntry,
   StashFiles,
@@ -89,6 +90,7 @@ function UncommittedFileSection({
   onOpenFileHistory,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
   sectionRef,
 }: {
   repoPath: string;
@@ -121,6 +123,8 @@ function UncommittedFileSection({
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -417,6 +421,8 @@ function UncommittedFileSection({
               path={entry.path}
               onResolve={onResolveConflict}
               onResolveAddDelete={onResolveAddDeleteConflict}
+              onResolveWholeFile={onResolveWholeFile}
+              onMarkResolved={onMarkResolved === undefined ? undefined : () => void markResolved(false)}
             />
           ) : error !== null ? (
             <InlineError
@@ -472,7 +478,7 @@ export interface CommitHooksControls {
   onCancel: () => void;
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [] };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null };
 const noop = () => {};
 const noAmend = async () => false;
 
@@ -514,6 +520,9 @@ export function DiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  onSequenceContinue = noop,
+  onSequenceAbort = noop,
+  sequencePending = false,
   commits,
   refreshGeneration = 0,
   initialCommitDraft,
@@ -527,6 +536,7 @@ export function DiffPane({
   stashActions,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
 }: {
   // The stash list: a selected commit id that is a stash's renders the stash view instead of
   // the commit view.
@@ -537,6 +547,8 @@ export function DiffPane({
   externalTools?: ExternalToolsApi;
   // "Mark resolved" on a conflicted file's merge tool notice.
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   // Set while the graph shows a file's history: the commit view shows only that file.
   fileHistoryFocus?: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
@@ -601,6 +613,11 @@ export function DiffPane({
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
+  // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
+  onSequenceContinue?: () => void;
+  onSequenceAbort?: () => void;
+  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
+  sequencePending?: boolean;
 }) {
   if (selectedRow === "uncommitted") {
     return (
@@ -641,6 +658,9 @@ export function DiffPane({
         rebaseProgress={rebaseProgress}
         onRebaseContinue={onRebaseContinue}
         onRebaseAbort={onRebaseAbort}
+        onSequenceContinue={onSequenceContinue}
+        onSequenceAbort={onSequenceAbort}
+        sequencePending={sequencePending}
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         onCommitDraftChange={onCommitDraftChange}
@@ -650,6 +670,7 @@ export function DiffPane({
         onOpenFileHistory={onOpenFileHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
+        onResolveWholeFile={onResolveWholeFile}
       />
     );
   }
@@ -739,6 +760,9 @@ function UncommittedDiffPane({
   rebaseProgress,
   onRebaseContinue,
   onRebaseAbort,
+  onSequenceContinue = noop,
+  onSequenceAbort = noop,
+  sequencePending = false,
   refreshGeneration,
   discardRequest: discardRequestProp,
   onDiscardRequestChange,
@@ -748,10 +772,13 @@ function UncommittedDiffPane({
   onOpenFileHistory,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
 }: {
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
@@ -801,6 +828,11 @@ function UncommittedDiffPane({
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   onRebaseContinue: () => void;
   onRebaseAbort: () => void;
+  // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
+  onSequenceContinue?: () => void;
+  onSequenceAbort?: () => void;
+  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
+  sequencePending?: boolean;
 }) {
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
@@ -1040,6 +1072,7 @@ function UncommittedDiffPane({
         onOpenFileHistory={onOpenFileHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
+        onResolveWholeFile={onResolveWholeFile}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -1140,14 +1173,29 @@ function UncommittedDiffPane({
         <SplitButton
           label="Stash"
           onClick={onSaveStash}
-          disabled={status.length === 0 || rebaseProgress !== null}
+          disabled={status.length === 0 || rebaseProgress !== null || headInfo.sequence !== null}
           menuLabel="More stash options"
           items={[
             { label: "Stash all", onSelect: () => onSaveStash() },
             { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
           ]}
         />
-        {rebaseProgress !== null ? (
+        {headInfo.sequence !== null ? (
+          // A stopped cherry-pick/revert sequence: no editable message per step; Continue
+          // commits the resolved step with its MERGE_MSG, like rebase continue.
+          <RebaseProgressPanel
+            currentStep={headInfo.sequence.currentStep}
+            totalSteps={headInfo.sequence.totalSteps}
+            disabled={sequencePending || conflictCount > 0}
+            disabledReason={conflictReason(conflictCount)}
+            onContinue={onSequenceContinue}
+            onAbort={onSequenceAbort}
+            abortDisabled={sequencePending}
+            title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
+            continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
+            abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
+          />
+        ) : rebaseProgress !== null ? (
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
             totalSteps={rebaseProgress.totalSteps}
@@ -1184,7 +1232,11 @@ function UncommittedDiffPane({
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
             amend={{
-              available: headInfo.headId !== null && headInfo.operation === null && mergeMessage === null,
+              available:
+                headInfo.headId !== null &&
+                headInfo.operation === null &&
+                headInfo.sequence === null &&
+                mergeMessage === null,
               on: amendMode,
               headMessage,
               pushed: headInfo.headPushed,

@@ -38,6 +38,7 @@ mod rebase;
 mod reflog;
 mod remote;
 mod search;
+mod sequence_store;
 mod stash;
 mod status;
 mod submodule;
@@ -451,6 +452,11 @@ pub(crate) enum Command {
         force: bool,
         reply: Sender<Result<git_core::merge::MarkResolvedOutcome, String>>,
     },
+    ResolveWholeFile {
+        path: String,
+        side: git_core::merge::ConflictSide,
+        reply: Sender<Result<(), String>>,
+    },
     PrepareDiffTool {
         path: String,
         source: git_core::tools::DiffSource,
@@ -519,11 +525,27 @@ pub(crate) enum Command {
     },
     CherryPick {
         commit_id: String,
+        mainline: Option<u32>,
         reply: Sender<Result<git_core::pick::PickOutcome, String>>,
     },
     RevertCommit {
         commit_id: String,
+        mainline: Option<u32>,
         reply: Sender<Result<git_core::pick::PickOutcome, String>>,
+    },
+    CherryPickMany {
+        commit_ids: Vec<String>,
+        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+    },
+    RevertMany {
+        commit_ids: Vec<String>,
+        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+    },
+    ContinueSequence {
+        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+    },
+    AbortSequence {
+        reply: Sender<Result<git_core::pick::SequenceAbort, String>>,
     },
     ResetToCommit {
         commit_id: String,
@@ -705,10 +727,14 @@ impl Worker {
             let credential_service = CredentialService::new(credential_store);
             let pull_request_service = PullRequestService::new(forge_api);
             let mut undo_recorder = undo::UndoRecorder::open(&repo);
+            // A stopped multi-commit cherry-pick/revert, persisted so it survives a restart.
+            let sequence_store = sequence_store::SequenceStore::open(&repo);
             // Browsitory's own rebase leaves `repo.state()` clean, so its paused state lives in
-            // `rebase_state` instead.
+            // `rebase_state` instead; a sequence stopped by an error is clean too.
             let in_progress = |repo: &git2::Repository, rebase_state: &Option<RebaseState>| {
-                repo.state() != git2::RepositoryState::Clean || rebase_state.is_some()
+                repo.state() != git2::RepositoryState::Clean
+                    || rebase_state.is_some()
+                    || sequence_store.load(repo).is_some()
             };
             for mut command in rx {
                 undo_recorder.settle(in_progress(&repo, &rebase_state));
@@ -716,7 +742,9 @@ impl Worker {
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
                     command,
-                    Command::AbortMerge { .. } | Command::AbortRebase { .. }
+                    Command::AbortMerge { .. }
+                        | Command::AbortRebase { .. }
+                        | Command::AbortSequence { .. }
                 );
                 let mut held = undo::HeldReplies::default();
                 if track {
@@ -724,6 +752,11 @@ impl Worker {
                 }
                 if let Some(plan) = plan {
                     undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_state));
+                }
+                // While a cherry-pick/revert sequence is stored, commands that would move HEAD
+                // or rewrite the index under it are refused before git-core runs.
+                if sequence_store.load(&repo).is_some() {
+                    command = history::gate_during_sequence(command);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -1099,8 +1132,17 @@ impl Worker {
                         resolved_content,
                         reply,
                     } => merge::resolve(&repo, path, resolved_content, reply),
-                    Command::AbortMerge { reply } => merge::abort(&repo, reply),
-                    Command::GetHeadInfo { reply } => history::head_info(&repo, reply),
+                    Command::AbortMerge { reply } => {
+                        // A stale UI's Abort during a sequence must not strand sequence.json.
+                        if sequence_store.load(&repo).is_some() {
+                            history::abort_sequence_for_merge(&repo, &sequence_store, reply)
+                        } else {
+                            merge::abort(&repo, reply)
+                        }
+                    }
+                    Command::GetHeadInfo { reply } => {
+                        history::head_info(&repo, &sequence_store, reply)
+                    }
                     Command::AmendCommit {
                         message,
                         no_verify,
@@ -1118,11 +1160,37 @@ impl Worker {
                         events,
                         reply,
                     ),
-                    Command::CherryPick { commit_id, reply } => {
-                        history::cherry_pick(&repo, commit_id, reply)
+                    Command::CherryPick {
+                        commit_id,
+                        mainline,
+                        reply,
+                    } => history::cherry_pick(&repo, commit_id, mainline, reply),
+                    Command::RevertCommit {
+                        commit_id,
+                        mainline,
+                        reply,
+                    } => history::revert(&repo, commit_id, mainline, reply),
+                    Command::CherryPickMany { commit_ids, reply } => {
+                        let kind = git_core::pick::SequenceKind::CherryPick;
+                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        let _ = reply.send(result);
                     }
-                    Command::RevertCommit { commit_id, reply } => {
-                        history::revert(&repo, commit_id, reply)
+                    Command::RevertMany { commit_ids, reply } => {
+                        let kind = git_core::pick::SequenceKind::Revert;
+                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        let _ = reply.send(result);
+                    }
+                    Command::ContinueSequence { reply } => {
+                        let (kind, result) = history::continue_sequence(&repo, &sequence_store);
+                        if let Some(kind) = kind {
+                            undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        }
+                        let _ = reply.send(result);
+                    }
+                    Command::AbortSequence { reply } => {
+                        history::abort_sequence(&repo, &sequence_store, reply)
                     }
                     Command::ResetToCommit {
                         commit_id,
@@ -1158,6 +1226,9 @@ impl Worker {
                     } => merge::resolve_add_delete(&repo, path, choice, reply),
                     Command::MarkResolved { path, force, reply } => {
                         merge::mark_resolved(&repo, path, force, reply)
+                    }
+                    Command::ResolveWholeFile { path, side, reply } => {
+                        merge::resolve_whole_file(&repo, path, side, reply)
                     }
                     Command::PrepareDiffTool {
                         path,
@@ -1598,6 +1669,8 @@ mod tests {
             config.set_str("user.name", "Test User").unwrap();
             config.set_str("user.email", "test@example.com").unwrap();
             config.set_bool("core.autocrlf", false).unwrap();
+            config.set_str("core.eol", "lf").unwrap();
+            config.set_bool("core.safecrlf", false).unwrap();
             config.set_bool("commit.gpgSign", false).unwrap();
             // Pin the hooks dir (git's default) so a global `core.hooksPath` never runs here.
             let hooks = repo.path().join("hooks");
@@ -2060,6 +2133,304 @@ mod tests {
             handle.mark_resolved("a.txt".into(), true).unwrap(),
             git_core::merge::MarkResolvedOutcome::Resolved
         );
+    }
+
+    /// base: a.txt="base\n". feature: "f one" (+b.txt), "f two" (a.txt="feature\n"),
+    /// "f three" (+c.txt). The base branch (checked out): a.txt="main\n". Returns the feature
+    /// ids oldest-first.
+    fn side_commits_with_a_conflict() -> (TempDir, Repository, Vec<String>) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &head, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        let mut ids = Vec::new();
+        for (path, contents, message) in [
+            ("b.txt", "b\n", "f one"),
+            ("a.txt", "feature\n", "f two"),
+            ("c.txt", "c\n", "f three"),
+        ] {
+            write_file(dir.path(), path, contents);
+            commit_all(&repo, message);
+            ids.push(repo.head().unwrap().target().unwrap().to_string());
+        }
+        repo.set_head(&format!("refs/heads/{base_branch}")).unwrap();
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true),
+        ))
+        .unwrap();
+        write_file(dir.path(), "a.txt", "main\n");
+        commit_all(&repo, "main change");
+        (dir, repo, ids)
+    }
+
+    fn sequence_file(repo: &Repository) -> std::path::PathBuf {
+        repo.path().join("browsitory").join("sequence.json")
+    }
+
+    #[test]
+    fn a_conflicted_sequence_finished_by_continue_is_one_undo_entry() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let outcome = handle.cherry_pick_many(ids.clone()).unwrap();
+        assert!(matches!(
+            outcome,
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        assert!(sequence_file(&repo).exists());
+        let progress = handle.get_head_info().unwrap().sequence.unwrap();
+        assert_eq!((progress.current_step, progress.total_steps), (2, 3));
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+        assert_eq!(handle.cherry_pick(ids[0].clone(), None).unwrap_err(), busy);
+        assert_eq!(handle.revert_many(ids.clone()).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap_err(),
+            busy
+        );
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        let outcome = handle.continue_sequence().unwrap();
+        assert_eq!(
+            outcome,
+            git_core::pick::SequenceOutcome::Completed {
+                applied: 3,
+                skipped: vec![]
+            }
+        );
+        assert_eq!(handle.get_head_info().unwrap().sequence, None);
+        assert!(!sequence_file(&repo).exists());
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 3 commits".into())
+        );
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[test]
+    fn a_stored_sequence_refuses_everything_that_moves_head_or_the_index() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids.clone()).unwrap();
+        let base = repo.head().unwrap().target().unwrap().to_string();
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+
+        assert_eq!(
+            handle
+                .commit("x".into(), false, mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .reset_to_commit(base.clone(), git_core::reset::ResetMode::Hard)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.checkout_commit(base.clone()).unwrap_err(), busy);
+        assert_eq!(handle.switch_branch("feature".into()).unwrap_err(), busy);
+        assert_eq!(
+            handle.pull_current_upstream(mpsc::channel().0).unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.apply_stash(0, "s".into(), false).unwrap_err(), busy);
+        assert_eq!(handle.pop_stash(0, "s".into(), false).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .restore_reflog_entry("HEAD".into(), base.clone())
+                .unwrap_err(),
+            busy
+        );
+        // Read-only and resolving commands still work.
+        assert!(handle.get_status().is_ok());
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert!(handle.continue_sequence().is_ok());
+    }
+
+    #[test]
+    fn the_undo_label_counts_the_commits_that_were_applied() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        // "f one" is already on the branch: it is skipped, so two commits are applied.
+        git_core::pick::cherry_pick(&repo, &ids[0], None).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids.clone()).unwrap();
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert_eq!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed {
+                applied: 2,
+                skipped: vec![ids[0].clone()],
+            }
+        );
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 2 commits".into())
+        );
+    }
+
+    #[test]
+    fn an_aborted_sequence_records_nothing() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(
+            handle.revert_many(vec![]).unwrap_err(),
+            "Select at least one commit."
+        );
+        assert!(!sequence_file(&repo).exists());
+        handle.cherry_pick_many(ids).unwrap();
+        assert_eq!(
+            handle.abort_sequence().unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+        assert_eq!(handle.get_head_info().unwrap().sequence, None);
+        assert!(!sequence_file(&repo).exists());
+        assert_eq!(
+            handle.get_undo_state().unwrap(),
+            UndoState {
+                undo: None,
+                redo: None
+            }
+        );
+        let none = "No cherry-pick or revert is in progress.";
+        assert_eq!(handle.continue_sequence().unwrap_err(), none);
+        assert_eq!(handle.abort_sequence().unwrap_err(), none);
+    }
+
+    #[test]
+    fn abort_merge_during_a_sequence_clears_it() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids).unwrap();
+        handle.abort_merge().unwrap();
+        assert_eq!(handle.get_head_info().unwrap().sequence, None);
+        assert!(!sequence_file(&repo).exists());
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[test]
+    fn a_stopped_sequence_survives_a_worker_restart() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            worker.handle().cherry_pick_many(ids).unwrap();
+        }
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let progress = handle.get_head_info().unwrap().sequence.unwrap();
+        assert_eq!(progress.current_step, 2);
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert_eq!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed {
+                applied: 3,
+                skipped: vec![]
+            }
+        );
+        assert!(!sequence_file(&repo).exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "feature\n"
+        );
+    }
+
+    #[test]
+    fn a_sequence_stopped_by_an_error_blocks_undo_and_offers_continue() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        // c.txt untracked in the way of step three.
+        write_file(dir.path(), "c.txt", "mine\n");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        // Step two conflicts first; take theirs and continue into step three's error.
+        handle.cherry_pick_many(ids).unwrap();
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert!(handle.continue_sequence().is_err());
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+        let progress = handle.get_head_info().unwrap().sequence.unwrap();
+        assert_eq!(progress.current_step, 3);
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+        std::fs::remove_file(dir.path().join("c.txt")).unwrap();
+        assert!(matches!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed { applied: 3, .. }
+        ));
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 3 commits".into())
+        );
+    }
+
+    #[test]
+    fn a_corrupt_sequence_file_never_blocks_the_repository() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        std::fs::create_dir_all(repo.path().join("browsitory")).unwrap();
+        std::fs::write(sequence_file(&repo), "{not json").unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(handle.get_head_info().unwrap().sequence, None);
+        assert!(matches!(
+            handle.cherry_pick(ids[0].clone(), None).unwrap(),
+            git_core::pick::PickOutcome::Committed { .. }
+        ));
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+    }
+
+    #[test]
+    fn whole_file_resolution_round_trips_through_the_worker() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let main = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "a.txt", "theirs\n");
+        commit_all(&repo, "feature");
+        git_core::branch::switch_branch(&repo, &main).unwrap();
+        write_file(dir.path(), "a.txt", "ours\n");
+        commit_all(&repo, "main");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "theirs\n"
+        );
+        assert!(!repo.index().unwrap().has_conflicts());
     }
 
     fn two_commit_repo() -> (TempDir, Repository) {
@@ -3957,7 +4328,7 @@ mod tests {
 
         assert_eq!(handle.get_head_info().unwrap().head_id, Some(base.clone()));
 
-        let outcome = handle.cherry_pick(side.clone()).unwrap();
+        let outcome = handle.cherry_pick(side.clone(), None).unwrap();
         assert!(matches!(
             outcome,
             git_core::pick::PickOutcome::Committed { .. }
@@ -3968,7 +4339,7 @@ mod tests {
             .unwrap();
         let picked = handle.get_head_info().unwrap().head_id.unwrap();
 
-        let reverted = handle.revert_commit(picked).unwrap();
+        let reverted = handle.revert_commit(picked, None).unwrap();
         assert!(matches!(
             reverted,
             git_core::pick::PickOutcome::Committed { .. }
@@ -3982,7 +4353,7 @@ mod tests {
         handle.checkout_commit(side).unwrap();
         assert!(handle.get_head_info().unwrap().detached_at.is_some());
 
-        assert!(handle.cherry_pick("not-a-sha".into()).is_err());
+        assert!(handle.cherry_pick("not-a-sha".into(), None).is_err());
         assert!(
             handle.get_head_info().is_ok(),
             "worker survives a failed command"
