@@ -217,6 +217,23 @@ fn a_repositorys_own_config_can_never_choose_or_define_a_tool() {
 }
 
 #[test]
+fn a_file_included_from_the_repository_config_is_not_trusted_either() {
+    let (dir, repo) = init_repo();
+    let included = dir.path().join("tools.gitconfig");
+    std::fs::write(
+        &included,
+        "[diff]\n\ttool = evil\n[difftool \"evil\"]\n\tcmd = touch pwned\n",
+    )
+    .unwrap();
+    set_local(&repo, &[("include.path", included.to_str().unwrap())]);
+    let (_d, config) = user_config(Some(&repo), &[]);
+    assert!(matches!(
+        resolve_tool(&config, ToolKind::Diff),
+        Err(ToolError::RepositoryConfigIgnored { name, .. }) if name == "evil"
+    ));
+}
+
+#[test]
 fn a_repository_cannot_override_the_users_tool_command_or_program() {
     let (_dir, repo) = init_repo();
     set_local(
