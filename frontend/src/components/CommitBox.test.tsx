@@ -533,4 +533,65 @@ describe("CommitBox showAbort", () => {
 
     expect(screen.getByRole("button", { name: "Abort merge" })).toBeInTheDocument();
   });
+
+  describe("summary counter and ruler", () => {
+    it("counts summary characters and warns past the soft limit without blocking", async () => {
+      const onCommit = vi.fn(async () => true);
+      render(
+        <CommitBox
+          onCommit={onCommit}
+          disabled={false}
+          onAbortMerge={vi.fn()}
+          messageSettings={{ summaryLimit: 10, bodyRuler: 72, showRuler: true }}
+        />,
+      );
+      const box = screen.getByRole("textbox", { name: "Commit message" });
+      const counter = screen.getByLabelText("Summary length");
+      expect(counter).toHaveTextContent("Summary 0/10");
+      fireEvent.change(box, { target: { value: "0123456789\nbody that is long enough to pass any limit" } });
+      expect(counter).toHaveTextContent("Summary 10/10");
+      expect(counter).not.toHaveAttribute("data-over");
+      expect(counter).not.toHaveAttribute("title");
+      fireEvent.change(box, { target: { value: "0123456789é\n" } });
+      expect(counter).toHaveTextContent("Summary 11/10");
+      expect(counter).toHaveAttribute("data-over", "true");
+      expect(counter).toHaveAttribute("title", "Many tools cut summaries longer than 10 characters.");
+      fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+      expect(onCommit).toHaveBeenCalled();
+      await waitFor(() => expect(box).toHaveValue(""));
+    });
+
+    it("counts code points, not UTF-16 units, of the first line only", () => {
+      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+      const box = screen.getByRole("textbox", { name: "Commit message" });
+      fireEvent.change(box, { target: { value: "🎉 ok" } });
+      expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 4/50");
+      fireEvent.change(box, { target: { value: "ab\r\nsecond line" } });
+      expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 2/50");
+    });
+
+    it("draws the ruler at the configured column in a monospace field, or not at all", () => {
+      const { rerender } = render(
+        <CommitBox
+          onCommit={vi.fn(async () => true)}
+          disabled={false}
+          onAbortMerge={vi.fn()}
+          messageSettings={{ summaryLimit: 50, bodyRuler: 80, showRuler: true }}
+        />,
+      );
+      const box = screen.getByRole("textbox", { name: "Commit message" });
+      expect(box).toHaveAttribute("data-ruler", "true");
+      expect(box.style.getPropertyValue("--ruler-column")).toBe("80");
+      rerender(
+        <CommitBox
+          onCommit={vi.fn(async () => true)}
+          disabled={false}
+          onAbortMerge={vi.fn()}
+          messageSettings={{ summaryLimit: 50, bodyRuler: 80, showRuler: false }}
+        />,
+      );
+      expect(box).not.toHaveAttribute("data-ruler");
+      expect(box.style.getPropertyValue("--ruler-column")).toBe("");
+    });
+  });
 });

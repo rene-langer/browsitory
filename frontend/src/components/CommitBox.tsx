@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { DEFAULT_COMMIT_MESSAGE_SETTINGS, type CommitMessageSettings } from "../ipc/RepoClient";
 import { Toolbar } from "./primitives/Toolbar";
 import { runningHookLabel } from "../lib/hookFailure";
 import styles from "./CommitBox.module.css";
@@ -34,6 +35,7 @@ export function CommitBox({
   hooks,
   clearMessage = null,
   onClearMessageHandled,
+  messageSettings = DEFAULT_COMMIT_MESSAGE_SETTINGS,
 }: {
   /**
    * Resolves `true` once the commit landed. The message is cleared only then (and only if it was
@@ -78,6 +80,8 @@ export function CommitBox({
    */
   clearMessage?: string | null;
   onClearMessageHandled?: () => void;
+  /** The summary counter's soft limit and the body ruler (Preferences → Commit message). */
+  messageSettings?: CommitMessageSettings;
   /** Amend-last-commit mode; omit to hide the toggle entirely. */
   amend?: {
     /** headId !== null && no operation in progress. */
@@ -194,6 +198,15 @@ export function CommitBox({
       .finally(() => setSubmitting(false));
   };
 
+  // Code points of the first line, as most tools count a summary.
+  const summaryLength = [...message.split(/\r?\n/, 1)[0]].length;
+  const summaryLimit = messageSettings.summaryLimit;
+  const summaryOver = summaryLength > summaryLimit;
+  // A column ruler only lines up in a monospace font, so the field switches to one while shown.
+  const ruler = messageSettings.showRuler
+    ? { "data-ruler": "true", style: { "--ruler-column": String(messageSettings.bodyRuler) } as CSSProperties }
+    : {};
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
@@ -211,7 +224,16 @@ export function CommitBox({
         onKeyDown={handleKeyDown}
         placeholder="Commit message"
         aria-label="Commit message"
+        {...ruler}
       />
+      <span
+        aria-label="Summary length"
+        className={styles.counter}
+        data-over={summaryOver ? "true" : undefined}
+        title={summaryOver ? `Many tools cut summaries longer than ${summaryLimit} characters.` : undefined}
+      >
+        Summary {summaryLength}/{summaryLimit}
+      </span>
       {!amendOn && disabled && disabledReason !== undefined && (
         <p id="commit-disabled-reason" className={styles.reason}>
           {disabledReason}

@@ -28,6 +28,7 @@ import type {
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
+import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -861,6 +862,7 @@ function UncommittedDiffPane({
   // An action is running: the sequence's Continue/Abort are disabled (no double submit).
   sequencePending?: boolean;
 }) {
+  const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {
     if (!amendMode || headInfo.headId === null) {
@@ -1258,6 +1260,7 @@ function UncommittedDiffPane({
             }
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
+            messageSettings={commitMessageSettings}
             amend={{
               available:
                 headInfo.headId !== null &&

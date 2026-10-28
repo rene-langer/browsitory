@@ -4,6 +4,7 @@ import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
+import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
 import styles from "./DiffPane.module.css";
@@ -2119,5 +2120,27 @@ describe("DiffPane image preview", () => {
     );
     expect(await screen.findByRole("img", { name: "After: logo.png" })).toBeInTheDocument();
     expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Commit", commitId: "s0", oldPath: null });
+  });
+});
+
+describe("DiffPane commit message settings", () => {
+  it("hands the Preferences counter limit and ruler to the commit box", () => {
+    rtlRender(
+      <CommitMessageSettingsContext.Provider
+        value={{ settings: { summaryLimit: 60, bodyRuler: 80, showRuler: true }, update: vi.fn(), error: null, dismissError: vi.fn() }}
+      >
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({})}
+          selectedRow="uncommitted"
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />
+      </CommitMessageSettingsContext.Provider>,
+    );
+    expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 0/60");
+    expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
   });
 });

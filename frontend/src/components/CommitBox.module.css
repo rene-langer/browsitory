@@ -13,6 +13,33 @@
   resize: vertical;
 }
 
+/* The body ruler: a 1px line at the configured column, drawn behind the text and scrolling with
+   it. `1ch` is one character only in a monospace font, hence the font switch. */
+.textarea[data-ruler="true"] {
+  --ruler-x: calc(var(--space-2) + var(--ruler-column) * 1ch);
+  font-family: var(--font-mono);
+  background-image: linear-gradient(
+    to right,
+    transparent var(--ruler-x),
+    var(--color-border) var(--ruler-x),
+    var(--color-border) calc(var(--ruler-x) + 1px),
+    transparent calc(var(--ruler-x) + 1px)
+  );
+  background-attachment: local;
+}
+
+.counter {
+  display: block;
+  margin: calc(-1 * var(--space-1)) 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.counter[data-over="true"] {
+  color: var(--color-warning-text);
+}
+
 .reason {
   margin: 0;
   color: var(--color-warning-text);
