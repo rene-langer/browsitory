@@ -102,8 +102,7 @@ describe("Browsitory interactive rebase", () => {
 
     await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting(), { timeout: 10000 });
     const commitGraphAfter = await $("li*=e2e: combined rebase commit");
-    const droppedEntry = await $("li*=rebase commit b (to drop)");
-    await expect(droppedEntry).not.toBeExisting();
+    await $("li*=rebase commit b (to drop)").waitForExist({ reverse: true, timeout: 10000 });
   });
 
   // Sets up a rebase that pauses on a real conflict: `onto` introduces a file, one commit edits
@@ -184,8 +183,7 @@ describe("Browsitory interactive rebase", () => {
     );
     const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
     await landedEntry.waitForExist({ timeout: 10000 });
-    const droppedStillGone = await $("li*=e2e: conflict-resume change on top");
-    await expect(droppedStillGone).not.toBeExisting();
+    await $("li*=e2e: conflict-resume change on top").waitForExist({ reverse: true, timeout: 10000 });
 
     const headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
       cwd: E2E_REPO_PATH,
@@ -315,7 +313,7 @@ describe("Browsitory interactive rebase", () => {
       async () => !(await $("li*=e2e: multi 1 (drop)").isExisting()),
       { timeout: 10000 },
     );
-    await expect($("li*=e2e: multi 3 (drop)")).not.toBeExisting();
+    await $("li*=e2e: multi 3 (drop)").waitForExist({ reverse: true, timeout: 10000 });
     await expect($("li*=e2e: multi 2 (keep)")).toBeExisting();
     await expect($("li*=e2e: multi 4 (keep)")).toBeExisting();
   });

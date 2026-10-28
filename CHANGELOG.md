@@ -248,6 +248,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and no longer race a temporary config directory's cleanup on Windows (#111).
 - Fixed an intermittent SSH-signing test failure caused by one test's throwaway ssh-agent
   leaking into concurrently running signing tests (#153).
+- E2E: specs type-check cleanly and CI now type-checks both E2E suites (#103); "row is gone"
+  checks wait for the row to disappear instead of racing a stale element (#145).
 
 ## [0.3.0] - 2026-10-21
 

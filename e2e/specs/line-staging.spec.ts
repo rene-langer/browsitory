@@ -54,6 +54,8 @@ describe("Browsitory line staging and discard", () => {
       timeout: 10000,
       timeoutMsg: "expected the untracked file to be deleted",
     });
-    await expect($(`span=${UNTRACKED} (New)`)).not.toBeExisting();
+    // waitForExist({ reverse: true }) re-queries until the row is gone; `not.toBeExisting()`
+    // can hit a stale element when the row unmounts mid-lookup (#145).
+    await $(`span=${UNTRACKED} (New)`).waitForExist({ reverse: true, timeout: 10000 });
   });
 });
