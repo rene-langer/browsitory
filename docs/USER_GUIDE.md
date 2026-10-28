@@ -160,7 +160,9 @@ Browsitory runs your repository's client-side git hooks the way git does:
 | `post-merge` | merge a branch (also a squash merge) or pull with a fast-forward |
 
 Hooks come from `core.hooksPath` (a relative path is relative to the repository root) or
-`.git/hooks`. They run in the repository root with the same arguments and standard input git
+`.git/hooks`. As in git, this includes a `core.hooksPath` set in the repository's own config;
+only open repositories you trust. (External diff and merge tools are stricter, see
+[Diff and merge tools](#diff-and-merge-tools).) They run in the repository root with the same arguments and standard input git
 gives them, and like git Browsitory does not set `GIT_DIR`, so a hook can `cd` into a
 subdirectory (for example `cd frontend && npx lint-staged`) and run git there. On macOS
 and Linux a hook must be executable. Hook managers such as husky, pre-commit or lefthook work
@@ -510,9 +512,21 @@ Examples: `code --goto {file}:{line}`, `subl {file}:{line}`, or on Windows
 `"C:\Program Files\Sublime Text\subl.exe" {file}:{line}`.
 
 Without an editor setting, the file opens with your system's default app. Files the system
-might run instead of open are refused: programs, scripts (`.sh`, `.py`, `.bat`, `.ps1`, …),
-shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), files with the execute bit on macOS
-and Linux, and files that start like a script or program. Set an editor to open those.
+might run instead of open are refused on every platform (a Windows installer can still run on
+Linux or macOS through Wine): programs and installers (`.exe`, `.msi`, …), scripts (`.sh`,
+`.py`, `.bat`, `.ps1`, …), shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), files with
+the execute bit on macOS and Linux, and files whose contents start like a script, program,
+installer or desktop launcher. Set an editor to open those.
+
+Don't wrap an editor or terminal command in `sh -c '…'` or `cmd /c …`: Browsitory deliberately
+passes the file path as one plain argument, and a shell would read shell syntax in file names
+(a repository can contain a file called `$(rm -rf ~).txt`). Commands are checked when you save
+them, and one with an unclosed quote is refused.
+
+Apps started from the macOS Dock (or a Linux desktop launcher) may not see your shell's `PATH`.
+If an editor, terminal or diff tool isn't found, use its absolute path, for example
+`/usr/local/bin/code --goto {file}:{line}` or `git config --global difftool.meld.path
+/opt/homebrew/bin/meld`.
 
 ### Terminal
 
@@ -556,7 +570,9 @@ to run them in; give them a `cmd` that opens a terminal window if you want them 
 Browsitory only reads tool settings from your own git config (global, XDG or system), never
 from a repository's `.git/config`: a repository you downloaded or share with others can't make
 Browsitory run a command when you click a menu item. If a repository sets one, Preferences and
-the error message say so.
+the error message say so. Hooks are different: they keep git's behaviour, including a
+`core.hooksPath` set in the repository's own config (see [Hooks](#hooks)), because running a
+repository's hooks is what git itself does on every commit and push.
 
 What the tool compares:
 
@@ -567,16 +583,20 @@ What the tool compares:
 - a compare: the left side against the right side (or the working tree file)
 
 A missing side (a new or deleted file) is an empty file. The other sides are temporary copies,
-removed when the tool closes.
+removed when the tool closes. They hold the bytes exactly as git stores them: line-ending
+conversion (`core.autocrlf`, `text`/`eol` attributes), `ident` and filter drivers (Git LFS, …)
+are not applied, so with `core.autocrlf=true` on Windows every line can look changed against the
+working tree file. The VSCode diff and merge editors show the same stored bytes.
 
 ### Resolving with a merge tool
 
 **Open in merge tool** on a conflicted file opens your tool with your version (`LOCAL`), the
 incoming version (`REMOTE`), their common ancestor (`BASE`) and the working tree file
 (`MERGED`) to save the result to. Other actions keep working while the tool is open. When it
-closes, the file shows "The merge tool finished." with **Mark resolved**, or "The merge tool
-closed without resolving the conflict." With `mergetool.<name>.trustExitCode` set, the tool's
-exit code decides; otherwise any change to the file counts as finished. **Mark resolved**
+closes, the file shows "The merge tool finished." or, when the tool reported no resolution, "The
+merge tool closed without resolving the conflict." With `mergetool.<name>.trustExitCode` set,
+the tool's exit code decides; otherwise any change to the file counts as finished. Both notices
+offer **Mark resolved**. **Mark resolved**
 stages the file; if it still contains `<<<<<<<` or `>>>>>>>` lines, Browsitory asks first.
 No `.orig` backup is written.
 
@@ -584,8 +604,9 @@ No `.orig` backup is written.
 
 In the VSCode extension, everything opens in VSCode itself: **Open in editor** opens the file
 at the line, **Open in diff tool** opens VSCode's diff view, **Open in merge tool** opens
-VSCode's merge editor (Browsitory can't tell when you are done there, so it shows no notice:
-save the result and stage the file as you normally would), **Open terminal here** opens an integrated terminal, and
+VSCode's merge editor (Browsitory can't tell when you are done there, so it shows no
+**Mark resolved** notice: save the result, then stage the file from VSCode's merge editor or
+Source Control view; Browsitory picks the change up on its next refresh), **Open terminal here** opens an integrated terminal, and
 **Reveal** uses "Reveal in File Explorer/Finder". The editor and terminal settings and your git
 tools are not used there.
 

@@ -290,7 +290,11 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   symlink's target) before calling `tauri_plugin_opener::open_path`.
 - `git-core::tools` resolves `diff.tool`/`merge.tool` from **trusted config levels only**
   (system, XDG, global): a repository's own `.git/config` (and its includes) can neither pick a
-  tool nor change its `cmd`, `path` or `trustExitCode`, and is reported as ignored. A
+  tool nor change its `cmd`, `path` or `trustExitCode`, and is reported as ignored. This is
+  deliberately stricter than hooks (`git-core::hooks`), which keep git's behaviour and honour
+  a repository-level `core.hooksPath`: running a repository's hooks is part of what git does on
+  every commit, while a click on "Open in diff tool" must never run something the repository
+  chose. A
   `difftool.<name>.cmd`/`mergetool.<name>.cmd` runs as `sh -c` with `LOCAL`/`REMOTE`/`MERGED`/
   `BASE` as environment variables, exactly as git runs it, so no path is ever spliced into
   shell text. On Windows, `sh` is Git for Windows' `sh.exe`; without it, the cmd is split and
@@ -301,7 +305,16 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   tool and, for the merge tool, waits on `spawn_blocking`, so a tool window that stays open for
   hours never blocks the repo's command queue. Stale directories are swept after 24 hours.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
-  calls the sidecar's internal `read_file_version`. No temp files are needed there.
+  calls the sidecar's internal `read_file_version`. No temp files are needed there. Before
+  opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
+  guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
+  inside the tree).
+- Side files and `read_file_version` return raw blob bytes: git2 0.21 exposes neither
+  `git_blob_filter` nor libgit2's filter lists, so CRLF/`ident`/filter-driver conversion is not
+  applied (documented for users in USER_GUIDE).
+- Runnable-file refusal checks one extension list on every OS (Wine runs Windows installers and
+  shortcuts from `xdg-open`/`open`) plus content sniffing (`#!`, ELF, PE, Mach-O, OLE except
+  old Office documents, `[Desktop Entry]`).
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 
