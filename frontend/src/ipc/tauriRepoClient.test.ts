@@ -522,3 +522,71 @@ describe("tauriRepoClient commit search", () => {
     expect(invoke).toHaveBeenLastCalledWith("get_branch_compare_range", { repoPath: "/repo", refName: "refs/heads/feature" });
   });
 });
+
+describe("tauriRepoClient external tools", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("invokes the external tool commands with camelCase args", async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await tauriRepoClient.openInEditor("/repo", "src/a.ts", 12);
+    expect(invoke).toHaveBeenLastCalledWith("open_in_editor", { repoPath: "/repo", path: "src/a.ts", line: 12 });
+    await tauriRepoClient.revealInFileManager("/repo", null);
+    expect(invoke).toHaveBeenLastCalledWith("reveal_in_file_manager", { repoPath: "/repo", path: null });
+    await tauriRepoClient.openTerminal("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("open_terminal", { repoPath: "/repo" });
+    await tauriRepoClient.openDiffTool("/repo", "a.ts", { kind: "Range", fromId: "a", toId: null, oldPath: null });
+    expect(invoke).toHaveBeenLastCalledWith("open_diff_tool", {
+      repoPath: "/repo",
+      path: "a.ts",
+      source: { kind: "Range", fromId: "a", toId: null, oldPath: null },
+    });
+    vi.mocked(invoke).mockResolvedValueOnce("Resolved");
+    await expect(tauriRepoClient.openMergeTool("/repo", "a.ts")).resolves.toBe("Resolved");
+    expect(invoke).toHaveBeenLastCalledWith("open_merge_tool", { repoPath: "/repo", path: "a.ts" });
+    vi.mocked(invoke).mockResolvedValueOnce("MarkersRemain");
+    await expect(tauriRepoClient.markResolved("/repo", "a.ts", false)).resolves.toBe("MarkersRemain");
+    expect(invoke).toHaveBeenLastCalledWith("mark_resolved", { repoPath: "/repo", path: "a.ts", force: false });
+    await tauriRepoClient.getExternalToolSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_external_tool_settings", undefined);
+    await tauriRepoClient.setExternalToolSettings({ editor: "code", terminal: null });
+    expect(invoke).toHaveBeenLastCalledWith("set_external_tool_settings", { settings: { editor: "code", terminal: null } });
+    await tauriRepoClient.getGitTools("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_git_tools", { repoPath: "/repo" });
+  });
+});
+
+describe("tauriRepoClient external tools", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("invokes the external tool commands with camelCase args", async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await tauriRepoClient.openInEditor("/repo", "src/a.ts", 12);
+    expect(invoke).toHaveBeenLastCalledWith("open_in_editor", { repoPath: "/repo", path: "src/a.ts", line: 12 });
+    await tauriRepoClient.revealInFileManager("/repo", null);
+    expect(invoke).toHaveBeenLastCalledWith("reveal_in_file_manager", { repoPath: "/repo", path: null });
+    await tauriRepoClient.openTerminal("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("open_terminal", { repoPath: "/repo" });
+    await tauriRepoClient.openDiffTool("/repo", "a.ts", { kind: "Range", fromId: "a", toId: null, oldPath: null });
+    expect(invoke).toHaveBeenLastCalledWith("open_diff_tool", {
+      repoPath: "/repo",
+      path: "a.ts",
+      source: { kind: "Range", fromId: "a", toId: null, oldPath: null },
+    });
+    vi.mocked(invoke).mockResolvedValueOnce("Resolved");
+    await expect(tauriRepoClient.openMergeTool("/repo", "a.ts")).resolves.toBe("Resolved");
+    expect(invoke).toHaveBeenLastCalledWith("open_merge_tool", { repoPath: "/repo", path: "a.ts" });
+    vi.mocked(invoke).mockResolvedValueOnce("MarkersRemain");
+    await expect(tauriRepoClient.markResolved("/repo", "a.ts", false)).resolves.toBe("MarkersRemain");
+    expect(invoke).toHaveBeenLastCalledWith("mark_resolved", { repoPath: "/repo", path: "a.ts", force: false });
+    await tauriRepoClient.getExternalToolSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_external_tool_settings", undefined);
+    await tauriRepoClient.setExternalToolSettings({ editor: "code", terminal: null });
+    expect(invoke).toHaveBeenLastCalledWith("set_external_tool_settings", { settings: { editor: "code", terminal: null } });
+    await tauriRepoClient.getGitTools("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_git_tools", { repoPath: "/repo" });
+  });
+});

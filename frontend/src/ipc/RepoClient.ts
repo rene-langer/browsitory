@@ -321,6 +321,37 @@ export type ConflictSegment =
 
 export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 
+/**
+ * Which two versions of a file a diff tool compares. `Range.toId === null` compares `fromId`
+ * with the working tree (the compare view's "with the working tree" mode).
+ */
+export type DiffSource =
+  | { kind: "Unstaged" }
+  | { kind: "Staged" }
+  | { kind: "Commit"; commitId: string; oldPath: string | null }
+  | { kind: "Range"; fromId: string; toId: string | null; oldPath: string | null };
+/** `HandedOff`: VSCode's merge editor took over, and Browsitory can't see when it's done. */
+export type MergeToolOutcome = "Resolved" | "Unresolved" | "HandedOff";
+export type MarkResolvedOutcome = "Resolved" | "MarkersRemain";
+/** Editor/terminal command lines; `null` means the system default. */
+export interface ExternalToolSettings {
+  editor: string | null;
+  terminal: string | null;
+}
+export type GitConfigSource = "System" | "Xdg" | "Global" | "Local" | "Worktree" | "Other";
+export interface GitToolInfo {
+  name: string;
+  command: string | null;
+  source: GitConfigSource;
+  viaMergeTool: boolean;
+  /** Why the tool can't be used (e.g. a terminal tool, or set only in repository config). */
+  problem: string | null;
+}
+export interface GitTools {
+  diffTool: GitToolInfo | null;
+  mergeTool: GitToolInfo | null;
+}
+
 export interface RebasePlanCommit {
   id: string;
   shortId: string;
@@ -609,6 +640,24 @@ export interface RepoClient {
   // app's own window away from the app entirely (see `tauriRepoClient.ts` and
   // `PullRequestPanel.tsx`, the only caller).
   openExternalUrl(url: string): Promise<void>;
+  // External tools. The five launch methods (`openInEditor` … `openMergeTool`) are answered by
+  // the VSCode extension host itself (see `sidecarBridge.ts`'s `NATIVE_METHODS`); the desktop
+  // app spawns the programs from Rust. `line` is 1-based, `null` when unknown.
+  openInEditor(repoPath: string, path: string, line: number | null): Promise<void>;
+  // `path === null` reveals the work tree root.
+  revealInFileManager(repoPath: string, path: string | null): Promise<void>;
+  openTerminal(repoPath: string): Promise<void>;
+  openDiffTool(repoPath: string, path: string, source: DiffSource): Promise<void>;
+  // Resolves when the tool exits on desktop, and at once with "HandedOff" in VSCode.
+  openMergeTool(repoPath: string, path: string): Promise<MergeToolOutcome>;
+  // With `force: false` a file that still has conflict markers is never staged
+  // ("MarkersRemain"); the caller asks and retries with `force: true`.
+  markResolved(repoPath: string, path: string, force: boolean): Promise<MarkResolvedOutcome>;
+  getExternalToolSettings(): Promise<ExternalToolSettings>;
+  setExternalToolSettings(settings: ExternalToolSettings): Promise<void>;
+  // The `diff.tool`/`merge.tool` git would use for this repo (repository-level tool settings
+  // are reported with a `problem`, because Browsitory ignores them).
+  getGitTools(repoPath: string): Promise<GitTools>;
   // Single choke point for frontend failure logging (see `frontend/src/lib/logger.ts`'s global
   // `error`/`unhandledrejection` handlers, the only caller): each transport routes it into its
   // own durable log sink — `tauriRepoClient.ts` writes to the same rotated log file as the Rust

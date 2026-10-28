@@ -1,4 +1,9 @@
 import type {
+  DiffSource,
+  ExternalToolSettings,
+  GitTools,
+  MarkResolvedOutcome,
+  MergeToolOutcome,
   CommitOutcome,
   CommitSignature,
   HookProgress,
@@ -437,6 +442,22 @@ export const vscodeRepoClient: RepoClient = {
     call<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
   openExternalUrl: (url: string) =>
     call<void>("open_external_url", { url }),
+  // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`).
+  openInEditor: (repoPath: string, path: string, line: number | null) =>
+    call<void>("open_in_editor", { repoPath, path, line }),
+  revealInFileManager: (repoPath: string, path: string | null) =>
+    call<void>("reveal_in_file_manager", { repoPath, path }),
+  openTerminal: (repoPath: string) => call<void>("open_terminal", { repoPath }),
+  openDiffTool: (repoPath: string, path: string, source: DiffSource) =>
+    call<void>("open_diff_tool", { repoPath, path, source }),
+  openMergeTool: (repoPath: string, path: string) =>
+    call<MergeToolOutcome>("open_merge_tool", { repoPath, path }),
+  markResolved: (repoPath: string, path: string, force: boolean) =>
+    call<MarkResolvedOutcome>("mark_resolved", { repoPath, path, force }),
+  getExternalToolSettings: () => call<ExternalToolSettings>("get_external_tool_settings", {}),
+  setExternalToolSettings: (settings: ExternalToolSettings) =>
+    call<void>("set_external_tool_settings", { settings }),
+  getGitTools: (repoPath: string) => call<GitTools>("get_git_tools", { repoPath }),
   // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`), which
   // writes into the "Browsitory" output channel rather than forwarding to the sidecar process.
   logFrontendError: (context: string, error: unknown) =>

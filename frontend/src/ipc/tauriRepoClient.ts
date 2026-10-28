@@ -4,6 +4,11 @@ import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import { toCloneError } from "./RepoClient";
 import type {
+  DiffSource,
+  ExternalToolSettings,
+  GitTools,
+  MarkResolvedOutcome,
+  MergeToolOutcome,
   CommitOutcome,
   CommitSignature,
   HookProgress,
@@ -355,5 +360,20 @@ export const tauriRepoClient: RepoClient = {
   createPullRequest: (repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest) =>
     loggedInvoke<PullRequest>("create_pull_request", { repoPath, remoteName, account, pullRequest }),
   openExternalUrl: (url: string) => loggedInvoke("open_external_url", { url }),
+  openInEditor: (repoPath: string, path: string, line: number | null) =>
+    loggedInvoke("open_in_editor", { repoPath, path, line }),
+  revealInFileManager: (repoPath: string, path: string | null) =>
+    loggedInvoke("reveal_in_file_manager", { repoPath, path }),
+  openTerminal: (repoPath: string) => loggedInvoke("open_terminal", { repoPath }),
+  openDiffTool: (repoPath: string, path: string, source: DiffSource) =>
+    loggedInvoke("open_diff_tool", { repoPath, path, source }),
+  openMergeTool: (repoPath: string, path: string) =>
+    loggedInvoke<MergeToolOutcome>("open_merge_tool", { repoPath, path }),
+  markResolved: (repoPath: string, path: string, force: boolean) =>
+    loggedInvoke<MarkResolvedOutcome>("mark_resolved", { repoPath, path, force }),
+  getExternalToolSettings: () => loggedInvoke<ExternalToolSettings>("get_external_tool_settings"),
+  setExternalToolSettings: (settings: ExternalToolSettings) =>
+    loggedInvoke("set_external_tool_settings", { settings }),
+  getGitTools: (repoPath: string) => loggedInvoke<GitTools>("get_git_tools", { repoPath }),
   logFrontendError: (context: string, error: unknown) => logFrontendError(context, error),
 };
