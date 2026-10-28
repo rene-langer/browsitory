@@ -2,6 +2,7 @@ import { useRef, useState, type KeyboardEvent } from "react";
 import { X, Plus } from "lucide-react";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { repoPanelId, repoTabId } from "./repoTabIds";
 import styles from "./RepoTabs.module.css";
 
@@ -59,10 +60,9 @@ export function RepoTabs({
     const tabs = Array.from(tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     const current = tabs.indexOf(event.currentTarget);
     if (current === -1) return;
-    if (tabMenuItems !== undefined && (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))) {
+    if (tabMenuItems !== undefined && isMenuKey(event)) {
       event.preventDefault();
-      const rect = event.currentTarget.getBoundingClientRect();
-      setMenu({ path, x: rect.left, y: rect.bottom });
+      setMenu({ path, ...rectAnchor(event.currentTarget) });
       return;
     }
     // WAI-ARIA APG tabs pattern: Delete closes the focused tab — any tab, not just the active one.
@@ -110,7 +110,7 @@ export function RepoTabs({
               ? undefined
               : (event) => {
                   event.preventDefault();
-                  setMenu({ path: repo.path, x: event.clientX, y: event.clientY });
+                  setMenu({ path: repo.path, ...menuAnchor(event, event.currentTarget) });
                 }
           }
           title={repo.path}

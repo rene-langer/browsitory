@@ -54,6 +54,7 @@ import {
 } from "./FileActionsMenu";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
+import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
@@ -296,7 +297,7 @@ function UncommittedFileSection({
           hasFileActions
             ? (event) => {
                 event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY });
+                setMenu(menuAnchor(event, event.currentTarget));
               }
             : undefined
         }
@@ -1022,7 +1023,7 @@ function UncommittedDiffPane({
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
-    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    } else if (isMenuKey(event)) {
       // Opens the selected row's actions menu by activating its "⋯" button (conflicted and staged
       // rows have none, so this is then a no-op).
       const trigger = event.currentTarget.querySelector<HTMLButtonElement>(

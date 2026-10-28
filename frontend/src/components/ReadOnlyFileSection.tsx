@@ -13,6 +13,7 @@ import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
+import { menuAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 
 /**
@@ -136,7 +137,7 @@ export function ReadOnlyFileSection({
             ? undefined
             : (event) => {
                 event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY });
+                setMenu(menuAnchor(event, event.currentTarget));
               }
         }
       >

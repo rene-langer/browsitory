@@ -21,6 +21,7 @@ import { ResetDialog } from "./ResetDialog";
 import { ParentPickerDialog } from "./ParentPickerDialog";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
+import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { RefBadges } from "./RefBadges";
 import styles from "./CommitGraph.module.css";
@@ -267,7 +268,7 @@ export function CommitGraph({
         event.preventDefault();
         setSelection(selectOnly(primaryId), { commitId: primaryId });
       }
-    } else if (event.key === "Enter" || event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+    } else if (event.key === "Enter" || isMenuKey(event)) {
       event.preventDefault();
       openMenuForSelected(event.currentTarget);
     }
@@ -275,7 +276,7 @@ export function CommitGraph({
 
   const handleContextMenu = (event: MouseEvent, commitId: string) => {
     event.preventDefault();
-    setContextMenu({ commitId, x: event.clientX, y: event.clientY });
+    setContextMenu({ commitId, ...menuAnchor(event, event.currentTarget as Element) });
   };
 
   const handleCommitClick = (event: MouseEvent | undefined, commitId: string) => {
@@ -458,7 +459,7 @@ export function CommitGraph({
             onTagContextMenu={
               onPushTag === undefined
                 ? undefined
-                : (tag, event) => setTagMenu({ tag, commitId: commit.id, x: event.clientX, y: event.clientY })
+                : (tag, event) => setTagMenu({ tag, commitId: commit.id, ...menuAnchor(event, event.currentTarget as Element) })
             }
           />
           <span className={styles.commitSummary}>
