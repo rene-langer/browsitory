@@ -14,6 +14,10 @@ pub enum DiffError {
     NoMergeBase(String),
     #[error("No branch named \"{0}\".")]
     UnknownRef(String),
+    #[error("path must be relative to the repository: {0}")]
+    InvalidPath(String),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -387,4 +391,240 @@ pub(crate) fn hunks_from_diff(diff: &git2::Diff) -> Result<Vec<DiffHunk>, DiffEr
     )?;
 
     Ok(hunks.into_inner())
+}
+
+// ---------------------------------------------------------------------------------------------
+// File sides (image preview)
+// ---------------------------------------------------------------------------------------------
+
+/// Largest side `file_sides` loads for a preview; larger sides are `FileSide::TooLarge`.
+pub const MAX_PREVIEW_BYTES: u64 = 20 * 1024 * 1024;
+
+/// One side of a file's diff, as raw bytes for a preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileSide {
+    /// The path does not exist on this side (added/deleted), or it is not a regular file (a
+    /// symlink, a submodule, a folder, or a work tree file reached through a symlinked folder).
+    Missing,
+    /// Over the cap; nothing was loaded.
+    TooLarge {
+        size: u64,
+    },
+    Loaded {
+        bytes: Vec<u8>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileSides {
+    pub old: FileSide,
+    pub new: FileSide,
+}
+
+const GITLINK_MODE: u32 = 0o160000;
+const LINK_MODE: u32 = 0o120000;
+
+fn check_relative(path: &str) -> Result<&std::path::Path, DiffError> {
+    if crate::launch::is_safe_relative(path) {
+        Ok(std::path::Path::new(path))
+    } else {
+        Err(DiffError::InvalidPath(path.to_string()))
+    }
+}
+
+/// A blob's bytes, or `TooLarge` judged from the object header before the blob is read.
+fn blob_contents(repo: &Repository, oid: git2::Oid, cap: u64) -> Result<FileSide, DiffError> {
+    let (size, _) = repo.odb()?.read_header(oid)?;
+    let size = size as u64;
+    if size > cap {
+        return Ok(FileSide::TooLarge { size });
+    }
+    Ok(FileSide::Loaded {
+        bytes: repo.find_blob(oid)?.content().to_vec(),
+    })
+}
+
+fn tree_side(
+    repo: &Repository,
+    tree: Option<&git2::Tree>,
+    rel: &std::path::Path,
+    cap: u64,
+) -> Result<FileSide, DiffError> {
+    let Some(tree) = tree else {
+        return Ok(FileSide::Missing);
+    };
+    match tree.get_path(rel) {
+        Ok(entry)
+            if entry.kind() == Some(git2::ObjectType::Blob)
+                && entry.filemode() as u32 != LINK_MODE =>
+        {
+            blob_contents(repo, entry.id(), cap)
+        }
+        Ok(_) => Ok(FileSide::Missing),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(FileSide::Missing),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn index_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<FileSide, DiffError> {
+    match repo.index()?.get_path(rel, 0) {
+        Some(entry) if entry.mode != GITLINK_MODE && entry.mode != LINK_MODE => {
+            blob_contents(repo, entry.id, cap)
+        }
+        _ => Ok(FileSide::Missing),
+    }
+}
+
+/// The work tree file, never through a symlink: a symlinked file, or one reached through a
+/// folder symlink out of the work tree, is `Missing`. The read is bounded, so a file that grew
+/// after the size check is still `TooLarge`.
+fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<FileSide, DiffError> {
+    use std::io::Read;
+    let Some(workdir) = repo.workdir() else {
+        return Ok(FileSide::Missing);
+    };
+    let file = workdir.join(rel);
+    if !crate::launch::parent_stays_inside(workdir, &file) {
+        return Ok(FileSide::Missing);
+    }
+    let meta = match std::fs::symlink_metadata(&file) {
+        Ok(meta) => meta,
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(FileSide::Missing)
+        }
+        Err(e) => return Err(e.into()),
+    };
+    if !meta.file_type().is_file() {
+        return Ok(FileSide::Missing);
+    }
+    if meta.len() > cap {
+        return Ok(FileSide::TooLarge { size: meta.len() });
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(&file)?
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > cap {
+        let size = std::fs::metadata(&file)
+            .map(|m| m.len())
+            .unwrap_or(bytes.len() as u64);
+        return Ok(FileSide::TooLarge { size });
+    }
+    Ok(FileSide::Loaded { bytes })
+}
+
+/// Both sides of `path`'s diff in `source`, as bytes (each capped at `cap`), for an image
+/// preview. The sides are those the diff view shows: index ↔ work tree (`Unstaged`), HEAD ↔
+/// index (`Staged`), first parent (or nothing, for a root commit) ↔ commit (`Commit`), and
+/// `from` ↔ `to` or the work tree (`Range`). The old side reads `old_path` when the source has
+/// one (a rename). Paths must be relative, without `.`/`..` components.
+pub fn file_sides(
+    repo: &Repository,
+    source: &crate::tools::DiffSource,
+    path: &str,
+    cap: u64,
+) -> Result<FileSides, DiffError> {
+    use crate::tools::DiffSource;
+    let rel = check_relative(path)?;
+    let old_rel = match source {
+        DiffSource::Commit {
+            old_path: Some(old),
+            ..
+        }
+        | DiffSource::Range {
+            old_path: Some(old),
+            ..
+        } => check_relative(old)?,
+        _ => rel,
+    };
+    let (old, new) = match source {
+        DiffSource::Unstaged => (index_side(repo, rel, cap)?, workdir_side(repo, rel, cap)?),
+        DiffSource::Staged => {
+            let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+            (
+                tree_side(repo, head_tree.as_ref(), rel, cap)?,
+                index_side(repo, rel, cap)?,
+            )
+        }
+        DiffSource::Commit { commit_id, .. } => {
+            let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
+            (
+                tree_side(repo, old_tree.as_ref(), old_rel, cap)?,
+                tree_side(repo, Some(&new_tree), rel, cap)?,
+            )
+        }
+        DiffSource::Range { from_id, to_id, .. } => {
+            let old_tree = commit_tree(repo, from_id)?;
+            let new = match to_id {
+                Some(to_id) => tree_side(repo, Some(&commit_tree(repo, to_id)?), rel, cap)?,
+                None => workdir_side(repo, rel, cap)?,
+            };
+            (tree_side(repo, Some(&old_tree), old_rel, cap)?, new)
+        }
+    };
+    Ok(FileSides { old, new })
+}
+
+/// The image type `bytes` actually are, from their magic bytes (never the file name): PNG,
+/// JPEG, GIF, WebP, or SVG (an `<svg` root element, after an optional BOM, XML declaration,
+/// comments and doctype). `None` for anything else. The preview renders only these types, and
+/// only through `<img>`.
+pub fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(b"\xff\xd8\xff") {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if svg_root(bytes) {
+        return Some("image/svg+xml");
+    }
+    None
+}
+
+/// How far into a file the SVG sniffer looks for the root element.
+const SVG_SNIFF_BYTES: usize = 64 * 1024;
+
+fn svg_root(bytes: &[u8]) -> bool {
+    let mut rest = &bytes[..bytes.len().min(SVG_SNIFF_BYTES)];
+    rest = rest.strip_prefix(b"\xef\xbb\xbf").unwrap_or(rest);
+    loop {
+        let start = rest
+            .iter()
+            .position(|b| !b.is_ascii_whitespace())
+            .unwrap_or(rest.len());
+        rest = &rest[start..];
+        let skip_to = |rest: &[u8], end: &[u8]| -> Option<usize> {
+            rest.windows(end.len())
+                .position(|w| w == end)
+                .map(|i| i + end.len())
+        };
+        let skipped = if rest.starts_with(b"<?") {
+            skip_to(rest, b"?>")
+        } else if rest.starts_with(b"<!--") {
+            skip_to(rest, b"-->")
+        } else if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case(b"<!doctype") {
+            skip_to(rest, b">")
+        } else {
+            return rest.starts_with(b"<svg")
+                && rest
+                    .get(4)
+                    .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>' || *b == b'/');
+        };
+        match skipped {
+            Some(end) => rest = &rest[end..],
+            None => return false,
+        }
+    }
 }
