@@ -54,6 +54,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
+import { pickToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -383,6 +384,18 @@ function RepoWorkspace({
         return action(...args);
       },
     [dismissError],
+  );
+  // Cherry-pick/revert toasts come from the outcome, not from "no error": a pick that stopped on
+  // a conflict succeeded as a call but must not say "Cherry-picked" (#107).
+  const runPickAction = useCallback(
+    async <T,>(action: () => Promise<T | null>, toast: (result: T) => string | null) => {
+      dismissError();
+      const result = await action();
+      if (result === null || !mounted.current) return;
+      const message = toast(result);
+      if (message !== null) pushToast(message);
+    },
+    [dismissError, pushToast],
   );
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
@@ -861,8 +874,30 @@ function RepoWorkspace({
                       onRebaseSelection={appState.openRebaseSelection}
                       headInfo={appState.state.headInfo}
                       currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
-                      onCherryPick={announce("Cherry-picked", appState.cherryPick)}
-                      onRevert={announce("Reverted", appState.revertCommit)}
+                      onCherryPick={(commitId, mainline) =>
+                        void runPickAction(
+                          () => appState.cherryPick(commitId, mainline),
+                          (outcome) => pickToast("CherryPick", outcome),
+                        )
+                      }
+                      onRevert={(commitId, mainline) =>
+                        void runPickAction(
+                          () => appState.revertCommit(commitId, mainline),
+                          (outcome) => pickToast("Revert", outcome),
+                        )
+                      }
+                      onCherryPickMany={(ids) =>
+                        void runPickAction(
+                          () => appState.cherryPickMany(ids),
+                          (outcome) => sequenceToast("CherryPick", outcome),
+                        )
+                      }
+                      onRevertMany={(ids) =>
+                        void runPickAction(
+                          () => appState.revertMany(ids),
+                          (outcome) => sequenceToast("Revert", outcome),
+                        )
+                      }
                       onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
                       onResetToCommit={announce("Reset branch", appState.resetToCommit)}
                       onEditHeadMessage={() => {

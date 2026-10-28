@@ -3609,10 +3609,54 @@ describe("history actions", () => {
     const cherryPick = vi.fn(async () => ({ kind: "Committed", commitId: "n1" }) as const);
     const getStatus = vi.fn(async () => []);
     const { result } = renderHook(() => useAppState(transferClient({ cherryPick, getStatus }), TEST_REPO_PATH));
-    await act(() => result.current.cherryPick("c1"));
-    expect(cherryPick).toHaveBeenCalledWith(TEST_REPO_PATH, "c1");
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.cherryPick("c1");
+    });
+    expect(cherryPick).toHaveBeenCalledWith(TEST_REPO_PATH, "c1", null);
+    expect(outcome).toEqual({ kind: "Committed", commitId: "n1" });
     expect(getStatus).toHaveBeenCalled();
     expect(result.current.state.error).toBeNull();
+  });
+
+  it("passes a mainline through and resolves sequences to their outcomes", async () => {
+    const revertCommit = vi.fn(async () => ({ kind: "Conflicted" as const, files: ["a"] }));
+    const completed = { kind: "Completed" as const, applied: 2, skipped: [] };
+    const cherryPickMany = vi.fn(async () => completed);
+    const revertMany = vi.fn(async () => completed);
+    const continueSequence = vi.fn(async () => completed);
+    const abortSequence = vi.fn(async () => ({ rewound: false }));
+    const { result } = renderHook(() =>
+      useAppState(
+        transferClient({ revertCommit, cherryPickMany, revertMany, continueSequence, abortSequence }),
+        TEST_REPO_PATH,
+      ),
+    );
+    const outcomes: unknown[] = [];
+    await act(async () => {
+      outcomes.push(await result.current.revertCommit("m", 2));
+      outcomes.push(await result.current.cherryPickMany(["a", "b"]));
+      outcomes.push(await result.current.revertMany(["a"]));
+      outcomes.push(await result.current.continueSequence());
+      outcomes.push(await result.current.abortSequence());
+    });
+    expect(revertCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "m", 2);
+    expect(cherryPickMany).toHaveBeenCalledWith(TEST_REPO_PATH, ["a", "b"]);
+    expect(revertMany).toHaveBeenCalledWith(TEST_REPO_PATH, ["a"]);
+    expect(outcomes).toEqual([{ kind: "Conflicted", files: ["a"] }, completed, completed, completed, { rewound: false }]);
+  });
+
+  it("resolves null and sets state.error when a sequence call fails", async () => {
+    const continueSequence = vi.fn(async () => {
+      throw new Error("Resolve all conflicts before continuing.");
+    });
+    const { result } = renderHook(() => useAppState(transferClient({ continueSequence }), TEST_REPO_PATH));
+    let outcome: unknown = "unset";
+    await act(async () => {
+      outcome = await result.current.continueSequence();
+    });
+    expect(outcome).toBeNull();
+    expect(result.current.state.error).toContain("Resolve all conflicts");
   });
 
   it("surfaces a backend refusal as state.error", async () => {

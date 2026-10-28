@@ -571,6 +571,67 @@ describe("CommitGraph", () => {
 
   const row = (name: string) => screen.getByText(new RegExp(`^${name} `)).closest("li")!;
 
+  it("offers Cherry-pick and Revert N commits for a multi-selection, oldest first", () => {
+    const onCherryPickMany = vi.fn();
+    const onRevertMany = vi.fn();
+    renderChain({ onCherryPickMany, onRevertMany });
+
+    fireEvent.click(row("D"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    fireEvent.click(row("A"), { ctrlKey: true });
+    const toolbar = screen.getByRole("toolbar", { name: "Selected commits" });
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Cherry-pick 3 commits" }));
+    expect(onCherryPickMany).toHaveBeenCalledWith(["A", "B", "D"]);
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Revert 3 commits" }));
+    expect(onRevertMany).toHaveBeenCalledWith(["A", "B", "D"]);
+
+    fireEvent.contextMenu(row("B"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick 3 commits" }));
+    expect(onCherryPickMany).toHaveBeenCalledTimes(2);
+    // After the rebase items, which keep their order.
+    const labels = within(toolbar)
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+    expect(labels.slice(-2)).toEqual(["Cherry-pick 3 commits", "Revert 3 commits"]);
+  });
+
+  it("keeps multi-commit pick and revert next to Compare these commits", () => {
+    const onCherryPickMany = vi.fn();
+    renderChain({ onCherryPickMany, onRevertMany: vi.fn(), onCompareCommits: vi.fn() });
+    fireEvent.click(row("C"));
+    fireEvent.click(row("A"), { ctrlKey: true });
+    const toolbar = screen.getByRole("toolbar", { name: "Selected commits" });
+    expect(within(toolbar).getByRole("button", { name: "Compare these commits" })).toBeEnabled();
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Cherry-pick 2 commits" }));
+    expect(onCherryPickMany).toHaveBeenCalledWith(["A", "C"]);
+  });
+
+  it("disables multi-commit pick and revert while pending or with a merge commit selected", () => {
+    const withMerge: GraphCommit[] = [
+      { ...commits[0], id: "M", shortId: "M", summary: "M", parentIds: ["B", "X"] },
+      ...chainCommits.slice(2),
+    ];
+    renderChain({ commits: withMerge, onCherryPickMany: vi.fn(), onRevertMany: vi.fn() });
+    fireEvent.click(row("M"));
+    fireEvent.click(row("B"), { ctrlKey: true });
+    const toolbar = screen.getByRole("toolbar", { name: "Selected commits" });
+    const pick = within(toolbar).getByRole("button", { name: "Cherry-pick 2 commits" });
+    expect(pick).toBeDisabled();
+    expect(pick).toHaveAttribute("title", "Cherry-pick merge commits one at a time.");
+    expect(within(toolbar).getByRole("button", { name: "Revert 2 commits" })).toHaveAttribute(
+      "title",
+      "Revert merge commits one at a time.",
+    );
+  });
+
+  it("disables multi-commit pick and revert while an operation is pending", () => {
+    renderChain({ pending: true, onCherryPickMany: vi.fn(), onRevertMany: vi.fn() });
+    fireEvent.click(row("D"));
+    fireEvent.click(row("C"), { ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Cherry-pick 2 commits" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revert 2 commits" })).toBeDisabled();
+  });
+
   it("offers Compare these commits only with exactly two selected", () => {
     const onCompareCommits = vi.fn();
     renderChain({ onCompareCommits });
@@ -1095,10 +1156,10 @@ describe("CommitGraph — history actions", () => {
     const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onResetToCommit } = setup();
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
-    expect(onCherryPick).toHaveBeenCalledWith("B");
+    expect(onCherryPick).toHaveBeenCalledWith("B", null);
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
-    expect(onRevert).toHaveBeenCalledWith("B");
+    expect(onRevert).toHaveBeenCalledWith("B", null);
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
     expect(onCheckoutCommit).toHaveBeenCalledWith("B");
@@ -1108,16 +1169,44 @@ describe("CommitGraph — history actions", () => {
     expect(onResetToCommit).toHaveBeenCalledWith("B", "mixed");
   });
 
-  it("disables cherry-pick on HEAD, offers Edit commit message there, and blocks merge commits", () => {
+  it("disables cherry-pick on HEAD and offers Edit commit message there", () => {
     const { openMenu, onEditHeadMessage } = setup();
     openMenu("C");
     expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit message…" }));
     expect(onEditHeadMessage).toHaveBeenCalled();
     openMenu("M");
-    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Revert" })).toBeDisabled();
     expect(screen.queryByRole("menuitem", { name: "Edit commit message…" })).not.toBeInTheDocument();
+  });
+
+  it("asks for the parent of a merge commit and passes it as the mainline", () => {
+    const { openMenu, onCherryPick, onRevert } = setup();
+    openMenu("M");
+    expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick…" }));
+    const dialog = screen.getByRole("dialog", { name: "Choose parent" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cherry-pick" }));
+    expect(onCherryPick).toHaveBeenCalledWith("M", 1);
+    expect(screen.queryByRole("dialog", { name: "Choose parent" })).toBeNull();
+
+    openMenu("M");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert…" }));
+    const revertDialog = screen.getByRole("dialog", { name: "Choose parent" });
+    fireEvent.click(within(revertDialog).getAllByRole("radio")[1]);
+    fireEvent.click(within(revertDialog).getByRole("button", { name: "Revert" }));
+    expect(onRevert).toHaveBeenCalledWith("M", 2);
+
+    openMenu("M");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert…" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Choose parent" })).getByRole("button", { name: "Cancel" }));
+    expect(onRevert).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Cherry-pick… on a merge commit at HEAD", () => {
+    const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "M" } });
+    openMenu("M");
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick…" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Revert…" })).toBeEnabled();
   });
 
   it("disables the new actions while pending", () => {

@@ -866,6 +866,62 @@ describe("App", () => {
     });
   });
 
+  describe("cherry-pick and revert toasts", () => {
+    const graph = [
+      { id: "c2", shortId: "c2", summary: "two", authorName: "A", authorEmail: "a@x", timestamp: 2, parentIds: ["c1"], branchRefs: ["main"], remoteBranchRefs: [] },
+      { id: "c1", shortId: "c1", summary: "one", authorName: "A", authorEmail: "a@x", timestamp: 1, parentIds: [], branchRefs: [], remoteBranchRefs: [] },
+    ];
+    function pickClient(overrides: Partial<RepoClient>) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graph,
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listStashes: async () => [],
+        getGraphBranchSelection: async () => null,
+        getCommitFiles: async () => [],
+        getCommitMessage: async () => "two",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+        ...overrides,
+      });
+    }
+
+    it("says Cherry-picked only when the pick committed (#107)", async () => {
+      const cherryPick = vi
+        .fn<RepoClient["cherryPick"]>()
+        .mockResolvedValueOnce({ kind: "Conflicted", files: ["a.txt"] })
+        .mockResolvedValueOnce({ kind: "Committed", commitId: "c3" });
+      render(<App client={pickClient({ cherryPick })} />);
+
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
+      // Give a would-be toast every chance to render before asserting there is none.
+      await waitFor(() => expect(cherryPick).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(screen.queryByText("Cherry-picked")).toBeNull();
+
+      fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+    });
+
+    it("toasts a finished multi-commit revert with its skipped count", async () => {
+      const revertMany = vi.fn(async () => ({ kind: "Completed" as const, applied: 1, skipped: ["c1"] }));
+      render(<App client={pickClient({ revertMany })} />);
+
+      fireEvent.click((await screen.findByText(/c2 two/)).closest("li")!);
+      fireEvent.click(screen.getByText(/c1 one/).closest("li")!, { ctrlKey: true });
+      fireEvent.click(screen.getByRole("button", { name: "Revert 2 commits" }));
+
+      await waitFor(() => expect(revertMany).toHaveBeenCalledWith("/repos/a", ["c1", "c2"]));
+      expect(await screen.findByText("Reverted 1 commit, skipped 1 already applied")).toBeInTheDocument();
+    });
+  });
+
   describe("stash options", () => {
     function stashClient(overrides: Partial<RepoClient>) {
       return fakeClient({
