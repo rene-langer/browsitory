@@ -1,5 +1,7 @@
 use super::{Command, WorkerHandle};
-use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOptions, MergeOutcome};
+use git_core::merge::{
+    ConflictSegment, FileConflictChoice, MarkResolvedOutcome, MergeOptions, MergeOutcome,
+};
 use std::sync::mpsc::Sender;
 pub(super) fn start(
     repo: &git2::Repository,
@@ -59,7 +61,31 @@ pub(super) fn resolve_add_delete(
             .map_err(|error| error.to_string()),
     );
 }
+pub(super) fn mark_resolved(
+    repo: &git2::Repository,
+    path: String,
+    force: bool,
+    reply: Sender<Result<MarkResolvedOutcome, String>>,
+) {
+    let _ = reply.send(
+        git_core::merge::mark_resolved(repo, &path, force).map_err(|error| error.to_string()),
+    );
+}
 impl WorkerHandle {
+    /// Stages a conflicted file; without `force`, reports leftover conflict markers instead.
+    pub fn mark_resolved(&self, path: String, force: bool) -> Result<MarkResolvedOutcome, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::MarkResolved {
+                path,
+                force,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     /// Merges `branch_name` (a local branch name or a full ref) with `options`.
     pub fn start_merge(
         &self,
