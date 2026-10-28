@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffSource, FileSide, FileSides, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatBytes, imageDataUrl } from "../lib/imageTypes";
@@ -106,11 +106,12 @@ function SideBody({
 }) {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
+  // Validating up to ~27 MB of base64 is not free: once per side, not on every render.
+  const url = useMemo(() => (side.kind === "Loaded" ? imageDataUrl(side.mime, side.base64) : null), [side]);
   if (side.kind === "Missing") return <p className={styles.placeholder}>{missingText}</p>;
   if (side.kind === "TooLarge") {
     return <p className={styles.placeholder}>Too large to preview ({formatBytes(side.size)})</p>;
   }
-  const url = imageDataUrl(side.mime, side.base64);
   if (url === null || failed) return <p className={styles.placeholder}>Can't display this image</p>;
   return (
     <>
