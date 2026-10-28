@@ -1175,3 +1175,141 @@ fn conflict_resolution_never_writes_through_a_symlinked_folder() {
     );
     assert!(repo.index().unwrap().has_conflicts());
 }
+
+/// `shared.txt` conflicts; `feature` also changes `tc` and `d/f` and adds `d/new.txt`, which
+/// merge cleanly. The merge is stopped on the conflict.
+#[cfg(unix)]
+fn stopped_merge_with_clean_paths() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\nline three\n");
+    write_file(dir.path(), "tc", "plain\n");
+    write_file(dir.path(), "d/f", "inner\n");
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(
+        dir.path(),
+        "shared.txt",
+        "line one\nfeature two\nline three\n",
+    );
+    write_file(dir.path(), "tc", "feature\n");
+    write_file(dir.path(), "d/f", "feature inner\n");
+    write_file(dir.path(), "d/new.txt", "new\n");
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "shared.txt", "line one\nmain two\nline three\n");
+    commit_all(&repo, "main commit");
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+    assert!(matches!(outcome, MergeOutcome::Conflicted { .. }));
+    (dir, repo)
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_merge_restores_a_conflicted_path_replaced_by_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "shared.txt", &out.path().join("target.txt"));
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "shared.txt"));
+    assert_eq!(
+        common::read(dir.path(), "shared.txt"),
+        "line one\nmain two\nline three\n"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_merge_restores_a_merged_path_replaced_by_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert_eq!(common::read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_merge_restores_a_directory_replaced_by_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "d"));
+    assert_eq!(common::read(dir.path(), "d/f"), "inner\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_merge_never_deletes_an_added_file_through_a_symlinked_directory() {
+    let out = common::outside_dir();
+    std::fs::write(out.path().join("new.txt"), "OUTSIDE\n").unwrap();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(out.path().join("new.txt").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_conflict_replaces_a_symlink_instead_of_writing_through_it() {
+    let out = common::outside_dir();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "shared.txt", &out.path().join("target.txt"));
+
+    git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n").unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "shared.txt"));
+    assert_eq!(common::read(dir.path(), "shared.txt"), "resolved\n");
+    assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_add_delete_conflict_replaces_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo) = make_delete_modify_conflict();
+    common::replace_with_link(dir.path(), "shared.txt", &out.path().join("target.txt"));
+
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)
+        .unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "shared.txt"));
+    assert_eq!(common::read(dir.path(), "shared.txt"), "v2\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn resolve_whole_file_replaces_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo) = stopped_merge_with_clean_paths();
+    common::replace_with_link(dir.path(), "shared.txt", &out.path().join("target.txt"));
+
+    git_core::merge::resolve_whole_file(&repo, "shared.txt", git_core::merge::ConflictSide::Theirs)
+        .unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "shared.txt"));
+    assert_eq!(
+        common::read(dir.path(), "shared.txt"),
+        "line one\nfeature two\nline three\n"
+    );
+}

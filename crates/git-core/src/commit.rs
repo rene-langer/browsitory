@@ -437,12 +437,13 @@ pub fn commit(
         let mut parents: Vec<&git2::Commit> = head_parent.iter().collect();
         parents.extend(merge_parents.iter());
 
-        crate::signing::create_commit(
+        create_commit_reporting(
             repo,
-            Some(crate::signing::HeadUpdate {
+            &mut hooks,
+            crate::signing::HeadUpdate {
                 expected: head_parent.as_ref().map(|commit| commit.id()),
                 reflog_operation: "commit",
-            }),
+            },
             pick_author.as_ref().unwrap_or(&signature),
             &signature,
             &hooked.message,
@@ -469,6 +470,50 @@ pub fn commit(
 
     run_post_commit(repo, &mut hooks);
     Ok(oid.to_string())
+}
+
+/// `signing::create_commit_with`, bounded by the commit's cancel check. While a signing program
+/// runs, the hook reporter sees a `"signing"` pseudo-hook (started/finished, reported as
+/// `NotInstalled` so nothing logs it): the commit box shows "Waiting for the signing program…"
+/// with the hooks' Cancel button (#110).
+#[allow(clippy::too_many_arguments)]
+fn create_commit_reporting(
+    repo: &git2::Repository,
+    hooks: &mut HookOptions<'_>,
+    head_update: crate::signing::HeadUpdate<'_>,
+    author: &git2::Signature<'_>,
+    committer: &git2::Signature<'_>,
+    message: &str,
+    tree: &git2::Tree<'_>,
+    parents: &[&git2::Commit<'_>],
+) -> Result<git2::Oid, CommitError> {
+    const SIGNING: &str = "signing";
+    let signing = matches!(crate::signing::signing_config(repo), Ok(Some(_)));
+    if signing {
+        if let Some(reporter) = hooks.reporter.as_mut() {
+            reporter.started(SIGNING);
+        }
+    }
+    let never = || false;
+    let result = crate::signing::create_commit_with(
+        repo,
+        Some(head_update),
+        author,
+        committer,
+        message,
+        tree,
+        parents,
+        &crate::signing::SignOptions {
+            cancel: hooks.cancel.unwrap_or(&never),
+            timeout: crate::signing::SIGN_TIMEOUT,
+        },
+    );
+    if signing {
+        if let Some(reporter) = hooks.reporter.as_mut() {
+            reporter.finished(SIGNING, &Ok(hooks::HookOutcome::NotInstalled));
+        }
+    }
+    Ok(result?)
 }
 
 /// Rewrites HEAD's commit with the current index tree and `message`, keeping its parents and
@@ -513,12 +558,13 @@ pub fn amend_head(
     };
     let parents: Vec<git2::Commit> = head.parents().collect();
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    let oid = crate::signing::create_commit(
+    let oid = create_commit_reporting(
         repo,
-        Some(crate::signing::HeadUpdate {
+        &mut hooks,
+        crate::signing::HeadUpdate {
             expected: Some(head.id()),
             reflog_operation: "commit (amend)",
-        }),
+        },
         &author,
         &committer,
         &hooked.message,

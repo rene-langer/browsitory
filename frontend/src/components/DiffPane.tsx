@@ -17,6 +17,7 @@ import type {
   AmendOptions,
   BlameLine,
   DiffHunk,
+  DiffSource,
   DiffOptions,
   FileConflictChoice,
   GraphCommit,
@@ -138,6 +139,9 @@ function UncommittedFileSection({
   const [confirmMarkers, setConfirmMarkers] = useState(false);
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
+  // A staged rename compares its old path in HEAD with its new path in the index (#137).
+  const renamedFrom = entry.staged ? (entry.oldPath ?? null) : null;
+  const diffSource: DiffSource = entry.staged ? { kind: "Staged", oldPath: renamedFrom } : { kind: "Unstaged" };
   const onPickFileAction = (action: FileAction) => {
     switch (action.kind) {
       case "discard":
@@ -154,7 +158,7 @@ function UncommittedFileSection({
       case "reveal":
         return externalTools?.reveal(entry.path);
       case "diffTool":
-        return externalTools?.openDiffTool(entry.path, { kind: entry.staged ? "Staged" : "Unstaged" });
+        return externalTools?.openDiffTool(entry.path, diffSource);
       case "mergeTool":
         return externalTools?.openMergeTool(entry.path);
     }
@@ -218,8 +222,10 @@ function UncommittedFileSection({
   const loadDiff = () => {
     let ignore = false;
     const requested = diffOptions;
-    client
-      .getWorkingDiff(repoPath, entry.path, entry.staged, requested)
+    (renamedFrom === null
+      ? client.getWorkingDiff(repoPath, entry.path, entry.staged, requested)
+      : client.getWorkingDiff(repoPath, entry.path, entry.staged, requested, renamedFrom)
+    )
       .then((next) => {
         if (!ignore) {
           setHunks(next);
@@ -244,7 +250,7 @@ function UncommittedFileSection({
     if (mode !== "diff" || isConflicted || showImage || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
+  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -312,6 +318,7 @@ function UncommittedFileSection({
         <span className={styles.path}>
           {entry.path} ({entry.kind})
         </span>
+        {renamedFrom !== null && <span className={styles.renamedFrom}>Renamed from {renamedFrom}</span>}
         <div className={styles.rowActions}>
           <button
             type="button"
@@ -452,7 +459,7 @@ function UncommittedFileSection({
                   client={client}
                   repoPath={repoPath}
                   path={entry.path}
-                  source={{ kind: entry.staged ? "Staged" : "Unstaged" }}
+                  source={diffSource}
                   refreshKey={diffVersion}
                 />
               )}

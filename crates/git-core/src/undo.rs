@@ -139,7 +139,7 @@ fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
             continue;
         }
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
-        match read_worktree_file(&workdir.join(&path), &config, previous_mode)? {
+        match read_worktree_file(workdir, &path, &config, previous_mode)? {
             Some((bytes, mode)) => {
                 let id = repo.blob(&bytes)?;
                 overlay.add(&index_entry(&path, id, mode))?;
@@ -152,14 +152,21 @@ fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
     Ok(overlay.write_tree_to(repo)?)
 }
 
-/// Raw bytes (no clean filters) and git mode of a worktree path; `None` when absent or a
-/// directory. `previous_mode` keeps the exec bit when `core.filemode` is off and the symlink
-/// mode when `core.symlinks` is off, matching what git itself records.
+/// Raw bytes (no clean filters) and git mode of the worktree path `rel`; `None` when absent, a
+/// directory, or below a symlinked directory (git sees no file there, and reading would follow
+/// the link, possibly out of the repository). `previous_mode` keeps the exec bit when
+/// `core.filemode` is off and the symlink mode when `core.symlinks` is off, matching what git
+/// itself records.
 pub(crate) fn read_worktree_file(
-    full: &Path,
+    workdir: &Path,
+    rel: &str,
     config: &WorktreeConfig,
     previous_mode: Option<u32>,
 ) -> io::Result<Option<(Vec<u8>, u32)>> {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, rel) {
+        return Ok(None);
+    }
+    let full = &workdir.join(rel);
     let meta = match fs::symlink_metadata(full) {
         Ok(meta) => meta,
         Err(error) if is_absent(&error) => return Ok(None),
@@ -475,7 +482,7 @@ impl WorktreeChange {
             let expected = self.from.get(path).copied();
             let previous_mode = expected.map(|(_, mode)| mode);
             let full = workdir.join(path);
-            let disk = read_worktree_file(&full, &config, previous_mode)?;
+            let disk = read_worktree_file(workdir, path, &config, previous_mode)?;
             let current = disk
                 .as_ref()
                 .map(|(bytes, mode)| {
@@ -540,13 +547,9 @@ impl WorktreeChange {
         // Ignore files first, so the target's ignore rules are on disk before deciding which
         // other deletions would hit a now-ignored (unsnapshotted) file.
         for path in self.paths.iter().filter(|path| is_ignore_file(path)) {
-            let full = workdir.join(path);
             match self.to.get(path) {
-                Some((id, mode)) => write_worktree_file(repo, &full, *id, *mode, &config)?,
-                None => {
-                    remove_existing(&full)?;
-                    prune_empty_parents(workdir, &full);
-                }
+                Some((id, mode)) => write_worktree_file(repo, workdir, path, *id, *mode, &config)?,
+                None => remove_existing(workdir, path)?,
             }
         }
         let others = || self.paths.iter().filter(|path| !is_ignore_file(path));
@@ -559,12 +562,11 @@ impl WorktreeChange {
             {
                 continue;
             }
-            remove_existing(&full)?;
-            prune_empty_parents(workdir, &full);
+            remove_existing(workdir, path)?;
         }
         for path in others().filter(|path| !self.from_index.contains(*path)) {
             if let Some((id, mode)) = self.to.get(path) {
-                write_worktree_file(repo, &workdir.join(path), *id, *mode, &config)?;
+                write_worktree_file(repo, workdir, path, *id, *mode, &config)?;
             }
         }
         Ok(())
@@ -575,6 +577,14 @@ impl WorktreeChange {
         if self.from_index.is_empty() {
             return Ok(());
         }
+        // A forced checkout writes through a symlink that replaced a file or folder (#114).
+        let index = repo.index()?;
+        let paths: Vec<String> = self.from_index.iter().cloned().collect();
+        crate::worktree_guard::prepare_forced_checkout::<UndoError, _>(
+            repo,
+            Some(&crate::worktree_guard::GuardSource::Index(&index)),
+            Some(&paths),
+        )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().disable_pathspec_match(true);
         for path in &self.from_index {
@@ -589,7 +599,7 @@ impl WorktreeChange {
             let full = workdir.join(path);
             if fs::symlink_metadata(&full).is_err() {
                 if let Some((id, mode)) = self.to.get(path) {
-                    write_worktree_file(repo, &full, *id, *mode, &config)?;
+                    write_worktree_file(repo, workdir, path, *id, *mode, &config)?;
                 }
             }
         }
@@ -647,34 +657,57 @@ fn flatten_tree(repo: &Repository, id: &str) -> Result<TreeFiles, UndoError> {
     Ok(files)
 }
 
-fn remove_existing(full: &Path) -> io::Result<()> {
-    match fs::symlink_metadata(full) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir(full),
-        Ok(_) => fs::remove_file(full),
-        Err(error) if is_absent(&error) => Ok(()),
-        Err(error) => Err(error),
+/// Removes the file, link or empty directory `rel` and then the directories that emptied. Never
+/// acts through a symlinked directory: a path below one does not exist for git (#114).
+fn remove_existing(workdir: &Path, rel: &str) -> io::Result<()> {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, rel) {
+        return Ok(());
     }
+    let full = workdir.join(rel);
+    match fs::symlink_metadata(&full) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir(&full)?,
+        Ok(_) => fs::remove_file(&full)?,
+        Err(error) if is_absent(&error) => {}
+        Err(error) => return Err(error),
+    }
+    prune_empty_parents(workdir, &full);
+    Ok(())
 }
 
 fn prune_empty_parents(workdir: &Path, full: &Path) {
     let mut dir = full.parent();
     while let Some(current) = dir {
-        if current == workdir || !current.starts_with(workdir) || fs::remove_dir(current).is_err() {
+        let is_real_dir = fs::symlink_metadata(current).is_ok_and(|meta| meta.is_dir());
+        if current == workdir
+            || !current.starts_with(workdir)
+            || !is_real_dir
+            || fs::remove_dir(current).is_err()
+        {
             break;
         }
         dir = current.parent();
     }
 }
 
+/// Writes the blob as `rel`, replacing what is there. A symlink that replaced a directory on the
+/// way is removed first (never written through, #114).
 fn write_worktree_file(
     repo: &Repository,
-    full: &Path,
+    workdir: &Path,
+    rel: &str,
     id: Oid,
     mode: u32,
     config: &WorktreeConfig,
 ) -> Result<(), UndoError> {
     let blob = repo.find_blob(id)?;
-    remove_existing(full)?;
+    crate::worktree_guard::clear_symlinked_ancestors(workdir, rel)?;
+    let full = &workdir.join(rel);
+    match fs::symlink_metadata(full) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir(full)?,
+        Ok(_) => fs::remove_file(full)?,
+        Err(error) if is_absent(&error) => {}
+        Err(error) => return Err(error.into()),
+    }
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent)?;
     }

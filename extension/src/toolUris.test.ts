@@ -76,10 +76,14 @@ describe("toolUris", () => {
     expect(unstaged.right).toBe("file:///r/a.ts");
     expect(unstaged.title).toBe("a.ts (Index ↔ Working Tree)");
 
-    const staged = diffSides("/r", "/r", "a.ts", { kind: "Staged" });
+    const staged = diffSides("/r", "/r", "a.ts", { kind: "Staged", oldPath: null });
     expect(parseFileVersionUri(split(staged.left)).version).toEqual({ kind: "Head" });
     expect(parseFileVersionUri(split(staged.right)).version).toEqual({ kind: "Index" });
     expect(staged.title).toBe("a.ts (HEAD ↔ Index)");
+
+    const stagedRename = diffSides("/r", "/r", "b.ts", { kind: "Staged", oldPath: "a.ts" });
+    expect(parseFileVersionUri(split(stagedRename.left))).toEqual({ repoPath: "/r", path: "a.ts", version: { kind: "Head" } });
+    expect(parseFileVersionUri(split(stagedRename.right))).toEqual({ repoPath: "/r", path: "b.ts", version: { kind: "Index" } });
 
     const commit = diffSides("/r", "/r", "b.ts", { kind: "Commit", commitId: "abcdef123", oldPath: "a.ts" });
     expect(parseFileVersionUri(split(commit.left))).toEqual({

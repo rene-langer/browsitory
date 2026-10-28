@@ -493,7 +493,9 @@ describe("tauriRepoClient diff pane commands", () => {
   it("invokes the diff-pane commands with camelCase args", async () => {
     const opts = { ignoreWhitespace: true, contextLines: 5 };
     await tauriRepoClient.getWorkingDiff("/repo", "f.txt", false, opts);
-    expect(invoke).toHaveBeenLastCalledWith("get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts });
+    expect(invoke).toHaveBeenLastCalledWith("get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts, oldPath: null });
+    await tauriRepoClient.getWorkingDiff("/repo", "new.txt", true, opts, "old.txt");
+    expect(invoke).toHaveBeenLastCalledWith("get_working_diff", { repoPath: "/repo", path: "new.txt", staged: true, opts, oldPath: "old.txt" });
     await tauriRepoClient.getCommitDiff("/repo", "abc", "f.txt", opts);
     expect(invoke).toHaveBeenLastCalledWith("get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts });
     await tauriRepoClient.stageHunk("/repo", "f.txt", 1, 2, 5);

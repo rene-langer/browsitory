@@ -889,3 +889,56 @@ fn current_step_is_one_indexed_at_the_first_pause() {
     assert_eq!(state.current_step(), 1);
     assert_eq!(state.total_steps(), 2);
 }
+
+/// A rebase paused on a `shared.txt` conflict; every commit also has `tc` = "plain\n" and
+/// `d/f` = "inner\n".
+#[cfg(unix)]
+fn paused_rebase() -> (
+    tempfile::TempDir,
+    git2::Repository,
+    git_core::rebase::RebaseState,
+) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    write_file(dir.path(), "tc", "plain\n");
+    write_file(dir.path(), "d/f", "inner\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let (state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![pick(&commits[1].id)]).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    (dir, repo, state)
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_rebase_replaces_a_typechanged_symlink() {
+    let out = common::outside_dir();
+    let (dir, repo, state) = paused_rebase();
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+
+    git_core::rebase::abort_rebase(&repo, state).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "tc"));
+    assert_eq!(common::read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn abort_rebase_replaces_a_symlinked_directory() {
+    let out = common::outside_dir();
+    let (dir, repo, state) = paused_rebase();
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    git_core::rebase::abort_rebase(&repo, state).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "d"));
+    assert_eq!(common::read(dir.path(), "d/f"), "inner\n");
+}

@@ -457,6 +457,8 @@ describe("SidecarBridge", () => {
     await send(5, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Range", fromId: "-x", toId: null, oldPath: null } });
     await send(6, "open_merge_tool", { repoPath: "/r", path: "a", extra: true });
     await send(7, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Commit", commitId: "abc", oldPath: "../b" } });
+    await send(8, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Staged", oldPath: "../b" } });
+    await send(9, "open_diff_tool", { repoPath: "/r", path: "a", source: { kind: "Staged", oldPath: 3 } });
 
     expect(spawn).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
@@ -470,6 +472,8 @@ describe("SidecarBridge", () => {
       [5, -32602],
       [6, -32602],
       [7, -32602],
+      [8, -32602],
+      [9, -32602],
     ]);
     expect(replies[0]?.error.message).toBe("Invalid path.");
   });

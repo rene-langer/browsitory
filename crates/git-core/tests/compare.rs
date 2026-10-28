@@ -404,3 +404,105 @@ fn an_unborn_head_has_nothing_to_compare_with() {
         "There is no commit checked out to compare with."
     );
 }
+
+/// Commit A: `d` is a file; commit B: `d` is a folder holding `inner.txt` (#116).
+fn file_became_folder(repo: &git2::Repository) -> (Oid, Oid) {
+    let a = commit_tree(repo, &[("d", "file d\n", REGULAR)], &[], "a");
+    let b = commit_tree(repo, &[("d/inner.txt", "inner\n", REGULAR)], &[a], "b");
+    (a, b)
+}
+
+#[test]
+fn range_diff_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (_dir, repo) = init_repo();
+    let (a, b) = file_became_folder(&repo);
+    let (a, b) = (a.to_string(), b.to_string());
+
+    assert_eq!(
+        sorted(range_diff_files(&repo, &a, &b).unwrap()),
+        vec![changed("d"), changed("d/inner.txt")]
+    );
+    let opts = DiffOptions::default();
+    assert_eq!(
+        edits(&range_diff(&repo, &a, &b, "d", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Remove, "file d".to_string())]
+    );
+    assert_eq!(
+        edits(&range_diff(&repo, &a, &b, "d/inner.txt", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Add, "inner".to_string())]
+    );
+}
+
+#[test]
+fn working_tree_compare_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    let a = repo.head().unwrap().target().unwrap().to_string();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+
+    let opts = DiffOptions::default();
+    assert_eq!(
+        edits(&compare_working_tree(&repo, &a, "d", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Remove, "file d".to_string())]
+    );
+}
+
+/// A merge stopped on a `c.txt` conflict; returns the base commit both branches started from.
+fn conflicted_merge(dir: &std::path::Path, repo: &git2::Repository) -> String {
+    write_file(dir, "c.txt", "one\ntwo\nthree\n");
+    commit_all(repo, "base");
+    let base = repo.head().unwrap().target().unwrap().to_string();
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(repo, "other", "HEAD").unwrap();
+    write_file(dir, "c.txt", "one\nother\nthree\n");
+    commit_all(repo, "other");
+    git_core::branch::switch_branch(repo, &main).unwrap();
+    write_file(dir, "c.txt", "one\nmain\nthree\n");
+    commit_all(repo, "main");
+    let outcome =
+        git_core::merge::start_merge(repo, "other", git_core::merge::MergeOptions::default())
+            .unwrap();
+    assert!(matches!(
+        outcome,
+        git_core::merge::MergeOutcome::Conflicted { .. }
+    ));
+    base
+}
+
+#[test]
+fn a_conflicted_file_compares_against_its_working_tree_content() {
+    let (dir, repo) = init_repo();
+    let base = conflicted_merge(dir.path(), &repo);
+
+    let hunks = compare_working_tree(&repo, &base, "c.txt", None, &DiffOptions::default()).unwrap();
+
+    assert!(!hunks.is_empty());
+    assert!(
+        edits(&hunks)
+            .iter()
+            .any(|(origin, line)| *origin == DiffLineOrigin::Add && line.starts_with("<<<<<<<")),
+        "{hunks:?}"
+    );
+    assert!(compare_working_tree_files(&repo, &base)
+        .unwrap()
+        .iter()
+        .any(|file| file.path == "c.txt"));
+}
+
+#[test]
+#[cfg(unix)]
+fn a_conflicted_path_replaced_by_a_symlink_is_not_read_through() {
+    let out = common::outside_dir();
+    let (dir, repo) = init_repo();
+    let base = conflicted_merge(dir.path(), &repo);
+    common::replace_with_link(dir.path(), "c.txt", &out.path().join("target.txt"));
+
+    let hunks = compare_working_tree(&repo, &base, "c.txt", None, &DiffOptions::default()).unwrap();
+
+    assert!(
+        !edits(&hunks).iter().any(|(_, line)| line == "OUTSIDE"),
+        "{hunks:?}"
+    );
+}

@@ -17,6 +17,10 @@ pub enum RebaseError {
     HeadMoved { expected: String, actual: String },
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +192,12 @@ pub fn start_rebase(
     // Checking out before detaching HEAD means a refused checkout (modified/untracked files in
     // the way) leaves the repo exactly as it was — the same safety ordering
     // `branch::switch_branch` and `merge::start_merge`'s fast-forward path already use.
+    // Safe checkouts create files through a symlinked folder (#114).
+    let onto_tree = onto_commit.tree()?;
+    crate::worktree_guard::refuse_linked_folders::<RebaseError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&onto_tree)],
+    )?;
     repo.checkout_tree(onto_commit.as_object(), None)?;
     repo.set_head_detached(onto_commit.id())?;
 
@@ -267,6 +277,16 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
             state.group_start_parent = Some(repo.head()?.peel_to_commit()?.id());
         }
 
+        // Safe checkouts create files through a symlinked folder (#114).
+        // The step writes the picked result; scan that (an untracked link counts too).
+        let head_commit = repo.head()?.peel_to_commit()?;
+        let merged = repo.cherrypick_commit(&commit, &head_commit, 0, None)?;
+        crate::worktree_guard::refuse_linked_folders::<RebaseError>(
+            repo,
+            &[crate::worktree_guard::Incoming::Merge(
+                crate::worktree_guard::GuardSource::Index(&merged),
+            )],
+        )?;
         repo.cherrypick(&commit, None)?;
 
         if repo.index()?.has_conflicts() {
@@ -460,6 +480,14 @@ pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseE
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
 fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
     repo.set_head(branch_ref)?;
+    // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
+    // folder; remove such links first, like git (#114).
+    let tree = repo.head()?.peel_to_tree()?;
+    crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
+        None,
+    )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
     repo.checkout_head(Some(&mut checkout))?;

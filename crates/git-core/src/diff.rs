@@ -179,7 +179,22 @@ pub fn working_diff(
         repo.diff_index_to_workdir(None, Some(&mut git_opts))?
     };
 
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[path])
+}
+
+/// The staged diff of a rename from `old_path` to `new_path` (HEAD → index), with rename
+/// detection so edits show as edits rather than a whole-file add. A pure rename yields no hunks.
+pub fn staged_rename_diff(
+    repo: &Repository,
+    old_path: &str,
+    new_path: &str,
+    opts: &DiffOptions,
+) -> Result<Vec<DiffHunk>, DiffError> {
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let mut git_opts = literal_path_options(new_path, Some(old_path), opts);
+    let mut diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut git_opts))?;
+    detect_renames(&mut diff)?;
+    hunks_from_diff(&diff, &[old_path, new_path])
 }
 
 /// Diff for one path between `commit_id` and its first parent (or an empty tree, for a
@@ -194,7 +209,7 @@ pub fn commit_diff(
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
     let mut git_opts = literal_path_options(path, None, opts);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[path])
 }
 
 /// Diff of a file that `commit_id` renamed from `old_path` to `new_path`, against the first
@@ -212,7 +227,7 @@ pub fn commit_rename_diff(
     let mut diff =
         repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     detect_renames(&mut diff)?;
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[old_path, new_path])
 }
 
 /// Paths changed by `commit_id` (vs. its first parent, same rule as `commit_diff`) — used to
@@ -266,7 +281,8 @@ pub fn range_diff(
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    hunks_from_diff(&diff)
+    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
+    hunks_from_diff(&diff, &wanted)
 }
 
 /// The working tree compares like the Uncommitted view: staged, unstaged and untracked files.
@@ -303,10 +319,22 @@ pub fn compare_working_tree(
     let mut git_opts = literal_path_options(path, old_path, opts);
     include_untracked_content(&mut git_opts);
     let mut diff = repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut git_opts))?;
+    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
+    let conflicted = diff
+        .deltas()
+        .any(|delta| delta.status() == git2::Delta::Conflicted && delta_is_one_of(&delta, &wanted));
+    if conflicted {
+        // The index holds conflict stages, so libgit2 reports the path without a patch (#117).
+        // Compare the commit with the working tree file itself, as `git diff <commit> -- path`
+        // does (filters still apply; a symlink is diffed as a link, never followed).
+        let mut git_opts = literal_path_options(path, old_path, opts);
+        include_untracked_content(&mut git_opts);
+        diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut git_opts))?;
+    }
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &wanted)
 }
 
 /// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…` or `refs/remotes/…`
@@ -360,23 +388,46 @@ fn commit_and_parent_trees<'repo>(
     Ok((old_tree, new_tree))
 }
 
-pub(crate) fn hunks_from_diff(diff: &git2::Diff) -> Result<Vec<DiffHunk>, DiffError> {
+/// True when `delta`'s old or new path is exactly one of `wanted`. A literal pathspec `d` also
+/// matches everything under `d/` (a file that became a folder), so per-file diffs filter by
+/// delta too (#116).
+pub(crate) fn delta_is_one_of(delta: &git2::DiffDelta<'_>, wanted: &[&str]) -> bool {
+    [delta.old_file(), delta.new_file()].iter().any(|file| {
+        file.path_bytes()
+            .is_some_and(|path| wanted.iter().any(|w| path == w.as_bytes()))
+    })
+}
+
+/// The hunks of the deltas whose old or new path is one of `wanted`.
+pub(crate) fn hunks_from_diff(
+    diff: &git2::Diff,
+    wanted: &[&str],
+) -> Result<Vec<DiffHunk>, DiffError> {
     let hunks: RefCell<Vec<DiffHunk>> = RefCell::new(Vec::new());
+    let keep = std::cell::Cell::new(false);
 
     diff.foreach(
-        &mut |_delta, _progress| true,
+        &mut |delta, _progress| {
+            keep.set(delta_is_one_of(&delta, wanted));
+            true
+        },
         None,
         Some(&mut |_delta, hunk| {
-            hunks.borrow_mut().push(DiffHunk {
-                old_start: hunk.old_start(),
-                old_lines: hunk.old_lines(),
-                new_start: hunk.new_start(),
-                new_lines: hunk.new_lines(),
-                lines: Vec::new(),
-            });
+            if keep.get() {
+                hunks.borrow_mut().push(DiffHunk {
+                    old_start: hunk.old_start(),
+                    old_lines: hunk.old_lines(),
+                    new_start: hunk.new_start(),
+                    new_lines: hunk.new_lines(),
+                    lines: Vec::new(),
+                });
+            }
             true
         }),
         Some(&mut |_delta, _hunk, line| {
+            if !keep.get() {
+                return true;
+            }
             let origin = match line.origin() {
                 '+' => DiffLineOrigin::Add,
                 '-' => DiffLineOrigin::Remove,
@@ -486,80 +537,29 @@ fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<Fi
     let Some(workdir) = repo.workdir() else {
         return Ok(FileSide::Missing);
     };
-    let file = workdir.join(rel);
-    if !crate::launch::parent_stays_inside(workdir, &file) {
-        return Ok(FileSide::Missing);
-    }
-    let meta = match std::fs::symlink_metadata(&file) {
-        Ok(meta) => meta,
-        Err(e)
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) =>
-        {
-            return Ok(FileSide::Missing)
-        }
-        Err(e) => return Err(e.into()),
-    };
-    if !meta.file_type().is_file() {
-        return Ok(FileSide::Missing);
-    }
-    if meta.len() > cap {
-        return Ok(FileSide::TooLarge { size: meta.len() });
-    }
-    // The path was checked before opening; make sure the opened file is still that regular file
-    // (not a symlink, FIFO or device swapped in meanwhile).
-    let Some(handle) = open_regular_file(&file)? else {
+    // One open that follows no symlink at any depth below the work tree and does not block on a
+    // FIFO; size and content both come from that handle, so nothing swapped in meanwhile (a
+    // folder replaced by a link, #138) can be read.
+    let Some(handle) = crate::worktree_guard::open_beneath(workdir, rel)? else {
         return Ok(FileSide::Missing);
     };
-    if !same_file(&meta, &handle.metadata()?) {
-        return Ok(FileSide::Missing);
+    let len = handle.metadata()?.len();
+    if len > cap {
+        return Ok(FileSide::TooLarge { size: len });
     }
     let mut bytes = Vec::new();
-    handle.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
+    (&handle)
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > cap {
-        let size = std::fs::metadata(&file)
+        let size = handle
+            .metadata()
             .map(|m| m.len())
-            .unwrap_or(bytes.len() as u64);
+            .unwrap_or(bytes.len() as u64)
+            .max(bytes.len() as u64);
         return Ok(FileSide::TooLarge { size });
     }
     Ok(FileSide::Loaded { bytes })
-}
-
-/// Opens `path` for reading only if it is (still) a regular file, `None` otherwise. On unix the
-/// open neither follows a final symlink (`O_NOFOLLOW`) nor waits for a writer if a FIFO was
-/// swapped in after the caller's check (`O_NONBLOCK`, which does not affect regular-file reads).
-#[cfg(unix)]
-fn open_regular_file(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let handle = match std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
-        .open(path)
-    {
-        Ok(handle) => handle,
-        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    Ok(handle.metadata()?.is_file().then_some(handle))
-}
-
-#[cfg(not(unix))]
-fn open_regular_file(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
-    let handle = std::fs::File::open(path)?;
-    Ok(handle.metadata()?.is_file().then_some(handle))
-}
-
-#[cfg(unix)]
-fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    a.dev() == b.dev() && a.ino() == b.ino()
-}
-
-#[cfg(not(unix))]
-fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
-    true
 }
 
 /// Both sides of `path`'s diff in `source`, as bytes (each capped at `cap`), for an image
@@ -583,15 +583,18 @@ pub fn file_sides(
         | DiffSource::Range {
             old_path: Some(old),
             ..
+        }
+        | DiffSource::Staged {
+            old_path: Some(old),
         } => check_relative(old)?,
         _ => rel,
     };
     let (old, new) = match source {
         DiffSource::Unstaged => (index_side(repo, rel, cap)?, workdir_side(repo, rel, cap)?),
-        DiffSource::Staged => {
+        DiffSource::Staged { .. } => {
             let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
             (
-                tree_side(repo, head_tree.as_ref(), rel, cap)?,
+                tree_side(repo, head_tree.as_ref(), old_rel, cap)?,
                 index_side(repo, rel, cap)?,
             )
         }
@@ -670,44 +673,5 @@ fn svg_root(bytes: &[u8]) -> bool {
             Some(end) => rest = &rest[end..],
             None => return false,
         }
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::open_regular_file;
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    #[test]
-    fn opening_a_fifo_does_not_block_and_is_not_treated_as_a_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let fifo = dir.path().join("pipe");
-        let c_path = CString::new(fifo.as_os_str().as_bytes()).unwrap();
-        // SAFETY: `c_path` is a valid NUL-terminated path for the duration of the call.
-        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
-
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(open_regular_file(&fifo).map(|f| f.is_some()));
-        });
-        let opened = rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("opening a FIFO with no writer must not block");
-        assert!(!opened.unwrap(), "a FIFO is not a regular file");
-    }
-
-    #[test]
-    fn opening_a_symlink_is_refused_and_a_regular_file_opens() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let target = dir.path().join("target.txt");
-        std::fs::write(&target, b"hi").unwrap();
-        let link = dir.path().join("link.txt");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-
-        assert!(open_regular_file(&link).unwrap().is_none());
-        assert!(open_regular_file(&target).unwrap().is_some());
     }
 }

@@ -188,10 +188,24 @@ fn emit_transfer_events(app: AppHandle, events: mpsc::Receiver<TransferEvent>) {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatusEntryDto {
     pub path: String,
+    /// A staged rename's old path; always present (`null` otherwise).
+    pub old_path: Option<String>,
     pub staged: bool,
     pub kind: String,
+}
+
+impl From<git_core::status::StatusEntry> for StatusEntryDto {
+    fn from(entry: git_core::status::StatusEntry) -> Self {
+        Self {
+            path: entry.path,
+            old_path: entry.old_path,
+            staged: entry.staged,
+            kind: format!("{:?}", entry.kind),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -1005,7 +1019,12 @@ pub(crate) fn trailers_from(dtos: Option<Vec<TrailerDto>>) -> Vec<git_core::comm
 #[serde(tag = "kind")]
 pub enum DiffSourceDto {
     Unstaged,
-    Staged,
+    /// `oldPath` (optional, default `null`): a staged rename's HEAD-side path.
+    #[serde(rename_all = "camelCase")]
+    Staged {
+        #[serde(default)]
+        old_path: Option<String>,
+    },
     #[serde(rename_all = "camelCase")]
     Commit {
         commit_id: String,
@@ -1024,7 +1043,7 @@ impl From<DiffSourceDto> for git_core::tools::DiffSource {
     fn from(dto: DiffSourceDto) -> Self {
         match dto {
             DiffSourceDto::Unstaged => Self::Unstaged,
-            DiffSourceDto::Staged => Self::Staged,
+            DiffSourceDto::Staged { old_path } => Self::Staged { old_path },
             DiffSourceDto::Commit {
                 commit_id,
                 old_path,
@@ -2007,6 +2026,31 @@ mod tests {
     }
 
     #[test]
+    fn status_entry_dto_always_serializes_old_path() {
+        use git_core::status::{StatusEntry, StatusKind};
+        let plain = super::StatusEntryDto::from(StatusEntry {
+            path: "a.txt".into(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::Modified,
+        });
+        assert_eq!(
+            serde_json::to_value(plain).unwrap(),
+            serde_json::json!({"path": "a.txt", "oldPath": null, "staged": false, "kind": "Modified"})
+        );
+        let renamed = super::StatusEntryDto::from(StatusEntry {
+            path: "new.txt".into(),
+            old_path: Some("old.txt".into()),
+            staged: true,
+            kind: StatusKind::Renamed,
+        });
+        assert_eq!(
+            serde_json::to_value(renamed).unwrap()["oldPath"],
+            serde_json::json!("old.txt")
+        );
+    }
+
+    #[test]
     fn diff_source_dto_parses_every_variant() {
         use super::DiffSourceDto;
         use git_core::tools::DiffSource;
@@ -2019,7 +2063,13 @@ mod tests {
         );
         assert_eq!(
             parse(serde_json::json!({"kind": "Staged"})),
-            DiffSource::Staged
+            DiffSource::Staged { old_path: None }
+        );
+        assert_eq!(
+            parse(serde_json::json!({"kind": "Staged", "oldPath": "a.png"})),
+            DiffSource::Staged {
+                old_path: Some("a.png".into())
+            }
         );
         assert_eq!(
             parse(serde_json::json!({"kind": "Commit", "commitId": "abc", "oldPath": null})),

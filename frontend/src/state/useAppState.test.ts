@@ -1143,7 +1143,7 @@ describe("useAppState", () => {
   });
 
   it("refresh populates repository state including remotes and upstream", async () => {
-    const entry: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const entry: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
     const graphCommit: GraphCommit = {
       id: "abc123",
       shortId: "abc123",
@@ -1335,7 +1335,7 @@ describe("useAppState", () => {
   });
 
   it("stageFile calls client.stageFile then refreshes status", async () => {
-    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const entryA: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
     let getStatusCalls = 0;
     let stageFileArg: string | null = null;
     const client: RepoClient = {
@@ -1430,7 +1430,7 @@ describe("useAppState", () => {
   });
 
   it("stageFile shows the file as staged before the backend call resolves, keeps it after success", async () => {
-    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const entryA: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
     let staged = false;
     let resolveStageFile: (() => void) | null = null;
     const client = transferClient({
@@ -1450,18 +1450,18 @@ describe("useAppState", () => {
       stagePromise = result.current.stageFile("a.txt");
     });
 
-    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+    expect(result.current.state.status).toEqual([{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }]);
 
     await act(async () => {
       resolveStageFile?.();
       await stagePromise;
     });
 
-    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+    expect(result.current.state.status).toEqual([{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }]);
   });
 
   it("stageFile rolls back the optimistic staged flag if the backend call fails", async () => {
-    const entryA: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
+    const entryA: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
     const client = transferClient({
       getStatus: async () => [entryA],
       stageFile: async () => {
@@ -1478,8 +1478,8 @@ describe("useAppState", () => {
   });
 
   it("stageFile merges a partially-staged file's two status rows into one staged row", async () => {
-    const unstagedPart: StatusEntry = { path: "a.txt", staged: false, kind: "Modified" };
-    const stagedPart: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
+    const unstagedPart: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
+    const stagedPart: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
     const client = transferClient({
       getStatus: async () => [unstagedPart, stagedPart],
       stageFile: async () => new Promise<void>(() => {}),
@@ -1491,7 +1491,7 @@ describe("useAppState", () => {
       void result.current.stageFile("a.txt");
     });
 
-    expect(result.current.state.status).toEqual([{ path: "a.txt", staged: true, kind: "Modified" }]);
+    expect(result.current.state.status).toEqual([{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }]);
   });
 
   // DiffPane's "Stage all" used to loop the per-file `stageFile`, and every one of those is its
@@ -1848,7 +1848,7 @@ describe("useAppState", () => {
   });
 
   it("stageHunk calls client.stageHunk then refreshes status", async () => {
-    const entryA: StatusEntry = { path: "a.txt", staged: true, kind: "Modified" };
+    const entryA: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
     let getStatusCalls = 0;
     let stageHunkArgs: [string, number, number] | null = null;
     const client: RepoClient = {

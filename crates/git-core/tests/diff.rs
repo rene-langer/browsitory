@@ -327,7 +327,7 @@ fn file_sides_for_unstaged_staged_and_commit_sources() {
         (loaded(b"v3"), loaded(b"v4"))
     );
     assert_eq!(
-        sides(&repo, DiffSource::Staged, "img.png"),
+        sides(&repo, DiffSource::Staged { old_path: None }, "img.png"),
         (loaded(b"v2"), loaded(b"v3"))
     );
     let commit = |id: &str| DiffSource::Commit {
@@ -434,10 +434,10 @@ fn a_side_over_the_cap_is_too_large_with_its_size() {
 
     // A blob over the cap is judged by its header, before it is read.
     git_core::stage::stage_file(&repo, "big.png").unwrap();
-    let staged = file_sides(&repo, &DiffSource::Staged, "big.png", 12).unwrap();
+    let staged = file_sides(&repo, &DiffSource::Staged { old_path: None }, "big.png", 12).unwrap();
     assert_eq!(staged.new, FileSide::TooLarge { size: 16 });
     // Exactly at the cap still loads.
-    let at_cap = file_sides(&repo, &DiffSource::Staged, "big.png", 10).unwrap();
+    let at_cap = file_sides(&repo, &DiffSource::Staged { old_path: None }, "big.png", 10).unwrap();
     assert_eq!(at_cap.old, loaded(b"0123456789"));
 }
 
@@ -563,11 +563,125 @@ fn the_index_side_sees_a_git_add_made_through_another_handle() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "img.png", "v1");
     commit_all(&repo, "v1");
-    assert_eq!(sides(&repo, DiffSource::Staged, "img.png").1, loaded(b"v1"));
+    assert_eq!(
+        sides(&repo, DiffSource::Staged { old_path: None }, "img.png").1,
+        loaded(b"v1")
+    );
     write_file(dir.path(), "img.png", "v2");
     let other = git2::Repository::open(dir.path()).unwrap();
     let mut index = other.index().unwrap();
     index.add_path(Path::new("img.png")).unwrap();
     index.write().unwrap();
-    assert_eq!(sides(&repo, DiffSource::Staged, "img.png").1, loaded(b"v2"));
+    assert_eq!(
+        sides(&repo, DiffSource::Staged { old_path: None }, "img.png").1,
+        loaded(b"v2")
+    );
+}
+
+#[test]
+fn commit_diff_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("d")).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "b");
+    let b = repo.head().unwrap().target().unwrap().to_string();
+
+    let hunks = git_core::diff::commit_diff(&repo, &b, "d", &DiffOptions::default()).unwrap();
+
+    let lines: Vec<_> = hunks.iter().flat_map(|h| h.lines.iter()).collect();
+    assert_eq!(lines.len(), 1, "{hunks:?}");
+    assert_eq!(lines[0].origin, DiffLineOrigin::Remove);
+    assert_eq!(lines[0].content, "file d\n");
+}
+
+#[test]
+fn working_diff_unstaged_of_a_file_replaced_by_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+
+    let hunks = git_core::diff::working_diff(&repo, "d", false, &DiffOptions::default()).unwrap();
+
+    let lines: Vec<_> = hunks.iter().flat_map(|h| h.lines.iter()).collect();
+    assert_eq!(lines.len(), 1, "{hunks:?}");
+    assert_eq!(lines[0].origin, DiffLineOrigin::Remove);
+}
+
+fn staged_rename(dir: &Path, repo: &git2::Repository, old: &str, new: &str) {
+    std::fs::rename(dir.join(old), dir.join(new)).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new(old)).unwrap();
+    index.add_path(Path::new(new)).unwrap();
+    index.write().unwrap();
+}
+
+#[test]
+fn file_sides_of_a_staged_rename_compares_old_and_new() {
+    use git_core::diff::{file_sides, FileSide};
+    use git_core::tools::DiffSource;
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("old.png"), b"\x89PNG image").unwrap();
+    commit_all(&repo, "base");
+    staged_rename(dir.path(), &repo, "old.png", "new.png");
+
+    let with_old = file_sides(
+        &repo,
+        &DiffSource::Staged {
+            old_path: Some("old.png".into()),
+        },
+        "new.png",
+        1 << 20,
+    )
+    .unwrap();
+    let loaded = FileSide::Loaded {
+        bytes: b"\x89PNG image".to_vec(),
+    };
+    assert_eq!(with_old.old, loaded);
+    assert_eq!(with_old.new, loaded);
+
+    let without = file_sides(
+        &repo,
+        &DiffSource::Staged { old_path: None },
+        "new.png",
+        1 << 20,
+    )
+    .unwrap();
+    assert_eq!(without.old, FileSide::Missing);
+}
+
+#[test]
+fn staged_rename_diff_shows_only_the_edit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "one\ntwo\nthree\nfour\nfive\n");
+    commit_all(&repo, "base");
+    staged_rename(dir.path(), &repo, "old.txt", "new.txt");
+    write_file(dir.path(), "new.txt", "one\ntwo\nTHREE\nfour\nfive\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+
+    let hunks =
+        git_core::diff::staged_rename_diff(&repo, "old.txt", "new.txt", &DiffOptions::default())
+            .unwrap();
+
+    let edits: Vec<_> = hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter(|l| l.origin != DiffLineOrigin::Context)
+        .map(|l| (l.origin, l.content.clone()))
+        .collect();
+    assert_eq!(
+        edits,
+        vec![
+            (DiffLineOrigin::Remove, "three\n".to_string()),
+            (DiffLineOrigin::Add, "THREE\n".to_string())
+        ]
+    );
 }

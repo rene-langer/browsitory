@@ -85,3 +85,73 @@ fn reset_clears_a_leftover_squash_message() {
 
     assert!(!repo.path().join("SQUASH_MSG").exists());
 }
+
+#[test]
+#[cfg(unix)]
+fn hard_reset_replaces_a_typechanged_symlink_without_writing_through_it() {
+    let out = common::outside_dir();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "tc", "plain\n");
+    common::commit_all(&repo, "base");
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    reset_to(&repo, &head, ResetMode::Hard).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "tc"));
+    assert_eq!(common::read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn hard_reset_replaces_a_symlinked_directory_without_writing_through_it() {
+    let out = common::outside_dir();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f", "inner\n");
+    common::commit_all(&repo, "base");
+    common::replace_with_link(dir.path(), "d", out.path());
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    reset_to(&repo, &head, ResetMode::Hard).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "d"));
+    assert_eq!(common::read(dir.path(), "d/f"), "inner\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn hard_reset_to_another_commit_does_not_write_through_a_link() {
+    let out = common::outside_dir();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "tc", "plain\n");
+    common::commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap().to_string();
+    common::write_file(dir.path(), "tc", "second\n");
+    common::commit_all(&repo, "second");
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+
+    reset_to(&repo, &base, ResetMode::Hard).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "tc"));
+    assert_eq!(common::read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn hard_reset_never_deletes_through_a_symlinked_directory() {
+    let out = common::outside_dir();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap().to_string();
+    common::write_file(dir.path(), "d/f", "inner\n");
+    common::commit_all(&repo, "adds d/f");
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    reset_to(&repo, &base, ResetMode::Hard).unwrap();
+
+    common::assert_outside_untouched(out.path());
+}

@@ -99,6 +99,27 @@ describe("CommitBox", () => {
     expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
   });
 
+  it("shows a waiting signing program with the same cancel button", () => {
+    const onCancel = vi.fn();
+    render(
+      <CommitBox
+        onCommit={async () => true}
+        disabled={false}
+        onAbortMerge={() => {}}
+        hooks={{
+          installed: false,
+          skip: false,
+          onToggleSkip: () => {},
+          running: { operationId: "commit-2", hook: "signing" },
+          onCancel,
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for the signing program…");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
   it("clears the message on a one-shot request only if it still holds the committed text", () => {
     const onClearMessageHandled = vi.fn();
     const { rerender } = render(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} />);

@@ -7,8 +7,8 @@ import {
   ignorePatterns,
 } from "./FileActionsMenu";
 
-const tracked = { path: "src/a.ts", staged: false, kind: "Modified" as const };
-const untracked = { path: "logs/run.log", staged: false, kind: "New" as const };
+const tracked = { path: "src/a.ts", oldPath: null, staged: false, kind: "Modified" as const };
+const untracked = { path: "logs/run.log", oldPath: null, staged: false, kind: "New" as const };
 
 describe("FileActionsMenu", () => {
   it("offers discard and stash for tracked files", () => {
@@ -23,11 +23,11 @@ describe("FileActionsMenu", () => {
 
   it("offers only stash for staged files and nothing for conflicted ones", () => {
     const onPick = vi.fn();
-    const items = fileMenuItems({ path: "src/a.ts", staged: true, kind: "Modified" }, onPick);
+    const items = fileMenuItems({ path: "src/a.ts", oldPath: null, staged: true, kind: "Modified" }, onPick);
     expect(items.map((i) => i.label)).toEqual(["Stash file…"]);
     items[0].onSelect();
     expect(onPick).toHaveBeenCalledWith({ kind: "stash" });
-    expect(fileMenuItems({ path: "c.txt", staged: false, kind: "Conflicted" }, vi.fn())).toEqual([]);
+    expect(fileMenuItems({ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }, vi.fn())).toEqual([]);
   });
 
   it("builds root-anchored ignore patterns", () => {
@@ -57,8 +57,8 @@ describe("FileActionsMenu", () => {
   });
 
   describe("external tools", () => {
-    const conflicted = { path: "c.txt", staged: false, kind: "Conflicted" as const };
-    const deleted = { path: "gone.txt", staged: false, kind: "Deleted" as const };
+    const conflicted = { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" as const };
+    const deleted = { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" as const };
     const idle = { mergeToolRunning: false };
 
     it("adds external tool items only when tools are available", () => {

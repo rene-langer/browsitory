@@ -360,6 +360,8 @@ pub enum RemoteError {
     HookFailed { hook: String, output: String },
     #[error("{0}")]
     Hook(#[from] crate::hooks::HookError),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 impl RemoteError {
@@ -897,6 +899,12 @@ pub fn pull_after_fetch(
         return Ok(PullOutcome::Diverged { upstream_ref });
     }
 
+    // Safe checkouts create files through a symlinked folder (#114).
+    let upstream_tree = upstream_commit.tree()?;
+    crate::worktree_guard::refuse_linked_folders::<RemoteError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&upstream_tree)],
+    )?;
     let local_ref = format!("refs/heads/{local_branch}");
     let mut checkout = CheckoutBuilder::new();
     checkout.safe();

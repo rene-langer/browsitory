@@ -21,7 +21,7 @@ export type FileVersion =
 /** `Range.toId === null` compares `fromId` with the working tree. */
 export type DiffSource =
   | { kind: "Unstaged" }
-  | { kind: "Staged" }
+  | { kind: "Staged"; oldPath: string | null }
   | { kind: "Commit"; commitId: string; oldPath: string | null }
   | { kind: "Range"; fromId: string; toId: string | null; oldPath: string | null };
 
@@ -157,7 +157,11 @@ export function diffSides(
     case "Unstaged":
       return { left: at(rel, { kind: "Index" }), right: worktree(), title: `${name} (Index ↔ Working Tree)` };
     case "Staged":
-      return { left: at(rel, { kind: "Head" }), right: at(rel, { kind: "Index" }), title: `${name} (HEAD ↔ Index)` };
+      return {
+        left: at(source.oldPath ?? rel, { kind: "Head" }),
+        right: at(rel, { kind: "Index" }),
+        title: `${name} (HEAD ↔ Index)`,
+      };
     case "Commit":
       return {
         left: at(source.oldPath ?? rel, { kind: "FirstParent", commitId: source.commitId }),

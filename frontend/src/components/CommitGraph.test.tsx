@@ -7,8 +7,8 @@ import { CommitGraph } from "./CommitGraph";
 import styles from "./CommitGraph.module.css";
 
 const status: StatusEntry[] = [
-  { path: "src/main.rs", staged: false, kind: "Modified" },
-  { path: "README.md", staged: true, kind: "New" },
+  { path: "src/main.rs", oldPath: null, staged: false, kind: "Modified" },
+  { path: "README.md", oldPath: null, staged: true, kind: "New" },
 ];
 
 const commits: GraphCommit[] = [

@@ -220,8 +220,8 @@ export const vscodeRepoClient: RepoClient = {
   getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
   getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
     call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
-  getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions) =>
-    call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts }),
+  getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
+    call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>

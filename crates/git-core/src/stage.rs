@@ -30,6 +30,8 @@ pub enum StageError {
     SelectionNotApplicable,
     #[error("That path is outside the repository.")]
     InvalidPath,
+    #[error("'{0}' is beyond a symbolic link.")]
+    BeyondSymlink(String),
     #[error("Ignore pattern can't be empty or span several lines.")]
     InvalidPattern,
     #[error("{0} is a folder (for example a nested repository) and wasn't discarded.")]
@@ -57,15 +59,46 @@ impl From<LinePatchError> for StageError {
     }
 }
 
+/// Stages the file as it is in the work tree, or its deletion when it is gone. A path below a
+/// symlinked folder is refused like git ("beyond a symbolic link"): staging it would read the
+/// link's target, possibly outside the repository; once the link itself is staged (it replaces
+/// the folder's entries, like `git add -A`) such a path has nothing left to stage. A symlink is
+/// staged as a link even when it dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let mut index = repo.index()?;
-    if workdir.join(path).exists() {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
+        // Staging the link that replaced the folder (as "Stage all" does first) already took
+        // the path out of the index; nothing is left to stage, and nothing is read.
+        if index.get_path(rel, 0).is_none() && !has_conflict_entries(&index, path) {
+            return Ok(());
+        }
+        return Err(StageError::BeyondSymlink(path.to_string()));
+    }
+    let full = workdir.join(rel);
+    if let Ok(meta) = full.symlink_metadata() {
+        if meta.file_type().is_symlink() {
+            // A link that replaced a tracked folder takes the folder's place, like `git add`.
+            index.remove_dir(rel, 0)?;
+        }
         index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;
     }
     index.write()?;
+    Ok(())
+}
+
+fn has_conflict_entries(index: &git2::Index, path: &str) -> bool {
+    (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some())
+}
+
+/// git's "'d/f' is beyond a symbolic link" for a path below a symlinked folder.
+fn refuse_beyond_symlink(workdir: &Path, path: &str) -> Result<(), StageError> {
+    if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
+        return Err(StageError::BeyondSymlink(path.to_string()));
+    }
     Ok(())
 }
 
@@ -105,8 +138,16 @@ pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(
 pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    refuse_beyond_symlink(workdir, path)?;
     ensure_no_symlinked_parent(workdir, rel)?;
-    if repo.index()?.get_path(rel, 0).is_some() {
+    let index = repo.index()?;
+    if index.get_path(rel, 0).is_some() {
+        // A forced checkout writes through a symlink that replaced the file (#114).
+        crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
+            repo,
+            Some(&crate::worktree_guard::GuardSource::Index(&index)),
+            Some(&[path.to_string()]),
+        )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
         repo.checkout_index(None, Some(&mut checkout))?;
@@ -200,8 +241,25 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let target = head_commit.as_ref().map(|c| c.as_object());
-    repo.reset_default(target, [path])?;
+    // A staged rename unstages as a whole: resetting only the new path would leave the old one
+    // staged as deleted (#137).
+    let mut paths = vec![path.to_string()];
+    if let Some(old) = staged_rename_source(repo, path)? {
+        paths.push(old);
+    }
+    repo.reset_default(target, paths.iter())?;
     Ok(())
+}
+
+/// The old path of the staged rename whose new path is `path`, if any.
+fn staged_rename_source(repo: &git2::Repository, path: &str) -> Result<Option<String>, StageError> {
+    let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
+    Ok(entries
+        .into_iter()
+        .find(|entry| {
+            entry.staged && entry.kind == crate::status::StatusKind::Renamed && entry.path == path
+        })
+        .and_then(|entry| entry.old_path))
 }
 
 /// Stages one whole hunk of the index→workdir diff, identified by the `(old_start, new_start)`
@@ -268,7 +326,13 @@ struct FoundHunk {
 
 /// Re-walks `diff` the same way `diff::hunks_from_diff` does and returns the lines of the hunk
 /// at `(old_start, new_start)` with their raw libgit2 origins, so indices line up with the UI.
-fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundHunk, StageError> {
+/// Only `path`'s own delta counts: a literal pathspec `d` also matches `d/…` (#116).
+fn find_hunk(
+    diff: &git2::Diff,
+    path: &str,
+    old_start: u32,
+    new_start: u32,
+) -> Result<FoundHunk, StageError> {
     use std::cell::{Cell, RefCell};
     let found: RefCell<Option<FoundHunk>> = RefCell::new(None);
     let in_target = Cell::new(false);
@@ -276,7 +340,10 @@ fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundH
         &mut |_, _| true,
         None,
         Some(&mut |delta, hunk| {
-            let is_target = hunk.old_start() == old_start && hunk.new_start() == new_start;
+            let is_target = found.borrow().is_none()
+                && hunk.old_start() == old_start
+                && hunk.new_start() == new_start
+                && crate::diff::delta_is_one_of(&delta, &[path]);
             in_target.set(is_target);
             if is_target {
                 let old_absent =
@@ -345,6 +412,12 @@ fn apply_selection(
     selection: Selection,
     target: Target,
 ) -> Result<(), StageError> {
+    if matches!(target, Target::Stage) {
+        let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+        checked_relative(path)?;
+        // The index→workdir diff reads through the link; git refuses the path instead.
+        refuse_beyond_symlink(workdir, path)?;
+    }
     let (staged_side, direction, location) = match target {
         Target::Stage => (false, Direction::Forward, git2::ApplyLocation::Index),
         Target::Unstage => (true, Direction::Reverse, git2::ApplyLocation::Index),
@@ -357,9 +430,10 @@ fn apply_selection(
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
-    let hunk = find_hunk(&diff, old_start, new_start)?;
+    let hunk = find_hunk(&diff, path, old_start, new_start)?;
     if matches!(target, Target::Discard) {
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+        refuse_beyond_symlink(workdir, path)?;
         ensure_no_symlinked_parent(workdir, checked_relative(path)?)?;
     }
     let all_changed: Vec<u32>;

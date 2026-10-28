@@ -224,7 +224,7 @@ fn discard_file_does_not_delete_through_a_symlinked_directory() {
     std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
     assert!(matches!(
         discard_file(&repo, "link/victim.txt"),
-        Err(StageError::InvalidPath)
+        Err(StageError::BeyondSymlink(_))
     ));
     assert!(outside.path().join("victim.txt").exists());
 }
@@ -249,7 +249,10 @@ fn setup_symlinked_parent() -> (tempfile::TempDir, git2::Repository, tempfile::T
 fn discard_file_does_not_write_a_tracked_file_through_a_symlinked_parent() {
     let (_dir, repo, outside) = setup_symlinked_parent();
     let result = discard_file(&repo, "d/f.txt");
-    assert!(matches!(result, Err(StageError::InvalidPath)), "{result:?}");
+    assert!(
+        matches!(result, Err(StageError::BeyondSymlink(_))),
+        "{result:?}"
+    );
     assert_eq!(read(outside.path(), "f.txt"), "outside\n");
 }
 
@@ -313,4 +316,46 @@ fn discard_all_caps_the_names_it_lists() {
         "Couldn't discard 5 files: d1/, d2/, d3/ and 2 more. \
          Folders (for example nested repositories) are never discarded."
     );
+}
+
+#[cfg(unix)]
+fn typechanged_tc() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    let out = common::outside_dir();
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "tc", "plain\n");
+    common::write_file(dir.path(), "d/f", "inner\n");
+    common::commit_all(&repo, "base");
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+    (dir, repo, out)
+}
+
+#[test]
+#[cfg(unix)]
+fn discard_file_of_a_typechanged_symlink_restores_the_file_and_leaves_the_target_alone() {
+    let (dir, repo, out) = typechanged_tc();
+    discard_file(&repo, "tc").unwrap();
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "tc"));
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn discard_all_unstaged_of_a_typechanged_symlink_does_not_write_through() {
+    let (dir, repo, out) = typechanged_tc();
+    discard_all_unstaged(&repo, &["tc".into()]).unwrap();
+    common::assert_outside_untouched(out.path());
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn discard_file_still_refuses_a_path_beyond_a_symlinked_directory() {
+    let (dir, repo, out) = typechanged_tc();
+    common::replace_with_link(dir.path(), "d", out.path());
+    assert!(matches!(
+        discard_file(&repo, "d/f"),
+        Err(StageError::BeyondSymlink(_))
+    ));
+    common::assert_outside_untouched(out.path());
 }

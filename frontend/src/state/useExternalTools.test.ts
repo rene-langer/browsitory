@@ -32,9 +32,9 @@ describe("useExternalTools", () => {
     act(() => {
       result.current.reveal(null);
       result.current.openTerminal();
-      result.current.openDiffTool("a.ts", { kind: "Staged" });
+      result.current.openDiffTool("a.ts", { kind: "Staged", oldPath: null });
     });
-    await waitFor(() => expect(openDiffTool).toHaveBeenCalledWith("/r", "a.ts", { kind: "Staged" }));
+    await waitFor(() => expect(openDiffTool).toHaveBeenCalledWith("/r", "a.ts", { kind: "Staged", oldPath: null }));
     expect(revealInFileManager).toHaveBeenCalledWith("/r", null);
     expect(openTerminal).toHaveBeenCalledWith("/r");
     expect(result.current.error).toBeNull();

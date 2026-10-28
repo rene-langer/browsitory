@@ -208,8 +208,18 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
     deliberately bypasses signing.
 - Signers are external programs run exactly as git runs them: `gpg --status-fd=2 -bsau <key>`
   and `ssh-keygen -Y sign -n git -f <key>` (`-U` for a literal key), with the buffer on stdin,
-  no TTY, and no console window on Windows. They block the repo's worker thread while pinentry
-  waits.
+  no TTY, and no console window on Windows. They run through `process::run_captured_split`
+  (stdout and stderr kept apart, the program in its own process group so a kill takes its
+  children too) and block the repo's worker thread while pinentry waits, at most
+  `SIGN_TIMEOUT` (120 s) → `SignError::TimedOut`. A signature over 1 MiB is an error, never
+  truncated. Commit and amend pass the operation's cancel check (`SignOptions`) and report a
+  `"signing"` pseudo-hook to the hook reporter, so the commit box shows "Waiting for the signing
+  program…" with the hooks' Cancel (`SignError::Cancelled`); cherry-pick, revert and rebase
+  commits get the timeout only. Verification is bounded by `VERIFY_TIMEOUT` (30 s), after which
+  the signature shows the error status.
+  - Running in a process group means a signer launched from a terminal that prompts on
+    `/dev/tty` (ssh-keygen with an encrypted key and no agent) is stopped by `SIGTTIN` until the
+    timeout or Cancel; pinentry (gpg-agent) is a separate process and unaffected.
 - `verify_commit` picks the format from the signature armor, not from config:
   - gpg: `--status-fd` lines map to `SignatureStatus`.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
@@ -307,6 +317,74 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   `git_core::commit::append_trailers` *before* `commit`/`amend_head`, so `prepare-commit-msg` and
   `commit-msg` see them, as with `git commit --trailer`.
 
+## Worktree writes and symlinks
+
+libgit2's *forced* checkouts (and plain `std::fs` writes) follow a symlink that replaced a
+tracked file, or a tracked folder on the way to one, so they could write or delete outside the
+repository (#114). `git-core::worktree_guard` owns every rule about this:
+
+- Every forced checkout calls `worktree_guard::prepare_forced_checkout` immediately before
+  libgit2 runs: it `scan`s the checkout's source (target tree or index) **and** the current HEAD
+  tree and index (a forced checkout also deletes what those track and the target lacks), limited
+  to the checkout's literal paths, and `clear_hazards` removes each link found (only the link,
+  never its target, never recursively; a Windows directory link with `remove_dir`). A link that
+  no tracked path goes through is the user's and is left alone; a source entry that is itself a
+  symlink is not a hazard. Call sites: `reset_to(Hard)`, `discard_file`, undo/redo
+  `checkout_from_index`, `abort_merge` (merge, cherry-pick, revert, sequences),
+  `resolve_whole_file`, `restore_original_branch` (abort rebase and its rollback).
+- "Stash all" cannot clear links in between libgit2's record and reset, so with a hazard it goes
+  through the path-limited stash (batch 4c) with every changed path: a file link is stashed and
+  then replaced, a folder link is refused (`BeyondSymlink`).
+- Browsitory's own raw writes use `write_beneath` / `remove_beneath` (conflict resolution, abort
+  merge's removal of added files); undo/redo's raw writes clear a symlinked folder on the way
+  first, never delete below one, and its snapshots and checks never read below one
+  (`read_worktree_file`).
+- Work-tree reads for the image preview use `open_beneath`: on unix an `openat` walk with
+  `O_NOFOLLOW` on every component (and `O_NONBLOCK`), so a folder swapped for a link at any
+  moment cannot redirect the read (#138); on Windows an open that does not follow a final reparse
+  point, then `GetFinalPathNameByHandleW` on the opened handle must lie under the canonical work
+  tree (a junction on the way is caught on the handle itself). Hand-declared `kernel32` import,
+  no new dependency.
+- A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
+  a tracked link with the target's folder (a typechange) by unlinking it, never following it,
+  even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
+- Safe (non-forced) checkouts refuse to *modify* a file below a link but still *create* new
+  ones through it, also through a link nothing tracks. So every safe operation first calls
+  `refuse_linked_folders` with what it brings in, refusing with `LinkedFolder` ("'d' is a
+  symbolic link where the repository has a folder. Remove or rename it first.", one error type
+  every operation's error enum wraps) while a symlink stands where HEAD, the index or the
+  incoming side has a folder. Tree checkouts (switch, checkout commit, merge fast-forward, pull
+  fast-forward, rebase start, sequence rewind) pass the target tree (`Incoming::Checkout`); a
+  folder link HEAD tracks is skipped there (libgit2 replaces it, or reports a conflict when it
+  was changed). Merge-like operations pass their merged result (`Incoming::Merge`): merge and
+  squash `merge_commits`, cherry-pick/revert steps and rebase steps `cherrypick_commit` /
+  `revert_commit`, stash apply/pop the stash's trees. Nothing is skipped there: libgit2 merges
+  `d/new.txt` without a conflict and writes it through a folder link HEAD tracks. The guard
+  examines each folder once across all sources and never stats files (100k-file repo: ~0.24 s).
+  A leaf typechange is refused by libgit2 itself. `tests/symlink_write_through.rs` pins every
+  operation × {file link, folder link, a new file below a tracked or an untracked folder link, a
+  committed folder link}, refusals included, so a future switch to a forced checkout is caught.
+- Submodule update refuses when the submodule path or a folder above it is a symlink (libgit2
+  would clone through it); nested updates check each nested path the same way.
+- `stage_file`, `stage_hunk` and `stage_lines` (and the discard variants) refuse a path below a
+  symlinked folder like git ("'d/f' is beyond a symbolic link."): the index→workdir diff would
+  read through the link. Staging the link itself replaces the folder's index entries (`git add
+  -A`), after which such a path has nothing left to stage and `stage_file` returns `Ok` — so
+  "Stage all", which stages each unstaged path in status order (`d` before `d/f`), stages the
+  typechange.
+- The forced-checkout path filter follows `core.ignorecase` like libgit2's pathspecs.
+- Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or
+  the refusal check) and libgit2's write; libgit2 has no `openat`-style checkout. Likewise
+  `write_beneath`, undo's raw reads/writes and `clear_hazards` check then act by path. The same
+  threat class as #138 (a local writer racing the app). On Windows `open_beneath` follows
+  intermediate reparse points during the open (a link to an inside folder is allowed; a link to
+  a UNC share is contacted before the refusal); only the final path is checked.
+- Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
+  is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
+  the outside name sees the new content). A hardlink is indistinguishable from a regular file by
+  path; it needs the user (or a local process) to have created it on the same filesystem, and
+  git behaves the same way.
+
 ## Image preview
 
 - `git_core::diff::file_sides(repo, &DiffSource, path, cap)` returns both sides of a diff as
@@ -314,8 +392,10 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   parent ↔ commit, `from` ↔ `to` or the work tree), so it covers the working tree, commits,
   stashes and compares. Each side is capped at `MAX_PREVIEW_BYTES` (20 MB), judged from the
   object header (`odb.read_header`) or file metadata before anything is read, and the work tree
-  read is bounded too. A work tree side never follows a symlink (the file itself, or a folder
-  symlink out of the work tree), and paths must be relative without `.`/`..`.
+  read is bounded too. A work tree side never follows a symlink (the file itself, or any folder
+  on the way, even one swapped in during the read: `worktree_guard::open_beneath`), and paths
+  must be relative without `.`/`..`. A staged rename's HEAD side is read from
+  `DiffSource::Staged { old_path }` (`StatusEntry.old_path`).
 - Bytes cross IPC as base64 in JSON (`repo_service::base64`, a hand-rolled RFC 4648 encoder, no
   dependency) with the image type `git_core::diff::sniff_image_mime` read from the magic bytes
   (PNG, JPEG, GIF, WebP, SVG root element). The frontend only picks *candidates* by extension;

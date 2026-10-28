@@ -231,8 +231,8 @@ function renderCommit(client: RepoClient, commitId: string, overrides: Partial<R
 describe("DiffPane", () => {
   describe("uncommitted", () => {
     const status: StatusEntry[] = [
-      { path: "a.txt", staged: false, kind: "Modified" },
-      { path: "b.txt", staged: true, kind: "New" },
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+      { path: "b.txt", oldPath: null, staged: true, kind: "New" },
     ];
 
     it("focuses the commit message once the amend prefill is in and reports it", async () => {
@@ -346,8 +346,8 @@ describe("DiffPane", () => {
 
     it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
       const partial: StatusEntry[] = [
-        { path: "a.txt", staged: false, kind: "Modified" },
-        { path: "a.txt", staged: true, kind: "Modified" },
+        { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+        { path: "a.txt", oldPath: null, staged: true, kind: "Modified" },
       ];
       const hunk: DiffHunk = { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] };
       // Only the unstaged side has a hunk to stage, so there's exactly one "Stage hunk" button.
@@ -417,9 +417,9 @@ describe("DiffPane", () => {
 
     describe("file actions", () => {
       const fileStatus: StatusEntry[] = [
-        { path: "src/a.ts", staged: false, kind: "Modified" },
-        { path: "logs/run.log", staged: false, kind: "New" },
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
+        { path: "src/a.ts", oldPath: null, staged: false, kind: "Modified" },
+        { path: "logs/run.log", oldPath: null, staged: false, kind: "New" },
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       const render = (overrides: Partial<React.ComponentProps<typeof DiffPane>> = {}) =>
         renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), fileStatus, overrides);
@@ -667,9 +667,9 @@ describe("DiffPane", () => {
     // per remote), all serialized through the single per-repo worker thread.
     it("Stage all makes a single bulk call with every unstaged path", () => {
       const threeStatus: StatusEntry[] = [
-        { path: "a.txt", staged: false, kind: "Modified" },
-        { path: "c.txt", staged: false, kind: "New" },
-        { path: "b.txt", staged: true, kind: "New" },
+        { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+        { path: "c.txt", oldPath: null, staged: false, kind: "New" },
+        { path: "b.txt", oldPath: null, staged: true, kind: "New" },
       ];
       const onStageFile = vi.fn();
       const onStageAllFiles = vi.fn();
@@ -686,8 +686,8 @@ describe("DiffPane", () => {
     // working tree). One "Stage all" click must not silently resolve an outstanding merge.
     it("Stage all omits Conflicted entries from the bulk call", () => {
       const conflictedMix: StatusEntry[] = [
-        { path: "a.txt", staged: false, kind: "Modified" },
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
+        { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       const onStageAllFiles = vi.fn();
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictedMix, { onStageAllFiles });
@@ -700,7 +700,7 @@ describe("DiffPane", () => {
     });
 
     it("disables Stage all when every unstaged entry is Conflicted", () => {
-      const conflictsOnly: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
+      const conflictsOnly: StatusEntry[] = [{ path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" }];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictsOnly);
 
       expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
@@ -719,21 +719,21 @@ describe("DiffPane", () => {
     });
 
     it("does not render Stage all when there are no unstaged entries", () => {
-      const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
+      const stagedOnly: StatusEntry[] = [{ path: "b.txt", oldPath: null, staged: true, kind: "New" }];
       renderUncommitted(fakeClient({}), stagedOnly);
 
       expect(screen.queryByRole("button", { name: "Stage all" })).not.toBeInTheDocument();
     });
 
     it("CommitBox is disabled when nothing is staged", () => {
-      const unstagedOnly: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+      const unstagedOnly: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
       renderUncommitted(fakeClient({}), unstagedOnly);
 
       expect(screen.getByText("Commit")).toBeDisabled();
     });
 
     it("CommitBox is enabled when something is staged", () => {
-      const stagedOnly: StatusEntry[] = [{ path: "b.txt", staged: true, kind: "New" }];
+      const stagedOnly: StatusEntry[] = [{ path: "b.txt", oldPath: null, staged: true, kind: "New" }];
       renderUncommitted(fakeClient({}), stagedOnly);
 
       // CommitBox itself still requires a non-empty message before it will enable
@@ -805,7 +805,7 @@ describe("DiffPane", () => {
 
     it("offers Stash file… on a staged row's actions menu", () => {
       const onOpenStashDialog = vi.fn();
-      renderUncommitted(fakeClient({}), [{ path: "src/s.ts", staged: true, kind: "Modified" }], {
+      renderUncommitted(fakeClient({}), [{ path: "src/s.ts", oldPath: null, staged: true, kind: "Modified" }], {
         onOpenStashDialog,
       });
 
@@ -848,7 +848,7 @@ describe("DiffPane", () => {
       const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence };
       const { unmount } = renderUncommitted(
         fakeClient({ getConflictHunks: async () => [] }),
-        [...status, { path: "c.txt", staged: false, kind: "Conflicted" }],
+        [...status, { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }],
         { headInfo, onSequenceContinue, onSequenceAbort },
       );
 
@@ -939,7 +939,7 @@ describe("DiffPane", () => {
     });
 
     it("shows the raw error and a plain-language hint, plus a Retry that re-fetches, when the working diff fails", async () => {
-      const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+      const singleFile: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
       const getWorkingDiff = vi.fn<RepoClient["getWorkingDiff"]>().mockResolvedValue([]);
       getWorkingDiff.mockRejectedValueOnce(new Error("Transport failed: sidecar exited unexpectedly (code 1)"));
       renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
@@ -994,7 +994,7 @@ describe("DiffPane", () => {
     });
 
     it("shows the conflict resolution pane instead of a diff for a Conflicted file", async () => {
-      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
+      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" }];
       const client = fakeClient({ getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }] });
       renderUncommitted(client, conflictedStatus);
 
@@ -1002,7 +1002,7 @@ describe("DiffPane", () => {
     });
 
     it("falls back to the real diff (fetched fresh) once a status refresh no longer lists the path as Conflicted", async () => {
-      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Conflicted" }];
+      const conflictedStatus: StatusEntry[] = [{ path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" }];
       const client = fakeClient({
         getConflictHunks: async () => [{ kind: "Clean", content: "resolved already" }],
         getWorkingDiff: vi.fn(async () => []),
@@ -1013,7 +1013,7 @@ describe("DiffPane", () => {
 
       // Simulate a status refresh after an abort (or after the conflict was already resolved
       // through this same pane): the conflicted entry is gone, replaced by its resolved form.
-      const resolvedStatus: StatusEntry[] = [{ path: "shared.txt", staged: false, kind: "Modified" }];
+      const resolvedStatus: StatusEntry[] = [{ path: "shared.txt", oldPath: null, staged: false, kind: "Modified" }];
       rerender(
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -1032,8 +1032,8 @@ describe("DiffPane", () => {
 
     it("keeps each conflicted file's resolution state independent of the others", async () => {
       const twoConflicts: StatusEntry[] = [
-        { path: "binary.dat", staged: false, kind: "Conflicted" },
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
+        { path: "binary.dat", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       const getConflictHunks = vi.fn((_repoPath: string, path: string): Promise<ConflictSegment[]> => {
         if (path === "binary.dat") {
@@ -1054,8 +1054,8 @@ describe("DiffPane", () => {
 
     it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
       const mixedStatus: StatusEntry[] = [
-        { path: "a.txt", staged: true, kind: "New" },
-        { path: "shared.txt", staged: false, kind: "Conflicted" },
+        { path: "a.txt", oldPath: null, staged: true, kind: "New" },
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixedStatus);
 
@@ -1072,8 +1072,8 @@ describe("DiffPane", () => {
 
     it("tints a conflicted file row and shows a conflict count badge", () => {
       const statusWithConflict: StatusEntry[] = [
-        { path: "crates/git-core/src/merge.rs", staged: false, kind: "Conflicted" },
-        { path: "README.md", staged: false, kind: "Modified" },
+        { path: "crates/git-core/src/merge.rs", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), statusWithConflict);
 
@@ -1116,8 +1116,8 @@ describe("DiffPane", () => {
 
     it("navigates the unstaged group with ArrowDown/ArrowUp, highlighting without hiding sections", async () => {
       const twoUnstaged: StatusEntry[] = [
-        { path: "a.txt", staged: false, kind: "Modified" },
-        { path: "c.txt", staged: false, kind: "New" },
+        { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+        { path: "c.txt", oldPath: null, staged: false, kind: "New" },
       ];
       renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), twoUnstaged);
 
@@ -1216,7 +1216,7 @@ describe("DiffPane", () => {
         vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
 
         const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
-        const singleFile: StatusEntry[] = [{ path: "a.txt", staged: false, kind: "Modified" }];
+        const singleFile: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
         renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
 
         expect(observe).toHaveBeenCalledTimes(1);
@@ -1455,7 +1455,7 @@ describe("DiffPane line staging", () => {
     const onStageLines = vi.fn();
     const { container } = renderUncommitted(
       fakeClient({ getWorkingDiff: async () => [lineHunk] }),
-      [{ path: "f.txt", staged: false, kind: "Modified" }],
+      [{ path: "f.txt", oldPath: null, staged: false, kind: "Modified" }],
       { onStageLines },
     );
     await screen.findByText("Stage hunk");
@@ -1469,7 +1469,7 @@ describe("DiffPane line staging", () => {
     const onDiscardLines = vi.fn();
     const { container } = renderUncommitted(
       fakeClient({ getWorkingDiff: async () => [lineHunk] }),
-      [{ path: "f.txt", staged: true, kind: "Modified" }],
+      [{ path: "f.txt", oldPath: null, staged: true, kind: "Modified" }],
       { onDiscardHunk, onDiscardLines },
     );
     await screen.findByText("Unstage hunk");
@@ -1493,8 +1493,8 @@ describe("DiffPane line staging", () => {
           client={fakeClient({ getWorkingDiff: async () => [lineHunk] })}
           selectedRow="uncommitted"
           status={[
-            { path: "f.txt", staged: false, kind: "Modified" },
-            { path: "f.txt", staged: true, kind: "Modified" },
+            { path: "f.txt", oldPath: null, staged: false, kind: "Modified" },
+            { path: "f.txt", oldPath: null, staged: true, kind: "Modified" },
           ]}
           mergeMessage={null}
           rebaseProgress={null}
@@ -1540,7 +1540,7 @@ describe("DiffPane diff options contract", () => {
     ],
   };
   const shown = lineHunk.lines.map((l) => l.content);
-  const status: StatusEntry[] = [{ path: "f.txt", staged: false, kind: "Modified" }];
+  const status: StatusEntry[] = [{ path: "f.txt", oldPath: null, staged: false, kind: "Modified" }];
 
   function pane(
     client: RepoClient,
@@ -1660,8 +1660,8 @@ describe("DiffPane diff options contract", () => {
       renderUncommitted(
         fakeClient({}),
         [
-          { path: "a.txt", staged: false, kind: "Modified" },
-          { path: "new.txt", staged: false, kind: "New" },
+          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
         ],
         { onOpenFileHistory },
       );
@@ -1921,7 +1921,7 @@ describe("DiffPane external tools", () => {
       { oldStart: 12, oldLines: 1, newStart: 14, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
     ];
     const externalTools = tools();
-    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", staged: false, kind: "Modified" }], {
+    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", oldPath: null, staged: false, kind: "Modified" }], {
       externalTools,
     });
     await screen.findByText(/^x$/);
@@ -1939,7 +1939,7 @@ describe("DiffPane external tools", () => {
       { oldStart: 1, oldLines: 1, newStart: 0, newLines: 0, lines: [{ origin: "Remove", content: "gone" }] },
     ];
     const externalTools = tools();
-    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", staged: false, kind: "Modified" }], {
+    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", oldPath: null, staged: false, kind: "Modified" }], {
       externalTools,
     });
     await screen.findByText(/^gone$/);
@@ -1949,21 +1949,28 @@ describe("DiffPane external tools", () => {
 
   it("a staged entry opens the staged diff", () => {
     const externalTools = tools();
-    renderUncommitted(fakeClient({}), [{ path: "a.ts", staged: true, kind: "Modified" }], { externalTools });
+    renderUncommitted(fakeClient({}), [{ path: "a.ts", oldPath: null, staged: true, kind: "Modified" }], { externalTools });
     pick("a.ts", "Open in diff tool");
-    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.ts", { kind: "Staged" });
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.ts", { kind: "Staged", oldPath: null });
+  });
+
+  it("a staged rename opens the diff tool against its old path", () => {
+    const externalTools = tools();
+    renderUncommitted(fakeClient({}), [{ path: "b.ts", oldPath: "a.ts", staged: true, kind: "Renamed" }], { externalTools });
+    pick("b.ts", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("b.ts", { kind: "Staged", oldPath: "a.ts" });
   });
 
   it("a conflicted entry has a menu with the merge tool, disabled while it runs", () => {
     const externalTools = tools();
-    const { unmount } = renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    const { unmount } = renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       externalTools,
     });
     pick("c.txt", "Open in merge tool");
     expect(externalTools.openMergeTool).toHaveBeenCalledWith("c.txt");
     unmount();
 
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       externalTools: tools({ mergeToolRunning: new Set(["c.txt"]) }),
     });
     fireEvent.click(screen.getByRole("button", { name: "Actions for c.txt" }));
@@ -1973,7 +1980,7 @@ describe("DiffPane external tools", () => {
   it("shows the merge tool result and marks the file resolved", async () => {
     const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Resolved"]]) });
     const onMarkResolved = vi.fn(async () => "Resolved" as const);
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       externalTools,
       onMarkResolved,
     });
@@ -1990,7 +1997,7 @@ describe("DiffPane external tools", () => {
       .fn<(path: string, force: boolean) => Promise<"Resolved" | "MarkersRemain" | null>>()
       .mockResolvedValueOnce("MarkersRemain")
       .mockResolvedValueOnce("Resolved");
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       externalTools,
       onMarkResolved,
     });
@@ -2007,7 +2014,7 @@ describe("DiffPane external tools", () => {
   it("an unresolved merge tool result still offers Mark resolved, guarded by the markers check", async () => {
     const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Unresolved"]]) });
     const onMarkResolved = vi.fn(async () => "MarkersRemain" as const);
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       externalTools,
       onMarkResolved,
     });
@@ -2027,7 +2034,7 @@ describe("DiffPane external tools", () => {
       .mockResolvedValueOnce("MarkersRemain")
       .mockResolvedValueOnce("Resolved");
     const onResolveWholeFile = vi.fn();
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }], {
       onMarkResolved,
       onResolveWholeFile,
     });
@@ -2062,7 +2069,7 @@ describe("DiffPane external tools", () => {
   });
 
   it("without externalTools the menus stay as before", async () => {
-    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }]);
+    renderUncommitted(conflictClient(), [{ path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }]);
     expect(screen.queryByRole("button", { name: "Actions for c.txt" })).toBeNull();
     cleanup();
     renderCommit(fakeClient({ getCommitFiles: async () => ["b.ts"], getCommitDiff: async () => [] }), "abc123");
@@ -2078,7 +2085,7 @@ describe("DiffPane image preview", () => {
   it("previews an unstaged image instead of fetching hunks", async () => {
     const getFileSides = vi.fn(async () => ({ old: pngSide("Zm9v"), new: pngSide("YmFy") }));
     const getWorkingDiff = vi.fn(async () => []);
-    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "logo.png", staged: false, kind: "Modified" }]);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "logo.png", oldPath: null, staged: false, kind: "Modified" }]);
 
     expect(await screen.findByRole("img", { name: "After: logo.png" })).toHaveAttribute("src", "data:image/png;base64,YmFy");
     expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Unstaged" });
@@ -2089,10 +2096,40 @@ describe("DiffPane image preview", () => {
   it("previews a staged image against HEAD", async () => {
     const getFileSides = vi.fn(async () => ({ old: { kind: "Missing" as const }, new: pngSide("YmFy") }));
     renderUncommitted(fakeClient({ getFileSides, getWorkingDiff: vi.fn(async () => []) }), [
-      { path: "logo.png", staged: true, kind: "New" },
+      { path: "logo.png", oldPath: null, staged: true, kind: "New" },
     ]);
     expect(await screen.findByText("Added")).toBeInTheDocument();
-    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Staged" });
+    expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "logo.png", { kind: "Staged", oldPath: null });
+  });
+
+  it("previews a staged rename of an image old against new and names the old path", async () => {
+    const getFileSides = vi.fn(async () => ({ old: pngSide("YmFy"), new: pngSide("YmFy") }));
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff: vi.fn(async () => []) }), [
+      { path: "new.png", oldPath: "old.png", staged: true, kind: "Renamed" },
+    ]);
+    expect(await screen.findByText("Renamed from old.png")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getFileSides).toHaveBeenCalledWith(TEST_REPO_PATH, "new.png", { kind: "Staged", oldPath: "old.png" }),
+    );
+  });
+
+  it("diffs a staged rename of a text file against its old path", async () => {
+    const getWorkingDiff = vi.fn(async (): Promise<DiffHunk[]> => []);
+    renderUncommitted(fakeClient({ getWorkingDiff }), [
+      { path: "new.txt", oldPath: "old.txt", staged: true, kind: "Renamed" },
+    ]);
+    expect(await screen.findByText("Renamed from old.txt")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "new.txt", true, expect.anything(), "old.txt"),
+    );
+  });
+
+  it("asks for the plain working diff when the entry has no old path", async () => {
+    const getWorkingDiff = vi.fn(async (): Promise<DiffHunk[]> => []);
+    renderUncommitted(fakeClient({ getWorkingDiff }), [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }]);
+    await waitFor(() =>
+      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, expect.anything()),
+    );
   });
 
   it("lets an SVG switch between the image and its text diff", async () => {
@@ -2100,7 +2137,7 @@ describe("DiffPane image preview", () => {
     const getWorkingDiff = vi.fn(async (): Promise<DiffHunk[]> => [
       { oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "<svg/>" }] },
     ]);
-    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "icon.svg", staged: false, kind: "New" }]);
+    renderUncommitted(fakeClient({ getFileSides, getWorkingDiff }), [{ path: "icon.svg", oldPath: null, staged: false, kind: "New" }]);
 
     expect(await screen.findByRole("img", { name: "After: icon.svg" })).toBeInTheDocument();
     expect(getWorkingDiff).not.toHaveBeenCalled();
@@ -2116,7 +2153,7 @@ describe("DiffPane image preview", () => {
     const getFileSides = vi.fn();
     renderUncommitted(
       fakeClient({ getFileSides, getConflictHunks: vi.fn(async () => []), getWorkingDiff: vi.fn(async () => []) }),
-      [{ path: "logo.png", staged: false, kind: "Conflicted" }],
+      [{ path: "logo.png", oldPath: null, staged: false, kind: "Conflicted" }],
     );
     await screen.findByText(/logo\.png/);
     expect(getFileSides).not.toHaveBeenCalled();
@@ -2230,7 +2267,7 @@ describe("DiffPane co-authors and amend author", () => {
   it("offers the repository's recent authors and commits them as trailers", async () => {
     const listRecentAuthors = vi.fn(async () => [{ name: "Ada", email: "ada@x.org" }]);
     const onCommit = vi.fn(async () => true);
-    renderUncommitted(fakeClient({ listRecentAuthors }), [{ path: "a.txt", staged: true, kind: "Modified" }], {
+    renderUncommitted(fakeClient({ listRecentAuthors }), [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }], {
       onCommit,
     });
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });

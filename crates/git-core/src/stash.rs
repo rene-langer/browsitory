@@ -1,3 +1,4 @@
+use crate::worktree_guard::has_symlinked_ancestor;
 use git2::{ErrorClass, ErrorCode, Repository, StashFlags};
 use thiserror::Error;
 
@@ -31,6 +32,8 @@ pub enum StashError {
     DirectoryReplacedNonDirectory { path: String, was: &'static str },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -127,6 +130,21 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
+    // libgit2's stash records and resets in one call, and its forced reset writes through a
+    // symlink that replaced a tracked file or folder (#114). With such a link, stash every
+    // changed path through Browsitory's path-limited stash instead: a file link is stashed and
+    // then replaced by the file, a folder link is refused (`BeyondSymlink`).
+    if crate::worktree_guard::has_hazard(repo)? {
+        let paths = changed_paths(repo, opts.include_untracked)?;
+        if paths.is_empty() {
+            return Err(StashError::NothingToStash);
+        }
+        let routed = StashOptions {
+            paths,
+            ..opts.clone()
+        };
+        return save_path_limited_stash(repo, &routed, message);
+    }
     let signature = repo.signature()?;
     let mut flags = StashFlags::empty();
     if opts.keep_index {
@@ -146,6 +164,26 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             }
         })?;
     Ok(())
+}
+
+/// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
+/// ignored files or untracked nested repositories), as `save_path_limited_stash` selects them.
+fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<String>, StashError> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(include_untracked)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+    let mut paths = Vec::new();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        let Ok(path) = entry.path() else { continue };
+        if entry.status().contains(git2::Status::IGNORED) || path.ends_with('/') {
+            continue;
+        }
+        paths.push(path.to_string());
+    }
+    Ok(paths)
 }
 
 /// `git stash push [-m <message>] [--keep-index] [-u] -- <paths>` with `paths` as literal file
@@ -382,10 +420,10 @@ fn save_path_limited_stash(
         if has_symlinked_ancestor(&workdir, path) {
             continue;
         }
-        let full = workdir.join(path);
-        if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            std::fs::remove_file(&full)?;
-        }
+        crate::worktree_guard::clear_hazards(
+            &workdir,
+            &[crate::worktree_guard::Hazard::Leaf(path.into())],
+        )?;
         checkout_paths.push(path.as_str());
     }
     // 3. Tracked paths back to HEAD (or to the index with `keep_index`).
@@ -405,19 +443,6 @@ fn save_path_limited_stash(
     Ok(())
 }
 
-/// True when a directory on the way to `path` (relative to `workdir`) is a symlink.
-fn has_symlinked_ancestor(workdir: &std::path::Path, path: &str) -> bool {
-    let mut current = workdir.to_path_buf();
-    let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
-    for component in components.iter().take(components.len().saturating_sub(1)) {
-        current.push(component);
-        if std::fs::symlink_metadata(&current).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            return true;
-        }
-    }
-    false
-}
-
 /// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
 /// `None` when the file is gone.
 fn worktree_blob(
@@ -428,7 +453,7 @@ fn worktree_blob(
     previous_mode: Option<u32>,
 ) -> Result<Option<(git2::Oid, u32)>, StashError> {
     let Some((bytes, mode)) =
-        crate::undo::read_worktree_file(&workdir.join(path), config, previous_mode)?
+        crate::undo::read_worktree_file(workdir, path, config, previous_mode)?
     else {
         return Ok(None);
     };
@@ -465,6 +490,23 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
     Ok(entries)
 }
 
+/// The trees of `stash@{index}`: its worktree commit and its index and untracked parents.
+fn stash_trees(repo: &Repository, index: usize) -> Result<Vec<git2::Tree<'_>>, StashError> {
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(Vec::new());
+    };
+    let stash = repo.find_commit(id)?;
+    let mut trees = vec![stash.tree()?];
+    for parent in stash.parents().skip(1) {
+        trees.push(parent.tree()?);
+    }
+    Ok(trees)
+}
+
 /// Applies `stash@{index}`. `restore_index` also restages what was staged (libgit2's
 /// `REINSTATE_INDEX`, `git stash apply --index`). libgit2 refuses outright while the index
 /// differs from HEAD; its errors are mapped to user-facing variants.
@@ -480,6 +522,20 @@ pub fn apply_stash(
     ensure_stash_at(repo, index, expected)?;
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
+    }
+    // Safe checkouts create files through a symlinked folder (#114): the stash's worktree,
+    // index and untracked trees are what the apply writes.
+    {
+        let incoming = stash_trees(repo, index)?;
+        let incoming: Vec<_> = incoming
+            .iter()
+            .map(|tree| {
+                crate::worktree_guard::Incoming::Merge(crate::worktree_guard::GuardSource::Tree(
+                    tree,
+                ))
+            })
+            .collect();
+        crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
     }
     let mut options = git2::StashApplyOptions::new();
     if restore_index {

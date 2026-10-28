@@ -38,6 +38,8 @@ pub enum SubmoduleError {
     DisallowedUrlScheme(String),
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
+    #[error("{0}")]
+    LinkedFolder(#[from] crate::LinkedFolder),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +94,12 @@ pub fn update_submodule(
         }
     }
 
+    // libgit2 clones into the submodule's path as it finds it, following a symlink that stands
+    // there or above it out of the repository.
+    if let Some(workdir) = repo.workdir() {
+        crate::worktree_guard::refuse_linked_path(workdir, submodule.path())?;
+    }
+
     if recursive {
         ensure_recursive_update_is_safe(repo, &submodule)?;
     }
@@ -118,6 +126,9 @@ fn find_submodule<'repo>(
 
 fn update_nested_submodules(repo: &Repository) -> Result<(), SubmoduleError> {
     for mut submodule in repo.submodules()? {
+        if let Some(workdir) = repo.workdir() {
+            crate::worktree_guard::refuse_linked_path(workdir, submodule.path())?;
+        }
         submodule.update(false, None)?;
         update_nested_submodules(&submodule.open()?)?;
     }

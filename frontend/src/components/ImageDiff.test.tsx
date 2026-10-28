@@ -29,7 +29,7 @@ describe("ImageDiff", () => {
 
   it("renders the sniffed type, not the one the extension suggests", async () => {
     const jpeg: FileSide = { kind: "Loaded", size: 3, base64: "Zm9v", mime: "image/jpeg" };
-    render(<ImageDiff client={sides({ kind: "Missing" }, jpeg)} repoPath="/r" source={{ kind: "Staged" }} path="photo.png" />);
+    render(<ImageDiff client={sides({ kind: "Missing" }, jpeg)} repoPath="/r" source={{ kind: "Staged", oldPath: null }} path="photo.png" />);
     expect(await screen.findByRole("img", { name: "After: photo.png" })).toHaveAttribute(
       "src",
       "data:image/jpeg;base64,Zm9v",
@@ -73,7 +73,7 @@ describe("ImageDiff", () => {
   it("renders SVG only through an img element", async () => {
     const svg: FileSide = { kind: "Loaded", size: 10, base64: "PHN2Zy8+", mime: "image/svg+xml" };
     const { container } = render(
-      <ImageDiff client={sides({ kind: "Missing" }, svg)} repoPath="/r" source={{ kind: "Staged" }} path="i.svg" />,
+      <ImageDiff client={sides({ kind: "Missing" }, svg)} repoPath="/r" source={{ kind: "Staged", oldPath: null }} path="i.svg" />,
     );
     const img = await screen.findByRole("img", { name: "After: i.svg" });
     expect(img.tagName).toBe("IMG");

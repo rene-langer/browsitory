@@ -13,11 +13,7 @@ pub async fn get_status(
     Ok(worker_handle(&state, &repo_path)?
         .get_status()?
         .into_iter()
-        .map(|entry| StatusEntryDto {
-            path: entry.path,
-            staged: entry.staged,
-            kind: format!("{:?}", entry.kind),
-        })
+        .map(StatusEntryDto::from)
         .collect())
 }
 
@@ -70,10 +66,11 @@ pub async fn get_working_diff(
     path: String,
     staged: bool,
     opts: DiffOptionsDto,
+    old_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
     Ok(worker_handle(&state, &repo_path)?
-        .get_working_diff(path, staged, opts.into())?
+        .get_working_diff(path, staged, opts.into(), old_path)?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())

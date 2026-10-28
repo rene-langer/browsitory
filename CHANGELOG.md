@@ -166,8 +166,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   closes with a notice.
 - The shortcut sheet (**?**) lists the context menu keys.
 
+### Security
+
+- Discarding changes, hard reset, undo/redo, aborting a merge, cherry-pick, revert or rebase,
+  resolving a conflict, and "Stash all" no longer write (or delete) through a symbolic link that
+  replaced a tracked file or folder: the link is removed and the file or folder restored, like
+  git. Previously a file outside the repository could be overwritten or deleted (#114). "Stash
+  all" stashes a link that replaced a file and then restores the file; while a link replaces a
+  tracked folder it refuses ("… is beyond a symbolic link"), as stashing a single file there
+  already did.
+- Switching branches, checking out a commit, merging, cherry-picking, reverting, rebasing,
+  applying a stash and pulling refuse while a symbolic link stands where the repository has a
+  folder ("'d' is a symbolic link where the repository has a folder…"); git's own safe checkout
+  could otherwise create a new file through the link, overwriting a file outside the repository.
+- Undo/redo snapshots and their checks no longer read a file through a symbolic link that
+  replaced a folder. Staging or discarding a file (or a hunk or lines of it) below such a link
+  refuses like git ("'d/f' is beyond a symbolic link.") instead of reading the link's target.
+  **Stage all** (or staging the link itself) stages the link in place of the folder, like
+  `git add -A`.
+- Those refusals also cover a symbolic link nothing in the repository tracks, when the operation
+  would create files below it (a cherry-pick could overwrite a file outside the repository), and
+  a merge, cherry-pick, revert or rebase step that would add a file below a folder the branch
+  has committed as a symbolic link. The message names the link ("'d' is a symbolic link where
+  the repository has a folder. Remove or rename it first."); applying a stash and pulling no
+  longer show a generic error instead.
+- Hard reset, switching branches and undo/redo work again when the repository itself has
+  committed a symbolic link where another commit has a folder (the hard reset failed and
+  deleted the link); nothing is written through the link, even after it is pointed elsewhere.
+- Updating a submodule whose folder was replaced by a symbolic link (or sits below one) refuses
+  instead of cloning into the link's target.
+- The image preview reads working-tree files without following a folder that is swapped for a
+  symbolic link while it reads (#138).
+
 ### Fixed
 
+- Committing or amending with a signing program that never finishes (for example a passphrase
+  prompt that never appears) no longer blocks the repository: the commit box shows "Waiting for
+  the signing program…" with **Cancel**, and signing stops after 2 minutes with an error that
+  says so. Cherry-pick, revert and rebase commits get the same 2-minute limit, and checking a
+  commit's signature in the history gives up after 30 seconds (#110).
+- The diff of a file that became a folder (or the reverse) no longer shows the folder's files,
+  and staging, unstaging or discarding one of its hunks or lines can no longer pick a hunk of a
+  file inside that folder (#116).
+- Comparing a commit with the working tree shows the changes of a conflicted file, conflict
+  markers included (#117).
+- A staged rename shows its new name with "Renamed from …", previews an image's old version
+  against the new one (instead of "Added"), diffs only the edits, opens the diff tool against the
+  old path, and unstages as a whole. A rename with edits shows as a rename, not as a
+  modification. A file moved but not staged shows as deleted plus new, like `git status` (#137).
 - A commit that fails (for example because of a hook) no longer clears the message you typed
   (#109).
 - VS Code: a large image preview no longer freezes the extension host for seconds while its

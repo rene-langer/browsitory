@@ -741,8 +741,12 @@ function requireDiffSource(value: unknown): DiffSource {
     v === null || (typeof v === "string" && isSafeRelativePath(v));
   switch (value["kind"]) {
     case "Unstaged":
+      if (keys === "kind") return { kind: "Unstaged" };
+      break;
     case "Staged":
-      if (keys === "kind") return { kind: value["kind"] };
+      // `oldPath`: a staged rename's HEAD-side path; a bare `{kind}` is still accepted.
+      if (keys === "kind") return { kind: "Staged", oldPath: null };
+      if (keys === "kind,oldPath" && oldPath(value["oldPath"])) return { kind: "Staged", oldPath: value["oldPath"] };
       break;
     case "Commit":
       if (keys === "commitId,kind,oldPath" && commitId(value["commitId"]) && oldPath(value["oldPath"])) {

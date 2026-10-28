@@ -88,6 +88,58 @@ fn reports_a_staged_rename_as_staged_renamed() {
     assert_eq!(entries.len(), 1);
     assert!(entries[0].staged);
     assert_eq!(entries[0].kind, StatusKind::Renamed);
+    assert_eq!(entries[0].path, "new.txt");
+    assert_eq!(entries[0].old_path.as_deref(), Some("old.txt"));
+}
+
+#[test]
+fn a_staged_rename_edited_again_has_both_entries_under_the_new_path() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "line one\nline two\nline three\n");
+    commit_all(&repo, "initial commit");
+    std::fs::rename(dir.path().join("old.txt"), dir.path().join("new.txt")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.txt")).unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+    write_file(
+        dir.path(),
+        "new.txt",
+        "line one\nline two\nline three\nfour\n",
+    );
+
+    let mut entries = git_core::status::status(&repo).unwrap();
+    entries.sort_by_key(|entry| !entry.staged);
+
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    assert_eq!(entries[0].path, "new.txt");
+    assert_eq!(entries[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(entries[0].kind, StatusKind::Renamed);
+    assert_eq!(entries[1].path, "new.txt");
+    assert_eq!(entries[1].old_path, None);
+    assert_eq!(entries[1].kind, StatusKind::Modified);
+}
+
+#[test]
+fn a_moved_but_unstaged_file_is_deleted_plus_untracked() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "line one\nline two\nline three\n");
+    commit_all(&repo, "initial commit");
+    std::fs::rename(dir.path().join("old.txt"), dir.path().join("new.txt")).unwrap();
+
+    let mut entries = git_core::status::status(&repo).unwrap();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    assert_eq!(
+        (entries[0].path.as_str(), entries[0].staged, entries[0].kind),
+        ("new.txt", false, StatusKind::New)
+    );
+    assert_eq!(
+        (entries[1].path.as_str(), entries[1].staged, entries[1].kind),
+        ("old.txt", false, StatusKind::Deleted)
+    );
+    assert!(entries.iter().all(|entry| entry.old_path.is_none()));
 }
 
 #[test]
@@ -161,4 +213,24 @@ fn reports_a_conflicted_file_as_conflicted() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path, "shared.txt");
     assert_eq!(entries[0].kind, StatusKind::Conflicted);
+}
+
+#[test]
+fn a_staged_rename_with_edits_is_still_a_rename() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "one\ntwo\nthree\nfour\n");
+    commit_all(&repo, "initial commit");
+    std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+    write_file(dir.path(), "new.txt", "one\nTWO\nthree\nfour\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("old.txt")).unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+
+    let entries = git_core::status::status(&repo).unwrap();
+
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].kind, StatusKind::Renamed);
+    assert_eq!(entries[0].path, "new.txt");
+    assert_eq!(entries[0].old_path.as_deref(), Some("old.txt"));
 }

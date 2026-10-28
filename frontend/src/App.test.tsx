@@ -290,7 +290,7 @@ describe("App", () => {
         listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
         openRepo: async () => {},
         persistOpenRepos: async () => {},
-        getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+        getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
         getCommitGraph: async () => [],
         listBranches: async () => [],
         listStashes: async () => [],
@@ -450,7 +450,7 @@ describe("App", () => {
       }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getStatus: async () => [{ path: "x.txt", oldPath: null, staged: false, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -486,7 +486,7 @@ describe("App", () => {
       }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "x.txt", staged: false, kind: "Modified" }],
+      getStatus: async () => [{ path: "x.txt", oldPath: null, staged: false, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -623,7 +623,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -664,7 +664,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -717,7 +717,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged, kind: "Modified" as const }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged, kind: "Modified" as const }],
       getMergeMessage: async () => mergeMessage,
       stageFile: async () => {
         staged = true;
@@ -760,7 +760,7 @@ describe("App", () => {
       }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async (repoPath: string) => (repoPath === "/repos/a" ? [{ path: "a.txt", staged: true, kind: "Modified" as const }] : []),
+      getStatus: async (repoPath: string) => (repoPath === "/repos/a" ? [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" as const }] : []),
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -794,7 +794,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -828,7 +828,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
@@ -1136,7 +1136,7 @@ describe("App", () => {
         listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
         openRepo: async () => {},
         persistOpenRepos: async () => {},
-        getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+        getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
         getWorkingDiff: async () => [],
         getCommitGraph: async () => [],
         listBranches: async () => [{ name: "main", isCurrent: true }],
@@ -1178,7 +1178,7 @@ describe("App", () => {
       render(
         <App
           client={stashClient({
-            getStatus: async () => [{ path: "a.txt", staged: true, kind: "Modified" }],
+            getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
             listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
           })}
         />,
@@ -1198,7 +1198,7 @@ describe("App", () => {
       const saveStash = vi.fn(async () => {});
       render(
         <App
-          client={stashClient({ saveStash, getStatus: async () => [{ path: "new.txt", staged: false, kind: "New" }] })}
+          client={stashClient({ saveStash, getStatus: async () => [{ path: "new.txt", oldPath: null, staged: false, kind: "New" }] })}
         />,
       );
 
@@ -1276,7 +1276,7 @@ describe("App", () => {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},
       persistOpenRepos: async () => {},
-      getStatus: async () => [{ path: "a.txt", staged: false, kind: "Modified" }],
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],

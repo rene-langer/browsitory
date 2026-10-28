@@ -1,7 +1,11 @@
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
 export interface StatusEntry {
+  /** For a rename, the new path. */
   path: string;
+  /** A staged rename's old path; `null` for every other entry. Unstaged moves show as a
+   * `Deleted` plus a `New` entry, like `git status`. */
+  oldPath: string | null;
   staged: boolean;
   kind: StatusKind;
 }
@@ -388,7 +392,7 @@ export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
  */
 export type DiffSource =
   | { kind: "Unstaged" }
-  | { kind: "Staged" }
+  | { kind: "Staged"; oldPath: string | null }
   | { kind: "Commit"; commitId: string; oldPath: string | null }
   | { kind: "Range"; fromId: string; toId: string | null; oldPath: string | null };
 /** `HandedOff`: VSCode's merge editor took over, and Browsitory can't see when it's done. */
@@ -542,7 +546,8 @@ export interface RepoClient {
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
-  getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions): Promise<DiffHunk[]>;
+  /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
+  getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath?: string | null): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
   /**
