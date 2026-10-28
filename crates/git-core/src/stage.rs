@@ -106,7 +106,14 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     ensure_no_symlinked_parent(workdir, rel)?;
-    if repo.index()?.get_path(rel, 0).is_some() {
+    let index = repo.index()?;
+    if index.get_path(rel, 0).is_some() {
+        // A forced checkout writes through a symlink that replaced the file (#114).
+        crate::worktree_guard::prepare_forced_checkout::<StageError>(
+            repo,
+            Some(&crate::worktree_guard::GuardSource::Index(&index)),
+            Some(&[path.to_string()]),
+        )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
         repo.checkout_index(None, Some(&mut checkout))?;
