@@ -27,4 +27,13 @@ describe("ShortcutSheet", () => {
     screen.getByRole("button", { name: "Close" }).click();
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("lists the context menu keys", () => {
+    render(<ShortcutSheet onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Context menus" })).toBeInTheDocument();
+    expect(screen.getByText("Open the focused item's menu")).toBeInTheDocument();
+    expect(screen.getByText("Jump to the next item starting with it")).toBeInTheDocument();
+    expect(screen.getByText("Close the menu and return to where it opened")).toBeInTheDocument();
+    expect(screen.getByText("Open the selected file's menu")).toBeInTheDocument();
+  });
 });

@@ -36,11 +36,24 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Context menus",
+    shortcuts: [
+      { keys: "Menu / Shift+F10", description: "Open the focused item's menu" },
+      { keys: "Up / Down", description: "Move between menu items" },
+      { keys: "Home / End", description: "First / last menu item" },
+      { keys: "A letter", description: "Jump to the next item starting with it" },
+      { keys: "Enter / Space", description: "Run the focused menu item" },
+      { keys: "Esc", description: "Close the menu and return to where it opened" },
+      { keys: "Tab", description: "Close the menu and move on" },
+    ],
+  },
+  {
     title: "Changed files",
     shortcuts: [
       { keys: "Down / j", description: "Select next file" },
       { keys: "Up / k", description: "Select previous file" },
       { keys: "s", description: "Stage or unstage the selected file" },
+      { keys: "Menu / Shift+F10", description: "Open the selected file's menu" },
     ],
   },
   {
