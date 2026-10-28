@@ -1836,6 +1836,19 @@ describe("DiffPane external tools", () => {
     expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.ts", { kind: "Unstaged" });
   });
 
+  it("opens at no particular line when the first hunk starts at line 0 (the file was emptied)", async () => {
+    const hunks: DiffHunk[] = [
+      { oldStart: 1, oldLines: 1, newStart: 0, newLines: 0, lines: [{ origin: "Remove", content: "gone" }] },
+    ];
+    const externalTools = tools();
+    renderUncommitted(fakeClient({ getWorkingDiff: async () => hunks }), [{ path: "a.ts", staged: false, kind: "Modified" }], {
+      externalTools,
+    });
+    await screen.findByText(/^gone$/);
+    pick("a.ts", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("a.ts", null);
+  });
+
   it("a staged entry opens the staged diff", () => {
     const externalTools = tools();
     renderUncommitted(fakeClient({}), [{ path: "a.ts", staged: true, kind: "Modified" }], { externalTools });
@@ -1893,16 +1906,19 @@ describe("DiffPane external tools", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("an unresolved merge tool result only offers Dismiss", () => {
+  it("an unresolved merge tool result still offers Mark resolved, guarded by the markers check", async () => {
     const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Unresolved"]]) });
+    const onMarkResolved = vi.fn(async () => "MarkersRemain" as const);
     renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
       externalTools,
-      onMarkResolved: vi.fn(),
+      onMarkResolved,
     });
 
     const notice = screen.getByRole("status");
     expect(notice).toHaveTextContent("The merge tool closed without resolving the conflict.");
-    expect(within(notice).queryByRole("button", { name: "Mark resolved" })).toBeNull();
+    fireEvent.click(within(notice).getByRole("button", { name: "Mark resolved" }));
+    expect(onMarkResolved).toHaveBeenCalledWith("c.txt", false);
+    expect(await screen.findByText("Conflict markers remain in c.txt. Mark it resolved anyway?")).toBeInTheDocument();
     fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
     expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt");
   });

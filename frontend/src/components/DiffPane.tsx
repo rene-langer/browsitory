@@ -135,8 +135,11 @@ function UncommittedFileSection({
         return onStashFile(entry.path);
       case "ignore":
         return onIgnorePath(action.pattern);
-      case "openInEditor":
-        return externalTools?.openInEditor(entry.path, hunks?.[0]?.newStart ?? null);
+      case "openInEditor": {
+        // A hunk that empties the file starts at line 0, which no editor accepts.
+        const line = hunks?.[0]?.newStart ?? 0;
+        return externalTools?.openInEditor(entry.path, line > 0 ? line : null);
+      }
       case "reveal":
         return externalTools?.reveal(entry.path);
       case "diffTool":
@@ -360,23 +363,23 @@ function UncommittedFileSection({
         // A persistent notice, not a toast: the user is usually still in the tool's window when
         // a toast would have closed.
         <div role="status" className={styles.mergeToolNotice}>
-          {mergeToolResult === "Resolved" ? (
-            <>
-              <span>The merge tool finished.</span>
-              {onMarkResolved !== undefined && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void markResolved(false);
-                  }}
-                >
-                  Mark resolved
-                </button>
-              )}
-            </>
-          ) : (
-            <span>The merge tool closed without resolving the conflict.</span>
+          <span>
+            {mergeToolResult === "Resolved"
+              ? "The merge tool finished."
+              : "The merge tool closed without resolving the conflict."}
+          </span>
+          {/* Offered either way: the tool may have saved a resolution it didn't report, and the
+              conflict-markers check still asks before staging a file that has them. */}
+          {onMarkResolved !== undefined && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void markResolved(false);
+              }}
+            >
+              Mark resolved
+            </button>
           )}
           <button
             type="button"
