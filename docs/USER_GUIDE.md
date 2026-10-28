@@ -85,6 +85,21 @@ aside — expand **Stashes** in the sidebar to get them back.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
+### Writing the commit message
+
+Below the message, **Summary 42/50** counts the characters of the first line. Past the limit it
+turns to a warning color, because many tools cut longer summaries; it never stops a commit. A
+faint ruler marks column 72 for wrapping the body, and the field uses a monospace font while the
+ruler is shown so the column lines up. Change the limit, the ruler column (both 10 to 200) or
+turn the ruler off under **Preferences → Commit message**.
+
+**Add co-author** lists the authors of the last 1,000 commits on the current branch (newest
+first, without you); type to filter, or type a new `Name <email>` and press Enter. Each co-author
+shows as a chip (× removes it) and is added to the message as a `Co-authored-by: Name <email>`
+trailer when you commit, after any trailers the message already ends with and never twice.
+The chips stay until the commit lands, so a failed hook keeps them, and **Commit without hooks**
+uses them too. They are hidden while a merge, cherry-pick or revert pre-fills the message.
+
 ### Resolving conflicts
 
 A merge, cherry-pick, revert, rebase or stash pop that conflicts lists the files as
@@ -236,6 +251,18 @@ current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.
 
 ![Viewing a past commit's diff](assets/commit-diff.png)
+
+### Image previews
+
+A changed PNG, JPEG, GIF, WebP or SVG file shows the old and new image side by side (**Before**
+and **After**) instead of a text diff, with each image's size in pixels and file size, on a
+checkerboard so transparency shows. A new file shows **Added** on the left and a deleted one
+**Deleted** on the right. This works in the working tree, commits, stashes and compares. Each
+side is previewed up to 20 MB; a bigger one says "Too large to preview". The image type is
+checked from the file's content, not its name, and a file that isn't really one of these images
+says "Can't display this image". Images are only shown as pictures, so an SVG can never run a
+script. An SVG is text too: **Show text diff** switches to its diff (and back with **Show
+image**). A conflicted image opens the conflict pane, like any conflict.
 
 ### Diff options
 
@@ -474,6 +501,10 @@ with the last commit's, and the **Commit** button becomes **Amend**: anything st
 into that commit (or just reword it). If that commit is already on the upstream, a warning reads
 "Already pushed — you'll need to force push." Whatever you had half-typed is kept and comes back
 when you untick amend or after a successful amend.
+An **Author** field shows the commit's author as `Name <email>`. Leave it as it is (or empty) to
+keep the author, or change it to give the commit a different author; the original author date is
+kept and you stay the committer. It must have the form `Name <email>`. Co-authors work here too;
+amend starts without the chips you added for your next commit and gives them back afterwards.
 
 **Force push.** When a push is rejected because the remote has commits you don't, the error
 offers **Force push (with lease)…**. The command palette (Remotes group) has it too; it is hidden

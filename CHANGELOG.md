@@ -131,6 +131,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: a cherry-pick or revert that stopped on a conflict no longer shows a "Cherry-picked" /
   "Reverted" toast (#107).
 
+### Image diff and commit message polish
+
+- PNG, JPEG, GIF, WebP and SVG changes show the old and new image side by side, with their
+  dimensions and file size (up to 20 MB per side), in the working tree, commits, stashes and
+  compares. SVGs can switch to the text diff. The image type is checked from the file's content,
+  and images are only ever shown as pictures, so an SVG can't run scripts.
+- The commit message shows a summary length counter (soft limit 50) and a ruler at column 72 for
+  the body; the field uses a monospace font while the ruler is shown. Both are configurable under
+  **Preferences → Commit message**.
+- **Add co-author** picks from the repository's recent authors (or takes a typed
+  `Name <email>`) and adds `Co-authored-by:` trailers, after any existing trailers and without
+  duplicates. They also apply to **Commit without hooks**.
+- Amending shows an editable **Author** field; the original author date is kept and the
+  committer stays you.
+
 ### Fixed
 
 - A commit that fails (for example because of a hook) no longer clears the message you typed
