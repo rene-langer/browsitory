@@ -1,18 +1,31 @@
-//! Runs an external program with combined, size-capped output, a timeout and a cancel check.
+//! Running programs that are not git.
 //!
-//! The runner is deliberately generic (it knows nothing about hooks) so other capture-and-wait
-//! callers can share it: stdout and stderr go through one pipe (true `2>&1` ordering), only the
-//! last `limit` bytes are kept, the child is polled for exit / cancel / deadline, and on Unix it
-//! leads its own process group so a timeout or cancel takes its children down with it. The
-//! child is always reaped before this returns, so no zombie is left behind.
+//! Two shapes live here:
+//! - `run_captured` (batch 4e, hooks): combined, size-capped output, a timeout and a cancel
+//!   check. Stdout and stderr go through one pipe (true `2>&1` ordering), only the last `limit`
+//!   bytes are kept, the child is polled for exit / cancel / deadline, and on Unix it leads its
+//!   own process group so a timeout or cancel takes its children down with it. The child is
+//!   always reaped before this returns, so no zombie is left behind.
+//! - `spawn` / `spawn_detached` (batch 4f, external tools): long-lived programs (editors,
+//!   terminals, diff/merge tools) with stdin/stdout closed and stderr optionally drained into a
+//!   tail buffer (`drain_tail`).
 //!
-//! Not for long-lived or detached programs (no capture, no waiting): those want a separate
-//! helper. See `docs/superpowers/specs/2026-10-27-parity-batch4e-design.md`.
+//! Nothing here goes through a shell. User-configured command lines are split into argv by
+//! `split_command_line` (POSIX or Windows rules) and programs are resolved to absolute paths by
+//! `find_program`, which only searches absolute `PATH` entries, so neither the current directory
+//! nor a repository's work tree can shadow a program. See
+//! `docs/superpowers/specs/2026-10-27-parity-batch4e-design.md` and
+//! `docs/superpowers/specs/2026-10-27-parity-batch4f-design.md`.
 
+use std::ffi::OsString;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+use thiserror::Error;
 
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// How long to keep reading after the program exited. A background grandchild that inherited
@@ -66,6 +79,12 @@ impl TailBuffer {
             self.bytes.drain(..excess);
             self.truncated = true;
         }
+    }
+
+    /// The last `limit` bytes seen so far.
+    #[allow(dead_code)] // used by `tools` (next commit)
+    pub(crate) fn tail_bytes(&self) -> &[u8] {
+        &self.bytes[self.bytes.len().saturating_sub(self.limit)..]
     }
 
     pub(crate) fn into_text(mut self) -> String {
@@ -268,9 +287,536 @@ pub(crate) fn run_captured(
     })
 }
 
+// ---------------------------------------------------------------------------------------------
+// External tools (batch 4f): command-line splitting, program lookup, detached spawn.
+// ---------------------------------------------------------------------------------------------
+
+/// Which quoting rules `split_command_line` applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandStyle {
+    /// POSIX shell word splitting without any expansion: `'…'`, `"…"` (with `\"`, `\\`, `\$`,
+    /// `` \` `` escapes) and a backslash escaping the next character outside quotes.
+    Posix,
+    /// `CommandLineToArgvW`: backslashes are literal unless they precede a `"`.
+    Windows,
+}
+
+impl CommandStyle {
+    pub fn native() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Posix
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SplitError {
+    #[error("The command is empty.")]
+    Empty,
+    #[error("The command has an unclosed quote.")]
+    UnclosedQuote,
+}
+
+#[derive(Debug, Error)]
+pub enum LaunchError {
+    #[error("Couldn't find the program '{0}'.")]
+    NotFound(String),
+    #[error(transparent)]
+    Split(#[from] SplitError),
+    #[error("Couldn't start '{program}': {source}")]
+    Io {
+        program: String,
+        source: std::io::Error,
+    },
+}
+
+/// Splits a user-configured command line into argv. Nothing is expanded: `$VAR`, `~`, globs,
+/// `;`, `|` and backticks stay literal characters, because the result is never given to a
+/// shell.
+pub fn split_command_line(input: &str, style: CommandStyle) -> Result<Vec<String>, SplitError> {
+    let words = match style {
+        CommandStyle::Posix => split_posix(input)?,
+        CommandStyle::Windows => split_windows(input)?,
+    };
+    if words.is_empty() {
+        return Err(SplitError::Empty);
+    }
+    Ok(words)
+}
+
+fn split_posix(input: &str) -> Result<Vec<String>, SplitError> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut chars = input.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            '\'' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(c) => current.push(c),
+                        None => return Err(SplitError::UnclosedQuote),
+                    }
+                }
+            }
+            '"' => {
+                in_word = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(c @ ('"' | '\\' | '$' | '`')) => current.push(c),
+                            Some(c) => {
+                                current.push('\\');
+                                current.push(c);
+                            }
+                            None => return Err(SplitError::UnclosedQuote),
+                        },
+                        Some(c) => current.push(c),
+                        None => return Err(SplitError::UnclosedQuote),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                if let Some(c) = chars.next() {
+                    current.push(c);
+                }
+            }
+            c => {
+                in_word = true;
+                current.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
+/// `CommandLineToArgvW` rules: 2n backslashes + `"` → n backslashes and a quote toggle; 2n+1
+/// backslashes + `"` → n backslashes and a literal `"`; other backslashes are literal; `""`
+/// inside quotes is a literal `"`. An unclosed quote is an error here (Windows tolerates it).
+fn split_windows(input: &str) -> Result<Vec<String>, SplitError> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut quoted = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            let start = i;
+            while i < chars.len() && chars[i] == '\\' {
+                i += 1;
+            }
+            let n = i - start;
+            in_word = true;
+            if i < chars.len() && chars[i] == '"' {
+                current.extend(std::iter::repeat_n('\\', n / 2));
+                if n % 2 == 1 {
+                    current.push('"');
+                    i += 1;
+                }
+            } else {
+                current.extend(std::iter::repeat_n('\\', n));
+            }
+            continue;
+        }
+        if c == '"' {
+            in_word = true;
+            if quoted && chars.get(i + 1) == Some(&'"') {
+                current.push('"');
+                i += 2;
+                continue;
+            }
+            quoted = !quoted;
+            i += 1;
+            continue;
+        }
+        if c.is_whitespace() && !quoted {
+            if in_word {
+                words.push(std::mem::take(&mut current));
+                in_word = false;
+            }
+            i += 1;
+            continue;
+        }
+        in_word = true;
+        current.push(c);
+        i += 1;
+    }
+    if quoted {
+        return Err(SplitError::UnclosedQuote);
+    }
+    if in_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
+/// Resolves `name` to an absolute program path through `PATH` (and `PATHEXT` on Windows).
+pub fn find_program(name: &str) -> Option<PathBuf> {
+    let dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    find_program_in(name, &dirs, &exts)
+}
+
+/// `name` containing a path separator must be absolute and is returned when it exists (trying
+/// `exts` too). A bare name is looked up in each **absolute** entry of `dirs`, in order. Relative
+/// entries (`.`, `bin`) are skipped: they would resolve against Browsitory's current directory,
+/// and a program must never be picked up from wherever that happens to be.
+pub fn find_program_in(name: &str, dirs: &[PathBuf], exts: &[String]) -> Option<PathBuf> {
+    let candidates = |base: PathBuf| -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if exts.is_empty() || base.extension().is_some() {
+            out.push(base.clone());
+        }
+        for ext in exts {
+            let mut with_ext = base.clone().into_os_string();
+            with_ext.push(ext);
+            out.push(PathBuf::from(with_ext));
+        }
+        out
+    };
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains('/') || name.contains('\\') {
+        let path = PathBuf::from(name);
+        if !path.is_absolute() {
+            return None;
+        }
+        return candidates(path).into_iter().find(|p| p.is_file());
+    }
+    dirs.iter()
+        .filter(|dir| dir.is_absolute())
+        .flat_map(|dir| candidates(dir.join(name)))
+        .find(|p| p.is_file())
+}
+
+/// Git for Windows' `sh.exe`: next to the `git.exe` found on `PATH` (see
+/// `hooks::sh_candidates`), else an `sh.exe` on `PATH`.
+#[cfg(windows)]
+pub fn find_sh() -> Option<PathBuf> {
+    find_program("git.exe")
+        .and_then(|git| {
+            crate::hooks::sh_candidates(&git)
+                .into_iter()
+                .find(|path| path.is_file())
+        })
+        .or_else(|| find_program("sh.exe"))
+}
+
+/// Variables that pin git to one repository/index/prefix. Removed from every spawned program:
+/// a tool or terminal opened for one repository must not operate on whichever repository
+/// Browsitory itself was launched for (from a git hook or alias, say).
+pub(crate) const REPO_PINNING_ENV: [&str; 4] =
+    ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"];
+
+/// A program to start. `program` should be absolute (see `find_program`); `args` reach it
+/// verbatim, with no shell in between.
+#[derive(Debug, Clone)]
+pub struct SpawnSpec {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub cwd: PathBuf,
+    pub env: Vec<(String, OsString)>,
+    /// Windows `CREATE_NEW_CONSOLE` (a terminal such as `cmd /K`).
+    pub new_console: bool,
+    /// Windows `CREATE_NO_WINDOW` (`sh.exe` running a GUI tool).
+    pub no_window: bool,
+    pub capture_stderr: bool,
+}
+
+/// stdin/stdout null; stderr null or piped. Unix: its own process group, so a Ctrl+C in the
+/// terminal Browsitory was started from does not take the tool down. Windows:
+/// `CREATE_NEW_PROCESS_GROUP` plus the console flags above.
+pub fn spawn(spec: &SpawnSpec) -> Result<Child, LaunchError> {
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .current_dir(&spec.cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(if spec.capture_stderr {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        });
+    for key in REPO_PINNING_ENV {
+        command.env_remove(key);
+    }
+    for (key, value) in &spec.env {
+        command.env(key, value);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut flags = CREATE_NEW_PROCESS_GROUP;
+        if spec.new_console {
+            flags |= CREATE_NEW_CONSOLE;
+        } else if spec.no_window {
+            flags |= CREATE_NO_WINDOW;
+        }
+        command.creation_flags(flags);
+    }
+    spawn_retrying(&mut command).map_err(|source| {
+        let program = spec.program.display().to_string();
+        if source.kind() == std::io::ErrorKind::NotFound {
+            LaunchError::NotFound(program)
+        } else {
+            LaunchError::Io { program, source }
+        }
+    })
+}
+
+/// Spawns and reaps on a background thread, so no zombie is left behind.
+pub fn spawn_detached(spec: &SpawnSpec) -> Result<(), LaunchError> {
+    let mut child = spawn(spec)?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// Reads `source` until EOF on its own thread, keeping only the last `cap` bytes. Draining to
+/// the end means a chatty tool never blocks on (or dies of `SIGPIPE` from) a full pipe.
+#[allow(dead_code)] // used by `tools` (next commit)
+pub(crate) fn drain_tail(
+    mut source: impl Read + Send + 'static,
+    cap: usize,
+) -> (Arc<Mutex<TailBuffer>>, JoinHandle<()>) {
+    let tail = Arc::new(Mutex::new(TailBuffer::new(cap)));
+    let sink = Arc::clone(&tail);
+    let handle = std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match source.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => sink
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(&chunk[..n]),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+    });
+    (tail, handle)
+}
+
+/// The last three non-empty lines (escape sequences removed, lossy UTF-8), or "no output".
+pub fn tail_text(bytes: &[u8]) -> String {
+    let text = clean_output(&String::from_utf8_lossy(bytes));
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let tail = lines[lines.len().saturating_sub(3)..].join("\n");
+    if tail.is_empty() {
+        "no output".to_string()
+    } else {
+        tail
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use CommandStyle::{Posix, Windows};
+
+    fn split(input: &str, style: CommandStyle) -> Vec<String> {
+        split_command_line(input, style).unwrap()
+    }
+
+    #[test]
+    fn posix_splits_on_whitespace_and_honours_quotes_and_escapes() {
+        assert_eq!(
+            split("code  --goto \"{file}:{line}\"", Posix),
+            ["code", "--goto", "{file}:{line}"]
+        );
+        assert_eq!(
+            split(r#"'a b' c\ d "e\"f" "g\h" '\n'"#, Posix),
+            ["a b", "c d", "e\"f", "g\\h", "\\n"]
+        );
+        assert_eq!(split(r#"x "" y"#, Posix), ["x", "", "y"]);
+        // No shell: `$`, `;`, `|` and backticks are plain characters.
+        assert_eq!(
+            split("ed $HOME;rm `x` | y", Posix),
+            ["ed", "$HOME;rm", "`x`", "|", "y"]
+        );
+    }
+
+    #[test]
+    fn posix_rejects_empty_and_unclosed_quotes() {
+        assert_eq!(split_command_line("   ", Posix), Err(SplitError::Empty));
+        assert_eq!(
+            split_command_line("\"abc", Posix),
+            Err(SplitError::UnclosedQuote)
+        );
+        assert_eq!(
+            split_command_line("'abc", Posix),
+            Err(SplitError::UnclosedQuote)
+        );
+    }
+
+    #[test]
+    fn windows_keeps_backslashes_literal_except_before_quotes() {
+        assert_eq!(
+            split(
+                r#""C:\Program Files\Sublime Text\subl.exe" {file}:{line}"#,
+                Windows
+            ),
+            [r"C:\Program Files\Sublime Text\subl.exe", "{file}:{line}"]
+        );
+        assert_eq!(split(r#"a\\\"b"#, Windows), [r#"a\"b"#]);
+        assert_eq!(split(r#""a\\" b"#, Windows), [r"a\", "b"]);
+        assert_eq!(split(r"C:\dir\ x", Windows), [r"C:\dir\", "x"]);
+        assert_eq!(split(r#""say ""hi""""#, Windows), [r#"say "hi""#]);
+        assert_eq!(split_command_line("  ", Windows), Err(SplitError::Empty));
+        assert_eq!(
+            split_command_line("\"abc", Windows),
+            Err(SplitError::UnclosedQuote)
+        );
+    }
+
+    #[test]
+    fn find_program_in_searches_absolute_dirs_and_tries_extensions() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("tool"), "").unwrap();
+        std::fs::write(dir.path().join("code.cmd"), "").unwrap();
+        let dirs = vec![
+            PathBuf::from("/definitely/missing"),
+            dir.path().to_path_buf(),
+        ];
+        assert_eq!(
+            find_program_in("tool", &dirs, &[]),
+            Some(dir.path().join("tool"))
+        );
+        let exts = vec![".EXE".to_string(), ".cmd".to_string()];
+        assert_eq!(
+            find_program_in("code", &dirs, &exts),
+            Some(dir.path().join("code.cmd"))
+        );
+        assert_eq!(find_program_in("nope", &dirs, &exts), None);
+        let explicit = dir.path().join("tool");
+        assert_eq!(
+            find_program_in(explicit.to_str().unwrap(), &[], &[]),
+            Some(explicit)
+        );
+    }
+
+    #[test]
+    fn find_program_in_never_resolves_relative_to_the_current_directory() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("bin")).unwrap();
+        std::fs::write(dir.path().join("bin").join("tool"), "").unwrap();
+        // A relative `PATH` entry (".", "bin") is skipped, and a relative explicit path is not
+        // a program: either would resolve against whatever directory Browsitory runs in.
+        let relative = vec![PathBuf::from("."), PathBuf::from("bin")];
+        assert_eq!(find_program_in("tool", &relative, &[]), None);
+        assert_eq!(find_program_in("bin/tool", &[], &[]), None);
+        assert_eq!(find_program_in("./tool", &[], &[]), None);
+    }
+
+    #[test]
+    fn drain_tail_keeps_only_the_last_bytes() {
+        let input: Vec<u8> = (0..10_000u32).map(|i| (i % 251) as u8).collect();
+        let (tail, reader) = drain_tail(std::io::Cursor::new(input.clone()), 4096);
+        reader.join().unwrap();
+        let kept = tail.lock().unwrap().tail_bytes().to_vec();
+        assert_eq!(kept, input[input.len() - 4096..].to_vec());
+    }
+
+    #[test]
+    fn tail_text_keeps_the_last_three_non_empty_lines() {
+        assert_eq!(tail_text(b"a\n\nb\nc\n  d  \n\n"), "b\nc\nd");
+        assert_eq!(tail_text(b"\x1b[31moops\x1b[0m\r\n"), "oops");
+        assert_eq!(tail_text(b""), "no output");
+    }
+
+    #[cfg(unix)]
+    fn spec(program: &str, args: &[&str]) -> SpawnSpec {
+        SpawnSpec {
+            program: PathBuf::from(program),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            cwd: std::env::temp_dir(),
+            env: vec![("BROWSITORY_TEST_VAR".into(), "a value".into())],
+            new_console: false,
+            no_window: false,
+            capture_stderr: true,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_passes_argv_verbatim_and_sets_env() {
+        // `$1` is a literal argument: no shell ever sees it.
+        let mut child = spawn(&spec(
+            "/bin/sh",
+            &[
+                "-c",
+                "printf '%s|%s' \"$1\" \"$BROWSITORY_TEST_VAR\" >&2",
+                "sh",
+                "$(touch /nonexistent); x",
+            ],
+        ))
+        .unwrap();
+        let (tail, reader) = drain_tail(child.stderr.take().unwrap(), 4096);
+        assert!(child.wait().unwrap().success());
+        reader.join().unwrap();
+        let text = String::from_utf8(tail.lock().unwrap().tail_bytes().to_vec()).unwrap();
+        assert_eq!(text, "$(touch /nonexistent); x|a value");
+    }
+
+    #[test]
+    fn spawning_a_missing_program_is_not_found() {
+        let err = spawn(&SpawnSpec {
+            program: PathBuf::from("browsitory-no-such-program"),
+            args: Vec::new(),
+            cwd: std::env::temp_dir(),
+            env: Vec::new(),
+            new_console: false,
+            no_window: false,
+            capture_stderr: false,
+        })
+        .unwrap_err();
+        assert!(matches!(err, LaunchError::NotFound(_)), "{err}");
+    }
 
     #[test]
     fn tail_buffer_keeps_the_last_bytes_and_marks_truncation() {

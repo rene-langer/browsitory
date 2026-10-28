@@ -10,7 +10,7 @@ pub mod hooks;
 mod line_patch;
 pub mod merge;
 pub mod pick;
-mod process;
+pub mod process;
 pub mod rebase;
 pub mod reflog;
 pub mod remote;
