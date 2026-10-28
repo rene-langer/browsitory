@@ -286,7 +286,6 @@ describe("Browsitory merge with conflict resolution", () => {
 
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "MERGE_HEAD"))).toBe(false);
 
-    const conflictedRowGone = await $("span*=abort.txt (Conflicted)");
-    await expect(conflictedRowGone).not.toBeExisting();
+    await $("span*=abort.txt (Conflicted)").waitForExist({ reverse: true, timeout: 10000 });
   });
 });

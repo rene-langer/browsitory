@@ -72,3 +72,7 @@ mod wire_format_tests {
         }
     }
 }
+
+// Hide the developer's / CI runner's global and system git config from every test (#111).
+#[cfg(test)]
+test_support::hermetic_git!();

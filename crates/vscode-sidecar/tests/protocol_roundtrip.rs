@@ -1,3 +1,6 @@
+// Hide the developer's / CI runner's global and system git config from every test (#111).
+test_support::hermetic_git!();
+
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::{Duration, Instant};

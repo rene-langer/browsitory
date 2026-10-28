@@ -178,22 +178,37 @@ fn signs_with_a_literal_ssh_public_key_through_the_agent() {
         .stdout(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    for _ in 0..50 {
-        if socket.exists() {
+    // The socket appears at bind() but accepts only after listen(), and a loaded machine can
+    // take a while to get there: retry ssh-add until the agent answers.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let added = std::process::Command::new("ssh-add")
+            .env("SSH_AUTH_SOCK", &socket)
+            .arg(&key.private)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        if added.success() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(
+            std::time::Instant::now() < deadline,
+            "ssh-add never reached the agent"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let added = std::process::Command::new("ssh-add")
-        .env("SSH_AUTH_SOCK", &socket)
-        .arg(&key.private)
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap();
-    assert!(added.success());
-    // ssh-keygen finds the agent through SSH_AUTH_SOCK; this test binary sets it only here
-    // and no other test in this file reads it.
-    std::env::set_var("SSH_AUTH_SOCK", &socket);
+    // Only this test's signer may see the throwaway agent (#153): setting SSH_AUTH_SOCK
+    // process-wide made every concurrently signing test in this binary talk to it, and one
+    // that hit it while it was being killed died of SIGPIPE ("the signing program exited with
+    // an error"). A wrapper `gpg.ssh.program` scopes the socket to this test's ssh-keygen.
+    let signer = keys.path().join("agent-ssh-keygen");
+    write_script(
+        &signer,
+        &format!(
+            "#!/bin/sh\nSSH_AUTH_SOCK='{}' exec ssh-keygen \"$@\"\n",
+            socket.display()
+        ),
+    );
 
     write_file(dir.path(), "a.txt", "a\n");
     commit_all(&repo, "base");
@@ -203,6 +218,9 @@ fn signs_with_a_literal_ssh_public_key_through_the_agent() {
         config.set_str("gpg.format", "ssh").unwrap();
         config
             .set_str("user.signingKey", &format!("key::{}", key.public_line))
+            .unwrap();
+        config
+            .set_str("gpg.ssh.program", signer.to_str().unwrap())
             .unwrap();
     }
     let base = repo.head().unwrap().peel_to_commit().unwrap();

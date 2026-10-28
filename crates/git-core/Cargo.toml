@@ -14,3 +14,4 @@ url = "2.5"
 libc = "0.2"
 
 [dev-dependencies]
+test-support = { path = "../test-support" }

@@ -1,10 +1,9 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::Duration;
 
-use common::{commit_all, write_file};
+use common::{commit_all, init_repo, write_file};
 use git2::{Config, ConfigLevel, Repository};
 use git_core::tools::{
     file_version_contents, git_tools, git_tools_from, prepare_diff_tool_with,
@@ -13,35 +12,9 @@ use git_core::tools::{
 };
 use tempfile::TempDir;
 
-/// Points libgit2's system/XDG/global config search paths at an empty directory for this whole
-/// test binary, so the developer's own `diff.tool` can never leak in (#111). Every test calls
-/// it before touching config; the first call does the work.
-fn isolate() {
-    static EMPTY: OnceLock<TempDir> = OnceLock::new();
-    EMPTY.get_or_init(|| {
-        let dir = TempDir::new().unwrap();
-        for level in [
-            ConfigLevel::ProgramData,
-            ConfigLevel::System,
-            ConfigLevel::XDG,
-            ConfigLevel::Global,
-        ] {
-            // SAFETY: runs once, under the `OnceLock`, before this binary reads any config.
-            unsafe { git2::opts::set_search_path(level, dir.path()).unwrap() };
-        }
-        dir
-    });
-}
-
-fn init_repo() -> (TempDir, Repository) {
-    isolate();
-    common::init_repo()
-}
-
 /// A config like `repo.config()`, but whose global level is a fresh temp file holding
 /// `global`; the repository's own `.git/config` is the local level.
 fn user_config(repo: Option<&Repository>, global: &[(&str, &str)]) -> (TempDir, Config) {
-    isolate();
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("gitconfig");
     std::fs::write(&file, "").unwrap();

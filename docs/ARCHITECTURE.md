@@ -494,6 +494,14 @@ promises and presents the diagnostic globally; it does not extend the transport-
   delegation tests of its own. It keeps `crates/tauri-app/src/commands/mod.rs`'s inline tests
   for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
   like `WorkspaceDto`/`OpenRepoEntryDto`).
+- Hermetic git config: every Rust test binary (`git-core`, `repo-service`, `vscode-sidecar`,
+  `tauri-app`) invokes `test_support::hermetic_git!()` (dev-only `crates/test-support`), which
+  before `main` points libgit2's global/XDG/system search paths at an empty directory and sets
+  `HOME`/`XDG_CONFIG_HOME`/`GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL` for spawned `git`, hooks
+  and the sidecar binary, so the developer's or CI runner's own git config never leaks in. A
+  test that needs a global config builds its own `git2::Config` or passes `HOME` to a child —
+  never moves the process-wide search path. New test binaries must include the macro (a
+  `tests/common` module counts).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
