@@ -1483,6 +1483,7 @@ name = "git-core"
 version = "0.1.0"
 dependencies = [
  "git2",
+ "libc",
  "tempfile",
  "thiserror 1.0.69",
  "url",

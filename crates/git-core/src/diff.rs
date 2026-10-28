@@ -508,11 +508,12 @@ fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<Fi
     if meta.len() > cap {
         return Ok(FileSide::TooLarge { size: meta.len() });
     }
-    let handle = std::fs::File::open(&file)?;
     // The path was checked before opening; make sure the opened file is still that regular file
-    // (not a symlink swapped in meanwhile).
-    let opened = handle.metadata()?;
-    if !opened.is_file() || !same_file(&meta, &opened) {
+    // (not a symlink, FIFO or device swapped in meanwhile).
+    let Some(handle) = open_regular_file(&file)? else {
+        return Ok(FileSide::Missing);
+    };
+    if !same_file(&meta, &handle.metadata()?) {
         return Ok(FileSide::Missing);
     }
     let mut bytes = Vec::new();
@@ -524,6 +525,30 @@ fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<Fi
         return Ok(FileSide::TooLarge { size });
     }
     Ok(FileSide::Loaded { bytes })
+}
+
+/// Opens `path` for reading only if it is (still) a regular file, `None` otherwise. On unix the
+/// open neither follows a final symlink (`O_NOFOLLOW`) nor waits for a writer if a FIFO was
+/// swapped in after the caller's check (`O_NONBLOCK`, which does not affect regular-file reads).
+#[cfg(unix)]
+fn open_regular_file(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let handle = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(handle) => handle,
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(handle.metadata()?.is_file().then_some(handle))
+}
+
+#[cfg(not(unix))]
+fn open_regular_file(path: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    let handle = std::fs::File::open(path)?;
+    Ok(handle.metadata()?.is_file().then_some(handle))
 }
 
 #[cfg(unix)]
@@ -645,5 +670,44 @@ fn svg_root(bytes: &[u8]) -> bool {
             Some(end) => rest = &rest[end..],
             None => return false,
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::open_regular_file;
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn opening_a_fifo_does_not_block_and_is_not_treated_as_a_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fifo = dir.path().join("pipe");
+        let c_path = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `c_path` is a valid NUL-terminated path for the duration of the call.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(open_regular_file(&fifo).map(|f| f.is_some()));
+        });
+        let opened = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("opening a FIFO with no writer must not block");
+        assert!(!opened.unwrap(), "a FIFO is not a regular file");
+    }
+
+    #[test]
+    fn opening_a_symlink_is_refused_and_a_regular_file_opens() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, b"hi").unwrap();
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(open_regular_file(&link).unwrap().is_none());
+        assert!(open_regular_file(&target).unwrap().is_some());
     }
 }

@@ -10,4 +10,7 @@ thiserror = "1.0"
 tempfile = "3"
 url = "2.5"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
