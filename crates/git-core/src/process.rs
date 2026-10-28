@@ -510,12 +510,28 @@ pub fn find_program_in(name: &str, dirs: &[PathBuf], exts: &[String]) -> Option<
         if !path.is_absolute() {
             return None;
         }
-        return candidates(path).into_iter().find(|p| p.is_file());
+        return candidates(path).into_iter().find(|p| is_program(p));
     }
     dirs.iter()
         .filter(|dir| dir.is_absolute())
         .flat_map(|dir| candidates(dir.join(name)))
-        .find(|p| p.is_file())
+        .find(|p| is_program(p))
+}
+
+/// A regular file with an execute bit (Unix, like a shell's `PATH` search), or on Windows any
+/// file, including an app execution alias such as `WindowsApps\wt.exe`, which `metadata`
+/// cannot follow.
+fn is_program(path: &std::path::Path) -> bool {
+    match std::fs::metadata(path) {
+        #[cfg(unix)]
+        Ok(meta) => {
+            use std::os::unix::fs::PermissionsExt;
+            meta.is_file() && meta.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        Ok(meta) => meta.is_file(),
+        Err(_) => cfg!(windows) && std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_dir()),
+    }
 }
 
 /// Git for Windows' `sh.exe`: next to the `git.exe` found on `PATH` (see
@@ -719,6 +735,8 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("tool"), "").unwrap();
         std::fs::write(dir.path().join("code.cmd"), "").unwrap();
+        make_executable(&dir.path().join("tool"));
+        make_executable(&dir.path().join("code.cmd"));
         let dirs = vec![
             PathBuf::from("/definitely/missing"),
             dir.path().to_path_buf(),
@@ -745,12 +763,38 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("bin")).unwrap();
         std::fs::write(dir.path().join("bin").join("tool"), "").unwrap();
+        make_executable(&dir.path().join("bin").join("tool"));
         // A relative `PATH` entry (".", "bin") is skipped, and a relative explicit path is not
         // a program: either would resolve against whatever directory Browsitory runs in.
         let relative = vec![PathBuf::from("."), PathBuf::from("bin")];
         assert_eq!(find_program_in("tool", &relative, &[]), None);
         assert_eq!(find_program_in("bin/tool", &[], &[]), None);
         assert_eq!(find_program_in("./tool", &[], &[]), None);
+    }
+
+    fn make_executable(path: &std::path::Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = path;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_program_in_skips_files_without_an_execute_bit() {
+        let first = tempfile::TempDir::new().unwrap();
+        let second = tempfile::TempDir::new().unwrap();
+        std::fs::write(first.path().join("tool"), "").unwrap();
+        std::fs::write(second.path().join("tool"), "").unwrap();
+        make_executable(&second.path().join("tool"));
+        let dirs = vec![first.path().to_path_buf(), second.path().to_path_buf()];
+        assert_eq!(
+            find_program_in("tool", &dirs, &[]),
+            Some(second.path().join("tool"))
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub mod forge;
 pub mod graph;
 pub mod history;
 pub mod hooks;
+pub mod launch;
 mod line_patch;
 pub mod merge;
 pub mod pick;
