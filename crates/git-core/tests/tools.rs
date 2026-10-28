@@ -346,10 +346,21 @@ fn file_versions_come_from_head_index_commits_and_parents() {
     }
 }
 
+/// Any existing program: preparing a launch resolves it, but these tests never run it. Using a
+/// preset with `.path` keeps them independent of `sh` (Windows CI).
+fn some_program() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
 fn diff_config(repo: &Repository) -> (TempDir, Config) {
+    let program = some_program();
     user_config(
         Some(repo),
-        &[("diff.tool", "t"), ("difftool.t.cmd", "true")],
+        &[("diff.tool", "meld"), ("difftool.meld.path", &program)],
     )
 }
 
@@ -596,6 +607,7 @@ fn conflicted_repo() -> (TempDir, Repository) {
     (dir, repo)
 }
 
+#[cfg(unix)]
 fn merge_config(repo: &Repository, cmd: &str, trust: bool) -> (TempDir, Config) {
     user_config(
         Some(repo),
@@ -610,10 +622,25 @@ fn merge_config(repo: &Repository, cmd: &str, trust: bool) -> (TempDir, Config) 
     )
 }
 
+fn preset_merge_config(repo: &Repository, trust: bool) -> (TempDir, Config) {
+    let program = some_program();
+    user_config(
+        Some(repo),
+        &[
+            ("merge.tool", "meld"),
+            ("mergetool.meld.path", &program),
+            (
+                "mergetool.meld.trustExitCode",
+                if trust { "true" } else { "false" },
+            ),
+        ],
+    )
+}
+
 #[test]
 fn merge_tool_sides_come_from_the_conflict_stages() {
     let (dir, repo) = conflicted_repo();
-    let (_c, config) = merge_config(&repo, "true", false);
+    let (_c, config) = preset_merge_config(&repo, false);
     let root = TempDir::new().unwrap();
 
     let prepared = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
@@ -634,7 +661,7 @@ fn merge_tool_sides_come_from_the_conflict_stages() {
 #[test]
 fn an_add_add_conflict_gets_an_empty_base() {
     let (_dir, repo) = conflicted_repo();
-    let (_c, config) = merge_config(&repo, "true", true);
+    let (_c, config) = preset_merge_config(&repo, true);
     let root = TempDir::new().unwrap();
     let prepared = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
     assert_eq!(read(&env(&prepared.invocation.env, "BASE")), "");
@@ -649,7 +676,7 @@ fn an_add_add_conflict_gets_an_empty_base() {
 fn merge_tool_refuses_paths_without_a_text_conflict() {
     let (dir, repo) = conflicted_repo();
     write_file(dir.path(), "other.txt", "x\n");
-    let (_c, config) = merge_config(&repo, "true", false);
+    let (_c, config) = preset_merge_config(&repo, false);
     let root = TempDir::new().unwrap();
     assert_eq!(
         prepare_merge_tool_with(&repo, &config, "other.txt", root.path())
