@@ -557,3 +557,17 @@ fn sniffs_image_types_from_magic_bytes_not_names() {
         assert_eq!(sniff_image_mime(not_an_image), None, "{not_an_image:?}");
     }
 }
+
+#[test]
+fn the_index_side_sees_a_git_add_made_through_another_handle() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "img.png", "v1");
+    commit_all(&repo, "v1");
+    assert_eq!(sides(&repo, DiffSource::Staged, "img.png").1, loaded(b"v1"));
+    write_file(dir.path(), "img.png", "v2");
+    let other = git2::Repository::open(dir.path()).unwrap();
+    let mut index = other.index().unwrap();
+    index.add_path(Path::new("img.png")).unwrap();
+    index.write().unwrap();
+    assert_eq!(sides(&repo, DiffSource::Staged, "img.png").1, loaded(b"v2"));
+}

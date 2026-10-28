@@ -205,12 +205,14 @@ function RepoWorkspace({
       if (retry.kind === "amend") return retryWithoutHooks({ ...retry, message });
       // The co-author chips the box holds now, too (the stashed ones while amending).
       const chips = draft === undefined ? undefined : amending ? draft.stashedCoAuthors : draft.coAuthors;
-      const trailers = current.trim() === "" || chips == null ? retry.trailers : coAuthorTrailers(chips);
+      // While a merge/pick/squash message is seeded the box hides the chips and sends none.
+      const seeded = appState.state.mergeMessage !== null || appState.state.headInfo.squashMessage !== null;
+      const trailers = seeded || current.trim() === "" || chips == null ? retry.trailers : coAuthorTrailers(chips);
       const ok = await retryWithoutHooks({ ...retry, message, trailers });
       if (ok && retry.kind === "commit") clearCommittedDraft(message);
       return ok;
     },
-    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath],
+    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath, appState.state.mergeMessage, appState.state.headInfo.squashMessage],
   );
   const panelVisibility = useSidebarPanelVisibility();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);

@@ -704,6 +704,47 @@ describe("App", () => {
     expect(screen.queryByRole("list", { name: "Co-authors" })).toBeNull();
   });
 
+  it("never adds hidden co-authors to a merge commit retried without hooks", async () => {
+    let mergeMessage: string | null = null;
+    let staged = false;
+    const commit = vi
+      .fn<RepoClient["commit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "pre-commit", output: "" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c1" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", staged, kind: "Modified" as const }],
+      getMergeMessage: async () => mergeMessage,
+      stageFile: async () => {
+        staged = true;
+      },
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRecentAuthors: async () => [{ name: "Ada", email: "ada@x.org" }],
+      commit,
+    });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    mergeMessage = "Merge branch 'x'";
+    fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
+    const box = screen.getByRole("textbox", { name: "Commit message" });
+    await waitFor(() => expect(box).toHaveValue("Merge branch 'x'"));
+    expect(screen.queryByRole("button", { name: "Add co-author" })).toBeNull();
+    const commitButton = screen.getByRole("button", { name: "Commit" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    expect(commit).toHaveBeenCalledWith("/repos/a", "Merge branch 'x'", false, []);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Commit without hooks" }));
+    await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "Merge branch 'x'", true, []));
+  });
+
   it("does not bring back a committed message when the tab was switched away mid-commit", async () => {
     let finish: (outcome: CommitOutcome) => void = () => {};
     const commit = vi.fn(() => new Promise<CommitOutcome>((resolve) => (finish = resolve)));

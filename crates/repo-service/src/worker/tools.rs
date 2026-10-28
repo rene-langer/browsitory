@@ -90,7 +90,6 @@ impl WorkerHandle {
             .ok_or_else(|| "repository has no working directory (bare repository)".to_string())
     }
 
-    /// Resolves the diff tool and writes its side files. The caller launches it.
     /// Both sides of `path` in `source` as bytes, each capped at `MAX_PREVIEW_BYTES`.
     pub fn get_file_sides(
         &self,
@@ -109,6 +108,7 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
+    /// Resolves the diff tool and writes its side files. The caller launches it.
     pub fn prepare_diff_tool(
         &self,
         path: String,

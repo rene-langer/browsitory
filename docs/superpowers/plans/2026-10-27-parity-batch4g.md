@@ -132,9 +132,17 @@ wins where the plan disagreed):
   commit box's co-author chips are hidden while a message is seeded (merge, pick, revert or
   sequence pause), and no trailers are sent then.
 - **Trailers and comment lines.** Browsitory commits the message as typed (like
-  `git commit -m`, comment lines are kept). As `git interpret-trailers` does, trailing comment
-  lines (`#…`) and blank lines are ignored when finding the trailer block, and the trailers go
-  before them. Continuation lines (leading whitespace) count as part of the preceding trailer.
+  `git commit -m`, nothing strips `#` lines), so `#` lines are ordinary message text for
+  `append_trailers`: the trailers always go last. (`git interpret-trailers` would put them before
+  trailing comment lines, which here would reorder the user's text.) Continuation lines (leading
+  whitespace) count as part of the preceding trailer, and duplicates compare the key
+  case-insensitively.
+- **`recent_authors` walk.** Unsorted (`Sort::NONE`): with any sort mode libgit2 walks and sorts
+  the whole history before yielding, so only the lazy walk is really bounded by `take(1000)`.
+- **Review fixes:** the index side re-reads the index (the worker's `Repository` is long-lived);
+  the work tree read checks the opened handle is the same regular file; the frontend's base64
+  check is a single character class (a grouped regex overflowed V8's stack on multi-MB images);
+  "Commit without hooks" never adds the (hidden) chips to a merge/pick/squash commit.
 - **User decisions:** the message field is monospace while the ruler is on; co-authors are
   chips that become `Co-authored-by:` trailers.
 

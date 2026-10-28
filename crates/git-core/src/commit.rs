@@ -66,10 +66,6 @@ fn parse_trailer_line(line: &str) -> Option<(String, String)> {
     is_trailer_key(key).then(|| (key.to_ascii_lowercase(), value.trim().to_string()))
 }
 
-fn is_comment(line: &str) -> bool {
-    line.starts_with('#')
-}
-
 fn is_blank(line: &str) -> bool {
     line.trim().is_empty()
 }
@@ -78,8 +74,8 @@ fn is_blank(line: &str) -> bool {
 /// the last paragraph is the trailer block when the message has more than one paragraph and
 /// every line of it is a `Key: value` trailer (or a whitespace-led continuation of one), and the
 /// new lines are appended to it; otherwise a blank line and a new block follow the message.
-/// Trailing comment lines (`#…`) and blank lines are not part of the message here, and comments
-/// stay after the trailers, as git keeps them. A trailer already in the block (same key, any
+/// Trailing blank lines are dropped. Lines starting with `#` are message text (nothing strips
+/// them in Browsitory), so trailers always go at the very end. A trailer already in the block (same key, any
 /// case, and same value) is not added again. No trailers leaves `message` byte-identical, and so
 /// does a call whose every trailer is already there.
 pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, CommitError> {
@@ -102,19 +98,10 @@ pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, Co
         ));
     }
 
-    let lines: Vec<&str> = message.split('\n').collect();
-    let end = lines
-        .iter()
-        .rposition(|line| !is_blank(line) && !is_comment(line))
-        .map_or(0, |i| i + 1);
-    let rest = &lines[end..];
-    let comments = if rest.iter().any(|line| is_comment(line)) {
-        rest.join("\n")
-    } else {
-        String::new()
-    };
-    let body = lines[..end].join("\n");
-    let body = body.trim_end();
+    // `#` lines are ordinary text here: Browsitory commits the message as typed (like
+    // `git commit -m`, no comment cleanup), so moving them after the trailers, as
+    // `git interpret-trailers` does for an editor buffer, would reorder the user's message.
+    let body = message.trim_end();
 
     let body_lines: Vec<&str> = body.split('\n').collect();
     let last_blank = body_lines.iter().rposition(|line| is_blank(line));
@@ -156,7 +143,6 @@ pub fn append_trailers(message: &str, trailers: &[Trailer]) -> Result<String, Co
     }
     out.push_str(&new_lines.join("\n"));
     out.push('\n');
-    out.push_str(&comments);
     Ok(out)
 }
 
@@ -206,7 +192,10 @@ pub fn recent_authors(
         .and_then(|s| s.email().ok().map(str::to_lowercase));
     let mut seen = std::collections::HashSet::new();
     let mut walk = repo.revwalk()?;
-    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    // Unsorted on purpose: any sort mode makes libgit2 walk (and sort) the whole history before
+    // yielding the first commit, so `take` would bound only the output, not the work. The
+    // unsorted walk is lazy and already roughly newest-first (a commit-time priority queue).
+    walk.set_sorting(git2::Sort::NONE)?;
     walk.push_head()?;
     for oid in walk.take(RECENT_AUTHORS_WALK_LIMIT) {
         let commit = repo.find_commit(oid?)?;
@@ -627,28 +616,19 @@ mod tests {
     }
 
     #[test]
-    fn trailers_go_before_trailing_comment_lines() {
-        // As `git interpret-trailers` places them.
+    fn hash_lines_are_message_text_and_trailers_go_last() {
+        // Browsitory never strips `#` lines, so they stay where the user put them.
         assert_eq!(
-            append_trailers("Subject\n\n# comment\n", &[co(ADA)]).unwrap(),
-            "Subject\n\nCo-authored-by: Ada <ada@x.org>\n\n# comment\n"
+            append_trailers("Fix crash\n\n#123\n", &[co(ADA)]).unwrap(),
+            "Fix crash\n\n#123\n\nCo-authored-by: Ada <ada@x.org>\n"
         );
         assert_eq!(
-            append_trailers("Subject\n# comment\n", &[co(ADA)]).unwrap(),
-            "Subject\n\nCo-authored-by: Ada <ada@x.org>\n# comment\n"
+            append_trailers("Subject\n# not a comment\n", &[co(ADA)]).unwrap(),
+            "Subject\n# not a comment\n\nCo-authored-by: Ada <ada@x.org>\n"
         );
         assert_eq!(
-            append_trailers(
-                "Subject\n\nBody\n\nSigned-off-by: A <a@x>\n\n# c1\n# c2\n",
-                &[co(ADA)]
-            )
-            .unwrap(),
-            "Subject\n\nBody\n\nSigned-off-by: A <a@x>\nCo-authored-by: Ada <ada@x.org>\n\n# c1\n# c2\n"
-        );
-        // A comment-only message gets just the trailers, the comments kept after them.
-        assert_eq!(
-            append_trailers("# only a comment\n", &[co(ADA)]).unwrap(),
-            "Co-authored-by: Ada <ada@x.org>\n# only a comment\n"
+            append_trailers("Subject\n\nSigned-off-by: A <a@x>\n# note\n", &[co(ADA)]).unwrap(),
+            "Subject\n\nSigned-off-by: A <a@x>\n# note\n\nCo-authored-by: Ada <ada@x.org>\n"
         );
     }
 

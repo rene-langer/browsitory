@@ -467,7 +467,10 @@ fn tree_side(
 }
 
 fn index_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<FileSide, DiffError> {
-    match repo.index()?.get_path(rel, 0) {
+    // The worker's `Repository` is long-lived: pick up a `git add` made elsewhere.
+    let mut index = repo.index()?;
+    index.read(false)?;
+    match index.get_path(rel, 0) {
         Some(entry) if entry.mode != GITLINK_MODE && entry.mode != LINK_MODE => {
             blob_contents(repo, entry.id, cap)
         }
@@ -505,10 +508,15 @@ fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<Fi
     if meta.len() > cap {
         return Ok(FileSide::TooLarge { size: meta.len() });
     }
+    let handle = std::fs::File::open(&file)?;
+    // The path was checked before opening; make sure the opened file is still that regular file
+    // (not a symlink swapped in meanwhile).
+    let opened = handle.metadata()?;
+    if !opened.is_file() || !same_file(&meta, &opened) {
+        return Ok(FileSide::Missing);
+    }
     let mut bytes = Vec::new();
-    std::fs::File::open(&file)?
-        .take(cap.saturating_add(1))
-        .read_to_end(&mut bytes)?;
+    handle.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > cap {
         let size = std::fs::metadata(&file)
             .map(|m| m.len())
@@ -516,6 +524,17 @@ fn workdir_side(repo: &Repository, rel: &std::path::Path, cap: u64) -> Result<Fi
         return Ok(FileSide::TooLarge { size });
     }
     Ok(FileSide::Loaded { bytes })
+}
+
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// Both sides of `path`'s diff in `source`, as bytes (each capped at `cap`), for an image

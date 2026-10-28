@@ -43,10 +43,12 @@ export function formatBytes(n: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// One character class, no groups: V8 runs this without a backtrack frame per character, so it
+// is safe on ~27 MB of text (a `(?:…{4})*` form overflows the stack from a few MB).
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** A `data:` URL for a sniffed, renderable image type and well-formed base64; else `null`. */
 export function imageDataUrl(mime: string | null, base64: string): string | null {
-  if (mime === null || !RENDERABLE.has(mime) || !BASE64.test(base64)) return null;
+  if (mime === null || !RENDERABLE.has(mime) || base64.length % 4 !== 0 || !BASE64.test(base64)) return null;
   return `data:${mime};base64,${base64}`;
 }

@@ -46,5 +46,11 @@ describe("imageDataUrl", () => {
     expect(imageDataUrl("text/html", "Zm9v")).toBeNull();
     expect(imageDataUrl("image/png", "Zm9v\"><script>")).toBeNull();
     expect(imageDataUrl("image/png", "Zm9")).toBeNull();
+    expect(imageDataUrl("image/png", "Zm=v")).toBeNull();
+  });
+
+  it("checks a preview at the 20 MB cap without overflowing the stack", () => {
+    const big = "QUJD".repeat(7_000_000); // 28 MB of base64, about 21 MB of bytes
+    expect(imageDataUrl("image/png", big)).toBe(`data:image/png;base64,${big}`);
   });
 });
