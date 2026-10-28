@@ -46,7 +46,30 @@ pub(super) fn read_file_version(
     );
 }
 
+pub(super) fn check_merge_target(
+    repo: &git2::Repository,
+    path: String,
+    reply: Sender<Result<(), String>>,
+) {
+    let _ = reply.send(
+        git_core::tools::check_merge_target(repo, &path)
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+    );
+}
+
 impl WorkerHandle {
+    /// The checks a merge tool launch makes, for hosts that open their own merge editor
+    /// (VSCode): a text conflict, no symlink or submodule, a work tree file inside the tree.
+    pub fn check_merge_target(&self, path: String) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::CheckMergeTarget { path, reply: tx })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
     /// Work tree root captured at spawn (the repo path may be a subdirectory). No round trip
     /// to the worker.
     pub fn workdir(&self) -> Result<PathBuf, String> {

@@ -734,6 +734,40 @@ fn merge_tool_refuses_paths_without_a_text_conflict() {
 }
 
 #[test]
+fn check_merge_target_accepts_a_text_conflict_and_refuses_the_rest() {
+    let (dir, repo) = conflicted_repo();
+    let target = git_core::tools::check_merge_target(&repo, "shared.txt").unwrap();
+    assert!(same_file(&target.merged, &dir.path().join("shared.txt")));
+    for (path, message) in [
+        ("other.txt", "no conflict found for path 'other.txt'"),
+        ("../shared.txt", "Invalid path."),
+    ] {
+        assert_eq!(
+            git_core::tools::check_merge_target(&repo, path)
+                .err()
+                .unwrap()
+                .to_string(),
+            message
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn check_merge_target_refuses_a_symlinked_work_tree_file() {
+    let (dir, repo) = conflicted_repo();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    std::os::unix::fs::symlink("/etc/passwd", dir.path().join("shared.txt")).unwrap();
+    assert_eq!(
+        git_core::tools::check_merge_target(&repo, "shared.txt")
+            .err()
+            .unwrap()
+            .to_string(),
+        "shared.txt is a symbolic link, which a merge tool can't merge."
+    );
+}
+
+#[test]
 fn sweep_removes_only_old_tool_dirs() {
     let root = TempDir::new().unwrap();
     std::fs::create_dir(root.path().join("browsitory-tool-old")).unwrap();

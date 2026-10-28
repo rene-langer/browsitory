@@ -94,6 +94,7 @@ pub fn dispatch(
         "mark_resolved" => mark_resolved(params, repos),
         "read_file_version" => read_file_version(params, repos),
         "repo_workdir" => repo_workdir(params, repos),
+        "check_merge_target" => check_merge_target(params, repos),
         "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(params),
         "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
         "get_commit_files" => get_commit_files(params, repos),
@@ -1250,6 +1251,23 @@ fn read_file_version(params: Value, repos: &Repos) -> Result<Value, String> {
     };
     let bytes = worker_handle(repos, &params.repo_path)?.read_file_version(params.path, version)?;
     Ok(serde_json::json!({ "text": bytes.map(|b| String::from_utf8_lossy(&b).into_owned()) }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoFileParams {
+    repo_path: String,
+    path: String,
+}
+
+/// Internal: not on `RepoClient`. Called by the extension host before it opens VSCode's merge
+/// editor, with the same checks as the desktop merge tool: `null`, or an error saying why the
+/// path can't be merged there.
+fn check_merge_target(params: Value, repos: &Repos) -> Result<Value, String> {
+    let params: RepoFileParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    worker_handle(repos, &params.repo_path)?.check_merge_target(params.path)?;
+    Ok(Value::Null)
 }
 
 /// Internal: not on `RepoClient`. The work tree root for the extension host's native launch

@@ -109,6 +109,8 @@ pub enum ToolError {
     NotATextConflict(String),
     #[error("{0} is a submodule, not a file.")]
     NotAFile(String),
+    #[error("{0} is a symbolic link, which a merge tool can't merge.")]
+    Symlink(String),
     #[error("{0} is too large to open (over 20 MB).")]
     TooLarge(String),
     #[error("The {tool} failed (exit {code}): {output}")]
@@ -962,17 +964,18 @@ pub fn prepare_diff_tool_with(
     }
 }
 
-pub fn prepare_merge_tool(repo: &Repository, path: &str) -> Result<PreparedMergeTool, ToolError> {
-    prepare_merge_tool_with(repo, &repo.config()?, path, &tool_temp_root())
+/// A conflicted path a merge tool (or VSCode's merge editor) may open.
+pub struct MergeTarget {
+    pub conflict: git2::IndexConflict,
+    /// The work tree file the result is written to.
+    pub merged: PathBuf,
+    pub workdir: PathBuf,
 }
 
-/// `prepare_merge_tool` with the git config and temp root given (tests).
-pub fn prepare_merge_tool_with(
-    repo: &Repository,
-    config: &Config,
-    path: &str,
-    root: &Path,
-) -> Result<PreparedMergeTool, ToolError> {
+/// The checks before any merge tool or merge editor opens `path`: a safe relative path, a text
+/// conflict with both sides, no symlink or submodule entry, and a work tree file that is not a
+/// symlink and is not reached through a directory symlink out of the work tree.
+pub fn check_merge_target(repo: &Repository, path: &str) -> Result<MergeTarget, ToolError> {
     let rel = checked(path)?;
     let workdir = repo.workdir().ok_or(ToolError::NoWorkdir)?.to_path_buf();
     let conflict = find_conflict(repo, path).map_err(|error| match error {
@@ -984,17 +987,36 @@ pub fn prepare_merge_tool_with(
         return Err(ToolError::NotATextConflict(path.to_string()));
     };
     let entries = [Some(ours), Some(theirs), conflict.ancestor.as_ref()];
-    if entries
-        .iter()
-        .flatten()
-        .any(|entry| entry.mode == GITLINK || entry.mode == LINK)
-    {
+    if entries.iter().flatten().any(|entry| entry.mode == GITLINK) {
         return Err(ToolError::NotAFile(path.to_string()));
     }
     let merged = work_tree_file(&workdir, rel)?;
-    if is_symlink(&merged) {
-        return Err(ToolError::NotAFile(path.to_string()));
+    if entries.iter().flatten().any(|entry| entry.mode == LINK) || is_symlink(&merged) {
+        return Err(ToolError::Symlink(path.to_string()));
     }
+    Ok(MergeTarget {
+        conflict,
+        merged,
+        workdir,
+    })
+}
+
+pub fn prepare_merge_tool(repo: &Repository, path: &str) -> Result<PreparedMergeTool, ToolError> {
+    prepare_merge_tool_with(repo, &repo.config()?, path, &tool_temp_root())
+}
+
+/// `prepare_merge_tool` with the git config and temp root given (tests).
+pub fn prepare_merge_tool_with(
+    repo: &Repository,
+    config: &Config,
+    path: &str,
+    root: &Path,
+) -> Result<PreparedMergeTool, ToolError> {
+    let target = check_merge_target(repo, path)?;
+    let (conflict, merged, workdir) = (target.conflict, target.merged, target.workdir);
+    let (Some(ours), Some(theirs)) = (&conflict.our, &conflict.their) else {
+        return Err(ToolError::NotATextConflict(path.to_string()));
+    };
     let mut tool = resolve_tool(config, ToolKind::Merge)?;
     if conflict.ancestor.is_none() && DROP_MISSING_BASE.contains(&tool.name.as_str()) {
         if let ToolCommand::Preset { args, .. } = &mut tool.command {

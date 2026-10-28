@@ -2391,6 +2391,21 @@ fn mark_resolved_round_trips_through_the_sidecar() {
     let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
+    let check = sidecar.call(
+        20,
+        "check_merge_target",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt"}),
+    );
+    assert_eq!(check["result"], serde_json::Value::Null);
+    let no_conflict = sidecar.call(
+        21,
+        "check_merge_target",
+        serde_json::json!({"repoPath": repo_path, "path": "missing.txt"}),
+    );
+    assert_eq!(
+        no_conflict["error"]["message"],
+        "no conflict found for path 'missing.txt'"
+    );
     let blocked = sidecar.call(
         2,
         "mark_resolved",

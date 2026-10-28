@@ -463,6 +463,10 @@ pub(crate) enum Command {
     GetGitTools {
         reply: Sender<Result<git_core::tools::GitTools, String>>,
     },
+    CheckMergeTarget {
+        path: String,
+        reply: Sender<Result<(), String>>,
+    },
     ReadFileVersion {
         path: String,
         version: git_core::tools::FileVersion,
@@ -1164,6 +1168,9 @@ impl Worker {
                         tools::prepare_merge_tool(&repo, path, reply)
                     }
                     Command::GetGitTools { reply } => tools::git_tools(&repo, reply),
+                    Command::CheckMergeTarget { path, reply } => {
+                        tools::check_merge_target(&repo, path, reply)
+                    }
                     Command::ReadFileVersion {
                         path,
                         version,
@@ -2019,6 +2026,10 @@ mod tests {
             "no conflict found for path 'a.txt'"
         );
         assert!(handle.get_git_tools().is_ok());
+        assert_eq!(
+            handle.check_merge_target("a.txt".into()).unwrap_err(),
+            "no conflict found for path 'a.txt'"
+        );
     }
 
     #[test]
@@ -2040,6 +2051,7 @@ mod tests {
 
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
+        handle.check_merge_target("a.txt".into()).unwrap();
         assert_eq!(
             handle.mark_resolved("a.txt".into(), false).unwrap(),
             git_core::merge::MarkResolvedOutcome::MarkersRemain
