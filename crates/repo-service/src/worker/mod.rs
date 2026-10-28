@@ -753,6 +753,11 @@ impl Worker {
                 if let Some(plan) = plan {
                     undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_state));
                 }
+                // While a cherry-pick/revert sequence is stored, commands that would move HEAD
+                // or rewrite the index under it are refused before git-core runs.
+                if sequence_store.load(&repo).is_some() {
+                    command = history::gate_during_sequence(command);
+                }
                 match command {
                     Command::Ping { reply } => {
                         let _ = reply.send(());
@@ -1117,11 +1122,7 @@ impl Worker {
                         branch_name,
                         options,
                         reply,
-                    } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            merge::start(&repo, branch_name, options, reply)
-                        }
-                    }
+                    } => merge::start(&repo, branch_name, options, reply),
                     Command::GetMergeDefaults { reply } => merge::defaults(&repo, reply),
                     Command::GetConflictHunks { path, reply } => {
                         merge::conflict_hunks(&repo, path, reply)
@@ -1148,63 +1149,45 @@ impl Worker {
                         operation_id,
                         events,
                         reply,
-                    } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            history::amend(
-                                &repo,
-                                message,
-                                no_verify,
-                                remote::TransferOp {
-                                    id: operation_id,
-                                    cancelled: &cancelled,
-                                },
-                                events,
-                                reply,
-                            )
-                        }
-                    }
+                    } => history::amend(
+                        &repo,
+                        message,
+                        no_verify,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::CherryPick {
                         commit_id,
                         mainline,
                         reply,
-                    } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            history::cherry_pick(&repo, commit_id, mainline, reply)
-                        }
-                    }
+                    } => history::cherry_pick(&repo, commit_id, mainline, reply),
                     Command::RevertCommit {
                         commit_id,
                         mainline,
                         reply,
-                    } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            history::revert(&repo, commit_id, mainline, reply)
-                        }
-                    }
+                    } => history::revert(&repo, commit_id, mainline, reply),
                     Command::CherryPickMany { commit_ids, reply } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            history::pick_many(
-                                &repo,
-                                &sequence_store,
-                                git_core::pick::SequenceKind::CherryPick,
-                                commit_ids,
-                                reply,
-                            )
-                        }
+                        let kind = git_core::pick::SequenceKind::CherryPick;
+                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        let _ = reply.send(result);
                     }
                     Command::RevertMany { commit_ids, reply } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            history::pick_many(
-                                &repo,
-                                &sequence_store,
-                                git_core::pick::SequenceKind::Revert,
-                                commit_ids,
-                                reply,
-                            )
-                        }
+                        let kind = git_core::pick::SequenceKind::Revert;
+                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        let _ = reply.send(result);
                     }
                     Command::ContinueSequence { reply } => {
-                        history::continue_sequence(&repo, &sequence_store, reply)
+                        let (kind, result) = history::continue_sequence(&repo, &sequence_store);
+                        if let Some(kind) = kind {
+                            undo::relabel_sequence(&mut undo_recorder, kind, &result);
+                        }
+                        let _ = reply.send(result);
                     }
                     Command::AbortSequence { reply } => {
                         history::abort_sequence(&repo, &sequence_store, reply)
@@ -1268,9 +1251,7 @@ impl Worker {
                         rebase::commits_since(&repo, onto, reply)
                     }
                     Command::StartRebase { onto, plan, reply } => {
-                        if !history::refused_during_sequence(&repo, &sequence_store, &reply) {
-                            rebase::start(&repo, onto, plan, &mut rebase_state, reply)
-                        }
+                        rebase::start(&repo, onto, plan, &mut rebase_state, reply)
                     }
                     Command::RebaseContinue { reply } => {
                         rebase::continue_rebase(&repo, &mut rebase_state, reply)
@@ -2236,6 +2217,73 @@ mod tests {
         );
         assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[test]
+    fn a_stored_sequence_refuses_everything_that_moves_head_or_the_index() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids.clone()).unwrap();
+        let base = repo.head().unwrap().target().unwrap().to_string();
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+
+        assert_eq!(
+            handle
+                .commit("x".into(), false, mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .reset_to_commit(base.clone(), git_core::reset::ResetMode::Hard)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.checkout_commit(base.clone()).unwrap_err(), busy);
+        assert_eq!(handle.switch_branch("feature".into()).unwrap_err(), busy);
+        assert_eq!(
+            handle.pull_current_upstream(mpsc::channel().0).unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.apply_stash(0, "s".into(), false).unwrap_err(), busy);
+        assert_eq!(handle.pop_stash(0, "s".into(), false).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .restore_reflog_entry("HEAD".into(), base.clone())
+                .unwrap_err(),
+            busy
+        );
+        // Read-only and resolving commands still work.
+        assert!(handle.get_status().is_ok());
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert!(handle.continue_sequence().is_ok());
+    }
+
+    #[test]
+    fn the_undo_label_counts_the_commits_that_were_applied() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        // "f one" is already on the branch: it is skipped, so two commits are applied.
+        git_core::pick::cherry_pick(&repo, &ids[0], None).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids.clone()).unwrap();
+        handle
+            .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
+            .unwrap();
+        assert_eq!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed {
+                applied: 2,
+                skipped: vec![ids[0].clone()],
+            }
+        );
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 2 commits".into())
+        );
     }
 
     #[test]

@@ -104,6 +104,22 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
     Some(UndoPlan { label, scope })
 }
 
+/// A finished sequence's undo entry names the commits it actually applied (skipped ones
+/// changed nothing), not the number selected.
+pub(super) fn relabel_sequence(
+    recorder: &mut UndoRecorder,
+    kind: git_core::pick::SequenceKind,
+    result: &Result<git_core::pick::SequenceOutcome, String>,
+) {
+    if let Ok(git_core::pick::SequenceOutcome::Completed { applied, .. }) = result {
+        let verb = match kind {
+            git_core::pick::SequenceKind::CherryPick => "Cherry-pick",
+            git_core::pick::SequenceKind::Revert => "Revert",
+        };
+        recorder.relabel(count_label(verb, *applied));
+    }
+}
+
 fn count_label(verb: &str, count: usize) -> String {
     format!(
         "{verb} {count} {}",
@@ -184,6 +200,15 @@ impl UndoRecorder {
             stacks,
             active: None,
             pending: None,
+        }
+    }
+
+    /// Renames the entry being recorded (the running command's, or the paused operation's).
+    pub fn relabel(&mut self, label: String) {
+        if let Some((plan, _)) = self.active.as_mut() {
+            plan.label = label;
+        } else if let Some((pending, _)) = self.pending.as_mut() {
+            *pending = label;
         }
     }
 

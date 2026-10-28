@@ -22,22 +22,33 @@ pub(super) fn head_info(
     let _ = reply.send(result);
 }
 
-/// While a sequence is stored, commands that would start another operation or rewrite HEAD
-/// (`CherryPick`, `RevertCommit`, `CherryPickMany`, `RevertMany`, `StartMerge`, `StartRebase`,
-/// `AmendCommit`) are refused with git-core's `OperationInProgress` text, before git-core runs.
-/// Returns `true` when it replied.
-pub(super) fn refused_during_sequence<T>(
-    repo: &git2::Repository,
-    sequence_store: &SequenceStore,
-    reply: &Sender<Result<T, String>>,
-) -> bool {
-    if sequence_store.load(repo).is_none() {
-        return false;
+/// Replaces a command that must not run while a sequence is stored with a no-op, after
+/// replying with git-core's `OperationInProgress` text on its own reply. Refused: anything that
+/// starts another operation or moves HEAD or the index under the sequence (picks, merge, rebase,
+/// commit and amend, reset, checkout, branch switch, pull, stash apply/pop, reflog restore).
+/// Read-only commands, fetch, staging and conflict resolution stay available.
+pub(super) fn gate_during_sequence(command: Command) -> Command {
+    fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
+        let _ = reply.send(Err(
+            git_core::pick::PickError::OperationInProgress.to_string()
+        ));
+        let (reply, _) = std::sync::mpsc::channel();
+        Command::Ping { reply }
     }
-    let _ = reply.send(Err(
-        git_core::pick::PickError::OperationInProgress.to_string()
-    ));
-    true
+    match command {
+        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => refuse(reply),
+        Command::CherryPickMany { reply, .. } | Command::RevertMany { reply, .. } => refuse(reply),
+        Command::StartMerge { reply, .. } => refuse(reply),
+        Command::StartRebase { reply, .. } => refuse(reply),
+        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => refuse(reply),
+        Command::ResetToCommit { reply, .. }
+        | Command::CheckoutCommit { reply, .. }
+        | Command::SwitchBranch { reply, .. }
+        | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
+        Command::PullCurrentUpstream { reply, .. } => refuse(reply),
+        Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
+        other => other,
+    }
 }
 
 /// Keeps or forgets the sequence as `run.state` says and turns the run into the reply. A state
@@ -70,26 +81,25 @@ pub(super) fn pick_many(
     sequence_store: &SequenceStore,
     kind: SequenceKind,
     commit_ids: Vec<String>,
-    reply: Sender<Result<SequenceOutcome, String>>,
-) {
+) -> Result<SequenceOutcome, String> {
     let run = match kind {
         SequenceKind::CherryPick => git_core::pick::cherry_pick_many(repo, &commit_ids),
         SequenceKind::Revert => git_core::pick::revert_many(repo, &commit_ids),
     };
-    let _ = reply.send(persist(sequence_store, run));
+    persist(sequence_store, run)
 }
 
+/// The stored sequence's kind (`None` when there is none) and the continue result.
 pub(super) fn continue_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
-    reply: Sender<Result<SequenceOutcome, String>>,
-) {
+) -> (Option<SequenceKind>, Result<SequenceOutcome, String>) {
     let Some(state) = sequence_store.load(repo) else {
-        let _ = reply.send(Err(NO_SEQUENCE.to_string()));
-        return;
+        return (None, Err(NO_SEQUENCE.to_string()));
     };
+    let kind = state.kind;
     let run = git_core::pick::continue_sequence(repo, state);
-    let _ = reply.send(persist(sequence_store, run));
+    (Some(kind), persist(sequence_store, run))
 }
 
 fn abort_stored(
