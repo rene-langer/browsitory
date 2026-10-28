@@ -571,3 +571,39 @@ fn the_index_side_sees_a_git_add_made_through_another_handle() {
     index.write().unwrap();
     assert_eq!(sides(&repo, DiffSource::Staged, "img.png").1, loaded(b"v2"));
 }
+
+#[test]
+fn commit_diff_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("d")).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "b");
+    let b = repo.head().unwrap().target().unwrap().to_string();
+
+    let hunks = git_core::diff::commit_diff(&repo, &b, "d", &DiffOptions::default()).unwrap();
+
+    let lines: Vec<_> = hunks.iter().flat_map(|h| h.lines.iter()).collect();
+    assert_eq!(lines.len(), 1, "{hunks:?}");
+    assert_eq!(lines[0].origin, DiffLineOrigin::Remove);
+    assert_eq!(lines[0].content, "file d\n");
+}
+
+#[test]
+fn working_diff_unstaged_of_a_file_replaced_by_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+
+    let hunks = git_core::diff::working_diff(&repo, "d", false, &DiffOptions::default()).unwrap();
+
+    let lines: Vec<_> = hunks.iter().flat_map(|h| h.lines.iter()).collect();
+    assert_eq!(lines.len(), 1, "{hunks:?}");
+    assert_eq!(lines[0].origin, DiffLineOrigin::Remove);
+}

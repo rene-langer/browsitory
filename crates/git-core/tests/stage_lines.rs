@@ -697,3 +697,23 @@ fn discard_lines_with_matching_content_still_works() {
     git_core::stage::discard_lines(&repo, "f.txt", o, n, 3, &[3], &displayed).unwrap();
     assert_eq!(workdir_content(dir.path(), "f.txt"), "a\nX\nb\nc\n");
 }
+
+#[test]
+fn discard_hunk_of_d_never_uses_a_hunk_of_d_slash_inner() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file d\n");
+    common::commit_all(&repo, "a");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/inner.txt", "inner\n");
+    // The hunk of `d/inner.txt` as `d`'s diff showed it before #116 was fixed (an add at 0,1).
+    let inner = &working_diff(&repo, "d/inner.txt", false, &DiffOptions::default()).unwrap()[0];
+    assert_eq!((inner.old_start, inner.new_start), (0, 1));
+
+    let result = git_core::stage::discard_hunk(&repo, "d", inner.old_start, inner.new_start, 3);
+
+    assert!(
+        matches!(result, Err(StageError::HunkNotFound)),
+        "{result:?}"
+    );
+    assert_eq!(workdir_content(dir.path(), "d/inner.txt"), "inner\n");
+}

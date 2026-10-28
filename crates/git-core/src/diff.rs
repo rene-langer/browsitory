@@ -179,7 +179,7 @@ pub fn working_diff(
         repo.diff_index_to_workdir(None, Some(&mut git_opts))?
     };
 
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[path])
 }
 
 /// Diff for one path between `commit_id` and its first parent (or an empty tree, for a
@@ -194,7 +194,7 @@ pub fn commit_diff(
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
     let mut git_opts = literal_path_options(path, None, opts);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[path])
 }
 
 /// Diff of a file that `commit_id` renamed from `old_path` to `new_path`, against the first
@@ -212,7 +212,7 @@ pub fn commit_rename_diff(
     let mut diff =
         repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     detect_renames(&mut diff)?;
-    hunks_from_diff(&diff)
+    hunks_from_diff(&diff, &[old_path, new_path])
 }
 
 /// Paths changed by `commit_id` (vs. its first parent, same rule as `commit_diff`) — used to
@@ -266,7 +266,8 @@ pub fn range_diff(
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    hunks_from_diff(&diff)
+    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
+    hunks_from_diff(&diff, &wanted)
 }
 
 /// The working tree compares like the Uncommitted view: staged, unstaged and untracked files.
@@ -306,7 +307,8 @@ pub fn compare_working_tree(
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    hunks_from_diff(&diff)
+    let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
+    hunks_from_diff(&diff, &wanted)
 }
 
 /// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…` or `refs/remotes/…`
@@ -360,23 +362,46 @@ fn commit_and_parent_trees<'repo>(
     Ok((old_tree, new_tree))
 }
 
-pub(crate) fn hunks_from_diff(diff: &git2::Diff) -> Result<Vec<DiffHunk>, DiffError> {
+/// True when `delta`'s old or new path is exactly one of `wanted`. A literal pathspec `d` also
+/// matches everything under `d/` (a file that became a folder), so per-file diffs filter by
+/// delta too (#116).
+pub(crate) fn delta_is_one_of(delta: &git2::DiffDelta<'_>, wanted: &[&str]) -> bool {
+    [delta.old_file(), delta.new_file()].iter().any(|file| {
+        file.path_bytes()
+            .is_some_and(|path| wanted.iter().any(|w| path == w.as_bytes()))
+    })
+}
+
+/// The hunks of the deltas whose old or new path is one of `wanted`.
+pub(crate) fn hunks_from_diff(
+    diff: &git2::Diff,
+    wanted: &[&str],
+) -> Result<Vec<DiffHunk>, DiffError> {
     let hunks: RefCell<Vec<DiffHunk>> = RefCell::new(Vec::new());
+    let keep = std::cell::Cell::new(false);
 
     diff.foreach(
-        &mut |_delta, _progress| true,
+        &mut |delta, _progress| {
+            keep.set(delta_is_one_of(&delta, wanted));
+            true
+        },
         None,
         Some(&mut |_delta, hunk| {
-            hunks.borrow_mut().push(DiffHunk {
-                old_start: hunk.old_start(),
-                old_lines: hunk.old_lines(),
-                new_start: hunk.new_start(),
-                new_lines: hunk.new_lines(),
-                lines: Vec::new(),
-            });
+            if keep.get() {
+                hunks.borrow_mut().push(DiffHunk {
+                    old_start: hunk.old_start(),
+                    old_lines: hunk.old_lines(),
+                    new_start: hunk.new_start(),
+                    new_lines: hunk.new_lines(),
+                    lines: Vec::new(),
+                });
+            }
             true
         }),
         Some(&mut |_delta, _hunk, line| {
+            if !keep.get() {
+                return true;
+            }
             let origin = match line.origin() {
                 '+' => DiffLineOrigin::Add,
                 '-' => DiffLineOrigin::Remove,

@@ -404,3 +404,47 @@ fn an_unborn_head_has_nothing_to_compare_with() {
         "There is no commit checked out to compare with."
     );
 }
+
+/// Commit A: `d` is a file; commit B: `d` is a folder holding `inner.txt` (#116).
+fn file_became_folder(repo: &git2::Repository) -> (Oid, Oid) {
+    let a = commit_tree(repo, &[("d", "file d\n", REGULAR)], &[], "a");
+    let b = commit_tree(repo, &[("d/inner.txt", "inner\n", REGULAR)], &[a], "b");
+    (a, b)
+}
+
+#[test]
+fn range_diff_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (_dir, repo) = init_repo();
+    let (a, b) = file_became_folder(&repo);
+    let (a, b) = (a.to_string(), b.to_string());
+
+    assert_eq!(
+        sorted(range_diff_files(&repo, &a, &b).unwrap()),
+        vec![changed("d"), changed("d/inner.txt")]
+    );
+    let opts = DiffOptions::default();
+    assert_eq!(
+        edits(&range_diff(&repo, &a, &b, "d", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Remove, "file d".to_string())]
+    );
+    assert_eq!(
+        edits(&range_diff(&repo, &a, &b, "d/inner.txt", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Add, "inner".to_string())]
+    );
+}
+
+#[test]
+fn working_tree_compare_of_a_file_that_became_a_folder_shows_only_that_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "file d\n");
+    commit_all(&repo, "a");
+    let a = repo.head().unwrap().target().unwrap().to_string();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+
+    let opts = DiffOptions::default();
+    assert_eq!(
+        edits(&compare_working_tree(&repo, &a, "d", None, &opts).unwrap()),
+        vec![(DiffLineOrigin::Remove, "file d".to_string())]
+    );
+}

@@ -275,7 +275,13 @@ struct FoundHunk {
 
 /// Re-walks `diff` the same way `diff::hunks_from_diff` does and returns the lines of the hunk
 /// at `(old_start, new_start)` with their raw libgit2 origins, so indices line up with the UI.
-fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundHunk, StageError> {
+/// Only `path`'s own delta counts: a literal pathspec `d` also matches `d/…` (#116).
+fn find_hunk(
+    diff: &git2::Diff,
+    path: &str,
+    old_start: u32,
+    new_start: u32,
+) -> Result<FoundHunk, StageError> {
     use std::cell::{Cell, RefCell};
     let found: RefCell<Option<FoundHunk>> = RefCell::new(None);
     let in_target = Cell::new(false);
@@ -283,7 +289,10 @@ fn find_hunk(diff: &git2::Diff, old_start: u32, new_start: u32) -> Result<FoundH
         &mut |_, _| true,
         None,
         Some(&mut |delta, hunk| {
-            let is_target = hunk.old_start() == old_start && hunk.new_start() == new_start;
+            let is_target = found.borrow().is_none()
+                && hunk.old_start() == old_start
+                && hunk.new_start() == new_start
+                && crate::diff::delta_is_one_of(&delta, &[path]);
             in_target.set(is_target);
             if is_target {
                 let old_absent =
@@ -364,7 +373,7 @@ fn apply_selection(
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
-    let hunk = find_hunk(&diff, old_start, new_start)?;
+    let hunk = find_hunk(&diff, path, old_start, new_start)?;
     if matches!(target, Target::Discard) {
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
         ensure_no_symlinked_parent(workdir, checked_relative(path)?)?;
