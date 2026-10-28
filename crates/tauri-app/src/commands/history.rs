@@ -36,7 +36,7 @@ pub async fn cherry_pick(
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
     Ok(PickOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.cherry_pick(commit_id)?,
+        worker_handle(&state, &repo_path)?.cherry_pick(commit_id, None)?,
     ))
 }
 
@@ -47,7 +47,7 @@ pub async fn revert_commit(
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
     Ok(PickOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.revert_commit(commit_id)?,
+        worker_handle(&state, &repo_path)?.revert_commit(commit_id, None)?,
     ))
 }
 

@@ -2537,14 +2537,14 @@ fn amend_commit(
 fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: CommitIdParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id)?;
+    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id, None)?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
 fn revert_commit(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: CommitIdParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(params.commit_id)?;
+    let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(params.commit_id, None)?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
