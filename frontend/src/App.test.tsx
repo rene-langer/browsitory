@@ -853,6 +853,63 @@ describe("App", () => {
     await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: new work", true, []));
   });
 
+  it("amends without hooks with the author and co-authors the box holds now", async () => {
+    const amendCommit = vi
+      .fn<RepoClient["amendCommit"]>()
+      .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "no\n" })
+      .mockResolvedValueOnce({ kind: "Committed", commitId: "c2" });
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRecentAuthors: async () => [
+        { name: "Ada", email: "ada@x.org" },
+        { name: "Bob", email: "bob@x.org" },
+      ],
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null }),
+      getCommitMessage: async () => "HEAD's message",
+      amendCommit,
+    });
+    render(<App client={client} />);
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.click(await screen.findByLabelText("Amend last commit"));
+    await waitFor(() => expect(box).toHaveValue("HEAD's message"));
+    const author = screen.getByRole("textbox", { name: "Author" });
+    fireEvent.change(author, { target: { value: "Grace <grace@x.org>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    const amendButton = screen.getByRole("button", { name: "Amend" });
+    await waitFor(() => expect(amendButton).toBeEnabled());
+    fireEvent.click(amendButton);
+    const ada = { key: "Co-authored-by", value: "Ada <ada@x.org>" };
+    const dialog = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
+    expect(amendCommit).toHaveBeenCalledWith("/repos/a", "HEAD's message", false, {
+      author: { name: "Grace", email: "grace@x.org" },
+      trailers: [ada],
+    });
+
+    // Author and chips edited after the failure go into the retry, like the message.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "commit-msg hook failed" })).toBeNull());
+    fireEvent.change(author, { target: { value: "Hopper <hopper@x.org>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Bob <bob@x.org>" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
+    const reopened = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Amend without hooks" }));
+
+    await waitFor(() =>
+      expect(amendCommit).toHaveBeenLastCalledWith("/repos/a", "HEAD's message", true, {
+        author: { name: "Hopper", email: "hopper@x.org" },
+        trailers: [ada, { key: "Co-authored-by", value: "Bob <bob@x.org>" }],
+      }),
+    );
+  });
+
   it("publishes the current branch from the sync bar through the Push dialog", async () => {
     const pushBranch = vi.fn(async () => "push-1");
     const client = fakeClient({

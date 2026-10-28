@@ -43,7 +43,7 @@ import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import type { RepoClient, Trailer } from "./ipc/RepoClient";
-import { coAuthorTrailers } from "./lib/people";
+import { coAuthorTrailers, parsePerson } from "./lib/people";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
 import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
@@ -202,12 +202,26 @@ function RepoWorkspace({
       const current =
         retry.kind === "commit" ? ((amending ? draft?.stashed : draft?.message) ?? "") : amending ? (draft?.message ?? "") : "";
       const message = current.trim() === "" ? retry.message : current;
-      if (retry.kind === "amend") return retryWithoutHooks({ ...retry, message });
-      // The co-author chips the box holds now, too (the stashed ones while amending).
-      const chips = draft === undefined ? undefined : amending ? draft.stashedCoAuthors : draft.coAuthors;
       // While a merge/pick/squash message is seeded the box hides the chips and sends none.
       const seeded = appState.state.mergeMessage !== null || appState.state.headInfo.squashMessage !== null;
-      const trailers = seeded || current.trim() === "" || chips == null ? retry.trailers : coAuthorTrailers(chips);
+      const fromBox = current.trim() !== "";
+      if (retry.kind === "amend") {
+        // The amend-mode Author field and chips as they are now, like the message.
+        const chips = draft?.coAuthors;
+        const trailers = seeded || !fromBox || chips == null ? retry.options.trailers : coAuthorTrailers(chips);
+        // Blank (or never edited) keeps HEAD's author; text the box would refuse keeps the
+        // author the failed amend was sent with.
+        const authorText = draft?.amendAuthor?.trim() ?? "";
+        const author = !fromBox
+          ? retry.options.author
+          : authorText === ""
+            ? null
+            : (parsePerson(authorText) ?? retry.options.author);
+        return retryWithoutHooks({ ...retry, message, options: { author, trailers } });
+      }
+      // The co-author chips the box holds now, too (the stashed ones while amending).
+      const chips = draft === undefined ? undefined : amending ? draft.stashedCoAuthors : draft.coAuthors;
+      const trailers = seeded || !fromBox || chips == null ? retry.trailers : coAuthorTrailers(chips);
       const ok = await retryWithoutHooks({ ...retry, message, trailers });
       if (ok && retry.kind === "commit") clearCommittedDraft(message);
       return ok;
