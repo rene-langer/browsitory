@@ -99,6 +99,7 @@ pub(crate) enum Command {
         path: String,
         staged: bool,
         opts: git_core::diff::DiffOptions,
+        old_path: Option<String>,
         reply: Sender<Result<Vec<DiffHunk>, String>>,
     },
     GetCommitDiff {
@@ -790,8 +791,9 @@ impl Worker {
                         path,
                         staged,
                         opts,
+                        old_path,
                         reply,
-                    } => status::get_working_diff(&repo, path, staged, opts, reply),
+                    } => status::get_working_diff(&repo, path, staged, opts, old_path, reply),
                     Command::GetCommitDiff {
                         commit_id,
                         path,
@@ -2805,6 +2807,7 @@ mod tests {
                 "tracked.txt".into(),
                 false,
                 git_core::diff::DiffOptions::default(),
+                None,
             )
             .unwrap();
         assert_eq!(hunks.len(), 1);
@@ -2836,6 +2839,7 @@ mod tests {
                 "tracked.txt".into(),
                 false,
                 git_core::diff::DiffOptions::default(),
+                None,
             )
             .unwrap();
         handle
@@ -2874,6 +2878,7 @@ mod tests {
                 "tracked.txt".into(),
                 false,
                 git_core::diff::DiffOptions::default(),
+                None,
             )
             .unwrap();
 
@@ -2891,6 +2896,39 @@ mod tests {
     }
 
     #[test]
+    fn a_staged_rename_diffs_old_against_new() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "old.txt", "one\ntwo\nthree\nfour\n");
+        commit_all(&repo, "base");
+        std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+        write_file(dir.path(), "new.txt", "one\nTWO\nthree\nfour\n");
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new("old.txt")).unwrap();
+        index.add_path(std::path::Path::new("new.txt")).unwrap();
+        index.write().unwrap();
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let opts = git_core::diff::DiffOptions::default();
+        let hunks = handle
+            .get_working_diff("new.txt".into(), true, opts, Some("old.txt".into()))
+            .unwrap();
+        let edits: Vec<_> = hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .filter(|l| l.origin != git_core::diff::DiffLineOrigin::Context)
+            .map(|l| l.content.clone())
+            .collect();
+        assert_eq!(edits, vec!["two\n".to_string(), "TWO\n".to_string()]);
+
+        // Without old_path a staged rename is a whole-file add, as before.
+        let added = handle
+            .get_working_diff("new.txt".into(), true, opts, None)
+            .unwrap();
+        assert_eq!(added[0].lines.len(), 4);
+    }
+
+    #[test]
     fn line_and_file_commands_round_trip_through_the_worker() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "f.txt", "a\nb\nc\n");
@@ -2902,7 +2940,7 @@ mod tests {
         let handle = worker.handle();
         let opts = git_core::diff::DiffOptions::default();
         let hunk = handle
-            .get_working_diff("f.txt".into(), false, opts)
+            .get_working_diff("f.txt".into(), false, opts, None)
             .unwrap()
             .remove(0);
 
@@ -2920,7 +2958,7 @@ mod tests {
         );
         assert!(stale.unwrap_err().contains("hunk not found"));
         assert!(handle
-            .get_working_diff("f.txt".into(), true, opts)
+            .get_working_diff("f.txt".into(), true, opts, None)
             .unwrap()
             .is_empty());
 
@@ -2935,7 +2973,7 @@ mod tests {
             )
             .unwrap();
         let staged = handle
-            .get_working_diff("f.txt".into(), true, opts)
+            .get_working_diff("f.txt".into(), true, opts, None)
             .unwrap()
             .remove(0);
         handle
@@ -2949,12 +2987,12 @@ mod tests {
             )
             .unwrap();
         assert!(handle
-            .get_working_diff("f.txt".into(), true, opts)
+            .get_working_diff("f.txt".into(), true, opts, None)
             .unwrap()
             .is_empty());
 
         let hunk = handle
-            .get_working_diff("f.txt".into(), false, opts)
+            .get_working_diff("f.txt".into(), false, opts, None)
             .unwrap()
             .remove(0);
         handle

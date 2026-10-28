@@ -2661,3 +2661,44 @@ fn file_sides_trailers_and_commit_message_settings_round_trip_through_the_sideca
         serde_json::json!({"summaryLimit": 10, "bodyRuler": 80, "showRuler": false})
     );
 }
+
+#[test]
+fn a_staged_rename_round_trips_its_old_path() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "one\ntwo\nthree\nfour\n");
+    commit_all(&repo, "initial commit");
+    std::fs::remove_file(dir.path().join("old.txt")).unwrap();
+    write_file(dir.path(), "new.txt", "one\nTWO\nthree\nfour\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("old.txt")).unwrap();
+    index.add_path(std::path::Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let status = sidecar.call(2, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(
+        status["result"],
+        serde_json::json!([{"path": "new.txt", "oldPath": "old.txt", "staged": true, "kind": "Renamed"}])
+    );
+
+    let diff = sidecar.call(
+        3,
+        "get_working_diff",
+        serde_json::json!({"repoPath": repo_path, "path": "new.txt", "staged": true, "oldPath": "old.txt", "opts": {"ignoreWhitespace": false, "contextLines": 3}}),
+    );
+    let hunks = diff["result"]
+        .as_array()
+        .expect("working diff result array");
+    assert_eq!(hunks.len(), 1);
+    let edits: Vec<_> = hunks[0]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| line["origin"] != "Context")
+        .map(|line| line["content"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(edits, vec!["two\n".to_string(), "TWO\n".to_string()]);
+}

@@ -21,16 +21,21 @@ pub(super) fn get_commit_graph(
     );
 }
 
+/// With `staged` and `old_path` (a staged rename), the HEAD → index diff of both paths with
+/// rename detection, so only the edits show (#137).
 pub(super) fn get_working_diff(
     repo: &git2::Repository,
     path: String,
     staged: bool,
     opts: git_core::diff::DiffOptions,
+    old_path: Option<String>,
     reply: Sender<Result<Vec<DiffHunk>, String>>,
 ) {
-    let _ = reply.send(
-        git_core::diff::working_diff(repo, &path, staged, &opts).map_err(|error| error.to_string()),
-    );
+    let result = match old_path.filter(|_| staged) {
+        Some(old_path) => git_core::diff::staged_rename_diff(repo, &old_path, &path, &opts),
+        None => git_core::diff::working_diff(repo, &path, staged, &opts),
+    };
+    let _ = reply.send(result.map_err(|error| error.to_string()));
 }
 
 pub(super) fn get_commit_diff(
@@ -344,11 +349,13 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
+    /// `old_path`: a staged rename's old path (see `status::get_working_diff`).
     pub fn get_working_diff(
         &self,
         path: String,
         staged: bool,
         opts: git_core::diff::DiffOptions,
+        old_path: Option<String>,
     ) -> Result<Vec<DiffHunk>, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -356,6 +363,7 @@ impl WorkerHandle {
                 path,
                 staged,
                 opts,
+                old_path,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

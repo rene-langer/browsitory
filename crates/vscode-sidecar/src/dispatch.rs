@@ -250,8 +250,11 @@ fn close_repo(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct StatusEntryDto {
     path: String,
+    /// A staged rename's old path; always present (`null` otherwise).
+    old_path: Option<String>,
     staged: bool,
     kind: String,
 }
@@ -260,6 +263,7 @@ impl From<StatusEntry> for StatusEntryDto {
     fn from(entry: StatusEntry) -> Self {
         Self {
             path: entry.path,
+            old_path: entry.old_path,
             staged: entry.staged,
             kind: format!("{:?}", entry.kind),
         }
@@ -370,13 +374,21 @@ struct GetWorkingDiffParams {
     path: String,
     staged: bool,
     opts: DiffOptionsDto,
+    /// A staged rename's old path (optional, default `null`).
+    #[serde(default)]
+    old_path: Option<String>,
 }
 
 fn get_working_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetWorkingDiffParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
-        .get_working_diff(params.path, params.staged, params.opts.into())?
+        .get_working_diff(
+            params.path,
+            params.staged,
+            params.opts.into(),
+            params.old_path,
+        )?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
