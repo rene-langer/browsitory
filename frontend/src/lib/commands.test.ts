@@ -163,6 +163,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     resolveConflict: vi.fn(),
     resolveAddDeleteConflict: vi.fn(),
     markResolved: vi.fn(),
+    resolveWholeFile: vi.fn(),
     abortMerge: vi.fn(),
     openRebasePlanner: vi.fn(),
     openRebaseSelection: vi.fn(),

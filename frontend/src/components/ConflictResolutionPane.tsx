@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConflictSegment, FileConflictChoice, RepoClient } from "../ipc/RepoClient";
+import type { ConflictSegment, ConflictSide, FileConflictChoice, RepoClient } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ConflictResolutionPane.module.css";
@@ -12,12 +12,18 @@ export function ConflictResolutionPane({
   path,
   onResolve,
   onResolveAddDelete,
+  onResolveWholeFile,
+  onMarkResolved,
 }: {
   repoPath: string;
   client: RepoClient;
   path: string;
   onResolve: (path: string, resolvedContent: string) => void;
   onResolveAddDelete: (path: string, choice: FileConflictChoice) => void;
+  /** Takes one side's whole file; works for every conflict shape, binary included. */
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
+  /** Stages the file as it is on disk (the caller asks first if conflict markers remain). */
+  onMarkResolved?: () => void;
 }) {
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
@@ -57,10 +63,42 @@ export function ConflictResolutionPane({
     };
   }, [repoPath, client, path]);
 
+  // "Ours" is stage 2 (HEAD); "theirs" stage 3, the commit being applied. During a rebase that
+  // makes "ours" the branch being rebased onto, which is why the titles name what they replace.
+  const header =
+    onResolveWholeFile === undefined && onMarkResolved === undefined ? null : (
+      <Toolbar aria-label="Whole file">
+        {onResolveWholeFile !== undefined && (
+          <>
+            <button
+              disabled={!loaded}
+              title="Replace the file with the current branch's version (HEAD)."
+              onClick={() => onResolveWholeFile(path, "Ours")}
+            >
+              Use ours (whole file)
+            </button>
+            <button
+              disabled={!loaded}
+              title="Replace the file with the incoming version."
+              onClick={() => onResolveWholeFile(path, "Theirs")}
+            >
+              Use theirs (whole file)
+            </button>
+          </>
+        )}
+        {onMarkResolved !== undefined && (
+          <button disabled={!loaded} onClick={onMarkResolved}>
+            Mark resolved
+          </button>
+        )}
+      </Toolbar>
+    );
+
   if (error !== null) {
     if (isAddDeleteConflict) {
       return (
         <Panel title="Resolve conflict">
+          {header}
           <p>{error}</p>
           <Toolbar>
             <button disabled={!loaded} onClick={() => onResolveAddDelete(path, "Ours")}>
@@ -76,7 +114,13 @@ export function ConflictResolutionPane({
         </Panel>
       );
     }
-    return <p role="alert">{error}</p>;
+    if (header === null) return <p role="alert">{error}</p>;
+    return (
+      <Panel title="Resolve conflict">
+        {header}
+        <p role="alert">{error}</p>
+      </Panel>
+    );
   }
 
   const setResolutionAt = (index: number, resolution: Resolution) => {
@@ -106,6 +150,7 @@ export function ConflictResolutionPane({
 
   return (
     <Panel title="Resolve conflict">
+      {header}
       {segments.map((segment, index) =>
         segment.kind === "Clean" ? (
           <pre key={index} className={styles.segment}>

@@ -914,6 +914,7 @@ function RepoWorkspace({
                   onOpenFileHistory={fileHistory.open}
                   externalTools={externalTools}
                   onMarkResolved={appState.markResolved}
+                  onResolveWholeFile={(path, side) => void appState.resolveWholeFile(path, side)}
                   status={appState.state.status}
                   refreshGeneration={appState.state.refreshGeneration}
                   discardRequest={discardRequest}

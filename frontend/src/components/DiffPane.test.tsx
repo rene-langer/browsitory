@@ -1886,7 +1886,7 @@ describe("DiffPane external tools", () => {
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("The merge tool finished.");
-    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Mark resolved" }));
     await waitFor(() => expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt"));
     expect(onMarkResolved).toHaveBeenCalledWith("c.txt", false);
   });
@@ -1902,7 +1902,7 @@ describe("DiffPane external tools", () => {
       onMarkResolved,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Mark resolved" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Conflict markers remain in c.txt. Mark it resolved anyway?");
     fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
@@ -1926,6 +1926,29 @@ describe("DiffPane external tools", () => {
     expect(await screen.findByText("Conflict markers remain in c.txt. Mark it resolved anyway?")).toBeInTheDocument();
     fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
     expect(externalTools.dismissMergeToolResult).toHaveBeenCalledWith("c.txt");
+  });
+
+  it("the conflict pane's whole-file buttons and Mark resolved go through the section", async () => {
+    const onMarkResolved = vi
+      .fn<(path: string, force: boolean) => Promise<"Resolved" | "MarkersRemain" | null>>()
+      .mockResolvedValueOnce("MarkersRemain")
+      .mockResolvedValueOnce("Resolved");
+    const onResolveWholeFile = vi.fn();
+    renderUncommitted(conflictClient(), [{ path: "c.txt", staged: false, kind: "Conflicted" }], {
+      onMarkResolved,
+      onResolveWholeFile,
+    });
+
+    const header = await screen.findByRole("group", { name: "Whole file" });
+    await waitFor(() => expect(within(header).getByRole("button", { name: "Use theirs (whole file)" })).toBeEnabled());
+    fireEvent.click(within(header).getByRole("button", { name: "Use theirs (whole file)" }));
+    expect(onResolveWholeFile).toHaveBeenCalledWith("c.txt", "Theirs");
+
+    fireEvent.click(within(header).getByRole("button", { name: "Mark resolved" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Conflict markers remain in c.txt. Mark it resolved anyway?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
+    await waitFor(() => expect(onMarkResolved).toHaveBeenLastCalledWith("c.txt", true));
   });
 
   it("commit file sections have an actions menu with a commit diff source", async () => {

@@ -3621,7 +3621,7 @@ describe("history actions", () => {
     });
     const { result } = renderHook(() => useAppState(transferClient({ revertCommit }), TEST_REPO_PATH));
     await act(() => result.current.revertCommit("m1"));
-    expect(result.current.state.error).toContain("merge commits isn't supported");
+    expect(result.current.state.error).toContain("Choose which parent");
   });
 
   it("resetToCommit and checkoutCommit pass their arguments through", async () => {
@@ -4677,6 +4677,21 @@ describe("git hooks", () => {
     expect(result.current.state.hookFailure?.dialogOpen).toBe(true);
     act(() => result.current.dismissError());
     expect(result.current.state.hookFailure).toBeNull();
+  });
+});
+
+describe("useAppState resolveWholeFile", () => {
+  it("resolves a conflicted file with one side and refreshes", async () => {
+    const resolveWholeFile = vi.fn(async () => {});
+    const client = transferClient({ resolveWholeFile });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(async () => {
+      await result.current.resolveWholeFile("a.txt", "Ours");
+    });
+
+    expect(resolveWholeFile).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", "Ours");
+    expect(result.current.state.error).toBeNull();
   });
 });
 

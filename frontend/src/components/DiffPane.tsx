@@ -21,6 +21,7 @@ import type {
   GraphCommit,
   HeadInfo,
   MarkResolvedOutcome,
+  ConflictSide,
   RepoClient,
   StashEntry,
   StashFiles,
@@ -89,6 +90,7 @@ function UncommittedFileSection({
   onOpenFileHistory,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
   sectionRef,
 }: {
   repoPath: string;
@@ -121,6 +123,8 @@ function UncommittedFileSection({
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -417,6 +421,8 @@ function UncommittedFileSection({
               path={entry.path}
               onResolve={onResolveConflict}
               onResolveAddDelete={onResolveAddDeleteConflict}
+              onResolveWholeFile={onResolveWholeFile}
+              onMarkResolved={onMarkResolved === undefined ? undefined : () => void markResolved(false)}
             />
           ) : error !== null ? (
             <InlineError
@@ -527,6 +533,7 @@ export function DiffPane({
   stashActions,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
 }: {
   // The stash list: a selected commit id that is a stash's renders the stash view instead of
   // the commit view.
@@ -537,6 +544,8 @@ export function DiffPane({
   externalTools?: ExternalToolsApi;
   // "Mark resolved" on a conflicted file's merge tool notice.
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   // Set while the graph shows a file's history: the commit view shows only that file.
   fileHistoryFocus?: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
@@ -650,6 +659,7 @@ export function DiffPane({
         onOpenFileHistory={onOpenFileHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
+        onResolveWholeFile={onResolveWholeFile}
       />
     );
   }
@@ -748,10 +758,13 @@ function UncommittedDiffPane({
   onOpenFileHistory,
   externalTools,
   onMarkResolved,
+  onResolveWholeFile,
 }: {
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
+  // The conflict pane's "Use ours/theirs (whole file)".
+  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
@@ -1040,6 +1053,7 @@ function UncommittedDiffPane({
         onOpenFileHistory={onOpenFileHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
+        onResolveWholeFile={onResolveWholeFile}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}

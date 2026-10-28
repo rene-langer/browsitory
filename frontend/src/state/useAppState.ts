@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   BranchInfo,
+  ConflictSide,
   CreatePullRequest,
   FileConflictChoice,
   MarkResolvedOutcome,
@@ -251,6 +252,8 @@ export interface UseAppStateResult {
   mergePull(upstreamRef: string): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
+  /** See `MergeRebaseActions.resolveWholeFile`. */
+  resolveWholeFile(path: string, side: ConflictSide): Promise<void>;
   /** See `MergeRebaseActions.markResolved`. */
   markResolved(path: string, force: boolean): Promise<MarkResolvedOutcome | null>;
   abortMerge(): Promise<void>;
@@ -595,6 +598,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    resolveWholeFile,
     markResolved,
     abortMerge,
     openRebasePlanner,
@@ -716,6 +720,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mergePull,
     resolveConflict,
     resolveAddDeleteConflict,
+    resolveWholeFile,
     markResolved,
     abortMerge,
     openRebasePlanner,
