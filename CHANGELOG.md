@@ -156,10 +156,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Menus return focus to where they were opened when closed with Esc or by running an item (so a
   dialog an item opens also returns there), close on Tab, and jump to an item by its first letter.
   A menu whose items are all disabled still takes focus, so Esc and Tab work.
+- A file header's menu (changed files, commit/compare/stash files), opened by right-click or the
+  keyboard, returns focus to that header's "…" button.
 - Remote folders have a "…" actions button, like branches.
 - Command palette: **Edit remote …**, **Manage credentials for …** and **Remove remote …** for
-  each remote, and **Check out tag … (detached)** for each tag. The remote dialogs also open while
-  the Branches section is collapsed.
+  each remote, and **Check out tag … (detached)** for each tag that points (through any tags) at
+  a commit. The remote dialogs also open while the Branches section or the whole sidebar is
+  collapsed. If the remote of an open remote dialog is removed or renamed elsewhere, the dialog
+  closes with a notice.
 - The shortcut sheet (**?**) lists the context menu keys.
 
 ### Fixed

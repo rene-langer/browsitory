@@ -41,6 +41,14 @@ Deviations from the tasks below (code won where they disagreed):
   does not focus on a pointer click; `ListRow`'s `onOpenMenu` gets the row as a second argument
   for right-clicks. Rows no longer carry `aria-haspopup` (they activate on Enter; the "…" button
   is the menu button). `ContextMenu` instances are keyed per target.
+- **Review fixes, round 2:** the three remote dialogs render from `App` through a new
+  `RemoteDialogs` component (snapshot logic moved there) instead of from `BranchTree`: a
+  collapsed sidebar stays mounted but `hidden`, so a palette-opened modal there was 0×0 and left
+  the page inert. `BranchTree` renders them itself only when uncontrolled. A dialog whose remote
+  disappears without its own rename/remove running closes with the toast "Remote <name> was
+  removed or renamed." (this replaces "renders nothing"). File header menus return focus to the
+  header's "…" on right-click and keyboard. `TagInfo` gained `commitId` (peeled in git-core,
+  `null` for tree/blob tags); palette tag checkout uses it.
 - **Task 9:** the E2E spec has a third test, Shift+F10 on a remote folder header. Shift+F10 works
   through WebKitGTK's WebDriver, so no Menu-key fallback was needed.
 
