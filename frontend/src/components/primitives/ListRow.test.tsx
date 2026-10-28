@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ListRow } from "./ListRow";
 
 describe("ListRow", () => {
@@ -157,5 +157,90 @@ describe("ListRow", () => {
     fireEvent.keyDown(inner, { key: " " });
     expect(onDoubleClick).not.toHaveBeenCalled();
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("ListRow onOpenMenu", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function rect(left: number, top: number, width: number, height: number) {
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  function renderRow(onOpenMenu = vi.fn(), selected?: boolean) {
+    render(
+      <ul>
+        <ListRow onClick={vi.fn()} selected={selected} onOpenMenu={onOpenMenu}>
+          row content <button>inner</button> <input aria-label="field" />
+        </ListRow>
+      </ul>,
+    );
+    return { onOpenMenu, row: screen.getByText(/row content/).closest("li") as HTMLElement };
+  }
+
+  it.each([[{ key: "ContextMenu" }], [{ key: "F10", shiftKey: true }]])("opens at the row's bottom-left on %j", (init) => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(10, 20, 200, 22));
+    const { onOpenMenu, row } = renderRow();
+    const prevented = !fireEvent.keyDown(row, init);
+    expect(prevented).toBe(true);
+    expect(onOpenMenu).toHaveBeenCalledWith({ x: 10, y: 42 });
+  });
+
+  it("opens from a key pressed on a nested button", () => {
+    const { onOpenMenu } = renderRow();
+    fireEvent.keyDown(screen.getByRole("button", { name: "inner" }), { key: "ContextMenu" });
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores the key inside a text field", () => {
+    const { onOpenMenu } = renderRow();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "field" }), { key: "F10", shiftKey: true });
+    expect(onOpenMenu).not.toHaveBeenCalled();
+  });
+
+  it("opens at the pointer on right-click", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(0, 0, 300, 30));
+    const { onOpenMenu, row } = renderRow();
+    const allowed = fireEvent.contextMenu(row, { clientX: 50, clientY: 12 });
+    expect(allowed).toBe(false);
+    expect(onOpenMenu).toHaveBeenCalledWith({ x: 50, y: 12 });
+  });
+
+  it("advertises the menu", () => {
+    const { row } = renderRow();
+    expect(row).toHaveAttribute("aria-haspopup", "menu");
+    expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10 ContextMenu");
+  });
+
+  it("leaves keys to the container on a container-owned row", () => {
+    const { onOpenMenu, row } = renderRow(vi.fn(), false);
+    expect(row).not.toHaveAttribute("aria-keyshortcuts");
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(onOpenMenu).not.toHaveBeenCalled();
+    fireEvent.contextMenu(row);
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it("still activates with Enter when it has a menu", () => {
+    const onClick = vi.fn();
+    render(
+      <ul>
+        <ListRow onClick={onClick} onOpenMenu={vi.fn()}>
+          row
+        </ListRow>
+      </ul>,
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "row" }), { key: "Enter" });
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

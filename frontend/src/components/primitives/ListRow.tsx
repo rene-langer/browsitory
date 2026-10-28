@@ -1,5 +1,13 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { isMenuKey, menuAnchor, rectAnchor } from "../../lib/menuKeys";
 import styles from "./ListRow.module.css";
+
+type MenuAnchor = { x: number; y: number };
+
+// `onContextMenu` (the raw event) and `onOpenMenu` (an anchor, keyboard included) are exclusive.
+type MenuProps =
+  | { onContextMenu?: (event: MouseEvent) => void; onOpenMenu?: never }
+  | { onOpenMenu?: (anchor: MenuAnchor) => void; onContextMenu?: never };
 
 /**
  * A row inside a list. Which interaction semantics it renders is decided entirely by the props
@@ -37,6 +45,15 @@ import styles from "./ListRow.module.css";
  * alongside the `j`/`k`/arrow navigation the container already owns (advertised with
  * `aria-keyshortcuts`). The container is the single tab stop, so that keeps the whole flow
  * keyboard-reachable without inventing a second focus model inside each row.
+ *
+ * ## Context menus: `onOpenMenu`
+ *
+ * A row with a context menu passes `onOpenMenu` (instead of `onContextMenu`) and gets an anchor
+ * to open it at: the pointer for a right-click, the row's bottom-left corner for a keyboard-
+ * generated `contextmenu` (see `menuAnchor`). A standalone row also opens it from the Menu key
+ * or Shift+F10, pressed on the row or on one of its nested buttons (not inside a text field,
+ * e.g. an inline rename input), and advertises that with `aria-keyshortcuts`. Container-owned
+ * rows only get the right-click: their container owns the keys (as `CommitGraph` does).
  */
 export function ListRow({
   id,
@@ -44,6 +61,7 @@ export function ListRow({
   onClick,
   onDoubleClick,
   onContextMenu,
+  onOpenMenu,
   onMouseEnter,
   onMouseLeave,
   className,
@@ -56,14 +74,13 @@ export function ListRow({
   // Standalone rows only (see below) — a row whose container owns selection has no use for a
   // second, "activate" action distinct from `onClick`.
   onDoubleClick?: (event?: MouseEvent) => void;
-  onContextMenu?: (event: MouseEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
   className?: string;
   // Lets the command palette find a commit row to open its context menu.
   "data-commit-id"?: string;
   children: ReactNode;
-}) {
+} & MenuProps) {
   const interactive = onClick !== undefined;
   // `selected` present means the surrounding list tracks a selection and therefore already
   // handles keyboard navigation itself — see the doc comment above.
@@ -71,6 +88,13 @@ export function ListRow({
   const containerOwnsSelection = interactive && selected !== undefined;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
+    if (onOpenMenu !== undefined && isMenuKey(event)) {
+      // The row's nested buttons (swatch, "…") open the row's menu too; text fields keep the key.
+      if ((event.target as HTMLElement).closest("input, textarea, select") !== null) return;
+      event.preventDefault();
+      onOpenMenu(rectAnchor(event.currentTarget));
+      return;
+    }
     if (onClick === undefined) return;
     // Keys bubbling from nested controls (swatch toggle, "..." button) belong to those controls.
     if (event.target !== event.currentTarget) return;
@@ -94,10 +118,19 @@ export function ListRow({
       role={standalone ? "button" : containerOwnsSelection ? "option" : undefined}
       tabIndex={standalone ? 0 : undefined}
       aria-selected={selected}
+      aria-haspopup={onOpenMenu !== undefined ? "menu" : undefined}
+      aria-keyshortcuts={onOpenMenu !== undefined && standalone ? "Shift+F10 ContextMenu" : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onKeyDown={standalone ? handleKeyDown : undefined}
-      onContextMenu={onContextMenu}
+      onContextMenu={
+        onOpenMenu !== undefined
+          ? (event) => {
+              event.preventDefault();
+              onOpenMenu(menuAnchor(event, event.currentTarget));
+            }
+          : onContextMenu
+      }
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
