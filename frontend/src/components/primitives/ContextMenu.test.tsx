@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ContextMenu } from "./ContextMenu";
+import { useEffect, useState } from "react";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ContextMenu", () => {
   it("renders checked items as menuitemcheckbox with aria-checked", () => {
@@ -224,5 +226,228 @@ describe("ContextMenu", () => {
       expect(screen.getByRole("menuitem", { name: "First" })).toHaveAttribute("tabindex", "-1");
       expect(screen.getByRole("menuitem", { name: "Second" })).toHaveAttribute("tabindex", "0");
     });
+  });
+});
+
+function Host({ items, onClose = () => {} }: { items: ContextMenuItem[]; onClose?: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>Trigger</button>
+      <button>After</button>
+      {open && (
+        <ContextMenu
+          x={0}
+          y={0}
+          items={items}
+          onClose={() => {
+            onClose();
+            setOpen(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function openFromTrigger() {
+  const trigger = screen.getByRole("button", { name: "Trigger" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  return trigger;
+}
+
+describe("ContextMenu focus and keys", () => {
+  it("returns focus to the trigger on Escape", () => {
+    render(<Host items={[{ label: "One", onSelect: () => {} }]} />);
+    const trigger = openFromTrigger();
+    expect(screen.getByRole("menuitem", { name: "One" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("Tab closes the menu, refocuses the trigger and lets the browser move on", () => {
+    render(<Host items={[{ label: "One", onSelect: () => {} }]} />);
+    const trigger = openFromTrigger();
+    const notPrevented = fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Tab" });
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("refocuses the trigger before running the item, so a dialog it opens returns there", () => {
+    function DialogHost() {
+      const [dialog, setDialog] = useState(false);
+      return (
+        <>
+          <Host items={[{ label: "Ask", onSelect: () => setDialog(true) }]} />
+          {dialog && (
+            <ConfirmDialog
+              ariaLabel="Sure"
+              message="Sure?"
+              confirmLabel="Yes"
+              onConfirm={() => setDialog(false)}
+              onCancel={() => setDialog(false)}
+            />
+          )}
+        </>
+      );
+    }
+    render(<DialogHost />);
+    const trigger = openFromTrigger();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Ask" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", hidden: true }));
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("does not move focus on an outside click", () => {
+    render(<Host items={[{ label: "One", onSelect: () => {} }]} />);
+    openFromTrigger();
+    const after = screen.getByRole("button", { name: "After" });
+    fireEvent.mouseDown(after);
+    after.focus();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(after).toHaveFocus();
+  });
+
+  it("still closes when the trigger was removed meanwhile", () => {
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const onClose = vi.fn();
+    render(<ContextMenu x={0} y={0} items={[{ label: "One", onSelect: () => {} }]} onClose={onClose} />);
+    trigger.remove();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["Enter", " "])("%j activates the focused item once and closes", (key) => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(<Host items={[{ label: "One", onSelect }]} onClose={onClose} />);
+    const trigger = openFromTrigger();
+    const prevented = !fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key });
+    expect(prevented).toBe(true);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveFocus();
+  });
+
+  it("Enter on a menu without enabled items does nothing", () => {
+    const onSelect = vi.fn();
+    render(<ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "Off", onSelect, disabled: true }]} />);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Enter" });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("typeahead jumps to the next enabled item starting with the letter, wrapping", () => {
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => {}}
+        items={[
+          { label: "Alpha", onSelect: () => {} },
+          { label: "Beta", onSelect: () => {} },
+          { label: "Blocked", onSelect: () => {}, disabled: true },
+          { label: "Bravo", onSelect: () => {} },
+        ]}
+      />,
+    );
+    const menu = screen.getByRole("menu");
+    fireEvent.keyDown(menu, { key: "b" });
+    expect(screen.getByRole("menuitem", { name: "Beta" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "B" });
+    expect(screen.getByRole("menuitem", { name: "Bravo" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "b" });
+    expect(screen.getByRole("menuitem", { name: "Beta" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "a", ctrlKey: true });
+    expect(screen.getByRole("menuitem", { name: "Beta" })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "z" });
+    expect(screen.getByRole("menuitem", { name: "Beta" })).toHaveFocus();
+  });
+
+  it("swallows contextmenu events on its items (no native menu, no second row menu)", () => {
+    const onRowMenu = vi.fn();
+    render(
+      <div onContextMenu={onRowMenu}>
+        <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />
+      </div>,
+    );
+    const allowed = fireEvent.contextMenu(screen.getByRole("menuitem", { name: "One" }));
+    expect(allowed).toBe(false);
+    expect(onRowMenu).not.toHaveBeenCalled();
+  });
+
+  it("focuses the menu itself when every item is disabled, and Escape still closes", () => {
+    const onClose = vi.fn();
+    render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "Off", onSelect: () => {}, disabled: true }]} />);
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("returnFocusTo overrides the captured trigger", () => {
+    const other = document.createElement("button");
+    document.body.appendChild(other);
+    const onClose = vi.fn();
+    render(
+      <ContextMenu x={0} y={0} onClose={onClose} returnFocusTo={other} items={[{ label: "One", onSelect: () => {} }]} />,
+    );
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(other).toHaveFocus();
+    other.remove();
+  });
+
+  it("Escape inside the menu does not reach ancestor key handlers", () => {
+    const onAncestorKey = vi.fn();
+    render(
+      <div onKeyDown={onAncestorKey}>
+        <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />
+      </div>,
+    );
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(onAncestorKey).not.toHaveBeenCalled();
+  });
+
+  it("swallows the Menu key and Shift+F10 inside the menu", () => {
+    const onAncestorKey = vi.fn();
+    render(
+      <div onKeyDown={onAncestorKey}>
+        <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />
+      </div>,
+    );
+    const item = screen.getByRole("menuitem", { name: "One" });
+    expect(fireEvent.keyDown(item, { key: "ContextMenu" })).toBe(false);
+    expect(fireEvent.keyDown(item, { key: "F10", shiftKey: true })).toBe(false);
+    expect(onAncestorKey).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("takes the trigger after the commit that opens it, e.g. once a closing palette restored focus", () => {
+    // Like the command palette: its input unmounts in the same commit the menu mounts, and its
+    // cleanup puts focus back where it was before the palette opened.
+    function Palette() {
+      useEffect(() => () => document.getElementById("origin")?.focus(), []);
+      return <input aria-label="palette" autoFocus />;
+    }
+    function Host({ menuOpen, paletteOpen }: { menuOpen: boolean; paletteOpen: boolean }) {
+      return (
+        <>
+          <button id="origin">Origin</button>
+          {paletteOpen && <Palette />}
+          {menuOpen && <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />}
+        </>
+      );
+    }
+    const { rerender } = render(<Host menuOpen={false} paletteOpen />);
+    expect(screen.getByRole("textbox", { name: "palette" })).toHaveFocus();
+    // One commit: the palette closes and the menu opens.
+    rerender(<Host menuOpen paletteOpen={false} />);
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Origin" })).toHaveFocus();
   });
 });

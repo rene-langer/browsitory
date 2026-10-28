@@ -42,6 +42,7 @@ const BASE_STATE: AppState = {
   error: null,
   pending: false,
   addRemoteDraftOpen: false,
+  remoteDialog: null,
   refreshGeneration: 0,
   headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
   forcePushOffer: null,
@@ -135,7 +136,7 @@ describe("useMutationRunner's optimistic variants", () => {
 
     const successResult = await act(() =>
       result.current.runOptimisticMutationWithMessage(
-        (prev) => ({ ...prev, tags: [{ name: "v1", targetId: "", annotated: false, message: null, taggerName: null, timestamp: null }] }),
+        (prev) => ({ ...prev, tags: [{ name: "v1", targetId: "", commitId: null, annotated: false, message: null, taggerName: null, timestamp: null }] }),
         async () => {},
       ),
     );
@@ -144,7 +145,7 @@ describe("useMutationRunner's optimistic variants", () => {
 
     const failureResult = await act(() =>
       result.current.runOptimisticMutationWithMessage(
-        (prev) => ({ ...prev, tags: [...prev.tags, { name: "v2", targetId: "", annotated: false, message: null, taggerName: null, timestamp: null }] }),
+        (prev) => ({ ...prev, tags: [...prev.tags, { name: "v2", targetId: "", commitId: null, annotated: false, message: null, taggerName: null, timestamp: null }] }),
         async () => {
           throw new Error("tag exists");
         },

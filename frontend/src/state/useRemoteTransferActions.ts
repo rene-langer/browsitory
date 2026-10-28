@@ -12,7 +12,7 @@ import type {
   RunOptimisticMutationWithOutcome,
 } from "./useMutationRunner";
 import type { UpstreamInfo } from "../ipc/RepoClient";
-import type { AppState } from "./useAppState";
+import type { AppState, RemoteDialog } from "./useAppState";
 import { hookFailedMessage, type PushRequest } from "../lib/hookFailure";
 
 function transferFailureMessage(progress: TransferProgress, upstreamLabel: string): string {
@@ -109,6 +109,9 @@ export interface RemoteTransferActions {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
+  // Opens a remote's Edit / Credentials / Remove dialog (BranchTree renders it); no client call.
+  openRemoteDialog(kind: RemoteDialog["kind"], remoteName: string): void;
+  closeRemoteDialog(): void;
   requestForcePush(remoteName: string): void;
   cancelForcePush(): void;
   forcePushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
@@ -392,7 +395,7 @@ export function useRemoteTransferActions(
           ...prev,
           tags: [
             ...prev.tags,
-            { name, targetId: "", annotated: message !== null, message, taggerName: null, timestamp: null },
+            { name, targetId: "", commitId: null, annotated: message !== null, message, taggerName: null, timestamp: null },
           ],
         }),
         () => client.createTag(repoPath, name, message),
@@ -545,6 +548,12 @@ export function useRemoteTransferActions(
   const closeAddRemoteDraft = useCallback(() => {
     setState((prev) => ({ ...prev, addRemoteDraftOpen: false }));
   }, [setState]);
+  const openRemoteDialog = useCallback(
+    (kind: RemoteDialog["kind"], remoteName: string) =>
+      setState((prev) => ({ ...prev, remoteDialog: { kind, remoteName } })),
+    [setState],
+  );
+  const closeRemoteDialog = useCallback(() => setState((prev) => ({ ...prev, remoteDialog: null })), [setState]);
 
   return {
     addRemote,
@@ -566,6 +575,8 @@ export function useRemoteTransferActions(
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
+    openRemoteDialog,
+    closeRemoteDialog,
     requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,

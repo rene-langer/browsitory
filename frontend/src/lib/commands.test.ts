@@ -47,7 +47,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
         },
       ],
       remotes: [{ name: "origin", fetchUrl: "https://example.com/repo.git", pushUrl: null, authMode: null, authUsername: null }],
-      tags: [{ name: "v1.0", targetId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
+      tags: [{ name: "v1.0", targetId: "aaa", commitId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
       upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
       remoteUpstreams: {},
       forgeRepositories: [],
@@ -80,6 +80,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       error: null,
       pending: false,
       addRemoteDraftOpen: false,
+      remoteDialog: null,
       refreshGeneration: 0,
       undoState: { undo: null, redo: null },
       ...overrides,
@@ -130,6 +131,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openCreateBranchDraft: vi.fn(),
     closeCreateBranchDraft: vi.fn(),
     openAddRemoteDraft: vi.fn(),
+    openRemoteDialog: vi.fn(),
+    closeRemoteDialog: vi.fn(),
     closeAddRemoteDraft: vi.fn(),
     requestForcePush: vi.fn(),
     cherryPick: vi.fn(),
@@ -731,6 +734,7 @@ describe("buildCommands", () => {
         expect(ids.some((id) => id.startsWith("push-tags:"))).toBe(false);
         expect(ids).not.toContain("pull");
         expect(ids.some((id) => id.startsWith("delete-tag:"))).toBe(false);
+        expect(ids.some((id) => /^(edit-remote|manage-credentials|remove-remote|checkout-tag):/.test(id))).toBe(false);
         expect(ids.some((id) => id.startsWith("open-worktree:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("remove-worktree:"))).toBe(false);
         expect(ids).not.toContain("prune-worktrees");
@@ -1166,5 +1170,56 @@ describe("preferences and external tool commands", () => {
     expect(labels).toEqual(
       expect.arrayContaining(["Open terminal here", "Reveal repository", "Open current file in editor"]),
     );
+  });
+});
+
+describe("remote and tag palette entries", () => {
+  const remotes = [
+    { name: "origin", fetchUrl: "a", pushUrl: null, authMode: null, authUsername: null },
+    { name: "fork", fetchUrl: "b", pushUrl: null, authMode: null, authUsername: null },
+  ];
+  const allVisible = { stash: true, worktree: true, submodule: true, reflog: true, tags: true, pullRequests: true };
+
+  it.each([
+    ["edit-remote:fork", "Edit remote fork…", "edit"],
+    ["manage-credentials:fork", "Manage credentials for fork…", "credentials"],
+    ["remove-remote:fork", "Remove remote fork…", "remove"],
+  ] as const)("%s (%s) opens the dialog for that remote", (id, label, kind) => {
+    const appState = makeAppState({ remotes });
+    const command = buildCommands(appState).find((c) => c.id === id);
+    expect(command?.label).toBe(label);
+    command?.run();
+    expect(appState.openRemoteDialog).toHaveBeenCalledWith(kind, "fork");
+    expect(commandGroup(id)).toBe("Remotes");
+  });
+
+  it("emits one entry per remote", () => {
+    const ids = buildCommands(makeAppState({ remotes })).map((c) => c.id);
+    expect(ids.filter((id) => id.startsWith("edit-remote:"))).toEqual(["edit-remote:origin", "edit-remote:fork"]);
+    expect(ids.filter((id) => id.startsWith("manage-credentials:"))).toHaveLength(2);
+    expect(ids.filter((id) => id.startsWith("remove-remote:"))).toHaveLength(2);
+  });
+
+  it("checks out the commit a tag peels to, even with the Tags panel hidden", () => {
+    // An annotated tag of a tag targets the inner tag object; `commitId` is the peeled commit.
+    const tags = [
+      { name: "v1", targetId: "tagobj", commitId: "c1", annotated: true, message: "m", taggerName: "t", timestamp: 1 },
+    ];
+    const appState = makeAppState({ tags });
+    const command = buildCommands(appState, vi.fn(), [], vi.fn(), { ...allVisible, tags: false }).find(
+      (c) => c.id === "checkout-tag:v1",
+    );
+    expect(command?.label).toBe("Check out tag v1 (detached)");
+    command?.run();
+    expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
+    expect(commandGroup("checkout-tag:v1")).toBe("Branches");
+  });
+
+  it("offers no checkout for a tag that doesn't peel to a commit", () => {
+    const tags = [
+      { name: "tree", targetId: "t1", commitId: null, annotated: true, message: "m", taggerName: "t", timestamp: 1 },
+    ];
+    const ids = buildCommands(makeAppState({ tags })).map((c) => c.id);
+    expect(ids).not.toContain("checkout-tag:tree");
   });
 });

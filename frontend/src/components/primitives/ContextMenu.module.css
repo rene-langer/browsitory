@@ -25,7 +25,8 @@
   cursor: pointer;
 }
 
-.item:hover:not(:disabled) {
+.item:hover:not(:disabled),
+.item:focus-visible:not(:disabled) {
   background: var(--color-selected-bg);
 }
 

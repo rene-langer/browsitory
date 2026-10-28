@@ -457,6 +457,27 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it.each([
+        ["Escape", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Escape" })],
+        ["Tab", (item: HTMLElement) => fireEvent.keyDown(item, { key: "Tab" })],
+        ["item activation", (item: HTMLElement) => fireEvent.click(item)],
+      ])("a file header right-click menu returns focus to its '…' on %s", (label, close) => {
+        render();
+        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        close(screen.getByRole("menuitem", { name: label === "item activation" ? "Stash file…" : "Discard changes…" }));
+        expect(screen.queryByRole("menu")).toBeNull();
+        expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
+      });
+
+      it("a contextmenu from a header control (keyboard) returns focus to '…'", () => {
+        render();
+        const blame = screen.getAllByRole("button", { name: "Blame" })[0];
+        blame.focus();
+        fireEvent.contextMenu(blame, { clientX: 0, clientY: 0 });
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
+      });
+
       it("opens the menu for the selected row with Shift+F10", () => {
         render();
         fireEvent.click(screen.getByText("src/a.ts (Modified)"));
@@ -464,6 +485,29 @@ describe("DiffPane", () => {
         fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "F10", shiftKey: true });
 
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
+      });
+
+      it("opens the menu of the row holding focus, not the selected row", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        const other = screen.getByRole("button", { name: "Stage logs/run.log" });
+        other.focus();
+
+        const prevented = !fireEvent.keyDown(other, { key: "ContextMenu" });
+
+        expect(prevented).toBe(true);
+        expect(screen.getByRole("menuitem", { name: "Ignore all *.log" })).toBeInTheDocument();
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(other).toHaveFocus();
+      });
+
+      it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {
+        render();
+        screen.getByRole("button", { name: "Stage logs/run.log" }).focus();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+        fireEvent.click(actions, { detail: 1 });
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
+        expect(actions).toHaveFocus();
       });
 
       it("keeps list key bindings out of an open menu", () => {

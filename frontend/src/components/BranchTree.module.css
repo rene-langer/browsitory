@@ -65,6 +65,30 @@
   color: var(--color-text);
 }
 
+/* A remote folder: its header plus a "…" actions button revealed on hover/focus, like a
+   branch row's. */
+.folderRow {
+  display: flex;
+  align-items: center;
+  padding-right: var(--space-2);
+}
+
+.folderRow > .folderHeader {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.folderRow > .iconButton {
+  flex: 0 0 auto;
+  opacity: 0;
+}
+
+.folderRow:hover > .iconButton,
+.folderRow:focus-within > .iconButton,
+.folderRow > .iconButton[aria-expanded="true"] {
+  opacity: 1;
+}
+
 .chevron {
   flex: 0 0 auto;
   transition: transform 120ms ease;

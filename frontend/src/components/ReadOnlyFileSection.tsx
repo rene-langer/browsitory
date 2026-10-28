@@ -1,5 +1,5 @@
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BlameLine, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
@@ -13,6 +13,7 @@ import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 
 /**
@@ -61,7 +62,8 @@ export function ReadOnlyFileSection({
   const isImage = previewSource !== undefined && imageMimeType(path) !== null;
   const [imageAsText, setImageAsText] = useState(false);
   const showImage = isImage && !imageAsText;
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
+  const actionsRef = useRef<HTMLButtonElement>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
   const onPickFileAction = (action: FileAction) => {
     if (tools === null) return;
@@ -136,7 +138,19 @@ export function ReadOnlyFileSection({
             ? undefined
             : (event) => {
                 event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY });
+                setMenu({ ...menuAnchor(event, event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
+              }
+        }
+        // The Menu key or Shift+F10 on any header control (collapse, Blame, History, "…") opens the
+        // file menu at the header. Every header menu (this, or a right-click on the non-focusable
+        // header) returns focus to the header's "…" when it closes from the keyboard or an item.
+        onKeyDown={
+          tools === null
+            ? undefined
+            : (event) => {
+                if (!isMenuKey(event)) return;
+                event.preventDefault();
+                setMenu({ ...rectAnchor(event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
               }
         }
       >
@@ -156,11 +170,16 @@ export function ReadOnlyFileSection({
             <button
               type="button"
               className={styles.stageToggle}
+              ref={actionsRef}
               aria-label={`Actions for ${path}`}
               aria-haspopup="menu"
               onClick={(event) => {
-                const r = event.currentTarget.getBoundingClientRect();
-                setMenu({ x: r.left, y: r.bottom });
+                // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
+                // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
+                setMenu({
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
+                });
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />
@@ -205,7 +224,13 @@ export function ReadOnlyFileSection({
         </div>
       )}
       {menu !== null && (
-        <ContextMenu x={menu.x} y={menu.y} items={commitFileMenuItems(onPickFileAction)} onClose={() => setMenu(null)} />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          items={commitFileMenuItems(onPickFileAction)}
+          onClose={() => setMenu(null)}
+        />
       )}
     </li>
   );

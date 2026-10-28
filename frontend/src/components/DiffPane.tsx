@@ -54,6 +54,7 @@ import {
 } from "./FileActionsMenu";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
@@ -132,7 +133,8 @@ function UncommittedFileSection({
   onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
+  const actionsRef = useRef<HTMLButtonElement>(null);
   const [confirmMarkers, setConfirmMarkers] = useState(false);
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
@@ -296,7 +298,8 @@ function UncommittedFileSection({
           hasFileActions
             ? (event) => {
                 event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY });
+                // The header isn't focusable: closing from the keyboard or an item lands on "…".
+                setMenu({ ...menuAnchor(event, event.currentTarget), returnFocusTo: actionsRef.current ?? undefined });
               }
             : undefined
         }
@@ -335,12 +338,17 @@ function UncommittedFileSection({
             <button
               type="button"
               className={styles.stageToggle}
+              ref={actionsRef}
               aria-label={`Actions for ${entry.path}`}
               aria-haspopup="menu"
               onClick={(event) => {
                 event.stopPropagation();
-                const r = event.currentTarget.getBoundingClientRect();
-                setMenu({ x: r.left, y: r.bottom });
+                // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
+                // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
+                setMenu({
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
+                });
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />
@@ -480,6 +488,7 @@ function UncommittedFileSection({
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
           items={menuItems}
           onClose={() => setMenu(null)}
         />
@@ -1022,12 +1031,14 @@ function UncommittedDiffPane({
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
-    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-      // Opens the selected row's actions menu by activating its "⋯" button (conflicted and staged
-      // rows have none, so this is then a no-op).
-      const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
-        '[aria-selected="true"] button[aria-haspopup="menu"]',
-      );
+    } else if (isMenuKey(event)) {
+      // Opens a row's actions menu by activating its "⋯" button: the row holding focus when focus
+      // is on one of its controls (Tab can put it on a row that isn't selected), else the
+      // selected row. A row without a "⋯" (no actions for it) makes this a no-op.
+      const row =
+        (event.target as HTMLElement).closest('[role="option"]') ??
+        event.currentTarget.querySelector('[aria-selected="true"]');
+      const trigger = row?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]') ?? null;
       if (trigger !== null) {
         event.preventDefault();
         trigger.click();

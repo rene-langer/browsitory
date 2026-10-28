@@ -1,6 +1,6 @@
 import { branchNameProblem } from "../lib/refName";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
-import { ChevronRight, Cloud, Copy, GitBranch, MoreHorizontal, Plus } from "lucide-react";
+import { ChevronRight, Cloud, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
   BranchInfo,
   PullOutcome,
@@ -16,17 +16,37 @@ import { FormDialog } from "./primitives/FormDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
+import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
+import type { RemoteDialog } from "../state/useAppState";
+import { RemoteDialogs } from "./RemoteDialogs";
 import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
 
-type RowContextMenu =
-  | { kind: "local-branch"; name: string; x: number; y: number }
-  | { kind: "add"; x: number; y: number }
-  | { kind: "remote-folder"; name: string; x: number; y: number }
-  | { kind: "remote-branch"; remoteName: string; branchName: string; x: number; y: number };
+// `returnFocusTo`: the element the menu was opened from by the pointer, which is not necessarily
+// focused (WebKit focuses neither a clicked button nor a right-clicked row); without it
+// `ContextMenu` returns focus to whatever had focus when it opened (right for a key).
+type RowContextMenu = { x: number; y: number; returnFocusTo?: HTMLElement } & (
+  | { kind: "local-branch"; name: string }
+  | { kind: "add" }
+  | { kind: "remote-folder"; name: string }
+  | { kind: "remote-branch"; remoteName: string; branchName: string }
+);
+
+/** A fresh `ContextMenu` per target, so a menu re-targeted while open never keeps the old one's focus state. */
+function rowMenuKey(menu: RowContextMenu): string {
+  switch (menu.kind) {
+    case "local-branch":
+    case "remote-folder":
+      return `${menu.kind}:${menu.name}`;
+    case "remote-branch":
+      return `${menu.kind}:${menu.remoteName}/${menu.branchName}`;
+    case "add":
+      return menu.kind;
+  }
+}
 
 function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
   if (!existingNames.includes("origin")) return "origin";
@@ -90,6 +110,8 @@ export function BranchTree({
   onOpenDeleteRemoteBranch,
   onCompareBranch,
   refreshGeneration,
+  remoteDialog: remoteDialogProp,
+  onRemoteDialogChange,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -172,6 +194,14 @@ export function BranchTree({
    * their list in place and closed ones forget theirs.
    */
   refreshGeneration: number;
+  /**
+   * The open remote dialog (Edit / Credentials / Remove), controlled by app state so the palette
+   * can open it. Controlled when `onRemoteDialogChange` is given, local state otherwise (same
+   * pattern as `DiffPane`'s `discardRequest`). Controlled, the owner renders the dialogs
+   * (`RemoteDialogs`); uncontrolled, this tree does.
+   */
+  remoteDialog?: RemoteDialog | null;
+  onRemoteDialogChange?: (dialog: RemoteDialog | null) => void;
 }) {
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -193,15 +223,9 @@ export function BranchTree({
 
   const [openRemotes, setOpenRemotes] = useState<Record<string, boolean>>({});
   const [remoteBranches, setRemoteBranches] = useState<Record<string, string[]>>({});
-  const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
-  const [editingRemote, setEditingRemote] = useState<RemoteInfo | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editFetchUrl, setEditFetchUrl] = useState("");
-  const [editPushUrl, setEditPushUrl] = useState("");
-  const [credentialRemote, setCredentialRemote] = useState<string | null>(null);
-  const [credentialMode, setCredentialMode] = useState<RemoteAuthMode>("HttpsToken");
-  const [credentialUsername, setCredentialUsername] = useState("");
-  const accessTokenRef = useRef<HTMLInputElement>(null);
+  const [localRemoteDialog, setLocalRemoteDialog] = useState<RemoteDialog | null>(null);
+  const remoteDialog = onRemoteDialogChange !== undefined ? (remoteDialogProp ?? null) : localRemoteDialog;
+  const setRemoteDialog = onRemoteDialogChange ?? setLocalRemoteDialog;
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
@@ -276,13 +300,11 @@ export function BranchTree({
                   if (!isRebasing) onSwitchBranch(branch.name);
                 }
           }
-          onContextMenu={
+          onOpenMenu={
             isRenaming
               ? undefined
-              : (event) => {
-                  event.preventDefault();
-                  openRowMenu({ kind: "local-branch", name: branch.name, x: event.clientX, y: event.clientY });
-                }
+              : (anchor, trigger) =>
+                  openRowMenu({ kind: "local-branch", name: branch.name, ...anchor, returnFocusTo: trigger })
           }
         >
           <div className={styles.rowInner}>
@@ -336,10 +358,15 @@ export function BranchTree({
                 className={styles.iconButton}
                 aria-label={`Actions for ${branch.name}`}
                 aria-haspopup="menu"
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  openRowMenu({ kind: "local-branch", name: branch.name, x: rect.left, y: rect.bottom });
-                }}
+                aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
+                onClick={(event) =>
+                  openRowMenu({
+                    kind: "local-branch",
+                    name: branch.name,
+                    ...rectAnchor(event.currentTarget),
+                    returnFocusTo: event.currentTarget,
+                  })
+                }
               >
                 <MoreHorizontal size={12} aria-hidden="true" />
               </button>
@@ -385,10 +412,9 @@ export function BranchTree({
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
           }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openRowMenu({ kind: "remote-branch", remoteName, branchName, x: event.clientX, y: event.clientY });
-          }}
+          onOpenMenu={(anchor, trigger) =>
+            openRowMenu({ kind: "remote-branch", remoteName, branchName, ...anchor, returnFocusTo: trigger })
+          }
         >
           <div className={styles.rowInner}>
             <button
@@ -408,19 +434,26 @@ export function BranchTree({
             <span className={styles.name} title={branchName}>
               {node.name}
             </span>
-            {/* Explicit affordance for the actions `onContextMenu` above only reaches via a
-                native contextmenu event (right-click, or Shift+F10/Menu-key once the branch
-                name button has focus) — without this, a keyboard/screen-reader user has no
-                visible indication those actions exist at all (AUD-2026-09-05-FE-001). */}
+            {/* Visible affordance for the row's menu (which the row itself also opens on
+                right-click, the Menu key or Shift+F10): without it a pointer or screen-reader
+                user has no indication those actions exist (AUD-2026-09-05-FE-001). */}
             <button
               type="button"
               className={styles.iconButton}
               aria-label={`Actions for ${branchName}`}
               aria-haspopup="menu"
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
-                openRowMenu({ kind: "remote-branch", remoteName, branchName, x: rect.left, y: rect.bottom });
-              }}
+              aria-expanded={
+                rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
+              }
+              onClick={(event) =>
+                openRowMenu({
+                  kind: "remote-branch",
+                  remoteName,
+                  branchName,
+                  ...rectAnchor(event.currentTarget),
+                  returnFocusTo: event.currentTarget,
+                })
+              }
             >
               <MoreHorizontal size={12} aria-hidden="true" />
             </button>
@@ -530,29 +563,17 @@ export function BranchTree({
       },
       {
         label: "Edit remote",
-        onSelect: () => {
-          setEditingRemote(remote);
-          setEditName(remote.name);
-          setEditFetchUrl(remote.fetchUrl);
-          setEditPushUrl(remote.pushUrl ?? "");
-        },
+        onSelect: () => setRemoteDialog({ kind: "edit", remoteName: remote.name }),
       },
       {
         label: "Manage credentials",
-        onSelect: () => {
-          setCredentialRemote(remote.name);
-          setCredentialMode(remote.authMode ?? "HttpsToken");
-          setCredentialUsername(remote.authUsername ?? "");
-        },
+        onSelect: () => setRemoteDialog({ kind: "credentials", remoteName: remote.name }),
       },
       {
         label: "Remove remote",
         destructive: true,
         disabled: operationDisabled,
-        onSelect: () =>
-          setRemoveConfirmation(
-            (remoteUpstreams[remote.name]?.length ?? 0) > 0 ? `clear:${remote.name}` : remote.name,
-          ),
+        onSelect: () => setRemoteDialog({ kind: "remove", remoteName: remote.name }),
       },
     ];
   }
@@ -720,570 +741,486 @@ export function BranchTree({
   }
 
   return (
-    <AccordionSection
-      title="Branches"
-      storageKey="sidebar-branches"
-      icon={GitBranch}
-      count={branches.length}
-      defaultOpen
-      actions={
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Add"
-          aria-haspopup="menu"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            openRowMenu({ kind: "add", x: rect.left, y: rect.bottom });
-          }}
-        >
-          <Plus size={14} aria-hidden="true" />
-        </button>
-      }
-    >
-      {createBranchDraft !== null && (
-        <form
-          className={styles.draftForm}
-          aria-label="New branch"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (newBranchProblem === null) void submitCreate();
-          }}
-        >
-          <p className={styles.draftBase}>
-            New branch from <strong>{createBaseLabel}</strong>
-          </p>
-          <label htmlFor="new-branch-name" className={styles.draftLabel}>
-            Branch name
-          </label>
-          <input
-            id="new-branch-name"
-            autoFocus
-            value={newBranchName}
-            aria-invalid={newBranchProblem !== null}
-            aria-describedby={newBranchProblem !== null ? "new-branch-name-problem" : undefined}
-            onChange={(event) => {
-              setNewBranchName(event.target.value);
-              setCreateError(null);
+    <>
+      <AccordionSection
+        title="Branches"
+        storageKey="sidebar-branches"
+        icon={GitBranch}
+        count={branches.length}
+        defaultOpen
+        actions={
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Add"
+            aria-haspopup="menu"
+            aria-expanded={rowMenu?.kind === "add"}
+            onClick={(event) => openRowMenu({ kind: "add", ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget })}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+        }
+      >
+        {createBranchDraft !== null && (
+          <form
+            className={styles.draftForm}
+            aria-label="New branch"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (newBranchProblem === null) void submitCreate();
             }}
-            placeholder="New branch name"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setCreateError(null);
-                onCloseCreateBranchDraft();
-              }
-            }}
-          />
-          {newBranchProblem !== null && (
-            <p id="new-branch-name-problem" className={styles.draftProblem}>
-              {newBranchProblem}
+          >
+            <p className={styles.draftBase}>
+              New branch from <strong>{createBaseLabel}</strong>
             </p>
-          )}
-          <label className={styles.draftCheckbox}>
+            <label htmlFor="new-branch-name" className={styles.draftLabel}>
+              Branch name
+            </label>
             <input
-              type="checkbox"
-              checked={checkoutAfterCreate}
-              onChange={(event) => setCheckoutAfterCreate(event.target.checked)}
-            />
-            Check out after creating
-          </label>
-          <div className={styles.draftActions}>
-            <button type="submit" disabled={newBranchName.trim() === "" || newBranchProblem !== null || isRebasing}>
-              Create
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreateError(null);
-                onCloseCreateBranchDraft();
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-          {createError !== null && <InlineError message={createError} onDismiss={() => setCreateError(null)} />}
-        </form>
-      )}
-
-      {addRemoteDraftOpen && (
-        <form
-          className={styles.form}
-          aria-label="Add remote"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") onCloseAddRemoteDraft();
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitAddRemote();
-          }}
-        >
-          <label className={styles.label}>
-            Remote name
-            <input
+              id="new-branch-name"
               autoFocus
-              placeholder="origin"
-              value={newRemoteName}
+              value={newBranchName}
+              aria-invalid={newBranchProblem !== null}
+              aria-describedby={newBranchProblem !== null ? "new-branch-name-problem" : undefined}
               onChange={(event) => {
-                setNameTouched(true);
-                setNewRemoteName(event.target.value);
+                setNewBranchName(event.target.value);
+                setCreateError(null);
               }}
-            />
-          </label>
-          <label className={styles.label}>
-            Fetch URL
-            <input
-              data-testid="add-remote-fetch-url"
-              placeholder="git@github.com:user/repo.git"
-              value={newFetchUrl}
-              onChange={(event) => {
-                const value = event.target.value;
-                setNewFetchUrl(value);
-                setAddError(null);
-                if (!nameTouched) {
-                  setNewRemoteName(deriveRemoteName(value, remotes.map((r) => r.name)));
+              placeholder="New branch name"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setCreateError(null);
+                  onCloseCreateBranchDraft();
                 }
               }}
             />
-          </label>
-          {addError !== null && <InlineError message={addError} onDismiss={() => setAddError(null)} />}
-          <details open={showPushUrl} onToggle={(event) => setShowPushUrl(event.currentTarget.open)}>
-            <summary
-              onClick={(event) => {
-                event.preventDefault();
-                setShowPushUrl((open) => !open);
-              }}
-            >
-              Push URL (optional)
-            </summary>
-            {showPushUrl && (
-              <label className={styles.label}>
-                Push URL
-                <input
-                  placeholder="git@github.com:user/repo.git"
-                  value={newPushUrl}
-                  onChange={(event) => setNewPushUrl(event.target.value)}
-                />
-              </label>
+            {newBranchProblem !== null && (
+              <p id="new-branch-name-problem" className={styles.draftProblem}>
+                {newBranchProblem}
+              </p>
             )}
-          </details>
-          <button
-            type="submit"
-            disabled={operationDisabled}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          >
-            Add remote
-          </button>
-          <button type="button" onClick={onCloseAddRemoteDraft}>
-            Cancel
-          </button>
-        </form>
-      )}
+            <label className={styles.draftCheckbox}>
+              <input
+                type="checkbox"
+                checked={checkoutAfterCreate}
+                onChange={(event) => setCheckoutAfterCreate(event.target.checked)}
+              />
+              Check out after creating
+            </label>
+            <div className={styles.draftActions}>
+              <button type="submit" disabled={newBranchName.trim() === "" || newBranchProblem !== null || isRebasing}>
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateError(null);
+                  onCloseCreateBranchDraft();
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {createError !== null && <InlineError message={createError} onDismiss={() => setCreateError(null)} />}
+          </form>
+        )}
 
-      <ul className={styles.tree}>
-        <li className={styles.folder}>
-          <button
-            type="button"
-            className={styles.folderHeader}
-            aria-expanded={localOpen}
-            onClick={() => {
-              const next = !localOpen;
-              setLocalOpen(next);
-              persistOpen(LOCAL_FOLDER_KEY, next);
+        {addRemoteDraftOpen && (
+          <form
+            className={styles.form}
+            aria-label="Add remote"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") onCloseAddRemoteDraft();
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitAddRemote();
             }}
           >
-            <ChevronRight
-              size={14}
-              aria-hidden="true"
-              className={localOpen ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
-            />
-            Local
-          </button>
-          {localOpen && (
-          <ul className={styles.folderBody}>
-            {renderLocalNodes(buildBranchTree(branches.map((branch) => ({ path: branch.name, value: branch }))))}
-          </ul>
-          )}
-        </li>
+            <label className={styles.label}>
+              Remote name
+              <input
+                autoFocus
+                placeholder="origin"
+                value={newRemoteName}
+                onChange={(event) => {
+                  setNameTouched(true);
+                  setNewRemoteName(event.target.value);
+                }}
+              />
+            </label>
+            <label className={styles.label}>
+              Fetch URL
+              <input
+                data-testid="add-remote-fetch-url"
+                placeholder="git@github.com:user/repo.git"
+                value={newFetchUrl}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setNewFetchUrl(value);
+                  setAddError(null);
+                  if (!nameTouched) {
+                    setNewRemoteName(deriveRemoteName(value, remotes.map((r) => r.name)));
+                  }
+                }}
+              />
+            </label>
+            {addError !== null && <InlineError message={addError} onDismiss={() => setAddError(null)} />}
+            <details open={showPushUrl} onToggle={(event) => setShowPushUrl(event.currentTarget.open)}>
+              <summary
+                onClick={(event) => {
+                  event.preventDefault();
+                  setShowPushUrl((open) => !open);
+                }}
+              >
+                Push URL (optional)
+              </summary>
+              {showPushUrl && (
+                <label className={styles.label}>
+                  Push URL
+                  <input
+                    placeholder="git@github.com:user/repo.git"
+                    value={newPushUrl}
+                    onChange={(event) => setNewPushUrl(event.target.value)}
+                  />
+                </label>
+              )}
+            </details>
+            <button
+              type="submit"
+              disabled={operationDisabled}
+              title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            >
+              Add remote
+            </button>
+            <button type="button" onClick={onCloseAddRemoteDraft}>
+              Cancel
+            </button>
+          </form>
+        )}
 
-        {remotes.map((remote) => (
-          <li key={remote.name} className={styles.folder}>
+        <ul className={styles.tree}>
+          <li className={styles.folder}>
             <button
               type="button"
               className={styles.folderHeader}
-              aria-expanded={isRemoteOpen(remote.name)}
-              onClick={() => toggleRemote(remote.name)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                openRowMenu({ kind: "remote-folder", name: remote.name, x: event.clientX, y: event.clientY });
+              aria-expanded={localOpen}
+              onClick={() => {
+                const next = !localOpen;
+                setLocalOpen(next);
+                persistOpen(LOCAL_FOLDER_KEY, next);
               }}
             >
               <ChevronRight
                 size={14}
                 aria-hidden="true"
-                className={isRemoteOpen(remote.name) ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+                className={localOpen ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
               />
-              <Cloud size={14} aria-hidden="true" />
-              {remote.name}
+              Local
             </button>
-            {isRemoteOpen(remote.name) && (
-              <ul className={styles.folderBody}>
-                {remoteBranches[remote.name] === undefined && remoteBranchesError === null && (
-                  <li className={styles.statusRow}>Loading…</li>
-                )}
-                {remoteBranches[remote.name]?.length === 0 && <li className={styles.statusRow}>No branches</li>}
-                {renderRemoteNodes(
-                  remote.name,
-                  buildBranchTree((remoteBranches[remote.name] ?? []).map((name) => ({ path: name, value: name }))),
-                )}
-              </ul>
+            {localOpen && (
+            <ul className={styles.folderBody}>
+              {renderLocalNodes(buildBranchTree(branches.map((branch) => ({ path: branch.name, value: branch }))))}
+            </ul>
             )}
           </li>
-        ))}
-      </ul>
 
-      {checkoutError !== null && <InlineError message={checkoutError} onDismiss={() => setCheckoutError(null)} />}
-      {remoteBranchesError !== null && (
-        <InlineError message={remoteBranchesError} onDismiss={() => setRemoteBranchesError(null)} />
-      )}
+          {remotes.map((remote) => (
+            <li key={remote.name} className={styles.folder}>
+              <div className={styles.folderRow}>
+                <button
+                  type="button"
+                  className={styles.folderHeader}
+                  aria-expanded={isRemoteOpen(remote.name)}
+                  aria-keyshortcuts="Shift+F10 ContextMenu"
+                  onClick={() => toggleRemote(remote.name)}
+                  onKeyDown={(event) => {
+                    if (!isMenuKey(event)) return;
+                    event.preventDefault();
+                    openRowMenu({ kind: "remote-folder", name: remote.name, ...rectAnchor(event.currentTarget) });
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openRowMenu({
+                      kind: "remote-folder",
+                      name: remote.name,
+                      ...menuAnchor(event, event.currentTarget),
+                      returnFocusTo: event.currentTarget,
+                    });
+                  }}
+                >
+                  <ChevronRight
+                    size={14}
+                    aria-hidden="true"
+                    className={isRemoteOpen(remote.name) ? `${styles.chevron} ${styles.chevronOpen}` : styles.chevron}
+                  />
+                  <Cloud size={14} aria-hidden="true" />
+                  {remote.name}
+                </button>
+                {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key).
+                    No text content: `commands.ts`'s `expandRemoteBranches` finds the header by its
+                    text, which must keep matching only the button above. */}
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  aria-label={`Actions for remote ${remote.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={rowMenu?.kind === "remote-folder" && rowMenu.name === remote.name}
+                  onClick={(event) =>
+                    openRowMenu({
+                      kind: "remote-folder",
+                      name: remote.name,
+                      ...rectAnchor(event.currentTarget),
+                      returnFocusTo: event.currentTarget,
+                    })
+                  }
+                >
+                  <MoreHorizontal size={12} aria-hidden="true" />
+                </button>
+              </div>
+              {isRemoteOpen(remote.name) && (
+                <ul className={styles.folderBody}>
+                  {remoteBranches[remote.name] === undefined && remoteBranchesError === null && (
+                    <li className={styles.statusRow}>Loading…</li>
+                  )}
+                  {remoteBranches[remote.name]?.length === 0 && <li className={styles.statusRow}>No branches</li>}
+                  {renderRemoteNodes(
+                    remote.name,
+                    buildBranchTree((remoteBranches[remote.name] ?? []).map((name) => ({ path: name, value: name }))),
+                  )}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
 
-      {/* Guarded by `branches.some(...)`, not just `pendingForceFor !== null`: the app's
-          optimistic-update flow removes a deleted branch from `branches` immediately on a
-          successful soft delete, only rolling back on failure. So "is the name still in
-          `branches`" is the reliable signal for "did the soft delete actually fail" — without
-          it, this dialog would also fire right after every successful delete, since
-          `handleDeleteClick` always sets `pendingForceFor` unconditionally. */}
-      {pendingForceFor !== null && branches.some((b) => b.name === pendingForceFor) && (
-        <ConfirmDialog
-          ariaLabel={`Force delete ${pendingForceFor}`}
-          message={
-            <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
-          }
-          confirmLabel="Force delete"
-          confirmDisabled={isRebasing}
-          onConfirm={() => {
-            void onDeleteBranch(pendingForceFor, true);
-            setPendingForceFor(null);
-          }}
-          onCancel={() => setPendingForceFor(null)}
-        />
-      )}
+        {checkoutError !== null && <InlineError message={checkoutError} onDismiss={() => setCheckoutError(null)} />}
+        {remoteBranchesError !== null && (
+          <InlineError message={remoteBranchesError} onDismiss={() => setRemoteBranchesError(null)} />
+        )}
 
-      {rowMenu !== null &&
-        rowMenu.kind === "local-branch" &&
-        (() => {
-          // A non-null assertion here would throw at render time if a background refresh
-          // removed this branch while its context menu was still open — guard instead so the
-          // menu just doesn't render for a branch that's gone, rather than crashing the app.
-          const branch = branches.find((b) => b.name === rowMenu.name);
-          return branch !== undefined ? (
-            <ContextMenu
-              x={rowMenu.x}
-              y={rowMenu.y}
-              onClose={() => setRowMenu(null)}
-              items={branchContextItems(branch)}
-            />
-          ) : null;
-        })()}
-      {rowMenu !== null && rowMenu.kind === "add" && (
-        <ContextMenu
-          x={rowMenu.x}
-          y={rowMenu.y}
-          onClose={() => setRowMenu(null)}
-          items={[
-            { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
-            { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
-            {
-              label: "Show all branches",
-              disabled: graphBranchSelection === null,
-              onSelect: () => onSetGraphBranchSelection(branches.map((b) => b.name)),
-            },
-          ]}
-        />
-      )}
-      {rowMenu !== null &&
-        rowMenu.kind === "remote-folder" &&
-        (() => {
-          const remote = remotes.find((r) => r.name === rowMenu.name);
-          return remote !== undefined ? (
-            <ContextMenu
-              x={rowMenu.x}
-              y={rowMenu.y}
-              onClose={() => setRowMenu(null)}
-              items={remoteFolderItems(remote)}
-            />
-          ) : null;
-        })()}
-      {rowMenu !== null && rowMenu.kind === "remote-branch" && (
-        <ContextMenu
-          x={rowMenu.x}
-          y={rowMenu.y}
-          onClose={() => setRowMenu(null)}
-          items={remoteBranchItems(rowMenu.remoteName, rowMenu.branchName)}
-        />
-      )}
-
-      {removeConfirmation !== null && (
-        <ConfirmDialog
-          ariaLabel="Remove remote confirmation"
-          message={
-            removeConfirmation.startsWith("clear:") ? (
-              <p>
-                Remove {removeConfirmation.slice(6)} and clear upstreams for{" "}
-                {remoteUpstreams[removeConfirmation.slice(6)].map((item) => item.localBranch).join(", ")}?
-              </p>
-            ) : (
-              <p>Remove remote {removeConfirmation}?</p>
-            )
-          }
-          confirmLabel="Confirm remove"
-          confirmDisabled={operationDisabled}
-          onConfirm={() => {
-            const target = removeConfirmation.startsWith("clear:") ? removeConfirmation.slice(6) : removeConfirmation;
-            const clearUpstreams = removeConfirmation.startsWith("clear:");
-            void onRemoveRemote(target, clearUpstreams).then(() => setRemoveConfirmation(null));
-          }}
-          onCancel={() => setRemoveConfirmation(null)}
-        />
-      )}
-
-      {editingRemote !== null && (
-        <FormDialog ariaLabel={`Edit ${editingRemote.name}`} onCancel={() => setEditingRemote(null)}>
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const name = editName.trim();
-              const fetchUrl = editFetchUrl.trim();
-              if (name === "" || fetchUrl === "") return;
-              if (name !== editingRemote.name && !(await onRenameRemote(editingRemote.name, name))) return;
-              await onUpdateRemoteUrls(name, fetchUrl, editPushUrl.trim() || null);
-              setEditingRemote(null);
+        {/* Guarded by `branches.some(...)`, not just `pendingForceFor !== null`: the app's
+            optimistic-update flow removes a deleted branch from `branches` immediately on a
+            successful soft delete, only rolling back on failure. So "is the name still in
+            `branches`" is the reliable signal for "did the soft delete actually fail" — without
+            it, this dialog would also fire right after every successful delete, since
+            `handleDeleteClick` always sets `pendingForceFor` unconditionally. */}
+        {pendingForceFor !== null && branches.some((b) => b.name === pendingForceFor) && (
+          <ConfirmDialog
+            ariaLabel={`Force delete ${pendingForceFor}`}
+            message={
+              <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
+            }
+            confirmLabel="Force delete"
+            confirmDisabled={isRebasing}
+            onConfirm={() => {
+              void onDeleteBranch(pendingForceFor, true);
+              setPendingForceFor(null);
             }}
-          >
-            <label className={styles.label}>
-              Remote name
-              <input value={editName} onChange={(event) => setEditName(event.target.value)} />
-            </label>
-            <label className={styles.label}>
-              Fetch URL
-              <input value={editFetchUrl} onChange={(event) => setEditFetchUrl(event.target.value)} />
-            </label>
+            onCancel={() => setPendingForceFor(null)}
+          />
+        )}
+
+        {rowMenu !== null &&
+          rowMenu.kind === "local-branch" &&
+          (() => {
+            // A non-null assertion here would throw at render time if a background refresh
+            // removed this branch while its context menu was still open — guard instead so the
+            // menu just doesn't render for a branch that's gone, rather than crashing the app.
+            const branch = branches.find((b) => b.name === rowMenu.name);
+            return branch !== undefined ? (
+              <ContextMenu
+                key={rowMenuKey(rowMenu)}
+                x={rowMenu.x}
+                y={rowMenu.y}
+                returnFocusTo={rowMenu.returnFocusTo}
+                onClose={() => setRowMenu(null)}
+                items={branchContextItems(branch)}
+              />
+            ) : null;
+          })()}
+        {rowMenu !== null && rowMenu.kind === "add" && (
+          <ContextMenu
+            key={rowMenuKey(rowMenu)}
+            x={rowMenu.x}
+            y={rowMenu.y}
+            returnFocusTo={rowMenu.returnFocusTo}
+            onClose={() => setRowMenu(null)}
+            items={[
+              { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
+              { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
+              {
+                label: "Show all branches",
+                disabled: graphBranchSelection === null,
+                onSelect: () => onSetGraphBranchSelection(branches.map((b) => b.name)),
+              },
+            ]}
+          />
+        )}
+        {rowMenu !== null &&
+          rowMenu.kind === "remote-folder" &&
+          (() => {
+            const remote = remotes.find((r) => r.name === rowMenu.name);
+            return remote !== undefined ? (
+              <ContextMenu
+                key={rowMenuKey(rowMenu)}
+                x={rowMenu.x}
+                y={rowMenu.y}
+                returnFocusTo={rowMenu.returnFocusTo}
+                onClose={() => setRowMenu(null)}
+                items={remoteFolderItems(remote)}
+              />
+            ) : null;
+          })()}
+        {rowMenu !== null && rowMenu.kind === "remote-branch" && (
+          <ContextMenu
+            key={rowMenuKey(rowMenu)}
+            x={rowMenu.x}
+            y={rowMenu.y}
+            returnFocusTo={rowMenu.returnFocusTo}
+            onClose={() => setRowMenu(null)}
+            items={remoteBranchItems(rowMenu.remoteName, rowMenu.branchName)}
+          />
+        )}
+
+        <section className={styles.upstreamBlock}>
+          <h3 className={styles.upstreamHeading}>Upstream</h3>
+          {upstream === null ? (
+            <p className={styles.helperText}>No upstream for the current branch.</p>
+          ) : (
+            <p className={styles.helperText}>
+              {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
+            </p>
+          )}
+          <Toolbar aria-label="Upstream actions">
             <button
               type="button"
-              className={styles.iconButton}
-              aria-label={`Copy fetch URL for ${editingRemote.name}`}
-              onClick={() => {
-                void navigator.clipboard.writeText(editingRemote.fetchUrl);
-              }}
+              disabled={operationDisabled || upstream === null || pendingPull !== null}
+              title={
+                operationDisabled
+                  ? (operationDisabledReason ?? undefined)
+                  : upstream === null
+                    ? "No upstream set for the current branch."
+                    : undefined
+              }
+              onClick={() => void onPull()}
             >
-              <Copy size={12} aria-hidden="true" />
+              Pull
             </button>
-            <label className={styles.label}>
-              Push URL
-              <input value={editPushUrl} onChange={(event) => setEditPushUrl(event.target.value)} />
-            </label>
-            {editingRemote.pushUrl !== null && (
-              <button
-                type="button"
-                className={styles.iconButton}
-                aria-label={`Copy push URL for ${editingRemote.name}`}
-                onClick={() => {
-                  void navigator.clipboard.writeText(editingRemote.pushUrl!);
-                }}
-              >
-                <Copy size={12} aria-hidden="true" />
+            {upstream !== null && (
+              <button type="button" onClick={() => setClearUpstreamConfirm(true)}>
+                Clear upstream
               </button>
             )}
-            <button type="submit">Save remote</button>
-            <button type="button" onClick={() => setEditingRemote(null)}>
+          </Toolbar>
+          {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
+        </section>
+
+        {clearUpstreamConfirm && upstream !== null && (
+          <ConfirmDialog
+            ariaLabel="Clear upstream confirmation"
+            message={
+              <p>
+                Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
+              </p>
+            }
+            confirmLabel="Clear upstream"
+            onConfirm={() => {
+              setClearUpstreamConfirm(false);
+              void onClearUpstream();
+            }}
+            onCancel={() => setClearUpstreamConfirm(false)}
+          />
+        )}
+
+        {upstreamDialogOpen && (
+          <FormDialog
+            ariaLabel={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
+            onCancel={() => setUpstreamDialogOpen(false)}
+          >
+            <form
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const branch = upstreamBranchField.trim();
+                if (upstreamRemoteField === "" || branch === "") return;
+                await onSetUpstream(upstreamRemoteField, branch);
+                setUpstreamDialogOpen(false);
+              }}
+            >
+              <label className={styles.label}>
+                Upstream remote
+                <select
+                  value={upstreamRemoteField}
+                  onChange={(event) => {
+                    const remoteName = event.target.value;
+                    setUpstreamRemoteField(remoteName);
+                    setRemoteBranchOptions([]);
+                    if (remoteName !== "") {
+                      void onListRemoteBranches(remoteName).then(setRemoteBranchOptions).catch(() => setRemoteBranchOptions([]));
+                    }
+                  }}
+                >
+                  <option value="">Choose a remote</option>
+                  {remotes.map((remote) => (
+                    <option key={remote.name} value={remote.name}>
+                      {remote.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.label}>
+                Upstream branch
+                <input
+                  list="upstream-branch-options"
+                  value={upstreamBranchField}
+                  onChange={(event) => setUpstreamBranchField(event.target.value)}
+                />
+              </label>
+              <datalist id="upstream-branch-options">
+                {remoteBranchOptions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <button type="submit">Set upstream</button>
+              <button type="button" onClick={() => setUpstreamDialogOpen(false)}>
+                Cancel
+              </button>
+            </form>
+          </FormDialog>
+        )}
+
+        {pendingPull !== null && (
+          <FormDialog ariaLabel="Pull has diverged" onCancel={onCancelPull}>
+            <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
+            <button type="button" disabled={operationDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>
+              Merge
+            </button>
+            <button type="button" disabled={operationDisabled} onClick={() => onRebasePull(pendingPull.upstreamRef)}>
+              Rebase
+            </button>
+            <button type="button" data-autofocus onClick={onCancelPull}>
               Cancel
             </button>
-          </form>
-        </FormDialog>
-      )}
-
-      {credentialRemote !== null && (
-        <FormDialog ariaLabel={`Credentials for ${credentialRemote}`} onCancel={() => setCredentialRemote(null)}>
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const username = credentialUsername.trim();
-              const token = accessTokenRef.current?.value ?? "";
-              try {
-                if (credentialMode === "SshAgent") {
-                  await onSetRemoteAuthMode(credentialRemote, "SshAgent", null);
-                  setCredentialRemote(null);
-                } else if (username !== "" && token !== "") {
-                  const configured = await onSetRemoteAuthMode(credentialRemote, "HttpsToken", username);
-                  if (configured) {
-                    await onSaveHttpsCredential(credentialRemote, username, token);
-                    setCredentialRemote(null);
-                  }
-                }
-              } catch {
-                // The application state owns remediation messages for failed credential operations.
-              } finally {
-                if (accessTokenRef.current !== null) accessTokenRef.current.value = "";
-              }
-            }}
-          >
-            <label className={styles.label}>
-              Authentication for {credentialRemote}
-              <select value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as RemoteAuthMode)}>
-                <option value="HttpsToken">HTTPS token</option>
-                <option value="SshAgent">SSH agent</option>
-              </select>
-            </label>
-            {credentialMode === "HttpsToken" ? (
-              <>
-                <label className={styles.label}>
-                  HTTPS username
-                  <input value={credentialUsername} onChange={(event) => setCredentialUsername(event.target.value)} autoComplete="off" />
-                </label>
-                <label className={styles.label}>
-                  Access token
-                  <input ref={accessTokenRef} type="password" autoComplete="off" />
-                </label>
-                <button type="submit">Save HTTPS credential</button>
-                <button type="button" onClick={() => void onForgetHttpsCredential(credentialRemote)}>
-                  Forget HTTPS credential
-                </button>
-              </>
-            ) : (
-              <>
-                <p className={styles.helperText}>
-                  Uses your system's SSH agent to authenticate — make sure one is running (for
-                  example via <code>ssh-add</code>) before fetching or pushing.
-                </p>
-                <button type="submit">Use SSH agent</button>
-              </>
-            )}
-            <button type="button" onClick={() => setCredentialRemote(null)}>
-              Cancel credentials
-            </button>
-          </form>
-        </FormDialog>
-      )}
-
-      <section className={styles.upstreamBlock}>
-        <h3 className={styles.upstreamHeading}>Upstream</h3>
-        {upstream === null ? (
-          <p className={styles.helperText}>No upstream for the current branch.</p>
-        ) : (
-          <p className={styles.helperText}>
-            {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
-          </p>
+          </FormDialog>
         )}
-        <Toolbar aria-label="Upstream actions">
-          <button
-            type="button"
-            disabled={operationDisabled || upstream === null || pendingPull !== null}
-            title={
-              operationDisabled
-                ? (operationDisabledReason ?? undefined)
-                : upstream === null
-                  ? "No upstream set for the current branch."
-                  : undefined
-            }
-            onClick={() => void onPull()}
-          >
-            Pull
-          </button>
-          {upstream !== null && (
-            <button type="button" onClick={() => setClearUpstreamConfirm(true)}>
-              Clear upstream
-            </button>
-          )}
-        </Toolbar>
-        {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
-      </section>
-
-      {clearUpstreamConfirm && upstream !== null && (
-        <ConfirmDialog
-          ariaLabel="Clear upstream confirmation"
-          message={
-            <p>
-              Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
-            </p>
-          }
-          confirmLabel="Clear upstream"
-          onConfirm={() => {
-            setClearUpstreamConfirm(false);
-            void onClearUpstream();
-          }}
-          onCancel={() => setClearUpstreamConfirm(false)}
+      </AccordionSection>
+      {/* Controlled (`App`), the dialogs render at app level: this tree sits in the sidebar, which
+          stays mounted but `hidden` while collapsed, and a modal there would be invisible. */}
+      {onRemoteDialogChange === undefined && (
+        <RemoteDialogs
+          remoteDialog={remoteDialog}
+          remotes={remotes}
+          remoteUpstreams={remoteUpstreams}
+          operationDisabled={operationDisabled}
+          onRenameRemote={onRenameRemote}
+          onUpdateRemoteUrls={onUpdateRemoteUrls}
+          onRemoveRemote={onRemoveRemote}
+          onSaveHttpsCredential={onSaveHttpsCredential}
+          onForgetHttpsCredential={onForgetHttpsCredential}
+          onSetRemoteAuthMode={onSetRemoteAuthMode}
+          onClose={() => setRemoteDialog(null)}
         />
       )}
-
-      {upstreamDialogOpen && (
-        <FormDialog
-          ariaLabel={`Set upstream for ${branches.find((b) => b.isCurrent)?.name ?? ""}`}
-          onCancel={() => setUpstreamDialogOpen(false)}
-        >
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const branch = upstreamBranchField.trim();
-              if (upstreamRemoteField === "" || branch === "") return;
-              await onSetUpstream(upstreamRemoteField, branch);
-              setUpstreamDialogOpen(false);
-            }}
-          >
-            <label className={styles.label}>
-              Upstream remote
-              <select
-                value={upstreamRemoteField}
-                onChange={(event) => {
-                  const remoteName = event.target.value;
-                  setUpstreamRemoteField(remoteName);
-                  setRemoteBranchOptions([]);
-                  if (remoteName !== "") {
-                    void onListRemoteBranches(remoteName).then(setRemoteBranchOptions).catch(() => setRemoteBranchOptions([]));
-                  }
-                }}
-              >
-                <option value="">Choose a remote</option>
-                {remotes.map((remote) => (
-                  <option key={remote.name} value={remote.name}>
-                    {remote.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={styles.label}>
-              Upstream branch
-              <input
-                list="upstream-branch-options"
-                value={upstreamBranchField}
-                onChange={(event) => setUpstreamBranchField(event.target.value)}
-              />
-            </label>
-            <datalist id="upstream-branch-options">
-              {remoteBranchOptions.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <button type="submit">Set upstream</button>
-            <button type="button" onClick={() => setUpstreamDialogOpen(false)}>
-              Cancel
-            </button>
-          </form>
-        </FormDialog>
-      )}
-
-      {pendingPull !== null && (
-        <FormDialog ariaLabel="Pull has diverged" onCancel={onCancelPull}>
-          <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
-          <button type="button" disabled={operationDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>
-            Merge
-          </button>
-          <button type="button" disabled={operationDisabled} onClick={() => onRebasePull(pendingPull.upstreamRef)}>
-            Rebase
-          </button>
-          <button type="button" data-autofocus onClick={onCancelPull}>
-            Cancel
-          </button>
-        </FormDialog>
-      )}
-    </AccordionSection>
+    </>
   );
 }

@@ -523,6 +523,29 @@ export function buildCommands(
         keywords: ["remote", "branch", "checkout", "upstream", "browse", remote.name],
         run: () => expandRemoteBranches(remote.name),
       });
+      // The remote folder menu's dialogs. App state owns them, so they open even while the
+      // Branches section is collapsed.
+      commands.push(
+        {
+          id: `edit-remote:${remote.name}`,
+          label: `Edit remote ${remote.name}…`,
+          keywords: ["remote", "edit", "url", "rename", remote.name],
+          run: () => appState.openRemoteDialog("edit", remote.name),
+        },
+        {
+          id: `manage-credentials:${remote.name}`,
+          label: `Manage credentials for ${remote.name}…`,
+          keywords: ["remote", "credentials", "token", "ssh", "https", "auth", "password", remote.name],
+          run: () => appState.openRemoteDialog("credentials", remote.name),
+        },
+        {
+          // Opens the same confirmation as the remote's menu; never removes directly.
+          id: `remove-remote:${remote.name}`,
+          label: `Remove remote ${remote.name}…`,
+          keywords: ["remote", "remove", "delete", remote.name],
+          run: () => appState.openRemoteDialog("remove", remote.name),
+        },
+      );
     }
 
     commands.push({
@@ -537,6 +560,19 @@ export function buildCommands(
     // these commands either navigate to a section that no longer renders (Tags/Worktrees'
     // `goToSidebarSection` calls) or silently mutate state the user can't see the result of
     // (stash/submodule). "Branches" has no toggle, so it's never filtered.
+
+    // The keyboard path for the tag badge menu's "Checkout (detached)". Not tied to the Tags
+    // panel's visibility: it doesn't navigate there.
+    for (const tag of state.tags) {
+      const commitId = tag.commitId;
+      if (commitId === null) continue; // a tag of a tree or blob has nothing to check out
+      commands.push({
+        id: `checkout-tag:${tag.name}`,
+        label: `Check out tag ${tag.name} (detached)`,
+        keywords: ["tag", "checkout", "detached", tag.name],
+        run: () => void appState.checkoutCommit(commitId),
+      });
+    }
 
     // Deleting a tag has a real confirmation dialog in TagPanel — the palette
     // must not skip it. This stays discoverable by tag name but only navigates
@@ -730,12 +766,17 @@ export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 /** Derives a command's display group from its id; unknown ids fall into "General". */
 export function commandGroup(id: string): CommandGroup {
-  if (id.startsWith("switch-branch:") || id.startsWith("merge-branch:")) return "Branches";
+  if (id.startsWith("switch-branch:") || id.startsWith("merge-branch:") || id.startsWith("checkout-tag:")) {
+    return "Branches";
+  }
   if (
     id.startsWith("fetch-remote:") ||
     id.startsWith("push-branch:") ||
     id.startsWith("push-tags:") ||
     id.startsWith("browse-remote-branches:") ||
+    id.startsWith("edit-remote:") ||
+    id.startsWith("manage-credentials:") ||
+    id.startsWith("remove-remote:") ||
     id === "add-remote" ||
     id === "force-push"
   ) {

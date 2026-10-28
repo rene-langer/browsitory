@@ -2163,6 +2163,7 @@ fn clear_current_upstream(params: Value, repos: &Repos) -> Result<Value, String>
 struct TagInfoDto {
     name: String,
     target_id: String,
+    commit_id: Option<String>,
     annotated: bool,
     message: Option<String>,
     tagger_name: Option<String>,
@@ -2174,6 +2175,7 @@ impl From<TagInfo> for TagInfoDto {
         Self {
             name: tag.name,
             target_id: tag.target_id,
+            commit_id: tag.commit_id,
             annotated: tag.annotated,
             message: tag.message,
             tagger_name: tag.tagger_name,

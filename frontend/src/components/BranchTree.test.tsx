@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
 
@@ -13,7 +13,12 @@ const baseBranches = [
 type BranchTreeProps = Parameters<typeof BranchTree>[0];
 
 function renderTree(overrides: Partial<BranchTreeProps> = {}) {
-  const props: BranchTreeProps = {
+  const props = treeProps(overrides);
+  return { ...render(<BranchTree {...props} />), props };
+}
+
+function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
+  return {
     branches: baseBranches,
     createBranchDraft: null,
     onSwitchBranch: vi.fn(),
@@ -61,7 +66,6 @@ function renderTree(overrides: Partial<BranchTreeProps> = {}) {
     refreshGeneration: 0,
     ...overrides,
   };
-  return { ...render(<BranchTree {...props} />), props };
 }
 
 describe("BranchTree — local branches", () => {
@@ -406,15 +410,6 @@ describe("BranchTree — remotes", () => {
   });
 
   const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
-  const oneRemoteWithPush = [
-    {
-      name: "origin",
-      fetchUrl: "git@github.com:user/repo.git",
-      pushUrl: "git@github.com:user/push-repo.git",
-      authMode: null,
-      authUsername: null,
-    },
-  ];
 
   it("lists remote folders and lazily loads their branches on first expand", async () => {
     const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "feat/foo"]);
@@ -784,84 +779,6 @@ describe("BranchTree — remotes", () => {
   // why (single global credential/edit modals replace the old per-row inline forms, so a few
   // row-isolation and disclosure-default tests no longer have anything to attach to).
 
-  it("copies the fetch URL to the clipboard from the Edit remote dialog", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Copy fetch URL for origin" }));
-    expect(writeText).toHaveBeenCalledWith("git@github.com:user/repo.git");
-  });
-
-  it("copies the push URL to the clipboard when one is set", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderTree({ remotes: oneRemoteWithPush });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Copy push URL for origin" }));
-    expect(writeText).toHaveBeenCalledWith("git@github.com:user/push-repo.git");
-  });
-
-  it("does not render a push-URL copy button when the remote has no push URL", async () => {
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    expect(within(dialog).queryByRole("button", { name: "Copy push URL for origin" })).not.toBeInTheDocument();
-  });
-
-  it("uses the SSH agent without rendering a token input", async () => {
-    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(true);
-    renderTree({ remotes: oneRemote, onSetRemoteAuthMode });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("Authentication for origin"), { target: { value: "SshAgent" } });
-    expect(within(dialog).queryByLabelText("Access token")).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Use SSH agent" }));
-    await waitFor(() => expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "SshAgent", null));
-  });
-
-  it("explains what the SSH agent option does", async () => {
-    renderTree({ remotes: oneRemote });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("Authentication for origin"), { target: { value: "SshAgent" } });
-    expect(within(dialog).getByText(/uses your system's ssh agent/i)).toBeInTheDocument();
-  });
-
-  it("clears the token after a failed credential save, keeping the dialog open", async () => {
-    const onSaveHttpsCredential = vi.fn().mockRejectedValue(new Error("keychain unavailable"));
-    renderTree({ remotes: oneRemote, onSaveHttpsCredential });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "rene" } });
-    fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "token-123" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save HTTPS credential" }));
-    await waitFor(() => expect(within(dialog).getByLabelText("Access token")).toHaveValue(""));
-  });
-
-  it("does not save a token when HTTPS authentication setup fails", async () => {
-    const onSetRemoteAuthMode = vi.fn().mockResolvedValue(false);
-    const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
-    renderTree({ remotes: oneRemote, onSetRemoteAuthMode, onSaveHttpsCredential });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
-    fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "rene" } });
-    fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "token-123" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save HTTPS credential" }));
-    await waitFor(() => expect(onSetRemoteAuthMode).toHaveBeenCalledWith("origin", "HttpsToken", "rene"));
-    expect(onSaveHttpsCredential).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(dialog).getByLabelText("Access token")).toHaveValue(""));
-  });
-
   it("disables Push current branch here while another operation is active", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
@@ -1077,22 +994,6 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("menuitem", { name: "Remove remote" })).toHaveAttribute("data-destructive", "true");
   });
 
-  it("does not update an existing remote's URLs when rename fails, leaving the dialog open", async () => {
-    const onRenameRemote = vi.fn().mockResolvedValue(false);
-    const onUpdateRemoteUrls = vi.fn().mockResolvedValue(undefined);
-    const backup = { name: "backup", fetchUrl: "../backup.git", pushUrl: "../push-backup.git", authMode: null, authUsername: null };
-    renderTree({ remotes: [...oneRemote, backup], onRenameRemote, onUpdateRemoteUrls });
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
-    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "backup" } });
-    fireEvent.change(within(dialog).getByLabelText("Fetch URL"), { target: { value: "../replacement.git" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote" }));
-    await waitFor(() => expect(onRenameRemote).toHaveBeenCalledWith("origin", "backup"));
-    expect(onUpdateRemoteUrls).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Edit origin" })).toBeInTheDocument();
-  });
-
   it("offers branch suggestions from the selected remote for the upstream-branch field", async () => {
     const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "develop"]);
     renderTree({ remotes: oneRemote, onListRemoteBranches });
@@ -1131,7 +1032,7 @@ describe("BranchTree — keys from inner controls", () => {
       remotes: [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }],
       onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
     });
-    fireEvent.click(screen.getByRole("button", { name: /origin/ }));
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
     const actions = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
     fireEvent.keyDown(actions, { key: "Enter" });
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
@@ -1410,5 +1311,176 @@ describe("BranchTree — refs and remotes (4b)", () => {
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
 
     await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("BranchTree — keyboard menus", () => {
+  const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
+  function rect(left: number, top: number, width: number, height: number) {
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("Shift+F10 on a local branch row opens its menu at the row and Escape returns focus to the row", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(8, 100, 240, 22));
+    renderTree();
+    const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "8px", top: "122px" });
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(row).toHaveFocus();
+  });
+
+  it("the Menu key on the current branch focuses the first enabled item (Checkout is disabled)", () => {
+    renderTree();
+    const row = screen.getByTitle("main").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+  });
+
+  it("the Menu key on a row's '…' button opens the row's menu and Escape returns to the button", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
+    actions.focus();
+    fireEvent.keyDown(actions, { key: "ContextMenu" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(actions).toHaveFocus();
+  });
+
+  it("does not open the row menu from the rename field", () => {
+    renderTree();
+    const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename feat/foo" }), { key: "F10", shiftKey: true });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("remote-tracking branch rows are focusable and open their menu from the keyboard", async () => {
+    renderTree({ remotes: [origin], onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByTitle("topic")).closest('[role="button"]') as HTMLElement;
+    expect(row.tabIndex).toBe(0);
+    row.focus();
+    expect(row).toHaveFocus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(row).toHaveFocus();
+  });
+
+  it("the Menu key on a remote folder header opens the remote's menu at the header", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(4, 300, 240, 22));
+    const { props } = renderTree({ remotes: [origin] });
+    const header = screen.getByRole("button", { name: "origin" });
+    header.focus();
+    const prevented = !fireEvent.keyDown(header, { key: "ContextMenu" });
+    expect(prevented).toBe(true);
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "4px", top: "322px" });
+    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Fetch" }), { key: "Escape" });
+    expect(header).toHaveFocus();
+    // The header's own toggle did not run.
+    expect(props.onListRemoteBranches).not.toHaveBeenCalled();
+  });
+
+  it("right-click on a remote folder header opens at the pointer", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(0, 300, 240, 22));
+    renderTree({ remotes: [origin] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }), { clientX: 50, clientY: 310 });
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "50px", top: "310px" });
+  });
+
+  it("a remote folder has a '…' button for its actions", () => {
+    renderTree({ remotes: [origin] });
+    const actions = screen.getByRole("button", { name: "Actions for remote origin" });
+    expect(actions).toHaveAttribute("aria-haspopup", "menu");
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
+  });
+
+  // WebKit (macOS) does not focus a button on mouse click, so the menu cannot rely on the focused
+  // element to know where it was opened from.
+  it("a menu opened by clicking '…' returns focus to that button, even if the click did not focus it", () => {
+    renderTree({ remotes: [origin] });
+    for (const name of ["Actions for feat/foo", "Actions for remote origin", "Add"]) {
+      const elsewhere = screen.getByRole("button", { name: "Show feat/foo in graph" });
+      elsewhere.focus();
+      const button = screen.getByRole("button", { name });
+      fireEvent.click(button);
+      fireEvent.keyDown(screen.getAllByRole("menuitem").find((item) => !item.hasAttribute("disabled"))!, {
+        key: "Escape",
+      });
+      expect(button).toHaveFocus();
+    }
+  });
+
+  it("a right-clicked row gets focus back when its menu closes", () => {
+    renderTree();
+    const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
+    screen.getByRole("button", { name: "Add" }).focus();
+    fireEvent.contextMenu(row);
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(row).toHaveFocus();
+  });
+
+  it("'…' and '+' report whether their menu is open", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
+    const add = screen.getByRole("button", { name: "Add" });
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    expect(add).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(add);
+    expect(add).toHaveAttribute("aria-expanded", "true");
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "New branch…" }), { key: "Escape" });
+    fireEvent.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    expect(add).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the '+' menu opens under the button, not at (0,0) (regression, PR #72)", () => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(rect(180, 40, 20, 20));
+    renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "180px", top: "60px" });
+  });
+});
+
+describe("BranchTree — controlled remote dialogs", () => {
+  const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
+  beforeEach(() => localStorage.clear());
+
+  it("menu items report the dialog through onRemoteDialogChange when controlled", () => {
+    const onRemoteDialogChange = vi.fn();
+    renderTree({ remotes: [origin], remoteDialog: null, onRemoteDialogChange });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
+    expect(onRemoteDialogChange).toHaveBeenCalledWith({ kind: "credentials", remoteName: "origin" });
+    expect(screen.queryByRole("dialog", { name: "Credentials for origin", hidden: true })).toBeNull();
+  });
+
+  // The owner (`App`) renders them outside the sidebar, which is `hidden` while collapsed.
+  it.each(["edit", "credentials", "remove"] as const)("leaves the controlled %s dialog to its owner", (kind) => {
+    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 });
