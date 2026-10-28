@@ -134,7 +134,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // symlink that replaced a tracked file or folder (#114). With such a link, stash every
     // changed path through Browsitory's path-limited stash instead: a file link is stashed and
     // then replaced by the file, a folder link is refused (`BeyondSymlink`).
-    if has_link_hazard(repo)? {
+    if crate::worktree_guard::has_hazard(repo)? {
         let paths = changed_paths(repo, opts.include_untracked)?;
         if paths.is_empty() {
             return Err(StashError::NothingToStash);
@@ -164,22 +164,6 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             }
         })?;
     Ok(())
-}
-
-/// True when a symlink replaced a file or folder that HEAD or the index tracks.
-fn has_link_hazard(repo: &Repository) -> Result<bool, StashError> {
-    use crate::worktree_guard::{scan, GuardSource};
-    let Some(workdir) = repo.workdir() else {
-        return Ok(false);
-    };
-    const ALL: Option<&[&str]> = None;
-    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
-        if !scan(workdir, &GuardSource::Tree(&head_tree), ALL)?.is_empty() {
-            return Ok(true);
-        }
-    }
-    let index = repo.index()?;
-    Ok(!scan(workdir, &GuardSource::Index(&index), ALL)?.is_empty())
 }
 
 /// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never

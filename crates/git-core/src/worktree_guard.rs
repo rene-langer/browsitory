@@ -105,6 +105,7 @@ fn selected<P: AsRef<[u8]>>(path: &[u8], paths: &[P], ignore_case: bool) -> bool
 /// A source entry that is itself a symlink is not a leaf hazard (libgit2 unlinks and recreates
 /// links, which never follows), and submodule entries are skipped. A symlink no source path goes
 /// through is the user's and is never reported.
+#[cfg(test)]
 pub(crate) fn scan<P: AsRef<[u8]>>(
     workdir: &Path,
     source: &GuardSource,
@@ -114,61 +115,131 @@ pub(crate) fn scan<P: AsRef<[u8]>>(
 }
 
 /// `scan` with the `paths` filter ignoring ASCII case when `ignore_case`.
+#[cfg(test)]
 fn scan_with_case<P: AsRef<[u8]>>(
     workdir: &Path,
     source: &GuardSource,
     paths: Option<&[P]>,
     ignore_case: bool,
 ) -> Result<Vec<Hazard>, git2::Error> {
-    let owned;
-    let index: &git2::Index = match source {
-        GuardSource::Index(index) => index,
-        GuardSource::Tree(tree) => {
-            let mut index = git2::Index::new()?;
-            index.read_tree(tree)?;
-            owned = index;
-            &owned
-        }
-    };
-    let mut dirs: HashMap<PathBuf, Entry> = HashMap::new();
     let mut hazards = BTreeSet::new();
-    for entry in index.iter() {
-        if entry.mode == MODE_GITLINK {
-            continue;
-        }
-        if paths.is_some_and(|paths| !selected(&entry.path, paths, ignore_case)) {
-            continue;
-        }
-        let rel = path_from_bytes(&entry.path);
-        if !plain_relative(&rel) {
-            continue;
-        }
-        let components: Vec<_> = rel.components().collect();
-        let mut current = PathBuf::new();
-        let mut blocked = false;
-        for component in &components[..components.len() - 1] {
-            current.push(component);
-            let kind = *dirs
-                .entry(current.clone())
-                .or_insert_with(|| entry_kind(&workdir.join(&current)));
-            match kind {
-                Entry::Dir => {}
-                Entry::Link => {
-                    hazards.insert(Hazard::Ancestor(current.clone()));
-                    blocked = true;
-                    break;
-                }
-                Entry::Other => {
-                    blocked = true;
-                    break;
-                }
-            }
-        }
-        if !blocked && entry.mode != MODE_LINK && is_link(&workdir.join(&rel)) {
-            hazards.insert(Hazard::Leaf(rel));
+    Scanner::new(workdir, true).scan(source, paths, ignore_case, &mut hazards)?;
+    Ok(hazards.into_iter().collect())
+}
+
+/// Scans several sources against one worktree, examining each directory (and, with `leaves`,
+/// each file) once across all of them.
+struct Scanner<'w> {
+    workdir: &'w Path,
+    /// Whether leaf hazards matter; when only folder links do, files are never examined.
+    leaves: bool,
+    dirs: HashMap<PathBuf, Entry>,
+    files: HashMap<PathBuf, bool>,
+}
+
+impl<'w> Scanner<'w> {
+    fn new(workdir: &'w Path, leaves: bool) -> Self {
+        Self {
+            workdir,
+            leaves,
+            dirs: HashMap::new(),
+            files: HashMap::new(),
         }
     }
-    Ok(hazards.into_iter().collect())
+
+    fn scan<P: AsRef<[u8]>>(
+        &mut self,
+        source: &GuardSource,
+        paths: Option<&[P]>,
+        ignore_case: bool,
+        hazards: &mut BTreeSet<Hazard>,
+    ) -> Result<(), git2::Error> {
+        let owned;
+        let index: &git2::Index = match source {
+            GuardSource::Index(index) => index,
+            GuardSource::Tree(tree) => {
+                let mut index = git2::Index::new()?;
+                index.read_tree(tree)?;
+                owned = index;
+                &owned
+            }
+        };
+        for entry in index.iter() {
+            if entry.mode == MODE_GITLINK {
+                continue;
+            }
+            if paths.is_some_and(|paths| !selected(&entry.path, paths, ignore_case)) {
+                continue;
+            }
+            let rel = path_from_bytes(&entry.path);
+            if !plain_relative(&rel) {
+                continue;
+            }
+            let mut blocked = false;
+            if let Some(parent) = rel.parent() {
+                let mut current = PathBuf::new();
+                for component in parent.components() {
+                    current.push(component);
+                    let kind = match self.dirs.get(&current) {
+                        Some(kind) => *kind,
+                        None => {
+                            let kind = entry_kind(&self.workdir.join(&current));
+                            self.dirs.insert(current.clone(), kind);
+                            kind
+                        }
+                    };
+                    match kind {
+                        Entry::Dir => {}
+                        Entry::Link => {
+                            hazards.insert(Hazard::Ancestor(current));
+                            blocked = true;
+                            break;
+                        }
+                        Entry::Other => {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if blocked || !self.leaves || entry.mode == MODE_LINK {
+                continue;
+            }
+            let workdir = self.workdir;
+            let linked = *self
+                .files
+                .entry(rel.clone())
+                .or_insert_with(|| is_link(&workdir.join(&rel)));
+            if linked {
+                hazards.insert(Hazard::Leaf(rel));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// True when a symlink replaced a file or folder that HEAD or the index tracks: what a forced
+/// checkout of either would have to clear.
+pub(crate) fn has_hazard(repo: &git2::Repository) -> Result<bool, git2::Error> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    const ALL: Option<&[&str]> = None;
+    let mut scanner = Scanner::new(workdir, true);
+    let mut hazards = BTreeSet::new();
+    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
+        scanner.scan(&GuardSource::Tree(&head_tree), ALL, false, &mut hazards)?;
+        if !hazards.is_empty() {
+            return Ok(true);
+        }
+    }
+    scanner.scan(
+        &GuardSource::Index(&repo.index()?),
+        ALL,
+        false,
+        &mut hazards,
+    )?;
+    Ok(!hazards.is_empty())
 }
 
 /// Removes each hazard's link, never its target and never recursively. A path that is no longer
@@ -231,25 +302,26 @@ where
         .and_then(|config| config.get_bool("core.ignorecase"))
         .unwrap_or(false);
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    let mut scanner = Scanner::new(workdir, true);
     let mut hazards = BTreeSet::new();
     if let Some(target) = target {
-        hazards.extend(scan_with_case(workdir, target, paths, ignore_case)?);
+        scanner.scan(target, paths, ignore_case, &mut hazards)?;
     }
     if let Some(head_tree) = &head_tree {
-        hazards.extend(scan_with_case(
-            workdir,
+        scanner.scan(
             &GuardSource::Tree(head_tree),
             paths,
             ignore_case,
-        )?);
+            &mut hazards,
+        )?;
     }
     let index = repo.index()?;
-    hazards.extend(scan_with_case(
-        workdir,
+    scanner.scan(
         &GuardSource::Index(&index),
         paths,
         ignore_case,
-    )?);
+        &mut hazards,
+    )?;
     hazards.retain(|hazard| !tracked_as_link(head_tree.as_ref(), hazard.path()));
     clear_hazards(workdir, &hazards.into_iter().collect::<Vec<_>>())?;
     Ok(())
@@ -298,18 +370,20 @@ where
             Incoming::Merge(GuardSource::Index(index)) => (GuardSource::Index(index), false),
         });
     }
+    // Only folder links matter here, so files are never examined.
+    let mut scanner = Scanner::new(workdir, false);
     let mut found = None;
     for (source, skip_head_links) in &sources {
-        found = scan(workdir, source, ALL)?
-            .into_iter()
-            .find_map(|hazard| match hazard {
-                Hazard::Ancestor(dir)
-                    if !(*skip_head_links && tracked_as_link(head_tree.as_ref(), &dir)) =>
-                {
-                    Some(dir)
-                }
-                _ => None,
-            });
+        let mut hazards = BTreeSet::new();
+        scanner.scan(source, ALL, false, &mut hazards)?;
+        found = hazards.into_iter().find_map(|hazard| match hazard {
+            Hazard::Ancestor(dir)
+                if !(*skip_head_links && tracked_as_link(head_tree.as_ref(), &dir)) =>
+            {
+                Some(dir)
+            }
+            _ => None,
+        });
         if found.is_some() {
             break;
         }
