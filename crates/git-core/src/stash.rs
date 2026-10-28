@@ -128,6 +128,21 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
+    // libgit2's stash records and resets in one call, and its forced reset writes through a
+    // symlink that replaced a tracked file or folder (#114). With such a link, stash every
+    // changed path through Browsitory's path-limited stash instead: a file link is stashed and
+    // then replaced by the file, a folder link is refused (`BeyondSymlink`).
+    if has_link_hazard(repo)? {
+        let paths = changed_paths(repo, opts.include_untracked)?;
+        if paths.is_empty() {
+            return Err(StashError::NothingToStash);
+        }
+        let routed = StashOptions {
+            paths,
+            ..opts.clone()
+        };
+        return save_path_limited_stash(repo, &routed, message);
+    }
     let signature = repo.signature()?;
     let mut flags = StashFlags::empty();
     if opts.keep_index {
@@ -147,6 +162,42 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             }
         })?;
     Ok(())
+}
+
+/// True when a symlink replaced a file or folder that HEAD or the index tracks.
+fn has_link_hazard(repo: &Repository) -> Result<bool, StashError> {
+    use crate::worktree_guard::{scan, GuardSource};
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    const ALL: Option<&[&str]> = None;
+    if let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) {
+        if !scan(workdir, &GuardSource::Tree(&head_tree), ALL)?.is_empty() {
+            return Ok(true);
+        }
+    }
+    let index = repo.index()?;
+    Ok(!scan(workdir, &GuardSource::Index(&index), ALL)?.is_empty())
+}
+
+/// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
+/// ignored files or untracked nested repositories), as `save_path_limited_stash` selects them.
+fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<String>, StashError> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(include_untracked)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+    let mut paths = Vec::new();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        let Ok(path) = entry.path() else { continue };
+        if entry.status().contains(git2::Status::IGNORED) || path.ends_with('/') {
+            continue;
+        }
+        paths.push(path.to_string());
+    }
+    Ok(paths)
 }
 
 /// `git stash push [-m <message>] [--keep-index] [-u] -- <paths>` with `paths` as literal file

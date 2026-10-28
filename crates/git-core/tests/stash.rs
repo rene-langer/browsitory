@@ -1009,3 +1009,90 @@ fn popping_a_file_stashed_from_a_directory_that_replaced_a_symlink_is_a_clear_er
     assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
     assert!(!dir.path().join("l").exists());
 }
+
+/// `tc` = "plain\n", `a.txt` = "a\n" and `d/f` = "inner\n" committed; `a.txt` edited and `tc`
+/// replaced by a link to the outside directory's `target.txt`.
+#[cfg(unix)]
+fn typechanged_link_repo() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    let out = common::outside_dir();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "tc", "plain\n");
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "d/f", "inner\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "edited\n");
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+    (dir, repo, out)
+}
+
+#[test]
+#[cfg(unix)]
+fn stash_all_with_a_typechanged_symlink_stashes_the_link_and_restores_it_on_pop() {
+    let (dir, mut repo, out) = typechanged_link_repo();
+
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert!(!common::is_link(dir.path(), "tc"));
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+    assert_eq!(read(dir.path(), "a.txt"), "a\n");
+    let list = git_core::stash::list_stashes(&mut repo).unwrap();
+    assert!(
+        list[0].message.starts_with("WIP on "),
+        "{}",
+        list[0].message
+    );
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert!(common::is_link(dir.path(), "tc"));
+    assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+    common::assert_outside_untouched(out.path());
+}
+
+#[test]
+#[cfg(unix)]
+fn stash_all_keep_index_with_a_typechanged_symlink_does_not_write_through() {
+    let (dir, mut repo, out) = typechanged_link_repo();
+    stage(&repo, "a.txt");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.keep_index = true)).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+    assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn stash_all_tracked_only_with_a_typechanged_symlink_does_not_write_through() {
+    let (dir, mut repo, out) = typechanged_link_repo();
+    write_file(dir.path(), "untracked.txt", "u\n");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+
+    common::assert_outside_untouched(out.path());
+    assert_eq!(read(dir.path(), "tc"), "plain\n");
+    assert_eq!(read(dir.path(), "untracked.txt"), "u\n");
+}
+
+#[test]
+#[cfg(unix)]
+fn stash_all_refuses_when_a_directory_was_replaced_by_a_symlink() {
+    let out = common::outside_dir();
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "d/f", "inner\n");
+    commit_all(&repo, "initial");
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    let result = git_core::stash::save_stash(&mut repo, &StashOptions::default());
+
+    assert!(
+        matches!(result, Err(StashError::BeyondSymlink(_))),
+        "{result:?}"
+    );
+    common::assert_outside_untouched(out.path());
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+    assert!(common::is_link(dir.path(), "d"));
+}
