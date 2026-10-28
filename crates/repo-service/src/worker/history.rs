@@ -38,15 +38,17 @@ pub(super) fn cherry_pick(
     commit_id: String,
     reply: Sender<Result<PickOutcome, String>>,
 ) {
-    let _ = reply
-        .send(git_core::pick::cherry_pick(repo, &commit_id).map_err(|error| error.to_string()));
+    let _ = reply.send(
+        git_core::pick::cherry_pick(repo, &commit_id, None).map_err(|error| error.to_string()),
+    );
 }
 pub(super) fn revert(
     repo: &git2::Repository,
     commit_id: String,
     reply: Sender<Result<PickOutcome, String>>,
 ) {
-    let _ = reply.send(git_core::pick::revert(repo, &commit_id).map_err(|error| error.to_string()));
+    let _ = reply
+        .send(git_core::pick::revert(repo, &commit_id, None).map_err(|error| error.to_string()));
 }
 pub(super) fn reset(
     repo: &git2::Repository,
