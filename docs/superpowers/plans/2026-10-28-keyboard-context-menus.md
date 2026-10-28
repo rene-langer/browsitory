@@ -29,10 +29,18 @@ Deviations from the tasks below (code won where they disagreed):
   nothing (no fallback to the selected row's menu).
 - **Task 6:** the dialog-internal tests moved from `BranchTree.test.tsx` into the two new
   component tests; `BranchTree.test.tsx` keeps one smoke test per dialog plus the controlled
-  tests. A dialog whose remote is gone renders nothing (the state is not cleared by
-  `removeRemote`). A successful rename in Edit re-targets `remoteDialog` to the new name, so the
-  dialog does not vanish while the URLs are saved. Added an `App.test.tsx` test for the palette
+  tests. Rename and remove are optimistic (`remotes` changes before the request settles and
+  rolls back on failure), so `BranchTree` keeps a snapshot of the dialog's remote while the
+  dialog is open; a dialog opened for a remote that does not exist renders nothing. The state
+  is not cleared by `removeRemote`; the confirmation closes itself when the remove settles. Added an `App.test.tsx` test for the palette
   opening Edit remote with Branches collapsed.
+- **Review fixes (after Task 10):** `ContextMenu` captures its trigger in the mount effect
+  rather than the first render (a palette closing in the same commit has restored focus by
+  then) and restores with `preventScroll`. Pointer-opened menus ("…", "+", a right-clicked
+  branch row, and the file "…" buttons on a pointer click) pass `returnFocusTo`, because WebKit
+  does not focus on a pointer click; `ListRow`'s `onOpenMenu` gets the row as a second argument
+  for right-clicks. Rows no longer carry `aria-haspopup` (they activate on Enter; the "…" button
+  is the menu button). `ContextMenu` instances are keyed per target.
 - **Task 9:** the E2E spec has a third test, Shift+F10 on a remote folder header. Shift+F10 works
   through WebKitGTK's WebDriver, so no Menu-key fallback was needed.
 
