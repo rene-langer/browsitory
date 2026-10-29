@@ -474,7 +474,7 @@ describe("App", () => {
     await waitFor(() => expect(closeA()).toBeEnabled());
   });
 
-  it("keeps a tab's close button disabled after it's switched away from mid-rebase, unlike a plain pending/transfer busy state", async () => {
+  it("switching away from a tab mid-rebase does not keep its close button disabled", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({
         entries: [
@@ -489,9 +489,8 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      // Rebase state lives only in the worker's in-memory `rebase_state` (nothing but
-      // `set_head_detached` is persisted), so unlike `pending`/`transfer` it must NOT be
-      // reported as clear just because this tab's workspace unmounted.
+      // The paused rebase is stored on disk (`rebase.json`), so closing this tab no longer loses
+      // it: a backgrounded tab mid-rebase is not kept busy.
       getHeadInfo: async () => ({
         headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null,
         rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
@@ -507,10 +506,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
     await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
 
-    // Unlike the plain pending/transfer case above, this stays disabled: `a`'s `RepoWorkspace`
-    // unmounted while `rebaseProgress !== null`, and dropping that worker mid-rebase would leave
-    // the repo with a detached HEAD and a conflicted index with no way to Continue or Abort.
-    expect(closeA()).toBeDisabled();
+    // Like the plain pending/transfer case above: reopening the tab restores the rebase.
+    await waitFor(() => expect(closeA()).toBeEnabled());
   });
 
   it("opens the shortcut sheet on ? outside of a text input", async () => {
