@@ -2547,6 +2547,7 @@ struct HeadInfoDto {
     squash_message: Option<String>,
     commit_hooks: Vec<String>,
     sequence: Option<SequenceProgressDto>,
+    rebase: Option<RebaseInfoDto>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -2564,6 +2565,46 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
+            rebase: info.rebase.map(RebaseInfoDto::from),
+        }
+    }
+}
+
+/// Same wire shape as the Tauri app's `RebaseInfoDto`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RebaseInfoDto {
+    branch: String,
+    onto: String,
+    current_step: usize,
+    total_steps: usize,
+    health: RebaseHealthDto,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "reason")]
+enum RebaseHealthDto {
+    Paused,
+    Diverged(&'static str),
+}
+
+impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
+    fn from(info: git_core::repo::RebaseInfo) -> Self {
+        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        Self {
+            branch: info.branch,
+            onto: info.onto,
+            current_step: info.current_step,
+            total_steps: info.total_steps,
+            health: match info.health {
+                RebaseHealth::Paused => RebaseHealthDto::Paused,
+                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
+                    RebaseDivergence::HeadMoved => "HeadMoved",
+                    RebaseDivergence::BranchMoved => "BranchMoved",
+                    RebaseDivergence::BranchMissing => "BranchMissing",
+                    RebaseDivergence::OtherOperation => "OtherOperation",
+                }),
+            },
         }
     }
 }
@@ -3502,8 +3543,8 @@ fn rebase_continue(params: Value, repos: &Repos) -> Result<Value, String> {
 fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.abort_rebase()?;
-    Ok(Value::Null)
+    let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
+    Ok(serde_json::json!({ "restored": abort.restored }))
 }
 
 #[derive(Serialize)]

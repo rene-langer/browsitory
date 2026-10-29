@@ -2705,3 +2705,162 @@ fn a_staged_rename_round_trips_its_old_path() {
         .collect();
     assert_eq!(edits, vec!["two\n".to_string(), "TWO\n".to_string()]);
 }
+
+/// `base` → `a` (a.txt) → `b` (b.txt) on the checked-out branch; returns `(onto, a, b)`.
+fn base_a_b(dir: &std::path::Path, repo: &git2::Repository) -> (String, String, String) {
+    write_file(dir, "base.txt", "base\n");
+    commit_all(repo, "base");
+    let onto = repo.head().unwrap().target().unwrap().to_string();
+    write_file(dir, "a.txt", "a\n");
+    commit_all(repo, "a");
+    let a = repo.head().unwrap().target().unwrap().to_string();
+    write_file(dir, "b.txt", "b\n");
+    commit_all(repo, "b");
+    let b = repo.head().unwrap().target().unwrap().to_string();
+    (onto, a, b)
+}
+
+#[test]
+fn a_paused_rebase_survives_a_sidecar_restart() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    let (onto, a, b) = base_a_b(dir.path(), &repo);
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    {
+        let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+        sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+        let started = sidecar.call(
+            2,
+            "start_rebase",
+            serde_json::json!({
+                "repoPath": repo_path,
+                "onto": onto,
+                "plan": [
+                    {"commitId": a, "action": {"kind": "Edit"}, "combinedMessage": null},
+                    {"commitId": b, "action": {"kind": "Pick"}, "combinedMessage": null},
+                ],
+            }),
+        );
+        assert_eq!(started["result"]["kind"], "PausedForEdit");
+    } // kill + wait: the VSCode window reloads
+
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    let head = sidecar.call(
+        2,
+        "get_head_info",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(
+        head["result"]["rebase"],
+        serde_json::json!({
+            "branch": branch,
+            "onto": onto,
+            "currentStep": 1,
+            "totalSteps": 2,
+            "health": { "kind": "Paused" },
+        })
+    );
+    let done = sidecar.call(
+        3,
+        "rebase_continue",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(done["result"]["kind"], "Done");
+    let head = sidecar.call(
+        4,
+        "get_head_info",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(head["result"]["rebase"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_sequence_finished_after_a_sidecar_restart_is_one_undo_entry() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    {
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &head, false).unwrap();
+    }
+    repo.set_head("refs/heads/feature").unwrap();
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "feature add");
+    let first = repo.head().unwrap().target().unwrap().to_string();
+    write_file(dir.path(), "a.txt", "feature\n");
+    commit_all(&repo, "feature edit");
+    let second = repo.head().unwrap().target().unwrap().to_string();
+    repo.set_head(&format!("refs/heads/{base}")).unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    write_file(dir.path(), "a.txt", "main\n");
+    commit_all(&repo, "main edit");
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    {
+        let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+        sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+        let started = sidecar.call(
+            2,
+            "cherry_pick_many",
+            serde_json::json!({ "repoPath": repo_path, "commitIds": [first, second] }),
+        );
+        assert_eq!(started["result"]["kind"], "Conflicted");
+    }
+
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    sidecar.call(
+        2,
+        "resolve_whole_file",
+        serde_json::json!({ "repoPath": repo_path, "path": "a.txt", "side": "Theirs" }),
+    );
+    let done = sidecar.call(
+        3,
+        "continue_sequence",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(done["result"]["kind"], "Completed");
+    let undo = sidecar.call(
+        4,
+        "get_undo_state",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(undo["result"]["undo"], "Cherry-pick 2 commits");
+}
+
+#[test]
+fn abort_rebase_reports_whether_head_went_back_to_the_branch() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    let (onto, a, _) = base_a_b(dir.path(), &repo);
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    let started = sidecar.call(
+        2,
+        "start_rebase",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "onto": onto,
+            "plan": [{"commitId": a, "action": {"kind": "Edit"}, "combinedMessage": null}],
+        }),
+    );
+    assert_eq!(started["result"]["kind"], "PausedForEdit");
+    let aborted = sidecar.call(
+        3,
+        "abort_rebase",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(aborted["result"], serde_json::json!({ "restored": true }));
+}
