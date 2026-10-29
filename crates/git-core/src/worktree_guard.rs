@@ -16,6 +16,65 @@ use std::path::{Component, Path, PathBuf};
 
 #[cfg(unix)]
 mod beneath_unix;
+#[cfg(windows)]
+mod beneath_windows;
+#[cfg(any(windows, test))]
+mod reparse;
+#[cfg(unix)]
+use beneath_unix as beneath;
+#[cfg(windows)]
+use beneath_windows as beneath;
+
+#[cfg(any(unix, windows))]
+mod walk_types {
+    //! The shared vocabulary of the platform walkers (`beneath_unix`, `beneath_windows`).
+    use std::ffi::OsStr;
+
+    /// How a walk treats a link where it needs a folder.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum OnLink {
+        /// Stop: the path is beyond a link.
+        Refuse,
+        /// Remove the link itself (never its target), then go on as [`OnMissing`] says.
+        Clear,
+    }
+
+    /// How a walk treats a missing folder.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum OnMissing {
+        Stop,
+        /// Create it.
+        Create,
+    }
+
+    /// A walk's progress, for tests that change the work tree at a chosen moment.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Step<'a> {
+        /// The folder was opened and is now held.
+        Opened(&'a OsStr),
+        Created(&'a OsStr),
+        Cleared(&'a OsStr),
+    }
+
+    /// The walk's test seam; production passes [`no_step`].
+    pub(crate) type StepFn<'s> = &'s mut dyn FnMut(Step<'_>);
+
+    pub(crate) fn no_step(_: Step<'_>) {}
+
+    /// Where a walk ended.
+    pub(crate) enum Walk<B> {
+        Found(B),
+        /// A component on the way is (or, with [`OnLink::Clear`] and [`OnMissing::Stop`], was) a
+        /// link.
+        Link,
+        /// A component on the way is missing ([`OnMissing::Stop`]).
+        Missing,
+        /// A component on the way is a file or something else that isn't a folder.
+        NotDir,
+    }
+}
+#[cfg(any(unix, windows))]
+use walk_types::{no_step, OnLink, OnMissing, Step, StepFn, Walk};
 
 /// Git's file modes for a symlink and a submodule (gitlink).
 const MODE_LINK: u32 = 0o120000;
@@ -248,19 +307,11 @@ pub(crate) fn has_hazard(repo: &git2::Repository) -> Result<bool, git2::Error> {
 /// Removes each hazard's link, never its target and never recursively. A path that is no longer
 /// a symlink (or already gone) is left alone. Call immediately before the forced checkout.
 ///
-/// Unix walks to each hazard's folder through held descriptors: a folder on the way that became
-/// a link meanwhile is itself removed (it would be a hazard too), never followed.
+/// The walk to each hazard holds every folder on the way: a folder that became a link meanwhile
+/// is itself removed (it would be a hazard too), never followed.
 pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()> {
     for hazard in hazards {
-        #[cfg(unix)]
-        beneath_unix::clear_hazard(workdir, hazard.path(), &mut beneath_unix::no_step)?;
-        #[cfg(not(unix))]
-        {
-            let full = workdir.join(hazard.path());
-            if is_link(&full) {
-                remove_link(&full)?;
-            }
-        }
+        beneath::clear_hazard(workdir, hazard.path(), &mut no_step)?;
     }
     Ok(())
 }
@@ -566,23 +617,6 @@ where
     }
 }
 
-/// Removes the symlink (or Windows junction) `full` itself.
-#[cfg(not(unix))]
-fn remove_link(full: &Path) -> io::Result<()> {
-    match std::fs::remove_file(full) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        // A Windows directory symlink or junction is removed with `RemoveDirectoryW`, which
-        // removes the link and not the directory it points to.
-        #[cfg(windows)]
-        Err(_) if is_link(full) => match std::fs::remove_dir(full) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
-        },
-        Err(error) => Err(error),
-    }
-}
-
 /// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
 /// a path that is not plain relative (`..`, absolute, a Windows prefix) counts as one.
 pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
@@ -614,24 +648,6 @@ pub(crate) fn refuse_linked_path(workdir: &Path, rel: &Path) -> Result<(), Linke
     Ok(())
 }
 
-/// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
-/// `rel` lands in a real directory inside the repository. (Unix does this inside the walk of
-/// [`replace_beneath`].)
-#[cfg(not(unix))]
-fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
-    let mut current = workdir.to_path_buf();
-    let components: Vec<_> = Path::new(rel).components().collect();
-    for component in &components[..components.len() - 1] {
-        current.push(component);
-        match entry_kind(&current) {
-            Entry::Dir => {}
-            Entry::Link => return remove_link(&current),
-            Entry::Other => return Ok(()),
-        }
-    }
-    Ok(())
-}
-
 /// Removes the file or link `rel` without following a link at the leaf or above it. Returns
 /// `Ok(false)` and does nothing when an ancestor is a symlink, `rel` is a directory, or `rel` is
 /// not a plain relative path. A missing `rel` counts as removed.
@@ -639,25 +655,7 @@ pub(crate) fn remove_beneath(workdir: &Path, rel: &str) -> io::Result<bool> {
     if !plain_relative(Path::new(rel)) {
         return Ok(false);
     }
-    #[cfg(unix)]
-    return beneath_unix::remove(workdir, Path::new(rel), &mut beneath_unix::no_step);
-    #[cfg(not(unix))]
-    {
-        if has_symlinked_ancestor(workdir, rel) {
-            return Ok(false);
-        }
-        let full = workdir.join(rel);
-        match std::fs::symlink_metadata(&full) {
-            Ok(meta) if meta.is_dir() => Ok(false),
-            Ok(meta) if meta.file_type().is_symlink() => remove_link(&full).map(|()| true),
-            Ok(_) => match std::fs::remove_file(&full) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-                _ => Ok(true),
-            },
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
-            Err(error) => Err(error),
-        }
-    }
+    beneath::remove(workdir, Path::new(rel), &mut no_step)
 }
 
 /// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
@@ -668,23 +666,7 @@ pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Resu
     if !plain_relative(Path::new(rel)) {
         return Ok(false);
     }
-    #[cfg(unix)]
-    return beneath_unix::write(workdir, Path::new(rel), bytes, &mut beneath_unix::no_step);
-    #[cfg(not(unix))]
-    {
-        if has_symlinked_ancestor(workdir, rel) {
-            return Ok(false);
-        }
-        let full = workdir.join(rel);
-        if is_link(&full) {
-            remove_link(&full)?;
-        }
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&full, bytes)?;
-        Ok(true)
-    }
+    beneath::write(workdir, Path::new(rel), bytes, &mut no_step)
 }
 
 /// A work-tree file or link as [`read_beneath`] found it.
@@ -717,42 +699,7 @@ pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>
     if !plain_relative(Path::new(rel)) {
         return Ok(None);
     }
-    #[cfg(unix)]
-    return beneath_unix::read(workdir, Path::new(rel), &mut beneath_unix::no_step);
-    #[cfg(not(unix))]
-    {
-        if has_symlinked_ancestor(workdir, rel) {
-            return Ok(None);
-        }
-        let full = workdir.join(rel);
-        let meta = match std::fs::symlink_metadata(&full) {
-            Ok(meta) => meta,
-            Err(error) if is_absent(&error) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        if meta.file_type().is_symlink() {
-            let target = std::fs::read_link(&full)?;
-            return Ok(Some(Leaf::Link(
-                target.to_string_lossy().replace('\\', "/").into_bytes(),
-            )));
-        }
-        if !meta.is_file() {
-            return Ok(None);
-        }
-        Ok(Some(Leaf::File {
-            bytes: std::fs::read(&full)?,
-            executable: false,
-        }))
-    }
-}
-
-/// Missing, or a parent is a file (`d/a` while `d` is a file).
-#[cfg(not(unix))]
-fn is_absent(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-    )
+    beneath::read(workdir, Path::new(rel), &mut no_step)
 }
 
 /// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
@@ -761,34 +708,7 @@ pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<
     if !plain_relative(Path::new(rel)) {
         return Ok(());
     }
-    #[cfg(unix)]
-    return beneath_unix::remove_and_prune(workdir, Path::new(rel), &mut beneath_unix::no_step);
-    #[cfg(not(unix))]
-    {
-        if has_symlinked_ancestor(workdir, rel) {
-            return Ok(());
-        }
-        let full = workdir.join(rel);
-        match std::fs::symlink_metadata(&full) {
-            Ok(meta) if meta.is_dir() => std::fs::remove_dir(&full)?,
-            Ok(_) => std::fs::remove_file(&full)?,
-            Err(error) if is_absent(&error) => {}
-            Err(error) => return Err(error),
-        }
-        let mut dir = full.parent();
-        while let Some(current) = dir {
-            let is_real_dir = std::fs::symlink_metadata(current).is_ok_and(|meta| meta.is_dir());
-            if current == workdir
-                || !current.starts_with(workdir)
-                || !is_real_dir
-                || std::fs::remove_dir(current).is_err()
-            {
-                break;
-            }
-            dir = current.parent();
-        }
-        Ok(())
-    }
+    beneath::remove_and_prune(workdir, Path::new(rel), &mut no_step)
 }
 
 /// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that
@@ -801,25 +721,7 @@ pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -
             "path must be relative to the repository",
         ));
     }
-    #[cfg(unix)]
-    return beneath_unix::replace(workdir, Path::new(rel), content, &mut beneath_unix::no_step);
-    #[cfg(not(unix))]
-    {
-        clear_symlinked_ancestors(workdir, rel)?;
-        let full = workdir.join(rel);
-        match std::fs::symlink_metadata(&full) {
-            Ok(meta) if meta.is_dir() => std::fs::remove_dir(&full)?,
-            Ok(_) => std::fs::remove_file(&full)?,
-            Err(error) if is_absent(&error) => {}
-            Err(error) => return Err(error),
-        }
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        match content {
-            Content::File { bytes, .. } | Content::Link(bytes) => std::fs::write(&full, bytes),
-        }
-    }
+    beneath::replace(workdir, Path::new(rel), content, &mut no_step)
 }
 
 /// Opens the regular file `rel` below `workdir` for reading without following a symlink at any
@@ -830,89 +732,15 @@ pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -
 /// Each step opens relative to the directory handle of the previous step (`openat` with
 /// `O_NOFOLLOW`), so a directory swapped for a symlink at any depth, at any moment, cannot
 /// redirect the read. `workdir` itself may be reached through a symlink (the user chose it).
-#[cfg(unix)]
+///
+/// Windows holds each folder on the way without `FILE_SHARE_DELETE` and opens every component
+/// as itself, so a junction or symbolic link anywhere (to a network share included) is refused
+/// without being contacted; an online-only OneDrive file is reopened so it loads (#150).
 pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std::fs::File>> {
     if !plain_relative(rel) {
         return Ok(None);
     }
-    beneath_unix::open_file(workdir, rel, &mut beneath_unix::no_step)
-}
-
-/// Windows: opens `rel` without following a final reparse point, then checks the path the
-/// *opened handle* resolves to: a junction or directory symlink anywhere on the way that leads
-/// out of the repository is detected on the handle itself, so a swap before the open is caught
-/// and a swap after it cannot change what was opened.
-#[cfg(windows)]
-pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std::fs::File>> {
-    use std::os::windows::fs::OpenOptionsExt;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    const ERROR_INVALID_NAME: i32 = 123;
-    const ERROR_DIRECTORY: i32 = 267;
-
-    if !plain_relative(rel) {
-        return Ok(None);
-    }
-    let root = std::fs::canonicalize(workdir)?;
-    // No FILE_FLAG_BACKUP_SEMANTICS: only files can be opened, a directory fails (access denied).
-    let file = match std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(workdir.join(rel))
-    {
-        Ok(file) => file,
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-            ) || matches!(e.raw_os_error(), Some(ERROR_INVALID_NAME | ERROR_DIRECTORY)) =>
-        {
-            return Ok(None)
-        }
-        Err(e) => return Err(e),
-    };
-    let meta = file.metadata()?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Ok(None);
-    }
-    let resolved = final_path(&file)?;
-    Ok(resolved.starts_with(&root).then_some(file))
-}
-
-/// The normalized `\\?\` DOS path of an open handle (`GetFinalPathNameByHandleW`), the same
-/// resolver `std::fs::canonicalize` uses.
-#[cfg(windows)]
-fn final_path(file: &std::fs::File) -> io::Result<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use std::os::windows::io::AsRawHandle;
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetFinalPathNameByHandleW(
-            file: *mut core::ffi::c_void,
-            path: *mut u16,
-            len: u32,
-            flags: u32,
-        ) -> u32;
-    }
-
-    let mut buf = vec![0u16; 512];
-    loop {
-        let capacity = u32::try_from(buf.len()).unwrap_or(u32::MAX);
-        // SAFETY: the handle belongs to `file`, which outlives the call; `buf` has `capacity`
-        // writable u16 slots. Flags 0 = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
-        let len = unsafe {
-            GetFinalPathNameByHandleW(file.as_raw_handle(), buf.as_mut_ptr(), capacity, 0)
-        } as usize;
-        if len == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if len < buf.len() {
-            buf.truncate(len);
-            return Ok(PathBuf::from(std::ffi::OsString::from_wide(&buf)));
-        }
-        // Too small: `len` is the size needed, including the terminating NUL.
-        buf.resize(len, 0);
-    }
+    beneath::open_file(workdir, rel, &mut no_step)
 }
 
 #[cfg(test)]
@@ -1418,6 +1246,171 @@ mod tests {
         assert!(open_beneath(dir.path(), Path::new("pipe"))
             .unwrap()
             .is_none());
+    }
+
+    /// A junction `link` -> `target` (no privilege needed).
+    #[cfg(windows)]
+    fn junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "mklink /J failed");
+    }
+
+    #[cfg(windows)]
+    fn outside_dir() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "f", "OUTSIDE\n");
+        dir
+    }
+
+    #[cfg(windows)]
+    fn assert_outside_dir_untouched(out: &Path) {
+        let names: Vec<_> = std::fs::read_dir(out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["f"]);
+        assert_eq!(std::fs::read_to_string(out.join("f")).unwrap(), "OUTSIDE\n");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_junction_to_an_inside_folder() {
+        let (dir, _repo) = repo();
+        junction(&dir.path().join("j"), &dir.path().join("d"));
+        assert!(open_beneath(dir.path(), Path::new("j/f"))
+            .unwrap()
+            .is_none());
+        assert!(open_beneath(dir.path(), Path::new("d/f"))
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_junction_to_an_outside_folder() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        write(dir.path(), "x/y/z", "z");
+        junction(&dir.path().join("x/y/l"), out.path());
+        assert!(open_beneath(dir.path(), Path::new("j/f"))
+            .unwrap()
+            .is_none());
+        assert!(open_beneath(dir.path(), Path::new("x/y/l/f"))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            read_all(
+                open_beneath(dir.path(), Path::new("x/y/z"))
+                    .unwrap()
+                    .unwrap()
+            ),
+            "z"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_file_symlink_leaf() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        if let Err(error) =
+            std::os::windows::fs::symlink_file(out.path().join("f"), dir.path().join("l"))
+        {
+            eprintln!("SKIP no symlink privilege: {error}");
+            return;
+        }
+        assert!(open_beneath(dir.path(), Path::new("l")).unwrap().is_none());
+        assert_eq!(
+            read_beneath(dir.path(), "l")
+                .unwrap()
+                .map(|leaf| matches!(leaf, Leaf::Link(_))),
+            Some(true)
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn write_beneath_refuses_a_junction_ancestor() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert!(!write_beneath(dir.path(), "j/f", b"PWNED").unwrap());
+        assert!(!write_beneath(dir.path(), "j/new", b"PWNED").unwrap());
+        assert!(write_beneath(dir.path(), "d/f", b"new").unwrap());
+        assert_eq!(std::fs::read(dir.path().join("d/f")).unwrap(), b"new");
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn remove_beneath_refuses_a_junction_ancestor() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert!(!remove_beneath(dir.path(), "j/f").unwrap());
+        assert_outside_dir_untouched(out.path());
+        // The junction itself is a link leaf: removed, never its target.
+        assert!(remove_beneath(dir.path(), "j").unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("j")).is_err());
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn clear_hazards_removes_the_junction_not_its_target() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+        junction(&dir.path().join("d"), out.path());
+        clear_hazards(dir.path(), &[Hazard::Ancestor("d".into())]).unwrap();
+        assert!(std::fs::symlink_metadata(dir.path().join("d")).is_err());
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn replace_beneath_clears_a_junction_on_the_way() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+        junction(&dir.path().join("d"), out.path());
+        replace_beneath(
+            dir.path(),
+            "d/f",
+            Content::File {
+                bytes: b"inside",
+                executable: false,
+            },
+        )
+        .unwrap();
+        let meta = std::fs::symlink_metadata(dir.path().join("d")).unwrap();
+        assert!(meta.is_dir() && !meta.file_type().is_symlink());
+        assert_eq!(std::fs::read(dir.path().join("d/f")).unwrap(), b"inside");
+        assert_outside_dir_untouched(out.path());
+        // Pruning stops at the work tree.
+        remove_and_prune_beneath(dir.path(), "d/f").unwrap();
+        assert!(!dir.path().join("d").exists());
+        assert!(dir.path().join("a.txt").exists());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn read_beneath_does_not_read_through_a_junction() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert_eq!(read_beneath(dir.path(), "j/f").unwrap(), None);
+        assert!(matches!(
+            read_beneath(dir.path(), "d/f").unwrap(),
+            Some(Leaf::File { .. })
+        ));
     }
 
     /// Stress test for #138: a thread swaps `rd` between a real directory and a symlink to an

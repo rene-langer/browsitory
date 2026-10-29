@@ -15,38 +15,9 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use super::{Content, Leaf};
-
-/// How a walk treats a link where it needs a folder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum OnLink {
-    /// Stop: the path is beyond a link.
-    Refuse,
-    /// Remove the link itself (`unlinkat`, never its target), then go on as [`OnMissing`] says.
-    Clear,
-}
-
-/// How a walk treats a missing folder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum OnMissing {
-    Stop,
-    /// `mkdirat` it (mode 0o777, minus the umask).
-    Create,
-}
-
-/// A walk's progress, for tests that change the work tree at a chosen moment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Step<'a> {
-    /// The folder was opened and is now held.
-    Opened(&'a OsStr),
-    Created(&'a OsStr),
-    Cleared(&'a OsStr),
-}
-
-/// The walk's test seam; production passes [`no_step`].
-pub(super) type StepFn<'s> = &'s mut dyn FnMut(Step<'_>);
-
-pub(super) fn no_step(_: Step<'_>) {}
+#[cfg(test)]
+use super::no_step;
+use super::{Content, Leaf, OnLink, OnMissing, Step, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -69,18 +40,6 @@ impl Beneath {
     pub(super) fn parent_fd(&self) -> RawFd {
         self.parent()
     }
-}
-
-/// Where a walk ended.
-pub(super) enum Walk {
-    Found(Beneath),
-    /// A component on the way is (or, with [`OnLink::Clear`] and [`OnMissing::Stop`], was) a
-    /// link.
-    Link,
-    /// A component on the way is missing ([`OnMissing::Stop`]).
-    Missing,
-    /// A component on the way is a file or something else that isn't a folder.
-    NotDir,
 }
 
 fn cstr(name: &OsStr) -> io::Result<CString> {
@@ -229,7 +188,7 @@ pub(super) fn walk(
     on_link: OnLink,
     on_missing: OnMissing,
     step: StepFn<'_>,
-) -> io::Result<Walk> {
+) -> io::Result<Walk<Beneath>> {
     use std::os::unix::fs::OpenOptionsExt;
     let names: Vec<OsString> = rel
         .components()
@@ -553,7 +512,7 @@ mod tests {
         on_link: OnLink,
         on_missing: OnMissing,
         step: StepFn<'_>,
-    ) -> Walk {
+    ) -> Walk<Beneath> {
         walk(dir, Path::new(rel), on_link, on_missing, step).unwrap()
     }
 
