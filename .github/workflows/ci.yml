@@ -54,8 +54,6 @@ jobs:
   rust:
     runs-on: ${{ matrix.os }}
     strategy:
-      # Temporary (#156): let every OS finish so the probe prints on each; removed before merge.
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
@@ -76,11 +74,6 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
-      # Temporary (#156): prints the case-insensitive probe's table on macOS/Windows. Removed
-      # before merge; the test itself stays and runs in `Test` above.
-      - name: Case-insensitive probe (temporary, #156)
-        if: success() || failure()
-        run: cargo test -p git-core --test case_insensitive_links -- --nocapture
       # The `forge-fixture-override` feature (see crates/tauri-app/Cargo.toml's doc comment)
       # gates security-sensitive code — the forge API-base-URL override and the in-memory
       # credential store swap — that only the `e2e` job below otherwise builds, and that job

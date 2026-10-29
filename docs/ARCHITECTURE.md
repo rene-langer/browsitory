@@ -354,11 +354,16 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   (`GetFileInformationByHandleEx`) decide. A name surrogate (symbolic link, junction, WSL link)
   is refused, or removed itself where the caller clears links, and never contacted (a junction
   to a UNC share included). Another reparse point (OneDrive/Cloud Files placeholder) is walked
-  through as a folder, or as a file reopened without the flag (so it hydrates) and accepted only
-  with the same file ID. Deletes act by path below held folders (`DeleteFileW` /
-  `RemoveDirectoryW` never follow a final reparse point); reads also check
-  `GetFinalPathNameByHandleW`. Hand-declared `kernel32` imports, no new dependency. A
-  `Step` seam in both walkers makes the races deterministic in tests.
+  through as a folder, or as a file read and written through a second, normal handle (so the
+  file system filter sees it) accepted only with the same file ID. Because an *empty* held
+  folder can still be turned into a junction in place, and the flag only guards a path's last
+  component, every component and leaf opened by path must sit in the held parent
+  (`GetFinalPathNameByHandleW` of both); leaves are deleted through their own handle
+  (`FileDispositionInfo`), new files are created with `create_new` and deleted again through
+  their handle if misplaced. Residual: creating a missing folder (`CreateDirectoryW`) goes by
+  path, so in that instant an empty folder could appear in a junction's target (nothing is
+  written into it). Hand-declared `kernel32` imports, no new dependency. A `Step` seam in both
+  walkers makes the races deterministic in tests.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
@@ -392,10 +397,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checkout and, under `core.ignorecase`, removes what is in the way, so it silently drops `d/x`
   rather than write through `D` (spec `2026-10-28-security-followups-design.md` §1.1–1.3 has the
   macOS/Windows probe). `worktree_guard::find_case_collision` refuses such a source anyway: a
-  pure pass over the index entries that folds names (Unicode lowercase without the HFS+
-  ignorable code points; NFC/NFD is not folded) and compares folded link/gitlink paths with
-  folded strict-prefix folders, both orders and exact duplicates; a file next to a folder is
-  fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows builds).
+  pure pass over the index entries that folds names (each character upper- then lowercased,
+  without the HFS+ ignorable code points; NFC/NFD is not folded) and compares folded
+  link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
+  and exact duplicates, over all of an operation's incoming sources together; a file next to a
+  folder is fine. A forced checkout whose target holds a collision HEAD already holds (abort,
+  `reset --hard`, discard) is allowed, so such a repository can be cleaned up. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows builds).
   `refuse_linked_folders` checks each incoming source after its link scan (so a repository
   whose HEAD already holds a collision isn't locked), `prepare_forced_checkout` its target
   (path-limited), undo its target work tree before its raw writes, `worktree::create_worktree`
