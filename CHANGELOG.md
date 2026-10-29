@@ -197,6 +197,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of cloning into the link's target.
 - The image preview reads working-tree files without following a folder that is swapped for a
   symbolic link while it reads (#138).
+- Hardening for case-insensitive file systems (macOS, Windows) against a repository holding a
+  symbolic link and a folder whose names differ only in case (#156).
 
 ### Fixed
 
