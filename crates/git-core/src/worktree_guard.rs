@@ -307,6 +307,22 @@ pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
             .unwrap_or(false)
 }
 
+/// When a fresh checkout (clone, submodule) checks for case collisions. Tests can't preset a
+/// fresh clone's config, so they force the check with `Always`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CasePolicy {
+    /// [`folds_case`] of the repository being checked out.
+    FromRepo,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Always,
+}
+
+impl CasePolicy {
+    pub(crate) fn applies(self, repo: &git2::Repository) -> bool {
+        self == CasePolicy::Always || folds_case(repo)
+    }
+}
+
 /// The first link or gitlink entry whose folded path equals the folded path of a folder on the
 /// way to another entry (a strict prefix of it), in either order.
 fn first_collision<P: AsRef<[u8]>>(

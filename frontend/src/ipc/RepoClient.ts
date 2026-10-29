@@ -231,6 +231,7 @@ export type CloneErrorKind =
   | "AlreadyRepository"
   | "Io"
   | "InitFailed"
+  | "CaseCollision"
   | TransferErrorKind;
 
 /** Clone/init failure; the backend sends `{ kind, message }` so callers can branch on `kind`. */
