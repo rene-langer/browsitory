@@ -260,6 +260,119 @@ pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()
 #[error("'{0}' is a symbolic link where the repository has a folder. Remove or rename it first.")]
 pub struct LinkedFolder(pub String);
 
+/// A link (or submodule) entry and a folder of another entry name the same file once case is
+/// ignored (#156). On a case-insensitive file system a write below the folder could go through
+/// the link.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "'{link}' is a symbolic link and '{folder}' a folder whose names differ only in case. On \
+     this file system they are the same name, so Browsitory won't check them out. Rename one of \
+     them in the repository."
+)]
+pub struct CaseCollision {
+    pub link: String,
+    pub folder: String,
+}
+
+/// The code points HFS+ ignores in names (the list git's `is_hfs_dotgit` uses).
+fn hfs_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'
+    )
+}
+
+/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 lowercased
+/// per character without the HFS+ ignorable code points, anything else lowercased as ASCII.
+/// NFC/NFD normalization is not folded (a documented residual, decision D4).
+pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
+    match std::str::from_utf8(name) {
+        Ok(text) => text
+            .chars()
+            .filter(|c| !hfs_ignorable(*c))
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+            .into_bytes(),
+        Err(_) => name.to_ascii_lowercase(),
+    }
+}
+
+/// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
+/// (decision D1), where a repository copied from elsewhere can carry a wrong setting.
+pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
+    cfg!(any(target_os = "macos", windows))
+        || repo
+            .config()
+            .and_then(|config| config.get_bool("core.ignorecase"))
+            .unwrap_or(false)
+}
+
+/// The first link or gitlink entry whose folded path equals the folded path of a folder on the
+/// way to another entry (a strict prefix of it), in either order.
+fn first_collision<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32)>,
+) -> Option<CaseCollision> {
+    let found = |link: &[u8], folder: &[u8]| CaseCollision {
+        link: String::from_utf8_lossy(link).into_owned(),
+        folder: String::from_utf8_lossy(folder).into_owned(),
+    };
+    // Folded path -> the path as git spells it.
+    let mut links: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+    let mut folders: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+    let mut seen_folders: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+    for (path, mode) in entries {
+        let path = path.as_ref();
+        if mode == MODE_LINK || mode == MODE_GITLINK {
+            let key = fold_name(path);
+            if let Some(folder) = folders.get(&key) {
+                return Some(found(path, folder));
+            }
+            links.entry(key).or_insert_with(|| path.to_vec());
+        }
+        for (at, byte) in path.iter().enumerate() {
+            if *byte != b'/' {
+                continue;
+            }
+            let prefix = &path[..at];
+            // Index entries are sorted, so most prefixes repeat; each is folded once.
+            if !seen_folders.insert(prefix.to_vec()) {
+                continue;
+            }
+            let key = fold_name(prefix);
+            if let Some(link) = links.get(&key) {
+                return Some(found(link, prefix));
+            }
+            folders.entry(key).or_insert_with(|| prefix.to_vec());
+        }
+    }
+    None
+}
+
+/// The first case collision among `source`'s entries, optionally limited to the literal `paths`
+/// (matched ignoring case, as libgit2 matches checkout paths under `core.ignorecase`), or `None`.
+/// Pure: never touches the work tree.
+pub(crate) fn find_case_collision<P: AsRef<[u8]>>(
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<Option<CaseCollision>, git2::Error> {
+    let owned;
+    let index: &git2::Index = match source {
+        GuardSource::Index(index) => index,
+        GuardSource::Tree(tree) => {
+            let mut index = git2::Index::new()?;
+            index.read_tree(tree)?;
+            owned = index;
+            &owned
+        }
+    };
+    Ok(first_collision(
+        index
+            .iter()
+            .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+            .map(|entry| (entry.path, entry.mode)),
+    ))
+}
+
 /// `rel` as git spells it: components joined with `/` on every platform.
 fn git_path(rel: &Path) -> String {
     rel.components()
@@ -908,6 +1021,172 @@ mod tests {
         assert!(remove_beneath(dir.path(), "missing.txt").unwrap());
         assert!(!remove_beneath(dir.path(), "d").unwrap());
         assert!(dir.path().join("d/f").exists());
+    }
+
+    /// A tree from `(path, mode, content)` entries, built without touching the work tree.
+    fn tree_of<'r>(repo: &'r Repository, entries: &[(&str, i32, &str)]) -> git2::Tree<'r> {
+        let mut index = git2::Index::new().unwrap();
+        for (path, mode, content) in entries {
+            let id = if *mode == MODE_GITLINK as i32 {
+                repo.head().unwrap().target().unwrap()
+            } else {
+                repo.blob(content.as_bytes()).unwrap()
+            };
+            index
+                .add(&crate::undo::index_entry(path, id, *mode as u32))
+                .unwrap();
+        }
+        let id = index.write_tree_to(repo).unwrap();
+        repo.find_tree(id).unwrap()
+    }
+
+    const LINK: i32 = MODE_LINK as i32;
+    const FILE: i32 = 0o100644;
+
+    fn collision(link: &str, folder: &str) -> Option<CaseCollision> {
+        Some(CaseCollision {
+            link: link.into(),
+            folder: folder.into(),
+        })
+    }
+
+    #[test]
+    fn a_link_and_a_folder_differing_in_case_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("D", "d"));
+    }
+
+    #[test]
+    fn the_reverse_order_collides() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D/x", FILE, "x"), ("d", LINK, "/x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("d", "D"));
+    }
+
+    #[test]
+    fn a_nested_link_collides_with_a_folder_of_another_case() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("A/b/c", FILE, "c"), ("a/B", LINK, "/x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("a/B", "A/b"));
+    }
+
+    #[test]
+    fn a_gitlink_counts_as_a_link() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(
+            &repo,
+            &[("Sub", MODE_GITLINK as i32, ""), ("sub/x", FILE, "x")],
+        );
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("Sub", "sub"));
+    }
+
+    #[test]
+    fn the_same_name_as_link_and_folder_collides() {
+        // `TreeBuilder` and `Index::add` both refuse such a pair, so only a crafted tree object
+        // holds one; check the pure core directly.
+        let found = first_collision([(&b"d"[..], MODE_LINK), (&b"d/x"[..], 0o100644)]);
+        assert_eq!(found, collision("d", "d"));
+    }
+
+    #[test]
+    fn unicode_case_and_hfs_ignorables_fold() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("Ä", LINK, "/x"), ("ä/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            collision("Ä", "ä")
+        );
+        let tree = tree_of(&repo, &[("d\u{200c}", LINK, "/x"), ("d/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            collision("d\u{200c}", "d")
+        );
+        assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "straße".as_bytes());
+        assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[test]
+    fn a_file_and_a_folder_differing_in_case_do_not_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", FILE, "x"), ("d/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn distinct_names_do_not_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(
+            &repo,
+            &[
+                ("D", LINK, "/x"),
+                ("e/x", FILE, "x"),
+                ("Dd/x", FILE, "x"),
+                ("dx", FILE, "x"),
+            ],
+        );
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn paths_limit_the_check() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let source = GuardSource::Tree(&tree);
+        // Paths match ignoring case, as libgit2's checkout under `core.ignorecase` does: `d`
+        // selects the link `D` too.
+        assert_eq!(find_case_collision(&source, Some(&["d/x"])).unwrap(), None);
+        assert_eq!(find_case_collision(&source, Some(&["e"])).unwrap(), None);
+        assert_eq!(
+            find_case_collision(&source, Some(&["d"])).unwrap(),
+            collision("D", "d")
+        );
+        assert_eq!(
+            find_case_collision(&source, Some(&["D", "d/x"])).unwrap(),
+            collision("D", "d")
+        );
+    }
+
+    #[test]
+    fn an_index_source_is_checked_like_a_tree() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let mut index = git2::Index::new().unwrap();
+        index.read_tree(&tree).unwrap();
+        assert_eq!(
+            find_case_collision(&GuardSource::Index(&index), ALL).unwrap(),
+            collision("D", "d")
+        );
+    }
+
+    #[test]
+    fn folds_case_reads_core_ignorecase() {
+        let (_dir, repo) = repo();
+        let mut config = repo.config().unwrap();
+        config.set_bool("core.ignorecase", false).unwrap();
+        assert_eq!(folds_case(&repo), cfg!(any(target_os = "macos", windows)));
+        config.set_bool("core.ignorecase", true).unwrap();
+        assert!(folds_case(&repo));
+    }
+
+    #[test]
+    fn case_collision_message_is_exact() {
+        assert_eq!(
+            collision("D", "d").unwrap().to_string(),
+            "'D' is a symbolic link and 'd' a folder whose names differ only in case. On this \
+             file system they are the same name, so Browsitory won't check them out. Rename one \
+             of them in the repository."
+        );
     }
 
     fn read_all(file: std::fs::File) -> String {
