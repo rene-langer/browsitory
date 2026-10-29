@@ -170,6 +170,17 @@ deviation made during implementation:
   - A refused Continue writes nothing; a `rebase.json` that can't be deleted is remembered as
     ended (`RebaseMemory::forgotten`); the recorder reloads `undo.json` before recording a pending
     entry; `rebase.json` temp names are unique per write.
+- **Verifier follow-ups** (after "merge with follow-ups"):
+  - `commit_matches_pick` (rebases and sequences) also requires the step's message (or a
+    Reword's planned one) and that every path the step changes cleanly is changed too; author
+    and time alone adopted another plan commit by the same author (reproduced, now a test in both
+    suites). Tests that committed by hand under another message now use git's kept message.
+  - Abort restores when HEAD is the adoptable step (health says Paused there).
+  - A failed Continue that finds HEAD moved by another writer saves nothing.
+  - Delete/rename are refused only for the rebased branch, plus a worktree on it. Creating a
+    branch (`git checkout -b`) is now gated for every stored operation: it moved HEAD.
+  - Product answers: the abort toast offers "Switch to {branch}" when the branch moved (ordinary
+    safe switch); OtherOperation has its own toast copy.
 - The rebase undo label is the pre-existing `Rebase onto <full id>` (the planner passes the full
   id); the E2E matches its prefix.
 

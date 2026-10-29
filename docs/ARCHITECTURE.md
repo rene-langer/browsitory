@@ -276,8 +276,9 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   otherwise `OperationInProgress` / `HeadMoved`. With git state clean and HEAD unchanged (an
   error stop, or `git cherry-pick --abort` from a terminal) Continue retries the step. Only a
   conflict stop (`stoppedOnConflict`) accepts HEAD one commit further as the step finished by
-  hand, and only if git's pick state is gone and the commit is recognisably the step (same
-  author name/email/time for a cherry-pick; "This reverts commit <id>" for a revert). The index
+  hand, and only if git's pick state is gone and the commit is recognisably the step (for a
+  cherry-pick `pick::commit_matches_pick`: same author name/email/time, the step's message, and
+  every path the step changes cleanly changed too; "This reverts commit <id>" for a revert). The index
   is re-read before use, so a terminal `git add` is seen. Abort aborts its own paused step (or
   the step's conflicts if `CHERRY_PICK_HEAD` was deleted), rewinds only when HEAD still names
   the ref the sequence started on (`originalRef`) and is still at the stop point and git has
@@ -335,25 +336,32 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   | another pick/merge/revert paused | `OperationInProgress` |
   | anything else | `HeadMoved` |
 
-  "Committed by hand" is `pick::commit_matches_pick`: one parent, `expected_head`, and the
-  picked commit's author name/email/time. Refusals leave the state untouched; a later error
+  "Committed by hand" is `pick::commit_matches_pick`: one parent, `expected_head`; the picked
+  commit's author name/email/time; its message (or a `Reword`'s planned message; comment lines
+  and trailing whitespace ignored); and every path that applying the step onto `expected_head`
+  changes cleanly is changed by the commit too (conflicted paths may be resolved any way, and an
+  edit stop may change more). Author and time alone would accept another plan commit by the same
+  author. Refusals leave the state untouched; a later error
   marks the stop `Error` unless the step is still applied and paused. `finish` moves the branch
   with `reference_matching` against `original_tip` and refuses `BranchMoved`/`BranchMissing`
   instead of overwriting a branch that moved during the pause.
-- **Abort** (`abort_rebase` → `RebaseAbort { restored }`): with HEAD at `expected_head`, the
+- **Abort** (`abort_rebase` → `RebaseAbort { restored }`): with HEAD at `expected_head` (or at
+  the step committed by hand, which health reports as `Paused`), the
   branch still at `original_tip` and nothing else paused, it force-checks-out the branch, then
   reattaches HEAD (checkout first, so a refused checkout leaves HEAD where the rebase can still
   abort) — `restored: true`. Otherwise (diverged) HEAD and refs stay where they are —
   `restored: false`: with HEAD still at `expected_head` the paused step is undone like `git
   cherry-pick --abort`; with HEAD moved only git's pick state is forgotten, so work staged on
   the other branch survives. The worker forgets the state only when Abort succeeded.
-- **Writes in the worker**: a refused Continue (state unchanged) writes nothing, so a refusal in
-  one app never puts back a state the other app moved on from. A file that can't be deleted
+- **Writes in the worker**: a refused Continue (state unchanged) writes nothing, and neither does
+  a failed Continue that finds HEAD moved by another writer (its commit lost HEAD's
+  compare-and-swap), so one app never puts back a state the other app moved on from. A file that can't be deleted
   when the rebase ends is remembered as ended for the session (`gate::RebaseMemory::forgotten`),
   so it doesn't keep gating the repository.
 - A stored rebase blocks the same commands as a sequence (`gate::gate_during_operation`, also
-  after an error stop where git sees nothing in progress), plus branch delete/rename (the
-  rebased branch isn't checked out, so git would allow it) and stash save, counts as in progress for undo, and
+  after an error stop where git sees nothing in progress; both also refuse creating a branch,
+  which checks it out), plus deleting or renaming the rebased branch or adding a worktree on it
+  (it isn't checked out, so git would allow it) and stash save, counts as in progress for undo, and
   is reported as `HeadInfo.rebase { branch, onto, currentStep, totalSteps, health }`, which the
   frontend reads on every refresh (there is no separate progress call).
 

@@ -16,9 +16,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - If the repository was changed outside Browsitory while a rebase was paused (HEAD moved, the
   branch moved or was deleted, another git operation started), the strip shows "Rebase of
   <branch> interrupted" with the reason. Abort then stops the rebase without moving HEAD or
-  discarding work it no longer owns.
+  discarding work it no longer owns; when the branch had changed, its toast offers "Switch to
+  <branch>".
 - Continue accepts a paused rebase step that was finished with git (`git cherry-pick
-  --continue` or `git commit`).
+  --continue` or `git commit`) when the commit keeps the step's author, message and changes.
+- Continue of a stopped cherry-pick/revert sequence now also requires a commit made by hand to
+  carry the step's message and changes, not only its author, before counting it as the step.
+- While a rebase or a sequence is paused, creating a branch (which checks it out) is refused,
+  and so are deleting, renaming or adding a worktree on the branch being rebased.
 - Fixed: continuing a rebase after a step failed (for example because a local edit was in the
   way) committed that step empty and lost its changes.
 - Fixed: a rebase whose branch moved during the pause no longer overwrites the branch; Continue

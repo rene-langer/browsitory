@@ -516,13 +516,18 @@ after a restart is still one step for **Undo** ("Rebase onto …").
 like a cherry-pick on a detached HEAD: `git status` says "You are currently cherry-picking". Finishing
 the paused step with `git cherry-pick --continue` or `git commit` is fine — Continue in Browsitory
 takes that commit as the step (a reworded step still gets the message you planned) and goes on.
+It does so only when the commit is recognisably that step: the step's author and message (keep the
+message git suggests) and the step's changes; any other commit counts as HEAD moved.
 `git cherry-pick --abort` is fine too: Continue then applies the step again.
 
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example
 `git switch`), the branch was changed or deleted, or another git operation is in progress. Such a
 rebase can only be aborted, and **Abort rebase** then stops it without moving HEAD or touching your
-branches; it only cleans up the rebase's own paused step. Continue also refuses to finish if the
+branches; it only cleans up the rebase's own paused step. When the branch had changed, the toast
+offers **Switch to ⟨branch⟩**, an ordinary branch switch that refuses rather than overwrite local
+changes. While a rebase is paused, the branch being rebased can't be deleted, renamed or checked
+out in a new worktree. Continue also refuses to finish if the
 branch being rebased moved during the pause, rather than overwriting those commits; put the branch
 back and Continue again, or abort and start over.
 
@@ -588,8 +593,8 @@ branch switching, pull and stash apply/pop are unavailable.
 
 If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
 **Continue** recognises it when it is exactly that step: one commit on top of where the sequence
-stopped, with the picked commit's author (for a cherry-pick) or git's "This reverts commit …"
-message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
+stopped, with the picked commit's author, message and changes (for a cherry-pick) or git's
+"This reverts commit …" message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
 means HEAD moved, and Continue refuses.
 
 **Abort** puts the branch back where it was before the first commit was applied, keeping
