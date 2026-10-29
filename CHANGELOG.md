@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Restart resilience
+
+- A paused rebase survives an app restart (in progress).
+
 ### Interface refresh
 
 - Calmer, editor-like look: a new charcoal dark palette and warm-neutral light palette with a

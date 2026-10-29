@@ -942,3 +942,107 @@ fn abort_rebase_replaces_a_symlinked_directory() {
     assert!(!common::is_link(dir.path(), "d"));
     assert_eq!(common::read(dir.path(), "d/f"), "inner\n");
 }
+
+// --- Restart resilience (#108) --------------------------------------------------------------
+
+use git_core::rebase::{RebaseState, RebaseStop};
+
+fn edit(commit_id: &str) -> RebasePlanEntry {
+    RebasePlanEntry {
+        commit_id: commit_id.to_string(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    }
+}
+
+fn head_id(repo: &git2::Repository) -> git2::Oid {
+    repo.head().unwrap().peel_to_commit().unwrap().id()
+}
+
+/// `base` (onto) → "add a" (a.txt) → "add b" (b.txt) on the current branch. Returns
+/// `(onto, [a, b], branch_ref)`.
+fn two_commits_on_a_branch(
+    dir: &std::path::Path,
+    repo: &git2::Repository,
+) -> (String, Vec<String>, String) {
+    write_file(dir, "base.txt", "v1\n");
+    commit_all(repo, "base commit");
+    let onto = commit_id_at(repo, 0);
+    write_file(dir, "a.txt", "a\n");
+    commit_all(repo, "add a");
+    write_file(dir, "b.txt", "b\n");
+    commit_all(repo, "add b");
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    let ids = git_core::rebase::commits_since(repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    (onto, ids, branch)
+}
+
+/// A rebase of one commit that conflicts with `onto` on `shared.txt`.
+fn conflicting_rebase() -> (tempfile::TempDir, git2::Repository, RebaseState, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let (state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![pick(&commits[1].id)]).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    (dir, repo, state, onto)
+}
+
+#[test]
+fn a_conflict_pause_records_stop_conflict_onto_and_the_original_tip() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    let tip = head_id(&repo);
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+
+    let (state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![pick(&commits[1].id)]).unwrap();
+
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    assert_eq!(state.stop, RebaseStop::Conflict);
+    assert_eq!(state.onto.to_string(), onto);
+    assert_eq!(state.original_tip, tip);
+    assert_eq!(state.original_branch_ref, branch);
+    assert_eq!(state.expected_head, head_id(&repo));
+    assert_eq!(state.cursor, 0);
+    assert_eq!(state.group_start_parent, None);
+}
+
+#[test]
+fn an_edit_pause_records_stop_edit() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = two_commits_on_a_branch(dir.path(), &repo);
+    let (state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+    assert_eq!(state.stop, RebaseStop::Edit);
+    // A clone compares equal: the state is plain data a store can rebuild.
+    assert_eq!(state.clone(), state);
+}
+
+#[test]
+fn progress_reports_the_paused_step_one_based() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = two_commits_on_a_branch(dir.path(), &repo);
+    let (state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    let progress = state.progress();
+    assert_eq!((progress.current_step, progress.total_steps), (1, 2));
+}

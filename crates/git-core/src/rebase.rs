@@ -100,32 +100,60 @@ pub enum RebaseStepResult {
     Done,
 }
 
+/// Why a rebase is stopped. `Conflict` and `Edit` mean the current step was applied to the
+/// index (`CHERRY_PICK_HEAD` written); `Error` means a step (or `finish`) failed, so the step at
+/// `cursor` is not applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseStop {
+    Conflict,
+    Edit,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseProgress {
+    pub current_step: usize,
+    pub total_steps: usize,
+}
+
+/// A paused rebase. Plain data, so `repo-service` can persist it and rebuild it after a
+/// restart; whether it still matches the repository is `rebase_health`'s job.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RebaseState {
-    plan: Vec<RebasePlanEntry>,
-    cursor: usize,
-    original_branch_ref: String,
-    // Not read by this task's code — recorded here for `abort_rebase` (Task 3), which reattaches
-    // to `original_branch_ref` at this tip to fully undo an in-progress rebase.
-    #[allow(dead_code)]
-    original_tip: Oid,
-    group_start_parent: Option<Oid>,
+    pub plan: Vec<RebasePlanEntry>,
+    /// Index of the stopped entry; `plan.len()` after a failed `finish`.
+    pub cursor: usize,
+    /// `refs/heads/<name>`: the branch being rebased, moved only by `finish`.
+    pub original_branch_ref: String,
+    /// The branch tip when the rebase started; `finish` refuses when the branch moved.
+    pub original_tip: Oid,
+    pub onto: Oid,
+    pub group_start_parent: Option<Oid>,
     /// The OID this crate last moved `HEAD` to (the initial detach, then each landed step or
     /// group collapse). `rebase_continue` refuses to run when the real `HEAD` has drifted from
     /// it — e.g. because something else switched branches on the same repo mid-pause — since
     /// continuing would commit the rebased step onto whatever ref happened to be checked out.
-    expected_head: Oid,
+    pub expected_head: Oid,
+    pub stop: RebaseStop,
 }
 
 impl RebaseState {
     /// 1-indexed number of the plan entry currently in flight, for a "Step N of M" display —
-    /// the first pause reports step 1, not 0. Clamped to `total_steps()` so a state whose cursor
-    /// has run past the end (the rebase is finished) still reports "N of N" rather than N+1.
+    /// the first pause reports step 1, not 0. Clamped to `total_steps` so a state whose cursor
+    /// has run past the end (a failed `finish`) still reports "N of N" rather than N+1.
+    pub fn progress(&self) -> RebaseProgress {
+        RebaseProgress {
+            current_step: (self.cursor + 1).min(self.plan.len()),
+            total_steps: self.plan.len(),
+        }
+    }
+
     pub fn current_step(&self) -> usize {
-        (self.cursor + 1).min(self.plan.len())
+        self.progress().current_step
     }
 
     pub fn total_steps(&self) -> usize {
-        self.plan.len()
+        self.progress().total_steps
     }
 }
 
@@ -208,8 +236,10 @@ pub fn start_rebase(
         cursor: 0,
         original_branch_ref,
         original_tip,
+        onto: onto_commit.id(),
         group_start_parent: None,
         expected_head: onto_commit.id(),
+        stop: RebaseStop::Error,
     };
 
     // Everything past the detach above must roll back on failure: an `Err` escaping here would
@@ -228,6 +258,17 @@ pub fn start_rebase(
 }
 
 pub fn rebase_continue(
+    repo: &Repository,
+    state: &mut RebaseState,
+) -> Result<RebaseStepResult, RebaseError> {
+    let result = continue_steps(repo, state);
+    if result.is_err() {
+        state.stop = RebaseStop::Error;
+    }
+    result
+}
+
+fn continue_steps(
     repo: &Repository,
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
@@ -292,12 +333,14 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         repo.cherrypick(&commit, None)?;
 
         if repo.index()?.has_conflicts() {
+            state.stop = RebaseStop::Conflict;
             return Ok(RebaseStepResult::Conflicted {
                 files: conflicted_paths(repo)?,
             });
         }
 
         if matches!(entry.action, RebaseAction::Edit) {
+            state.stop = RebaseStop::Edit;
             return Ok(RebaseStepResult::PausedForEdit);
         }
 
