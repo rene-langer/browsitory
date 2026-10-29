@@ -393,25 +393,43 @@ impl CasePolicy {
 fn first_collision<P: AsRef<[u8]>>(
     entries: impl IntoIterator<Item = (P, u32)>,
 ) -> Option<CaseCollision> {
+    first_collision_across(entries.into_iter().map(|(path, mode)| (path, mode, 0)))
+}
+
+/// [`first_collision`] over entries from several sources (the third field). Within one source
+/// an exactly equal link and folder collide too (only a crafted tree holds both); across
+/// sources they are one path changing kind (a link replaced by a folder), so only names that
+/// differ in spelling collide there.
+fn first_collision_across<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32, usize)>,
+) -> Option<CaseCollision> {
     let found = |link: &[u8], folder: &[u8]| CaseCollision {
         link: String::from_utf8_lossy(link).into_owned(),
         folder: String::from_utf8_lossy(folder).into_owned(),
     };
-    // Folded path -> the path as git spells it (and, for links, whether it is a gitlink).
-    let mut links: HashMap<Vec<u8>, (Vec<u8>, bool)> = HashMap::new();
-    let mut folders: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
-    let mut seen_folders: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
-    for (path, mode) in entries {
+    // Folded path -> the path as git spells it, its source (and for links, whether a gitlink).
+    let mut links: HashMap<Vec<u8>, (Vec<u8>, bool, usize)> = HashMap::new();
+    let mut folders: HashMap<Vec<u8>, Vec<(Vec<u8>, usize)>> = HashMap::new();
+    let mut seen_folders: std::collections::HashSet<(Vec<u8>, usize)> =
+        std::collections::HashSet::new();
+    // Same spelling from another source is the same path, not a collision.
+    let clash = |a: &[u8], a_src: usize, b: &[u8], b_src: usize| a_src == b_src || a != b;
+    for (path, mode, src) in entries {
         let path = path.as_ref();
         if mode == MODE_LINK || mode == MODE_GITLINK {
             let gitlink = mode == MODE_GITLINK;
             let key = fold_name(path);
-            if let Some(folder) = folders.get(&key) {
+            if let Some((folder, _)) = folders
+                .get(&key)
+                .and_then(|all| all.iter().find(|(f, f_src)| clash(path, src, f, *f_src)))
+            {
                 return Some(found(path, folder));
             }
             match links.get(&key) {
                 // A link next to a submodule folder of the same name.
-                Some((other, other_gitlink)) if *other_gitlink != gitlink => {
+                Some((other, other_gitlink, other_src))
+                    if *other_gitlink != gitlink && clash(path, src, other, *other_src) =>
+                {
                     return Some(if gitlink {
                         found(other, path)
                     } else {
@@ -420,7 +438,7 @@ fn first_collision<P: AsRef<[u8]>>(
                 }
                 Some(_) => {}
                 None => {
-                    links.insert(key, (path.to_vec(), gitlink));
+                    links.insert(key, (path.to_vec(), gitlink, src));
                 }
             }
         }
@@ -429,15 +447,17 @@ fn first_collision<P: AsRef<[u8]>>(
                 continue;
             }
             let prefix = &path[..at];
-            // Index entries are sorted, so most prefixes repeat; each is folded once.
-            if !seen_folders.insert(prefix.to_vec()) {
+            // Index entries are sorted, so most prefixes repeat; each is folded once per source.
+            if !seen_folders.insert((prefix.to_vec(), src)) {
                 continue;
             }
             let key = fold_name(prefix);
-            if let Some((link, _)) = links.get(&key) {
-                return Some(found(link, prefix));
+            if let Some((link, _, link_src)) = links.get(&key) {
+                if clash(link, *link_src, prefix, src) {
+                    return Some(found(link, prefix));
+                }
             }
-            folders.entry(key).or_insert_with(|| prefix.to_vec());
+            folders.entry(key).or_default().push((prefix.to_vec(), src));
         }
     }
     None
@@ -461,7 +481,7 @@ pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
     paths: Option<&[P]>,
 ) -> Result<Option<CaseCollision>, git2::Error> {
     let mut entries = Vec::new();
-    for source in sources {
+    for (i, source) in sources.iter().enumerate() {
         let owned;
         let index: &git2::Index = match source {
             GuardSource::Index(index) => index,
@@ -476,10 +496,10 @@ pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
             index
                 .iter()
                 .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
-                .map(|entry| (entry.path, entry.mode)),
+                .map(|entry| (entry.path, entry.mode, i)),
         );
     }
-    Ok(first_collision(entries))
+    Ok(first_collision_across(entries))
 }
 
 /// `rel` as git spells it: components joined with `/` on every platform.
@@ -1168,6 +1188,11 @@ mod tests {
             find_case_collision_in(&sources, ALL).unwrap(),
             collision("D", "d")
         );
+        // The same name as a link in one source and a folder in another is one path changing
+        // kind (a stash of a folder that replaced a link), not a collision.
+        let same = tree_of(&repo, &[("d", LINK, "/x")]);
+        let sources = [GuardSource::Tree(&same), GuardSource::Tree(&folders)];
+        assert_eq!(find_case_collision_in(&sources, ALL).unwrap(), None);
     }
 
     #[test]
