@@ -455,11 +455,20 @@ fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<b
     }
     let head = repo.head()?.peel_to_commit()?;
     let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    // git keeps the picked commit's message during the pause; a Reword step may also have been
+    // committed with its planned message.
+    let original = String::from_utf8_lossy(picked.message_bytes()).into_owned();
+    let mut messages = vec![original.as_str()];
+    if let RebaseAction::Reword { message } = &entry.action {
+        messages.push(message);
+    }
     Ok(crate::pick::commit_matches_pick(
+        repo,
         &head,
         state.expected_head,
         &picked,
-    ))
+        &messages,
+    )?)
 }
 
 /// Takes HEAD (checked by `is_step_committed_by_hand`) as the current step: a `Reword` entry

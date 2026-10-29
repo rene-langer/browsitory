@@ -635,30 +635,97 @@ fn is_step_committed_by_hand(
     }
     let target = repo.find_commit(Oid::from_str(&state.commits[state.next])?)?;
     Ok(match state.kind {
-        SequenceKind::CherryPick => {
-            commit_matches_pick(head, Oid::from_str(&state.expected_head)?, &target)
-        }
+        SequenceKind::CherryPick => commit_matches_pick(
+            repo,
+            head,
+            Oid::from_str(&state.expected_head)?,
+            &target,
+            &[&String::from_utf8_lossy(target.message_bytes())],
+        )?,
         SequenceKind::Revert => String::from_utf8_lossy(head.message_bytes())
             .contains(&format!("This reverts commit {}", target.id())),
     })
 }
 
-/// True when `head` is recognisably `picked` committed by hand on top of `expected_parent`:
-/// exactly one parent, `expected_parent`, and the picked commit's author (name, email and
-/// time), which `git commit`/`git cherry-pick --continue` keep during a cherry-pick. Shared by
-/// sequences and rebases.
+/// True when `head` is recognisably `picked` committed by hand on top of `expected_parent`
+/// (`git commit` or `git cherry-pick --continue` during the paused pick). Shared by sequences
+/// and rebases. All of:
+///
+/// - exactly one parent, `expected_parent`;
+/// - the picked commit's author (name, email and time), which git keeps during a cherry-pick;
+/// - one of `messages` (comment lines and trailing whitespace ignored, as git's cleanup does);
+/// - every path that applying `picked` onto the parent changes cleanly is changed by `head`
+///   too. Conflicted paths may be resolved any way (including to HEAD's side), and more may
+///   change (an edit stop's amendment), but a commit that leaves out part of the step is not it.
 pub(crate) fn commit_matches_pick(
+    repo: &Repository,
     head: &Commit<'_>,
     expected_parent: Oid,
     picked: &Commit<'_>,
-) -> bool {
-    if head.parent_count() != 1 || head.parent_id(0).ok() != Some(expected_parent) {
-        return false;
+    messages: &[&str],
+) -> Result<bool, git2::Error> {
+    if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
+        return Ok(false);
     }
     let (ours, theirs) = (head.author(), picked.author());
-    ours.name_bytes() == theirs.name_bytes()
+    let same_author = ours.name_bytes() == theirs.name_bytes()
         && ours.email_bytes() == theirs.email_bytes()
-        && ours.when() == theirs.when()
+        && ours.when() == theirs.when();
+    if !same_author {
+        return Ok(false);
+    }
+    let message = clean_message(head.message_bytes());
+    if !messages
+        .iter()
+        .any(|expected| clean_message(expected.as_bytes()) == message)
+    {
+        return Ok(false);
+    }
+    let parent = repo.find_commit(expected_parent)?;
+    let applied = repo.cherrypick_commit(picked, &parent, 0, None)?;
+    let mut conflicted = std::collections::HashSet::new();
+    for conflict in applied.conflicts()? {
+        let conflict = conflict?;
+        for entry in [conflict.ancestor, conflict.our, conflict.their]
+            .into_iter()
+            .flatten()
+        {
+            conflicted.insert(entry.path);
+        }
+    }
+    let (parent_tree, head_tree) = (parent.tree()?, head.tree()?);
+    let diff = repo.diff_tree_to_index(Some(&parent_tree), Some(&applied), None)?;
+    for delta in diff.deltas() {
+        if delta.status() == git2::Delta::Conflicted {
+            continue;
+        }
+        for file in [delta.old_file(), delta.new_file()] {
+            let Some(path) = file.path() else { continue };
+            let bytes = file.path_bytes().unwrap_or_default();
+            if conflicted.contains(bytes) {
+                continue;
+            }
+            let entry = |tree: &git2::Tree<'_>| {
+                tree.get_path(path)
+                    .ok()
+                    .map(|entry| (entry.id(), entry.filemode()))
+            };
+            if entry(&parent_tree) == entry(&head_tree) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// A commit message as git's default cleanup leaves it: `#` comment lines dropped, trailing
+/// whitespace trimmed.
+fn clean_message(message: &[u8]) -> String {
+    let text = String::from_utf8_lossy(message);
+    git2::message_prettify(text.as_ref(), Some(b'#'))
+        .unwrap_or_else(|_| text.into_owned())
+        .trim_end()
+        .to_string()
 }
 
 /// Ends a stopped sequence. A paused step of this sequence is aborted like `git cherry-pick

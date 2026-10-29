@@ -1225,7 +1225,7 @@ fn continue_adopts_an_edit_step_committed_with_git() {
     let mut index = repo.index().unwrap();
     index.add_path(std::path::Path::new("a.txt")).unwrap();
     index.write().unwrap();
-    commit_by_hand(&repo, &author_of(&repo, &ids[0]), "add a, amended");
+    commit_by_hand(&repo, &author_of(&repo, &ids[0]), "add a");
 
     let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
 
@@ -1235,7 +1235,7 @@ fn continue_adopts_an_edit_step_committed_with_git() {
         .into_iter()
         .map(|c| c.summary)
         .collect();
-    assert_eq!(summaries, ["add a, amended", "add b"]);
+    assert_eq!(summaries, ["add a", "add b"]);
     assert_eq!(repo.head().unwrap().name().unwrap(), branch);
     assert_eq!(common::read(dir.path(), "a.txt"), "amended\n");
 }
@@ -1261,7 +1261,8 @@ fn continue_gives_an_adopted_reword_step_its_planned_message() {
     let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
     assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
     resolve_shared(&repo);
-    commit_by_hand(&repo, &author_of(&repo, &picked), "typed in a terminal");
+    // git keeps the picked message during the pause.
+    commit_by_hand(&repo, &author_of(&repo, &picked), "conflicting change");
 
     assert_eq!(
         git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
@@ -1705,7 +1706,8 @@ fn a_failed_reword_of_an_adopted_step_can_be_retried() {
     }];
     let (mut state, _) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
     resolve_shared(&repo);
-    commit_by_hand(&repo, &author_of(&repo, &picked), "typed in a terminal");
+    // git keeps the picked message during the pause.
+    commit_by_hand(&repo, &author_of(&repo, &picked), "conflicting change");
     {
         let mut config = repo.config().unwrap();
         config.set_bool("commit.gpgSign", true).unwrap();
@@ -1745,4 +1747,104 @@ fn abort_leaves_a_foreign_operation_alone() {
     assert_eq!(abort, RebaseAbort { restored: false });
     assert!(repo.path().join("MERGE_HEAD").exists());
     assert!(repo.head_detached().unwrap());
+}
+
+/// Commits `path` = `contents` on HEAD with a fixed author (same name, email and time for every
+/// call), so two commits are indistinguishable by author alone.
+fn commit_with_fixed_author(
+    repo: &git2::Repository,
+    path: &str,
+    contents: &str,
+    message: &str,
+) -> String {
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    write_file(&workdir, path, contents);
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(path)).unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let author = git2::Signature::new(
+        "Same",
+        "same@example.com",
+        &git2::Time::new(1_700_000_000, 0),
+    )
+    .unwrap();
+    repo.commit(Some("HEAD"), &author, &author, message, &tree, &[&parent])
+        .unwrap()
+        .to_string()
+}
+
+/// Verifier repro: the edit stop's pick is aborted outside and *another* plan commit with the
+/// same author and time is committed instead. That is not the step: Continue must refuse, not
+/// adopt it and drop a.txt.
+#[test]
+fn continue_does_not_adopt_another_commit_with_the_same_author() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    let a = commit_with_fixed_author(&repo, "a.txt", "a\n", "a");
+    let b = commit_with_fixed_author(&repo, "b.txt", "b\n", "b");
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&a), pick(&b)]).unwrap();
+    abort_pick_outside(&repo);
+    repo.cherrypick(
+        &repo.find_commit(git2::Oid::from_str(&b).unwrap()).unwrap(),
+        None,
+    )
+    .unwrap();
+    commit_by_hand(&repo, &author_of(&repo, &b), "b");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(
+        matches!(result, Err(RebaseError::HeadMoved { .. })),
+        "{result:?}"
+    );
+    assert_ne!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+}
+
+#[test]
+fn continue_does_not_adopt_the_step_under_another_message() {
+    let (_dir, repo, mut state, _) = conflicting_rebase();
+    resolve_shared(&repo);
+    commit_by_hand(
+        &repo,
+        &author_of(&repo, &state.plan[0].commit_id),
+        "something else",
+    );
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::HeadMoved { .. })));
+}
+
+#[test]
+fn continue_adopts_a_conflict_resolved_to_ours() {
+    // Conflicted paths may be resolved any way, including back to HEAD's side.
+    let (dir, repo, mut state, onto) = conflicting_rebase();
+    let ours = repo
+        .find_commit(git2::Oid::from_str(&onto).unwrap())
+        .unwrap();
+    let ours = ours
+        .tree()
+        .unwrap()
+        .get_path(std::path::Path::new("shared.txt"))
+        .unwrap();
+    let blob = repo.find_blob(ours.id()).unwrap();
+    std::fs::write(dir.path().join("shared.txt"), blob.content()).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("shared.txt")).unwrap();
+    index.write().unwrap();
+    commit_by_hand(
+        &repo,
+        &author_of(&repo, &state.plan[0].commit_id),
+        "conflicting change",
+    );
+
+    assert_eq!(
+        git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
+        RebaseStepResult::Done
+    );
 }
