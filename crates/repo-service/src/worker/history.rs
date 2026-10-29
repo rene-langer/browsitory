@@ -7,15 +7,27 @@ use std::sync::mpsc::Sender;
 
 const NO_SEQUENCE: &str = "No cherry-pick or revert is in progress.";
 
-/// `HeadInfo` with the stored sequence's progress filled in (git-core has no persistence).
+/// `HeadInfo` with the stored sequence's progress and the stored rebase filled in (git-core has
+/// no persistence). A rebase whose health can't be read counts as diverged: Abort is then the
+/// safe way out.
 pub(super) fn head_info(
     repo: &git2::Repository,
-    sequence_store: &SequenceStore,
+    probe: &super::gate::OperationProbe<'_>,
     reply: Sender<Result<HeadInfo, String>>,
 ) {
     let result = git_core::repo::head_info(repo)
         .map(|mut info| {
-            info.sequence = sequence_store.load(repo).map(|state| state.progress());
+            info.sequence = probe.sequence.load(repo).map(|state| state.progress());
+            info.rebase = probe.rebase(repo).map(|state| {
+                let health =
+                    git_core::rebase::rebase_health(repo, &state).unwrap_or_else(|error| {
+                        eprintln!("browsitory: can't check the paused rebase: {error}");
+                        git_core::rebase::RebaseHealth::Diverged(
+                            git_core::rebase::RebaseDivergence::OtherOperation,
+                        )
+                    });
+                git_core::repo::RebaseInfo::new(&state, health)
+            });
             info
         })
         .map_err(|error| error.to_string());

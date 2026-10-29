@@ -2774,6 +2774,7 @@ mod tests {
             squash_message: None,
             commit_hooks: vec!["pre-commit".into()],
             sequence: None,
+            rebase: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
@@ -2787,6 +2788,7 @@ mod tests {
             squash_message: Some("Squashed commit of the following:\n".into()),
             commit_hooks: vec![],
             sequence: None,
+            rebase: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
@@ -2839,6 +2841,7 @@ mod tests {
                 squash_message: None,
                 commit_hooks: vec![],
                 sequence,
+                rebase: None,
             }))
             .unwrap()
         };

@@ -1183,9 +1183,7 @@ impl Worker {
                             merge::abort(&repo, reply)
                         }
                     }
-                    Command::GetHeadInfo { reply } => {
-                        history::head_info(&repo, &sequence_store, reply)
-                    }
+                    Command::GetHeadInfo { reply } => history::head_info(&repo, &probe!(), reply),
                     Command::AmendCommit {
                         message,
                         no_verify,
@@ -5333,5 +5331,70 @@ mod tests {
             std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
             "resolved\n"
         );
+    }
+
+    fn health(info: &git_core::repo::HeadInfo) -> git_core::rebase::RebaseHealth {
+        info.rebase.as_ref().expect("a stored rebase").health
+    }
+
+    #[test]
+    fn get_head_info_reports_a_paused_rebase_after_restart() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        // An edit pause leaves HEAD on `onto`: the step is applied to the index only.
+        let onto = Repository::open(dir.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        let info = handle.get_head_info().unwrap();
+
+        let rebase = info.rebase.unwrap();
+        assert_eq!(rebase.branch, branch.trim_start_matches("refs/heads/"));
+        assert_eq!(rebase.onto, onto.to_string());
+        assert_eq!((rebase.current_step, rebase.total_steps), (1, 2));
+        assert_eq!(rebase.health, git_core::rebase::RebaseHealth::Paused);
+    }
+
+    #[test]
+    fn get_head_info_reports_a_diverged_rebase_when_head_moved_outside() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        drop((worker, handle));
+        // `git switch <branch>` in a terminal while the app is closed.
+        repo.set_head(&branch).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let info = handle.get_head_info().unwrap();
+
+        assert_eq!(
+            health(&info),
+            git_core::rebase::RebaseHealth::Diverged(git_core::rebase::RebaseDivergence::HeadMoved)
+        );
+        assert_eq!(
+            handle.checkout_commit(info.head_id.unwrap()).unwrap_err(),
+            "Finish or abort the current merge/cherry-pick/revert/rebase first."
+        );
+        assert_eq!(
+            handle.abort_rebase().unwrap(),
+            git_core::rebase::RebaseAbort { restored: false }
+        );
+        assert_eq!(handle.get_head_info().unwrap().rebase, None);
+        assert!(!rebase_file(&repo).exists());
+    }
+
+    #[test]
+    fn get_head_info_reports_no_rebase_after_it_finishes() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        assert!(handle.get_head_info().unwrap().rebase.is_some());
+        handle.rebase_continue().unwrap();
+        assert_eq!(handle.get_head_info().unwrap().rebase, None);
     }
 }
