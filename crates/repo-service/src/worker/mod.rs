@@ -11,7 +11,7 @@ use git_core::diff::DiffHunk;
 use git_core::forge::{ForgeProvider, ForgeRepository};
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
-use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
+use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
 use git_core::reflog::ReflogEntry;
 use git_core::remote::{
     PullOutcome, RemoteInfo, TagInfo, TransferErrorKind, TransferOperation, UpstreamInfo,
