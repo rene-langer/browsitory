@@ -14,7 +14,11 @@ use super::Command;
 /// that starts another operation or moves HEAD or the index under it (picks, merge, rebase,
 /// commit and amend, reset, checkout, branch switch, pull, stash apply/pop, reflog restore).
 /// Read-only commands, fetch, staging and conflict resolution stay available.
-pub(super) fn gate_during_operation(command: Command) -> Command {
+///
+/// While a rebase is stored, branch delete/rename and stash save are refused too: the rebased
+/// branch isn't checked out (git would let it be deleted or renamed under the rebase), and a
+/// stash would carry the paused step away from the index.
+pub(super) fn gate_during_operation(command: Command, rebase_stored: bool) -> Command {
     fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
         let _ = reply.send(Err(
             git_core::pick::PickError::OperationInProgress.to_string()
@@ -34,36 +38,60 @@ pub(super) fn gate_during_operation(command: Command) -> Command {
         | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
         Command::PullCurrentUpstream { reply, .. } => refuse(reply),
         Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
+        Command::DeleteBranch { reply, .. }
+        | Command::RenameBranch { reply, .. }
+        | Command::SaveStash { reply, .. }
+            if rebase_stored =>
+        {
+            refuse(reply)
+        }
         other => other,
     }
 }
 
+/// What this worker remembers about the stored rebase beyond `rebase.json`, for when the file
+/// can't be written: `fallback` is a newer state whose save failed; `forgotten` is a state the
+/// rebase ended with but whose file couldn't be deleted, so it must not count any more.
+#[derive(Default)]
+pub(super) struct RebaseMemory {
+    pub fallback: Option<RebaseState>,
+    pub forgotten: Option<RebaseState>,
+}
+
 /// The stored rebase: this session's copy when saving it failed (newer than the file), else
-/// `rebase.json`.
+/// `rebase.json`, unless that is a rebase this session already ended.
 pub(super) fn stored_rebase(
     repo: &Repository,
     store: &RebaseStore,
-    fallback: &Option<RebaseState>,
+    memory: &RebaseMemory,
 ) -> Option<RebaseState> {
-    fallback.clone().or_else(|| store.load(repo))
+    if let Some(state) = &memory.fallback {
+        return Some(state.clone());
+    }
+    store
+        .load(repo)
+        .filter(|state| memory.forgotten.as_ref() != Some(state))
 }
 
 /// Looks at the stores and git's own state, fresh on every call (another process may share the
 /// repository).
 pub(super) struct OperationProbe<'a> {
     pub rebase: &'a RebaseStore,
-    pub fallback: &'a Option<RebaseState>,
+    pub memory: &'a RebaseMemory,
     pub sequence: &'a SequenceStore,
 }
 
 impl OperationProbe<'_> {
     pub fn rebase(&self, repo: &Repository) -> Option<RebaseState> {
-        stored_rebase(repo, self.rebase, self.fallback)
+        stored_rebase(repo, self.rebase, self.memory)
     }
 
-    /// A rebase or a sequence is stored, so `gate_during_operation` applies.
-    pub fn stored_operation(&self, repo: &Repository) -> bool {
-        self.rebase(repo).is_some() || self.sequence.load(repo).is_some()
+    /// `(rebase stored, sequence stored)`: either makes `gate_during_operation` apply.
+    pub fn stored_operations(&self, repo: &Repository) -> (bool, bool) {
+        (
+            self.rebase(repo).is_some(),
+            self.sequence.load(repo).is_some(),
+        )
     }
 
     /// Names the paused operation, constant for its whole life, so a pending undo entry is only
@@ -155,7 +183,7 @@ mod tests {
     fn marker(repo: &Repository, rebase: &RebaseStore, sequence: &SequenceStore) -> Option<String> {
         OperationProbe {
             rebase,
-            fallback: &None,
+            memory: &RebaseMemory::default(),
             sequence,
         }
         .marker(repo)
@@ -251,12 +279,16 @@ mod tests {
         );
         // The session copy of a rebase whose save failed counts too.
         rebase_store.clear().unwrap();
+        let memory = RebaseMemory {
+            fallback: Some(state),
+            forgotten: None,
+        };
         let probe = OperationProbe {
             rebase: &rebase_store,
-            fallback: &Some(state),
+            memory: &memory,
             sequence: &sequence_store,
         };
         assert!(probe.marker(&repo).unwrap().starts_with("rebase "));
-        assert!(probe.stored_operation(&repo));
+        assert_eq!(probe.stored_operations(&repo), (true, false));
     }
 }

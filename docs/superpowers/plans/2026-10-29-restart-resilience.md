@@ -157,6 +157,19 @@ deviation made during implementation:
   `XDG_DATA_HOME`); two distinct session ids were confirmed in the log. The spec is kept. Local
   E2E runs used `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME` under
   `target/e2e-xdg/`.
+- **Review fixes** (independent review of `git diff main...HEAD`):
+  - Abort restores only when the branch is still at `original_tip`. The spec's "reattach a moved
+    branch at its current tip" contradicted D3 and the strip's "HEAD stays where it is"; a forced
+    checkout there would discard edits made during the pause and orphan the rebased commits.
+    `abort_with_the_branch_moved_reattaches_to_its_new_tip` became
+    `abort_with_the_branch_moved_leaves_head_and_work_alone`; the toast names the moved branch.
+  - With HEAD moved, Abort only runs `cleanup_state` instead of `merge::abort_merge`, which reset
+    the whole index to the new HEAD (work staged on the other branch).
+  - A step committed by hand whose reworded re-commit fails keeps its stop (still adoptable).
+  - The gate also refuses branch delete/rename and stash save while a rebase is stored.
+  - A refused Continue writes nothing; a `rebase.json` that can't be deleted is remembered as
+    ended (`RebaseMemory::forgotten`); the recorder reloads `undo.json` before recording a pending
+    entry; `rebase.json` temp names are unique per write.
 - The rebase undo label is the pre-existing `Rebase onto <full id>` (the planner passes the full
   id); the E2E matches its prefix.
 

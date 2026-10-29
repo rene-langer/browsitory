@@ -341,13 +341,19 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   with `reference_matching` against `original_tip` and refuses `BranchMoved`/`BranchMissing`
   instead of overwriting a branch that moved during the pause.
 - **Abort** (`abort_rebase` → `RebaseAbort { restored }`): with HEAD at `expected_head`, the
-  branch present and nothing else paused, it force-checks-out the branch's current tip, then
+  branch still at `original_tip` and nothing else paused, it force-checks-out the branch, then
   reattaches HEAD (checkout first, so a refused checkout leaves HEAD where the rebase can still
-  abort) — `restored: true`. Otherwise HEAD and refs stay where they are and only the rebase's
-  own paused step is cleaned up like `git cherry-pick --abort` — `restored: false`. The worker
-  forgets the state only when Abort succeeded.
+  abort) — `restored: true`. Otherwise (diverged) HEAD and refs stay where they are —
+  `restored: false`: with HEAD still at `expected_head` the paused step is undone like `git
+  cherry-pick --abort`; with HEAD moved only git's pick state is forgotten, so work staged on
+  the other branch survives. The worker forgets the state only when Abort succeeded.
+- **Writes in the worker**: a refused Continue (state unchanged) writes nothing, so a refusal in
+  one app never puts back a state the other app moved on from. A file that can't be deleted
+  when the rebase ends is remembered as ended for the session (`gate::RebaseMemory::forgotten`),
+  so it doesn't keep gating the repository.
 - A stored rebase blocks the same commands as a sequence (`gate::gate_during_operation`, also
-  after an error stop where git sees nothing in progress), counts as in progress for undo, and
+  after an error stop where git sees nothing in progress), plus branch delete/rename (the
+  rebased branch isn't checked out, so git would allow it) and stash save, counts as in progress for undo, and
   is reported as `HeadInfo.rebase { branch, onto, currentStep, totalSteps, health }`, which the
   frontend reads on every refresh (there is no separate progress call).
 

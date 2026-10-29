@@ -274,6 +274,8 @@ impl UndoRecorder {
         if marker.is_some() {
             return;
         }
+        // Another process sharing `undo.json` may have recorded (or dropped) it already.
+        self.store.reload_if_changed(&mut self.stacks);
         if let Some(pending) = self.stacks.pending.take() {
             if aborted {
                 self.persist(repo);

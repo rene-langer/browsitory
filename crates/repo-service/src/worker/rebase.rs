@@ -1,3 +1,4 @@
+use super::gate::RebaseMemory;
 use super::rebase_store::RebaseStore;
 use super::{Command, WorkerHandle};
 use git_core::rebase::{
@@ -16,18 +17,35 @@ pub(super) fn commits_since(
 
 const NO_REBASE: &str = "no rebase is currently in progress";
 
-/// Where the paused rebase lives: `rebase.json`, plus this session's copy when saving it
-/// failed (a full disk, a read-only `.git/browsitory`), so the user isn't stranded mid-rebase.
-/// The copy is newer than whatever the file still holds, so it wins until the next successful
-/// save or clear drops it.
+/// Where the paused rebase lives: `rebase.json`, plus what this session remembers when the file
+/// can't be written (`gate::RebaseMemory`): a newer state whose save failed (so the user isn't
+/// stranded mid-rebase on a full disk or a read-only `.git/browsitory`), or a state the rebase
+/// ended with but whose file couldn't be deleted (so it doesn't keep gating the repository).
 pub(super) struct RebaseSlot<'a> {
     pub store: &'a RebaseStore,
-    pub fallback: &'a mut Option<RebaseState>,
+    pub memory: &'a mut RebaseMemory,
 }
 
 impl RebaseSlot<'_> {
     pub fn load(&self, repo: &git2::Repository) -> Option<RebaseState> {
-        super::gate::stored_rebase(repo, self.store, self.fallback)
+        super::gate::stored_rebase(repo, self.store, self.memory)
+    }
+
+    /// Forgets the rebase. When its file can't be deleted, whatever it still holds is
+    /// remembered as ended for this session.
+    fn forget(&mut self, repo: &git2::Repository) -> Result<(), String> {
+        self.memory.fallback = None;
+        match self.store.clear() {
+            Ok(()) => {
+                self.memory.forgotten = None;
+                Ok(())
+            }
+            Err(error) => {
+                eprintln!("browsitory: could not remove the ended rebase's state: {error}");
+                self.memory.forgotten = self.store.load(repo);
+                Err(error)
+            }
+        }
     }
 
     /// Keeps `state` (or forgets the rebase when it's `None`) and turns `outcome` into the
@@ -35,24 +53,21 @@ impl RebaseSlot<'_> {
     /// outcome, since a restart would not find it.
     fn persist(
         &mut self,
+        repo: &git2::Repository,
         state: Option<&RebaseState>,
         outcome: Result<RebaseStepResult, String>,
     ) -> Result<RebaseStepResult, String> {
-        let saved = match state {
-            Some(state) => self.store.save(state),
-            None => self.store.clear(),
+        let Some(state) = state else {
+            // The rebase is over: a file that can't be deleted is remembered as ended.
+            let _ = self.forget(repo);
+            return outcome;
         };
-        let Err(store_error) = saved else {
-            *self.fallback = None;
+        let Err(store_error) = self.store.save(state) else {
+            *self.memory = RebaseMemory::default();
             return outcome;
         };
         eprintln!("browsitory: could not update the rebase state: {store_error}");
-        let Some(state) = state else {
-            // The rebase is over; a leftover file only offers Abort, which leaves HEAD alone.
-            *self.fallback = None;
-            return outcome;
-        };
-        *self.fallback = Some(state.clone());
+        self.memory.fallback = Some(state.clone());
         match outcome {
             Ok(_) => Err(format!(
                 "The rebase stopped, but its progress could not be saved ({store_error}). Abort \
@@ -79,8 +94,8 @@ pub(super) fn start(
 ) {
     let result = match git_core::rebase::start_rebase(repo, &onto, plan) {
         // Nothing to keep: the rebase finished in one go.
-        Ok((_, RebaseStepResult::Done)) => slot.persist(None, Ok(RebaseStepResult::Done)),
-        Ok((state, step)) => slot.persist(Some(&state), Ok(step)),
+        Ok((_, RebaseStepResult::Done)) => slot.persist(repo, None, Ok(RebaseStepResult::Done)),
+        Ok((state, step)) => slot.persist(repo, Some(&state), Ok(step)),
         // `start_rebase` rolled back: there is no rebase to keep.
         Err(error) => Err(error.to_string()),
     };
@@ -93,11 +108,19 @@ pub(super) fn continue_rebase(
     reply: Sender<Result<RebaseStepResult, String>>,
 ) {
     let result = match slot.load(repo) {
-        Some(mut state) => {
+        Some(loaded) => {
+            let mut state = loaded.clone();
             let outcome = git_core::rebase::rebase_continue(repo, &mut state)
                 .map_err(|error| error.to_string());
-            let keep = !matches!(outcome, Ok(RebaseStepResult::Done));
-            slot.persist(keep.then_some(&state), outcome)
+            if matches!(outcome, Ok(RebaseStepResult::Done)) {
+                slot.persist(repo, None, outcome)
+            } else if state == loaded {
+                // Refused before anything changed: write nothing, so a refusal in one process
+                // (Tauri vs. VSCode) never puts back a state the other has moved on from.
+                outcome
+            } else {
+                slot.persist(repo, Some(&state), outcome)
+            }
         }
         None => Err(NO_REBASE.to_string()),
     };
@@ -108,17 +131,14 @@ pub(super) fn continue_rebase(
 /// retryable.
 pub(super) fn abort(
     repo: &git2::Repository,
-    slot: RebaseSlot<'_>,
+    mut slot: RebaseSlot<'_>,
     reply: Sender<Result<RebaseAbort, String>>,
 ) {
     let result = (|| {
         let state = slot.load(repo).ok_or(NO_REBASE)?;
         let abort =
             git_core::rebase::abort_rebase(repo, &state).map_err(|error| error.to_string())?;
-        *slot.fallback = None;
-        if let Err(error) = slot.store.clear() {
-            eprintln!("browsitory: could not remove the aborted rebase's state: {error}");
-        }
+        let _ = slot.forget(repo);
         Ok(abort)
     })();
     let _ = reply.send(result);

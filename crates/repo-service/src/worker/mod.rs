@@ -746,21 +746,21 @@ impl Worker {
             // nothing at all after an error stop, so only the store says a rebase is going on;
             // a sequence stopped by an error is clean too.
             let rebase_store = rebase_store::RebaseStore::open(&repo);
-            let mut rebase_fallback: Option<RebaseState> = None;
+            let mut rebase_memory = gate::RebaseMemory::default();
             macro_rules! probe {
                 () => {
                     gate::OperationProbe {
                         rebase: &rebase_store,
-                        fallback: &rebase_fallback,
+                        memory: &rebase_memory,
                         sequence: &sequence_store,
                     }
                 };
             }
             // Names the operation in progress (`None`: nothing is), for the undo recorder.
-            let marker = |repo: &git2::Repository, rebase_fallback: &Option<RebaseState>| {
+            let marker = |repo: &git2::Repository, rebase_memory: &gate::RebaseMemory| {
                 gate::OperationProbe {
                     rebase: &rebase_store,
-                    fallback: rebase_fallback,
+                    memory: rebase_memory,
                     sequence: &sequence_store,
                 }
                 .marker(repo)
@@ -769,12 +769,12 @@ impl Worker {
                 () => {
                     rebase::RebaseSlot {
                         store: &rebase_store,
-                        fallback: &mut rebase_fallback,
+                        memory: &mut rebase_memory,
                     }
                 };
             }
             for mut command in rx {
-                undo_recorder.settle(&repo, marker(&repo, &rebase_fallback).as_deref());
+                undo_recorder.settle(&repo, marker(&repo, &rebase_memory).as_deref());
                 let plan = undo::plan_for(&command);
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
@@ -788,12 +788,13 @@ impl Worker {
                     undo::hold_reply(&mut command, &mut held);
                 }
                 if let Some(plan) = plan {
-                    undo_recorder.begin(&repo, plan, marker(&repo, &rebase_fallback).as_deref());
+                    undo_recorder.begin(&repo, plan, marker(&repo, &rebase_memory).as_deref());
                 }
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
-                if probe!().stored_operation(&repo) {
-                    command = gate::gate_during_operation(command);
+                let (rebase_stored, sequence_stored) = probe!().stored_operations(&repo);
+                if rebase_stored || sequence_stored {
+                    command = gate::gate_during_operation(command, rebase_stored);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -1478,17 +1479,17 @@ impl Worker {
                     Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
                     Command::Undo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.undo(&repo, marker(&repo, &rebase_fallback).as_deref()),
+                            undo_recorder.undo(&repo, marker(&repo, &rebase_memory).as_deref()),
                         );
                     }
                     Command::Redo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.redo(&repo, marker(&repo, &rebase_fallback).as_deref()),
+                            undo_recorder.redo(&repo, marker(&repo, &rebase_memory).as_deref()),
                         );
                     }
                 }
                 if track {
-                    undo_recorder.finish(&repo, marker(&repo, &rebase_fallback).as_deref(), aborts);
+                    undo_recorder.finish(&repo, marker(&repo, &rebase_memory).as_deref(), aborts);
                 }
                 held.release();
             }
@@ -5601,5 +5602,85 @@ mod tests {
             .find_branch("before", git2::BranchType::Local)
             .is_ok());
         let _ = repo;
+    }
+
+    #[test]
+    fn branch_and_stash_commands_are_refused_during_a_rebase() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+        let short = branch.trim_start_matches("refs/heads/").to_string();
+        assert_eq!(handle.delete_branch(short.clone(), true).unwrap_err(), busy);
+        assert_eq!(
+            handle.rename_branch(short, "renamed".into()).unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .save_stash(git_core::stash::StashOptions::default())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+    }
+
+    /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the
+    /// repository after the rebase ended.
+    #[test]
+    #[cfg(unix)]
+    fn a_rebase_file_that_cannot_be_removed_is_still_forgotten() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        let folder = repo.path().join("browsitory");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(folder.join("probe"), "").is_ok() {
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // root: no reliable failure to provoke
+        }
+
+        let aborted = handle.abort_rebase();
+        let rebase = handle.get_head_info().map(|info| info.rebase);
+        let switched = handle.switch_branch(branch.trim_start_matches("refs/heads/").into());
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            aborted.unwrap(),
+            git_core::rebase::RebaseAbort { restored: true }
+        );
+        assert!(rebase_file(&repo).exists());
+        assert_eq!(rebase.unwrap(), None);
+        assert!(switched.is_ok(), "{switched:?}");
+    }
+
+    #[test]
+    fn a_pending_entry_recorded_by_another_worker_is_not_recorded_twice() {
+        let (dir, _repo) = conflicting_branches();
+        let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (a, b) = (first.handle(), second.handle());
+        a.start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        assert_eq!(b.get_undo_state().unwrap(), no_undo()); // b now knows the pending entry
+        a.resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        a.commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        b.create_branch("after".into(), "HEAD".into()).unwrap();
+
+        assert_eq!(
+            b.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Create branch after".into()
+            }
+        );
+        assert_eq!(
+            b.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Merge feature".into()
+            }
+        );
+        assert_eq!(b.undo().unwrap(), UndoOutcome::Nothing);
     }
 }
