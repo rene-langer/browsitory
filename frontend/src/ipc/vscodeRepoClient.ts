@@ -54,6 +54,7 @@ import type {
   HeadInfo,
   PickOutcome,
   SequenceAbort,
+  RebaseAbort,
   SequenceOutcome,
   ConflictSide,
   UndoOutcome,
@@ -456,7 +457,7 @@ export const vscodeRepoClient: RepoClient = {
   startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
     call<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
   rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
-  abortRebase: (repoPath: string) => call<void>("abort_rebase", { repoPath }),
+  abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),
   getRebaseProgress: (repoPath: string) =>
     call<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
   detectForgeRepository: (repoPath: string) =>

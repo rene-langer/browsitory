@@ -118,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -832,7 +832,7 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null }),
       getCommitMessage: async () => "HEAD's message",
       commit,
     });
@@ -872,7 +872,7 @@ describe("App", () => {
         { name: "Ada", email: "ada@x.org" },
         { name: "Bob", email: "bob@x.org" },
       ],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null }),
       getCommitMessage: async () => "HEAD's message",
       amendCommit,
     });
@@ -1044,7 +1044,7 @@ describe("App", () => {
         getCommitFiles: async () => [],
         getCommitMessage: async () => "two",
         getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
-        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null }),
         ...overrides,
       });
     }
@@ -1079,7 +1079,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored, rebase: null }),
             continueSequence,
           })}
         />,
@@ -1104,7 +1104,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null }),
             abortSequence,
             abortMerge,
           })}

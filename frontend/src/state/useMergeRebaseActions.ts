@@ -150,7 +150,10 @@ export function useMergeRebaseActions(
     [client, runMutation, repoPath],
   );
   const abortRebase = useCallback(
-    () => runMutation(() => client.abortRebase(repoPath)),
+    () =>
+      runMutation(async () => {
+        await client.abortRebase(repoPath);
+      }),
     [client, runMutation, repoPath],
   );
 

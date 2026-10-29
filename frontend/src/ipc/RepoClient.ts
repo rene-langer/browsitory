@@ -154,6 +154,23 @@ export interface HeadInfo {
   commitHooks: string[];
   /** A stopped multi-commit cherry-pick/revert (stored, so it survives a restart). */
   sequence: SequenceProgress | null;
+  /** A paused interactive rebase (stored, so it survives a restart). */
+  rebase: RebaseInfo | null;
+}
+/** What changed outside Browsitory while a rebase was paused; the rebase can only be aborted. */
+export type RebaseDivergence = "HeadMoved" | "BranchMoved" | "BranchMissing" | "OtherOperation";
+export type RebaseHealth = { kind: "Paused" } | { kind: "Diverged"; reason: RebaseDivergence };
+/** `branch` is the short name; `onto` the full id; `currentStep` is 1-based. */
+export interface RebaseInfo {
+  branch: string;
+  onto: string;
+  currentStep: number;
+  totalSteps: number;
+  health: RebaseHealth;
+}
+/** `restored: false`: the rebase no longer owned HEAD, so HEAD was left where it is. */
+export interface RebaseAbort {
+  restored: boolean;
 }
 export type SequenceKind = "CherryPick" | "Revert";
 /** `currentStep` is 1-based. */
@@ -714,7 +731,7 @@ export interface RepoClient {
   commitsSince(repoPath: string, onto: string): Promise<RebasePlanCommit[]>;
   startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
   rebaseContinue(repoPath: string): Promise<RebaseStepResult>;
-  abortRebase(repoPath: string): Promise<void>;
+  abortRebase(repoPath: string): Promise<RebaseAbort>;
   getRebaseProgress(repoPath: string): Promise<{ currentStep: number; totalSteps: number } | null>;
   detectForgeRepository(repoPath: string): Promise<ForgeRepository[]>;
   saveForgeToken(repoPath: string, provider: ForgeProvider, account: string, token: string): Promise<void>;
