@@ -1039,3 +1039,28 @@ fn restore_never_deletes_through_a_symlinked_directory_swapped_in_after_the_snap
     assert!(out.path().join("x.txt").exists());
     assert_outside_untouched(out.path());
 }
+
+/// A named pipe in the work tree must not hang the snapshot (#149): it is no file git can
+/// record, and opening it for reading would wait for a writer forever.
+#[cfg(unix)]
+#[test]
+fn undo_snapshot_skips_an_untracked_fifo() {
+    let (dir, repo) = seeded();
+    let pipe = dir.path().join("pipe");
+    let name = std::ffi::CString::new(pipe.to_str().unwrap()).unwrap();
+    // SAFETY: `name` is a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    let path = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let repo = Repository::open(path).unwrap();
+        let _ = tx.send(capture(&repo, SnapshotScope::Full).map(|s| s.worktree_tree));
+    });
+    let tree = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the snapshot blocked on the FIFO")
+        .unwrap()
+        .unwrap();
+    let tree = repo.find_tree(git2::Oid::from_str(&tree).unwrap()).unwrap();
+    assert!(tree.get_name("pipe").is_none());
+}

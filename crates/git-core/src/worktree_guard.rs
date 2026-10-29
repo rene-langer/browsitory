@@ -14,6 +14,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(unix)]
+mod beneath_unix;
+
 /// Git's file modes for a symlink and a submodule (gitlink).
 const MODE_LINK: u32 = 0o120000;
 const MODE_GITLINK: u32 = 0o160000;
@@ -244,13 +247,20 @@ pub(crate) fn has_hazard(repo: &git2::Repository) -> Result<bool, git2::Error> {
 
 /// Removes each hazard's link, never its target and never recursively. A path that is no longer
 /// a symlink (or already gone) is left alone. Call immediately before the forced checkout.
+///
+/// Unix walks to each hazard's folder through held descriptors: a folder on the way that became
+/// a link meanwhile is itself removed (it would be a hazard too), never followed.
 pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()> {
     for hazard in hazards {
-        let full = workdir.join(hazard.path());
-        if !is_link(&full) {
-            continue;
+        #[cfg(unix)]
+        beneath_unix::clear_hazard(workdir, hazard.path(), &mut beneath_unix::no_step)?;
+        #[cfg(not(unix))]
+        {
+            let full = workdir.join(hazard.path());
+            if is_link(&full) {
+                remove_link(&full)?;
+            }
         }
-        remove_link(&full)?;
     }
     Ok(())
 }
@@ -557,6 +567,7 @@ where
 }
 
 /// Removes the symlink (or Windows junction) `full` itself.
+#[cfg(not(unix))]
 fn remove_link(full: &Path) -> io::Result<()> {
     match std::fs::remove_file(full) {
         Ok(()) => Ok(()),
@@ -604,17 +615,12 @@ pub(crate) fn refuse_linked_path(workdir: &Path, rel: &Path) -> Result<(), Linke
 }
 
 /// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
-/// `rel` lands in a real directory inside the repository.
-pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
-    let rel = Path::new(rel);
-    if !plain_relative(rel) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path must be relative to the repository",
-        ));
-    }
+/// `rel` lands in a real directory inside the repository. (Unix does this inside the walk of
+/// [`replace_beneath`].)
+#[cfg(not(unix))]
+fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
     let mut current = workdir.to_path_buf();
-    let components: Vec<_> = rel.components().collect();
+    let components: Vec<_> = Path::new(rel).components().collect();
     for component in &components[..components.len() - 1] {
         current.push(component);
         match entry_kind(&current) {
@@ -630,38 +636,190 @@ pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result
 /// `Ok(false)` and does nothing when an ancestor is a symlink, `rel` is a directory, or `rel` is
 /// not a plain relative path. A missing `rel` counts as removed.
 pub(crate) fn remove_beneath(workdir: &Path, rel: &str) -> io::Result<bool> {
-    if !plain_relative(Path::new(rel)) || has_symlinked_ancestor(workdir, rel) {
+    if !plain_relative(Path::new(rel)) {
         return Ok(false);
     }
-    let full = workdir.join(rel);
-    match std::fs::symlink_metadata(&full) {
-        Ok(meta) if meta.is_dir() => Ok(false),
-        Ok(meta) if meta.file_type().is_symlink() => remove_link(&full).map(|()| true),
-        Ok(_) => match std::fs::remove_file(&full) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(true),
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(error),
+    #[cfg(unix)]
+    return beneath_unix::remove(workdir, Path::new(rel), &mut beneath_unix::no_step);
+    #[cfg(not(unix))]
+    {
+        if has_symlinked_ancestor(workdir, rel) {
+            return Ok(false);
+        }
+        let full = workdir.join(rel);
+        match std::fs::symlink_metadata(&full) {
+            Ok(meta) if meta.is_dir() => Ok(false),
+            Ok(meta) if meta.file_type().is_symlink() => remove_link(&full).map(|()| true),
+            Ok(_) => match std::fs::remove_file(&full) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+                _ => Ok(true),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(error),
+        }
     }
 }
 
 /// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
 /// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
-/// not a plain relative path.
+/// not a plain relative path. An existing file keeps its mode; a FIFO or device is an error,
+/// never written.
 pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Result<bool> {
-    if !plain_relative(Path::new(rel)) || has_symlinked_ancestor(workdir, rel) {
+    if !plain_relative(Path::new(rel)) {
         return Ok(false);
     }
-    let full = workdir.join(rel);
-    if is_link(&full) {
-        remove_link(&full)?;
+    #[cfg(unix)]
+    return beneath_unix::write(workdir, Path::new(rel), bytes, &mut beneath_unix::no_step);
+    #[cfg(not(unix))]
+    {
+        if has_symlinked_ancestor(workdir, rel) {
+            return Ok(false);
+        }
+        let full = workdir.join(rel);
+        if is_link(&full) {
+            remove_link(&full)?;
+        }
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&full, bytes)?;
+        Ok(true)
     }
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent)?;
+}
+
+/// A work-tree file or link as [`read_beneath`] found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Leaf {
+    File {
+        bytes: Vec<u8>,
+        executable: bool,
+    },
+    /// The link's target (`/`-separated on Windows).
+    Link(Vec<u8>),
+}
+
+/// What [`replace_beneath`] writes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Content<'a> {
+    File {
+        bytes: &'a [u8],
+        executable: bool,
+    },
+    /// A symbolic link to the target (written as a plain file holding it where links aren't
+    /// created, i.e. Windows).
+    Link(&'a [u8]),
+}
+
+/// Reads the file or link `rel` without following a link at any component, and without blocking
+/// on a FIFO. `None` when it is missing, a folder, not a regular file or link, or beyond a link
+/// (git sees no file there).
+pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(None);
     }
-    std::fs::write(&full, bytes)?;
-    Ok(true)
+    #[cfg(unix)]
+    return beneath_unix::read(workdir, Path::new(rel), &mut beneath_unix::no_step);
+    #[cfg(not(unix))]
+    {
+        if has_symlinked_ancestor(workdir, rel) {
+            return Ok(None);
+        }
+        let full = workdir.join(rel);
+        let meta = match std::fs::symlink_metadata(&full) {
+            Ok(meta) => meta,
+            Err(error) if is_absent(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if meta.file_type().is_symlink() {
+            let target = std::fs::read_link(&full)?;
+            return Ok(Some(Leaf::Link(
+                target.to_string_lossy().replace('\\', "/").into_bytes(),
+            )));
+        }
+        if !meta.is_file() {
+            return Ok(None);
+        }
+        Ok(Some(Leaf::File {
+            bytes: std::fs::read(&full)?,
+            executable: false,
+        }))
+    }
+}
+
+/// Missing, or a parent is a file (`d/a` while `d` is a file).
+#[cfg(not(unix))]
+fn is_absent(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
+}
+
+/// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
+/// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
+pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<()> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    return beneath_unix::remove_and_prune(workdir, Path::new(rel), &mut beneath_unix::no_step);
+    #[cfg(not(unix))]
+    {
+        if has_symlinked_ancestor(workdir, rel) {
+            return Ok(());
+        }
+        let full = workdir.join(rel);
+        match std::fs::symlink_metadata(&full) {
+            Ok(meta) if meta.is_dir() => std::fs::remove_dir(&full)?,
+            Ok(_) => std::fs::remove_file(&full)?,
+            Err(error) if is_absent(&error) => {}
+            Err(error) => return Err(error),
+        }
+        let mut dir = full.parent();
+        while let Some(current) = dir {
+            let is_real_dir = std::fs::symlink_metadata(current).is_ok_and(|meta| meta.is_dir());
+            if current == workdir
+                || !current.starts_with(workdir)
+                || !is_real_dir
+                || std::fs::remove_dir(current).is_err()
+            {
+                break;
+            }
+            dir = current.parent();
+        }
+        Ok(())
+    }
+}
+
+/// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that
+/// replaced a folder on the way is removed first and the folder recreated (never written
+/// through); missing folders are created.
+pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -> io::Result<()> {
+    if !plain_relative(Path::new(rel)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must be relative to the repository",
+        ));
+    }
+    #[cfg(unix)]
+    return beneath_unix::replace(workdir, Path::new(rel), content, &mut beneath_unix::no_step);
+    #[cfg(not(unix))]
+    {
+        clear_symlinked_ancestors(workdir, rel)?;
+        let full = workdir.join(rel);
+        match std::fs::symlink_metadata(&full) {
+            Ok(meta) if meta.is_dir() => std::fs::remove_dir(&full)?,
+            Ok(_) => std::fs::remove_file(&full)?,
+            Err(error) if is_absent(&error) => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        match content {
+            Content::File { bytes, .. } | Content::Link(bytes) => std::fs::write(&full, bytes),
+        }
+    }
 }
 
 /// Opens the regular file `rel` below `workdir` for reading without following a symlink at any
@@ -674,67 +832,10 @@ pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Resu
 /// redirect the read. `workdir` itself may be reached through a symlink (the user chose it).
 #[cfg(unix)]
 pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std::fs::File>> {
-    use std::ffi::CString;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-    use std::os::unix::ffi::OsStrExt;
-
     if !plain_relative(rel) {
         return Ok(None);
     }
-    let gone = |e: &io::Error| {
-        matches!(
-            e.raw_os_error(),
-            Some(libc::ELOOP | libc::ENOTDIR | libc::ENOENT)
-        )
-    };
-    let open_at =
-        |dir: libc::c_int, name: &std::ffi::OsStr, flags: libc::c_int| -> io::Result<OwnedFd> {
-            let name = CString::new(name.as_bytes())
-                .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-            // SAFETY: `dir` is an open directory descriptor owned by the caller for the duration
-            // of the call and `name` is a NUL-terminated string that outlives it.
-            let fd = unsafe { libc::openat(dir, name.as_ptr(), flags | libc::O_CLOEXEC) };
-            if fd < 0 {
-                Err(io::Error::last_os_error())
-            } else {
-                // SAFETY: `openat` just returned this descriptor; nothing else owns it.
-                Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-            }
-        };
-
-    let root = {
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY)
-            .open(workdir)?
-    };
-    let mut dir: OwnedFd = root.into();
-    let parts: Vec<&std::ffi::OsStr> = rel.components().map(|c| c.as_os_str()).collect();
-    let Some((last, parents)) = parts.split_last() else {
-        return Ok(None);
-    };
-    for part in parents {
-        match open_at(
-            dir.as_raw_fd(),
-            part,
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        ) {
-            Ok(next) => dir = next,
-            Err(e) if gone(&e) => return Ok(None),
-            Err(e) => return Err(e),
-        }
-    }
-    let file = match open_at(
-        dir.as_raw_fd(),
-        last,
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK,
-    ) {
-        Ok(fd) => std::fs::File::from(fd),
-        Err(e) if gone(&e) => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    Ok(file.metadata()?.is_file().then_some(file))
+    beneath_unix::open_file(workdir, rel, &mut beneath_unix::no_step)
 }
 
 /// Windows: opens `rel` without following a final reparse point, then checks the path the
@@ -1046,7 +1147,7 @@ mod tests {
         assert!(has_symlinked_ancestor(dir.path(), "../x"));
         assert!(has_symlinked_ancestor(dir.path(), "/etc/passwd"));
         assert!(!has_symlinked_ancestor(dir.path(), "d/f"));
-        assert!(clear_symlinked_ancestors(dir.path(), "../x").is_err());
+        assert!(replace_beneath(dir.path(), "../x", Content::Link(b"x")).is_err());
     }
 
     #[test]

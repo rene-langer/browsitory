@@ -12,6 +12,8 @@ use git2::{
 };
 use thiserror::Error;
 
+use crate::worktree_guard::{Content, Leaf};
+
 const MODE_FILE: u32 = 0o100644;
 const MODE_EXEC: u32 = 0o100755;
 pub(crate) const MODE_LINK: u32 = 0o120000;
@@ -155,36 +157,26 @@ fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
 }
 
 /// Raw bytes (no clean filters) and git mode of the worktree path `rel`; `None` when absent, a
-/// directory, or below a symlinked directory (git sees no file there, and reading would follow
-/// the link, possibly out of the repository). `previous_mode` keeps the exec bit when
-/// `core.filemode` is off and the symlink mode when `core.symlinks` is off, matching what git
-/// itself records.
+/// directory, not a regular file (a FIFO never blocks the snapshot), or below a symlinked
+/// directory (git sees no file there, and reading would follow the link, possibly out of the
+/// repository). Read through `worktree_guard::read_beneath`, so a folder swapped for a link
+/// meanwhile is never followed (#149). `previous_mode` keeps the exec bit when `core.filemode`
+/// is off and the symlink mode when `core.symlinks` is off, matching what git itself records.
 pub(crate) fn read_worktree_file(
     workdir: &Path,
     rel: &str,
     config: &WorktreeConfig,
     previous_mode: Option<u32>,
 ) -> io::Result<Option<(Vec<u8>, u32)>> {
-    if crate::worktree_guard::has_symlinked_ancestor(workdir, rel) {
-        return Ok(None);
-    }
-    let full = &workdir.join(rel);
-    let meta = match fs::symlink_metadata(full) {
-        Ok(meta) => meta,
-        Err(error) if is_absent(&error) => return Ok(None),
-        Err(error) => return Err(error),
+    let (bytes, executable) = match crate::worktree_guard::read_beneath(workdir, rel)? {
+        None => return Ok(None),
+        Some(Leaf::Link(target)) => return Ok(Some((target, MODE_LINK))),
+        Some(Leaf::File { bytes, executable }) => (bytes, executable),
     };
-    if meta.file_type().is_symlink() {
-        return Ok(Some((link_target_bytes(&fs::read_link(full)?), MODE_LINK)));
-    }
-    if meta.is_dir() {
-        return Ok(None);
-    }
-    let bytes = fs::read(full)?;
     let mode = if !config.symlinks && previous_mode == Some(MODE_LINK) {
         MODE_LINK
     } else if config.filemode {
-        if is_executable(&meta) {
+        if executable {
             MODE_EXEC
         } else {
             MODE_FILE
@@ -195,36 +187,6 @@ pub(crate) fn read_worktree_file(
         MODE_FILE
     };
     Ok(Some((bytes, mode)))
-}
-
-/// Missing, or a parent is a file (`d/a` while `d` is a file, as in a file <-> dir swap).
-fn is_absent(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-    )
-}
-
-#[cfg(unix)]
-fn is_executable(meta: &fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    meta.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn is_executable(_meta: &fs::Metadata) -> bool {
-    false
-}
-
-#[cfg(unix)]
-fn link_target_bytes(target: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    target.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(not(unix))]
-fn link_target_bytes(target: &Path) -> Vec<u8> {
-    target.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
 pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
@@ -670,39 +632,14 @@ fn flatten_tree(repo: &Repository, id: &str) -> Result<TreeFiles, UndoError> {
 }
 
 /// Removes the file, link or empty directory `rel` and then the directories that emptied. Never
-/// acts through a symlinked directory: a path below one does not exist for git (#114).
+/// acts through a symlinked directory: a path below one does not exist for git (#114), and the
+/// folders are held open while acting, so a swap meanwhile can't redirect it (#149).
 fn remove_existing(workdir: &Path, rel: &str) -> io::Result<()> {
-    if crate::worktree_guard::has_symlinked_ancestor(workdir, rel) {
-        return Ok(());
-    }
-    let full = workdir.join(rel);
-    match fs::symlink_metadata(&full) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir(&full)?,
-        Ok(_) => fs::remove_file(&full)?,
-        Err(error) if is_absent(&error) => {}
-        Err(error) => return Err(error),
-    }
-    prune_empty_parents(workdir, &full);
-    Ok(())
-}
-
-fn prune_empty_parents(workdir: &Path, full: &Path) {
-    let mut dir = full.parent();
-    while let Some(current) = dir {
-        let is_real_dir = fs::symlink_metadata(current).is_ok_and(|meta| meta.is_dir());
-        if current == workdir
-            || !current.starts_with(workdir)
-            || !is_real_dir
-            || fs::remove_dir(current).is_err()
-        {
-            break;
-        }
-        dir = current.parent();
-    }
+    crate::worktree_guard::remove_and_prune_beneath(workdir, rel)
 }
 
 /// Writes the blob as `rel`, replacing what is there. A symlink that replaced a directory on the
-/// way is removed first (never written through, #114).
+/// way is removed first (never written through, #114), through held folders (#149).
 fn write_worktree_file(
     repo: &Repository,
     workdir: &Path,
@@ -712,51 +649,14 @@ fn write_worktree_file(
     config: &WorktreeConfig,
 ) -> Result<(), UndoError> {
     let blob = repo.find_blob(id)?;
-    crate::worktree_guard::clear_symlinked_ancestors(workdir, rel)?;
-    let full = &workdir.join(rel);
-    match fs::symlink_metadata(full) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir(full)?,
-        Ok(_) => fs::remove_file(full)?,
-        Err(error) if is_absent(&error) => {}
-        Err(error) => return Err(error.into()),
-    }
-    if let Some(parent) = full.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if mode == MODE_LINK && config.symlinks {
-        create_symlink(blob.content(), full)?;
-        return Ok(());
-    }
-    fs::write(full, blob.content())?;
-    set_executable(full, mode == MODE_EXEC)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn create_symlink(target: &[u8], full: &Path) -> io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(target), full)
-}
-
-#[cfg(not(unix))]
-fn create_symlink(target: &[u8], full: &Path) -> io::Result<()> {
-    fs::write(full, target)
-}
-
-#[cfg(unix)]
-fn set_executable(full: &Path, executable: bool) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = fs::metadata(full)?.permissions();
-    let mode = permissions.mode();
-    permissions.set_mode(if executable {
-        mode | 0o111
+    let content = if mode == MODE_LINK && config.symlinks {
+        Content::Link(blob.content())
     } else {
-        mode & !0o111
-    });
-    fs::set_permissions(full, permissions)
-}
-
-#[cfg(not(unix))]
-fn set_executable(_full: &Path, _executable: bool) -> io::Result<()> {
+        Content::File {
+            bytes: blob.content(),
+            executable: mode == MODE_EXEC,
+        }
+    };
+    crate::worktree_guard::replace_beneath(workdir, rel, content)?;
     Ok(())
 }
