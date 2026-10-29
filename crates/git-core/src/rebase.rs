@@ -794,7 +794,7 @@ pub struct RebaseAbort {
 
 /// Ends a paused rebase, like `abort_sequence` (the caller forgets the state only on `Ok`):
 ///
-/// - HEAD is where the rebase left it, the branch is still at the tip the rebase started from and
+/// - HEAD is where the rebase left it (or is the paused step committed by hand), the branch is still at the tip the rebase started from and
 ///   git has nothing else paused: go back to the branch with a forced checkout, as `git rebase
 ///   --abort` does. `restored: true`.
 /// - Otherwise (the rebase diverged) HEAD and every ref stay where they are. With HEAD still at
@@ -812,7 +812,10 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
         Err(error) if error.code() == git2::ErrorCode::NotFound => false,
         Err(error) => return Err(error.into()),
     };
-    if at_expected && branch_unmoved && !other_operation {
+    // A step committed by hand that Continue would adopt is still a pause (`rebase_health`
+    // says Paused), so it is aborted like one.
+    let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
+    if paused_here && branch_unmoved && !other_operation {
         restore_original_branch(repo, &state.original_branch_ref)?;
         return Ok(RebaseAbort { restored: true });
     }

@@ -1848,3 +1848,26 @@ fn continue_adopts_a_conflict_resolved_to_ours() {
         RebaseStepResult::Done
     );
 }
+
+/// Health says Paused for a step committed by hand, so Abort must treat it like a pause too:
+/// back to the branch, not "HEAD had moved".
+#[test]
+fn abort_restores_the_branch_when_the_step_was_committed_by_hand() {
+    let (_dir, repo, state, _) = conflicting_rebase();
+    resolve_shared(&repo);
+    commit_by_hand(
+        &repo,
+        &author_of(&repo, &state.plan[0].commit_id),
+        "conflicting change",
+    );
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: true });
+    assert_eq!(
+        repo.head().unwrap().name().unwrap(),
+        state.original_branch_ref
+    );
+    assert_eq!(head_id(&repo), state.original_tip);
+}
