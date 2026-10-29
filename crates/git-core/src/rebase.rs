@@ -21,6 +21,8 @@ pub enum RebaseError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

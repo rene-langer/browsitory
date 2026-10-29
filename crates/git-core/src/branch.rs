@@ -13,6 +13,8 @@ pub enum BranchError {
     Worktree(#[from] crate::worktree::WorktreeError),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

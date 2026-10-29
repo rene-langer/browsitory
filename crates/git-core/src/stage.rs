@@ -46,6 +46,8 @@ pub enum StageError {
     Io(#[from] std::io::Error),
     #[error("failed to read status: {0}")]
     Status(String),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 impl From<LinePatchError> for StageError {

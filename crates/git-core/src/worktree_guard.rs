@@ -389,6 +389,26 @@ fn tracked_as_link(head_tree: Option<&git2::Tree>, rel: &Path) -> bool {
         .is_some_and(|entry| entry.filemode() as u32 == MODE_LINK)
 }
 
+/// Refuses `source` (optionally limited to `paths`) when it holds a case collision and case
+/// matters for `repo` ([`folds_case`]).
+pub(crate) fn refuse_case_collision<E, P>(
+    repo: &git2::Repository,
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CaseCollision>,
+    P: AsRef<[u8]>,
+{
+    if !folds_case(repo) {
+        return Ok(());
+    }
+    match find_case_collision(source, paths)? {
+        Some(collision) => Err(collision.into()),
+        None => Ok(()),
+    }
+}
+
 /// Clears every hazard of a forced checkout in `repo`'s worktree, optionally limited to the
 /// literal `paths`: those of the checkout's `target` and those of the current HEAD tree and
 /// index. The latter matter because a forced checkout also *deletes* what the baseline tracks
@@ -402,12 +422,15 @@ pub(crate) fn prepare_forced_checkout<E, P>(
     paths: Option<&[P]>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error>,
+    E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
+    if let Some(target) = target {
+        refuse_case_collision::<E, P>(repo, target, paths)?;
+    }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
     // filter here, or `TC` would scan nothing for a tracked `tc`.
     let ignore_case = repo
@@ -463,12 +486,22 @@ pub(crate) fn refuse_linked_folders<E>(
     incoming: &[Incoming],
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<LinkedFolder>,
+    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
     const ALL: Option<&[&str]> = None;
+    // Only what the operation brings in: a HEAD that already holds a collision doesn't lock the
+    // repository, but nothing brings one in (again).
+    for source in incoming {
+        let source = match source {
+            Incoming::Checkout(tree) => GuardSource::Tree(tree),
+            Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
+            Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
+        };
+        refuse_case_collision::<E, &str>(repo, &source, ALL)?;
+    }
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let index = repo.index()?;
     let mut sources = Vec::new();

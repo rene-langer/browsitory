@@ -56,6 +56,8 @@ pub enum UndoError {
     Git(#[from] git2::Error),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
@@ -301,6 +303,16 @@ pub fn restore(
     }
     if let Some(change) = &worktree {
         change.verify(repo)?;
+        // The raw writes below come before the forced checkout's own guard, so a target that
+        // brings in a case-colliding link and folder (#156) is refused here, writing nothing.
+        if let Some(to) = &target.worktree_tree {
+            let tree = repo.find_tree(Oid::from_str(to)?)?;
+            crate::worktree_guard::refuse_case_collision::<UndoError, _>(
+                repo,
+                &crate::worktree_guard::GuardSource::Tree(&tree),
+                Some(&change.paths),
+            )?;
+        }
     }
 
     // 2. Write: worktree first (most likely to fail), then index, refs, HEAD.

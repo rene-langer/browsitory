@@ -362,6 +362,8 @@ pub enum RemoteError {
     Hook(#[from] crate::hooks::HookError),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 impl RemoteError {

@@ -35,6 +35,8 @@ pub enum PickError {
     Merge(#[from] crate::merge::MergeError),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 #[derive(Clone, Copy)]

@@ -34,6 +34,8 @@ pub enum StashError {
     SymlinkReplacedByDirectory,
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
