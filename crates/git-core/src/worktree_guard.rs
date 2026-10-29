@@ -569,16 +569,6 @@ where
         return Ok(());
     };
     const ALL: Option<&[&str]> = None;
-    // Only what the operation brings in: a HEAD that already holds a collision doesn't lock the
-    // repository, but nothing brings one in (again).
-    for source in incoming {
-        let source = match source {
-            Incoming::Checkout(tree) => GuardSource::Tree(tree),
-            Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
-            Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
-        };
-        refuse_case_collision::<E, &str>(repo, &source, ALL)?;
-    }
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let index = repo.index()?;
     let mut sources = Vec::new();
@@ -611,10 +601,21 @@ where
             break;
         }
     }
-    match found {
-        Some(dir) => Err(LinkedFolder(git_path(&dir)).into()),
-        None => Ok(()),
+    if let Some(dir) = found {
+        return Err(LinkedFolder(git_path(&dir)).into());
     }
+    // Then case collisions (#156), after the more specific link on disk. Only what the operation
+    // brings in: a HEAD that already holds a collision doesn't lock the repository, but nothing
+    // brings one in (again).
+    for source in incoming {
+        let source = match source {
+            Incoming::Checkout(tree) => GuardSource::Tree(tree),
+            Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
+            Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
+        };
+        refuse_case_collision::<E, &str>(repo, &source, ALL)?;
+    }
+    Ok(())
 }
 
 /// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
