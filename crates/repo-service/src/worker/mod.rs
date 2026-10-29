@@ -35,6 +35,7 @@ mod history;
 mod hooks;
 mod merge;
 mod rebase;
+mod rebase_store;
 mod reflog;
 mod remote;
 mod search;
