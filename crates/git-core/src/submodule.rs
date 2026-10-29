@@ -4,6 +4,8 @@ use git2::{ObjectType, Oid, Repository, Tree};
 use thiserror::Error;
 use url::Url;
 
+use crate::worktree_guard::{CasePolicy, GuardSource};
+
 #[cfg(test)]
 mod tests {
     use super::validate_remote_url_scheme;
@@ -40,6 +42,8 @@ pub enum SubmoduleError {
     Git(#[from] git2::Error),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +82,16 @@ pub fn update_submodule(
     path: &str,
     recursive: bool,
 ) -> Result<(), SubmoduleError> {
+    update_submodule_with(repo, path, recursive, CasePolicy::FromRepo)
+}
+
+/// [`update_submodule`] with the case-collision policy as a parameter (tests force it on Linux).
+pub(crate) fn update_submodule_with(
+    repo: &Repository,
+    path: &str,
+    recursive: bool,
+    policy: CasePolicy,
+) -> Result<(), SubmoduleError> {
     let mut submodule = find_submodule(repo, path)?;
 
     // Validated unconditionally, not just on the recursive path: `submodule.update` below fetches
@@ -104,13 +118,95 @@ pub fn update_submodule(
         ensure_recursive_update_is_safe(repo, &submodule)?;
     }
 
-    submodule.update(false, None)?;
+    guarded_update(repo, &mut submodule, policy)?;
 
     if recursive {
-        update_nested_submodules(&submodule.open()?)?;
+        update_nested_submodules(&submodule.open()?, policy)?;
     }
 
     Ok(())
+}
+
+/// `submodule.update`, but the commit's tree is checked for case collisions (#156) and for links
+/// standing where it has folders (#114) before anything is written in the submodule's work tree.
+///
+/// A checked-out submodule is checked against its target commit, then updated by libgit2 as
+/// before. A fresh one is cloned without a checkout (libgit2 sets its HEAD to the target), then
+/// checked, then checked out (`checkout_head`, safe, recreating the missing files). A refused fresh
+/// submodule stays cloned with an empty work tree.
+fn guarded_update(
+    repo: &Repository,
+    submodule: &mut git2::Submodule<'_>,
+    policy: CasePolicy,
+) -> Result<(), SubmoduleError> {
+    let name = submodule.name()?.to_string();
+    let status = repo.submodule_status(&name, git2::SubmoduleIgnore::None)?;
+    // libgit2 clones only into an empty folder; anything else it opens as a checked-out
+    // submodule (and fails as it would, when that isn't one).
+    if !status.contains(git2::SubmoduleStatus::WD_UNINITIALIZED) {
+        let sub = submodule.open()?;
+        let target = submodule
+            .index_id()
+            .ok_or_else(|| git2::Error::from_str("could not get ID of submodule in index"))?;
+        if sub.find_commit(target).is_err() {
+            // libgit2 would fetch it from the submodule's default remote too.
+            download_target_from_origin(&sub, target)?;
+        }
+        let commit = sub.find_commit(target)?;
+        let tree = commit.tree()?;
+        check_submodule_tree(&sub, &tree, policy)?;
+        if workdir_is_empty(&sub) {
+            // A clone whose checkout was refused (or never ran): its index already lists every
+            // file, so libgit2's safe checkout would take the missing files for deletions.
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.safe().recreate_missing(true);
+            sub.checkout_tree(commit.as_object(), Some(&mut checkout))?;
+            sub.set_head_detached(target)?;
+        } else {
+            submodule.update(false, None)?;
+        }
+        return Ok(());
+    }
+    let mut no_checkout = git2::build::CheckoutBuilder::new();
+    no_checkout.dry_run();
+    let mut options = git2::SubmoduleUpdateOptions::new();
+    options.checkout(no_checkout);
+    submodule.update(false, Some(&mut options))?;
+    let sub = submodule.open()?;
+    let tree = sub.head()?.peel_to_tree()?;
+    check_submodule_tree(&sub, &tree, policy)?;
+    // The no-checkout pass already wrote HEAD's entries into the index, so the missing files
+    // must be recreated explicitly.
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe().recreate_missing(true);
+    sub.checkout_head(Some(&mut checkout))?;
+    Ok(())
+}
+
+/// True when the submodule's work tree holds nothing but its `.git`.
+fn workdir_is_empty(sub: &Repository) -> bool {
+    sub.workdir()
+        .and_then(|workdir| std::fs::read_dir(workdir).ok())
+        .is_some_and(|entries| entries.flatten().all(|entry| entry.file_name() == ".git"))
+}
+
+fn check_submodule_tree(
+    sub: &Repository,
+    tree: &Tree<'_>,
+    policy: CasePolicy,
+) -> Result<(), SubmoduleError> {
+    if policy.applies(sub) {
+        const ALL: Option<&[&str]> = None;
+        if let Some(collision) =
+            crate::worktree_guard::find_case_collision(&GuardSource::Tree(tree), ALL)?
+        {
+            return Err(collision.into());
+        }
+    }
+    crate::worktree_guard::refuse_linked_folders::<SubmoduleError>(
+        sub,
+        &[crate::worktree_guard::Incoming::Checkout(tree)],
+    )
 }
 
 fn find_submodule<'repo>(
@@ -124,13 +220,13 @@ fn find_submodule<'repo>(
         .ok_or(SubmoduleError::NotFound)
 }
 
-fn update_nested_submodules(repo: &Repository) -> Result<(), SubmoduleError> {
+fn update_nested_submodules(repo: &Repository, policy: CasePolicy) -> Result<(), SubmoduleError> {
     for mut submodule in repo.submodules()? {
         if let Some(workdir) = repo.workdir() {
             crate::worktree_guard::refuse_linked_path(workdir, submodule.path())?;
         }
-        submodule.update(false, None)?;
-        update_nested_submodules(&submodule.open()?)?;
+        guarded_update(repo, &mut submodule, policy)?;
+        update_nested_submodules(&submodule.open()?, policy)?;
     }
     Ok(())
 }
@@ -297,4 +393,167 @@ fn validate_path(path: &str) -> Result<(), SubmoduleError> {
         return Err(SubmoduleError::InvalidPath);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod case_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn sig() -> git2::Signature<'static> {
+        git2::Signature::now("T", "t@example.com").unwrap()
+    }
+
+    /// The submodule's source: `clean` (`a.txt`), `clean2` (`a.txt` changed, `b.txt`) and
+    /// `evil` (clean + `D -> /x` + `d/x`).
+    struct Source {
+        dir: TempDir,
+        clean: Oid,
+        clean2: Oid,
+        evil: Oid,
+    }
+
+    fn source() -> Source {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let blob = |bytes: &[u8]| repo.blob(bytes).unwrap();
+        let commit = |tree: Oid, parent: Option<Oid>| {
+            let tree = repo.find_tree(tree).unwrap();
+            let parents: Vec<_> = parent
+                .map(|id| repo.find_commit(id).unwrap())
+                .into_iter()
+                .collect();
+            let parents: Vec<_> = parents.iter().collect();
+            repo.commit(None, &sig(), &sig(), "c", &tree, &parents)
+                .unwrap()
+        };
+        let mut root = repo.treebuilder(None).unwrap();
+        root.insert("a.txt", blob(b"a\n"), 0o100644).unwrap();
+        let clean = commit(root.write().unwrap(), None);
+        root.insert("a.txt", blob(b"a2\n"), 0o100644).unwrap();
+        root.insert("b.txt", blob(b"b\n"), 0o100644).unwrap();
+        let clean2 = commit(root.write().unwrap(), Some(clean));
+        let mut root = repo.treebuilder(None).unwrap();
+        root.insert("a.txt", blob(b"a\n"), 0o100644).unwrap();
+        let mut inner = repo.treebuilder(None).unwrap();
+        inner.insert("x", blob(b"PWNED\n"), 0o100644).unwrap();
+        root.insert("d", inner.write().unwrap(), 0o040000).unwrap();
+        root.insert("D", blob(b"/x"), 0o120000).unwrap();
+        let evil = commit(root.write().unwrap(), Some(clean));
+        repo.reference("refs/heads/main", clean2, true, "").unwrap();
+        repo.reference("refs/heads/evil", evil, true, "").unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        Source {
+            dir,
+            clean,
+            clean2,
+            evil,
+        }
+    }
+
+    /// A super-repository whose submodule `sub` points at `src` with its gitlink at `at`,
+    /// initialized (not cloned).
+    fn super_repo(src: &Source, at: Oid) -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let url = src.dir.path().to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            dir.path().join(".gitmodules"),
+            format!("[submodule \"sub\"]\n\tpath = sub\n\turl = {url}\n"),
+        )
+        .unwrap();
+        set_gitlink(&repo, at);
+        // A checkout of the super-repository leaves the submodule's folder empty.
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        init_submodule(&repo, "sub").unwrap();
+        (dir, repo)
+    }
+
+    /// Commits `.gitmodules` + the gitlink `sub` at `at` (index and HEAD).
+    fn set_gitlink(repo: &Repository, at: Oid) {
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(".gitmodules")).unwrap();
+        index
+            .add(&crate::undo::index_entry("sub", at, 0o160000))
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<_> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig(), &sig(), "gitlink", &tree, &parents)
+            .unwrap();
+    }
+
+    fn update(repo: &Repository) -> Result<(), SubmoduleError> {
+        update_submodule_with(repo, "sub", false, CasePolicy::Always)
+    }
+
+    #[test]
+    fn updating_a_submodule_whose_commit_has_a_collision_is_refused() {
+        let src = source();
+        let (dir, repo) = super_repo(&src, src.evil);
+        let error = update(&repo).unwrap_err();
+        assert!(matches!(error, SubmoduleError::CaseCollision(_)), "{error}");
+        let sub = dir.path().join("sub");
+        assert!(std::fs::symlink_metadata(sub.join("d")).is_err());
+        assert!(std::fs::symlink_metadata(sub.join("D")).is_err());
+        assert!(!sub.join("a.txt").exists());
+    }
+
+    #[test]
+    fn moving_a_checked_out_submodule_to_a_collision_is_refused() {
+        let src = source();
+        let (dir, repo) = super_repo(&src, src.clean);
+        update(&repo).unwrap();
+        set_gitlink(&repo, src.evil);
+        let error = update(&repo).unwrap_err();
+        assert!(matches!(error, SubmoduleError::CaseCollision(_)), "{error}");
+        let sub = Repository::open(dir.path().join("sub")).unwrap();
+        assert_eq!(sub.head().unwrap().target(), Some(src.clean));
+        assert!(std::fs::symlink_metadata(dir.path().join("sub/d")).is_err());
+    }
+
+    #[test]
+    fn a_refused_fresh_submodule_is_complete_after_moving_to_a_clean_commit() {
+        let src = source();
+        let (dir, repo) = super_repo(&src, src.evil);
+        assert!(update(&repo).is_err());
+        set_gitlink(&repo, src.clean);
+        update(&repo).unwrap();
+        let sub_dir = dir.path().join("sub");
+        assert_eq!(
+            std::fs::read_to_string(sub_dir.join("a.txt")).unwrap(),
+            "a\n"
+        );
+        let sub = Repository::open(&sub_dir).unwrap();
+        assert_eq!(sub.head().unwrap().target(), Some(src.clean));
+        assert!(crate::status::status(&sub).unwrap().is_empty());
+    }
+
+    #[test]
+    fn updating_a_clean_submodule_populates_it_and_moves_it() {
+        let src = source();
+        let (dir, repo) = super_repo(&src, src.clean);
+        update(&repo).unwrap();
+        let sub_dir = dir.path().join("sub");
+        assert_eq!(
+            std::fs::read_to_string(sub_dir.join("a.txt")).unwrap(),
+            "a\n"
+        );
+        let sub = Repository::open(&sub_dir).unwrap();
+        assert!(crate::status::status(&sub).unwrap().is_empty());
+
+        set_gitlink(&repo, src.clean2);
+        update(&repo).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(sub_dir.join("a.txt")).unwrap(),
+            "a2\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(sub_dir.join("b.txt")).unwrap(),
+            "b\n"
+        );
+        assert_eq!(sub.head().unwrap().target(), Some(src.clean2));
+        assert!(crate::status::status(&sub).unwrap().is_empty());
+    }
 }

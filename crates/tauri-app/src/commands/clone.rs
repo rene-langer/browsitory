@@ -67,6 +67,7 @@ impl From<CloneError> for CloneErrorDto {
             CloneError::Cancelled => "Cancelled".to_string(),
             CloneError::Transfer { kind, .. } => format!("{kind:?}"),
             CloneError::Io(_) => "Io".to_string(),
+            CloneError::CaseCollision(_) => "CaseCollision".to_string(),
         };
         Self {
             kind,
@@ -165,6 +166,13 @@ mod tests {
             (CloneError::DestNotEmpty, "DestNotEmpty"),
             (CloneError::BranchNotFound, "BranchNotFound"),
             (CloneError::Cancelled, "Cancelled"),
+            (
+                CloneError::CaseCollision(git_core::CaseCollision {
+                    link: "D".into(),
+                    folder: "d".into(),
+                }),
+                "CaseCollision",
+            ),
             (
                 CloneError::Transfer {
                     kind: TransferErrorKind::MissingCredential,

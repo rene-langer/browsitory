@@ -34,6 +34,8 @@ pub enum StashError {
     SymlinkReplacedByDirectory,
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -382,34 +384,10 @@ fn save_path_limited_stash(
     //    was replaced by a directory holding untracked `l/f`), after which `l/f` would resolve
     //    into the link's target.
     for path in &untracked {
-        if has_symlinked_ancestor(&workdir, path) {
-            continue;
-        }
-        let full = workdir.join(path);
-        match std::fs::remove_file(&full) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-            _ => {}
-        }
-        // Remove directories the stash emptied, like git's clean -d; never a symlink, and never
-        // through one.
-        let mut dir = full.parent();
-        while let Some(parent) = dir {
-            if parent == workdir {
-                break;
-            }
-            let Ok(relative) = parent.strip_prefix(&workdir) else {
-                break;
-            };
-            let relative = relative.to_string_lossy();
-            let is_real_dir = std::fs::symlink_metadata(parent).is_ok_and(|meta| meta.is_dir());
-            if !is_real_dir
-                || has_symlinked_ancestor(&workdir, &relative)
-                || std::fs::remove_dir(parent).is_err()
-            {
-                break;
-            }
-            dir = parent.parent();
-        }
+        // Removes the file and the folders the stash emptied, like git's clean -d; never a
+        // symlink's target, never through one, and through held folders so a swap meanwhile
+        // can't redirect it (#149).
+        crate::worktree_guard::remove_and_prune_beneath(&workdir, path)?;
     }
     // 2. A tracked file replaced by a symlink (typechange) must be removed before its checkout:
     //    a forced checkout writes the file's content *through* the symlink, overwriting its

@@ -16,6 +16,8 @@ pub enum ResetError {
     OperationInProgress,
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,

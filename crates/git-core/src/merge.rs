@@ -28,6 +28,8 @@ pub enum MergeError {
     SymlinkedFolder(String),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a

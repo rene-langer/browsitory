@@ -14,6 +14,68 @@ use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(unix)]
+mod beneath_unix;
+#[cfg(windows)]
+mod beneath_windows;
+#[cfg(any(windows, test))]
+mod reparse;
+#[cfg(unix)]
+use beneath_unix as beneath;
+#[cfg(windows)]
+use beneath_windows as beneath;
+
+#[cfg(any(unix, windows))]
+mod walk_types {
+    //! The shared vocabulary of the platform walkers (`beneath_unix`, `beneath_windows`).
+    use std::ffi::OsStr;
+
+    /// How a walk treats a link where it needs a folder.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum OnLink {
+        /// Stop: the path is beyond a link.
+        Refuse,
+        /// Remove the link itself (never its target), then go on as [`OnMissing`] says.
+        Clear,
+    }
+
+    /// How a walk treats a missing folder.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum OnMissing {
+        Stop,
+        /// Create it.
+        Create,
+    }
+
+    /// A walk's progress, for tests that change the work tree at a chosen moment.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Step<'a> {
+        /// The folder was opened and is now held.
+        Opened(&'a OsStr),
+        Created(&'a OsStr),
+        Cleared(&'a OsStr),
+    }
+
+    /// The walk's test seam; production passes [`no_step`].
+    pub(crate) type StepFn<'s> = &'s mut dyn FnMut(Step<'_>);
+
+    pub(crate) fn no_step(_: Step<'_>) {}
+
+    /// Where a walk ended.
+    pub(crate) enum Walk<B> {
+        Found(B),
+        /// A component on the way is (or, with [`OnLink::Clear`] and [`OnMissing::Stop`], was) a
+        /// link.
+        Link,
+        /// A component on the way is missing ([`OnMissing::Stop`]).
+        Missing,
+        /// A component on the way is a file or something else that isn't a folder.
+        NotDir,
+    }
+}
+#[cfg(any(unix, windows))]
+use walk_types::{no_step, OnLink, OnMissing, Step, StepFn, Walk};
+
 /// Git's file modes for a symlink and a submodule (gitlink).
 const MODE_LINK: u32 = 0o120000;
 const MODE_GITLINK: u32 = 0o160000;
@@ -244,13 +306,12 @@ pub(crate) fn has_hazard(repo: &git2::Repository) -> Result<bool, git2::Error> {
 
 /// Removes each hazard's link, never its target and never recursively. A path that is no longer
 /// a symlink (or already gone) is left alone. Call immediately before the forced checkout.
+///
+/// The walk to each hazard holds every folder on the way: a folder that became a link meanwhile
+/// is itself removed (it would be a hazard too), never followed.
 pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()> {
     for hazard in hazards {
-        let full = workdir.join(hazard.path());
-        if !is_link(&full) {
-            continue;
-        }
-        remove_link(&full)?;
+        beneath::clear_hazard(workdir, hazard.path(), &mut no_step)?;
     }
     Ok(())
 }
@@ -259,6 +320,232 @@ pub(crate) fn clear_hazards(workdir: &Path, hazards: &[Hazard]) -> io::Result<()
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("'{0}' is a symbolic link where the repository has a folder. Remove or rename it first.")]
 pub struct LinkedFolder(pub String);
+
+/// A link (or submodule) entry and a folder of another entry name the same file once case is
+/// ignored (#156). On a case-insensitive file system a write below the folder could go through
+/// the link.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "'{link}' is a symbolic link and '{folder}' a folder whose names differ only in case. On \
+     this file system they are the same name, so Browsitory won't check them out. Rename one of \
+     them in the repository."
+)]
+pub struct CaseCollision {
+    pub link: String,
+    pub folder: String,
+}
+
+/// The code points HFS+ ignores in names (the list git's `is_hfs_dotgit` uses).
+fn hfs_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'
+    )
+}
+
+/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 upper- then
+/// lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
+/// case folding and NTFS's upcase table; `ß` meeting `ss` over-matches, which only refuses
+/// more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
+/// normalization is not folded (a documented residual, decision D4).
+pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
+    match std::str::from_utf8(name) {
+        Ok(text) => text
+            .chars()
+            .filter(|c| !hfs_ignorable(*c))
+            .flat_map(char::to_uppercase)
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+            .into_bytes(),
+        Err(_) => name.to_ascii_lowercase(),
+    }
+}
+
+/// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
+/// (decision D1), where a repository copied from elsewhere can carry a wrong setting.
+pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
+    cfg!(any(target_os = "macos", windows))
+        || repo
+            .config()
+            .and_then(|config| config.get_bool("core.ignorecase"))
+            .unwrap_or(false)
+}
+
+/// When a fresh checkout (clone, submodule) checks for case collisions. Tests can't preset a
+/// fresh clone's config, so they force the check with `Always`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CasePolicy {
+    /// [`folds_case`] of the repository being checked out.
+    FromRepo,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Always,
+}
+
+impl CasePolicy {
+    pub(crate) fn applies(self, repo: &git2::Repository) -> bool {
+        self == CasePolicy::Always || folds_case(repo)
+    }
+}
+
+/// The first link or gitlink entry whose folded path equals the folded path of a folder on the
+/// way to another entry (a strict prefix of it), in either order. A gitlink is a folder too (the
+/// submodule's checkout), so a link and a gitlink of the same folded name collide as well.
+#[cfg(test)]
+fn first_collision<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32)>,
+) -> Option<CaseCollision> {
+    first_collision_across(entries.into_iter().map(|(path, mode)| (path, mode, 0)))
+}
+
+/// [`first_collision`] over entries from several sources (the third field). Within one source
+/// an exactly equal link and folder collide too (only a crafted tree holds both); across
+/// sources they are one path changing kind (a link replaced by a folder), so only names that
+/// differ in spelling collide there.
+fn first_collision_across<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32, usize)>,
+) -> Option<CaseCollision> {
+    collisions_across(entries, false).into_iter().next()
+}
+
+/// Every collision among `entries` (or only the first, unless `all`), each reported once.
+fn collisions_across<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32, usize)>,
+    all: bool,
+) -> Vec<CaseCollision> {
+    let mut out: Vec<CaseCollision> = Vec::new();
+    macro_rules! report {
+        ($collision:expr) => {{
+            let collision = $collision;
+            if !out.contains(&collision) {
+                out.push(collision);
+            }
+            if !all {
+                return out;
+            }
+        }};
+    }
+    let found = |link: &[u8], folder: &[u8]| CaseCollision {
+        link: String::from_utf8_lossy(link).into_owned(),
+        folder: String::from_utf8_lossy(folder).into_owned(),
+    };
+    // Folded path -> the path as git spells it, its source (and for links, whether a gitlink).
+    let mut links: HashMap<Vec<u8>, (Vec<u8>, bool, usize)> = HashMap::new();
+    let mut folders: HashMap<Vec<u8>, Vec<(Vec<u8>, usize)>> = HashMap::new();
+    let mut seen_folders: std::collections::HashSet<(Vec<u8>, usize)> =
+        std::collections::HashSet::new();
+    // Same spelling from another source is the same path, not a collision.
+    let clash = |a: &[u8], a_src: usize, b: &[u8], b_src: usize| a_src == b_src || a != b;
+    for (path, mode, src) in entries {
+        let path = path.as_ref();
+        if mode == MODE_LINK || mode == MODE_GITLINK {
+            let gitlink = mode == MODE_GITLINK;
+            let key = fold_name(path);
+            if let Some((folder, _)) = folders
+                .get(&key)
+                .and_then(|all| all.iter().find(|(f, f_src)| clash(path, src, f, *f_src)))
+            {
+                report!(found(path, folder));
+            }
+            match links.get(&key) {
+                // A link next to a submodule folder of the same name.
+                Some((other, other_gitlink, other_src))
+                    if *other_gitlink != gitlink && clash(path, src, other, *other_src) =>
+                {
+                    report!(if gitlink {
+                        found(other, path)
+                    } else {
+                        found(path, other)
+                    });
+                }
+                Some(_) => {}
+                None => {
+                    links.insert(key, (path.to_vec(), gitlink, src));
+                }
+            }
+        }
+        for (at, byte) in path.iter().enumerate() {
+            if *byte != b'/' {
+                continue;
+            }
+            let prefix = &path[..at];
+            // Index entries are sorted, so most prefixes repeat; each is folded once per source.
+            if !seen_folders.insert((prefix.to_vec(), src)) {
+                continue;
+            }
+            let key = fold_name(prefix);
+            if let Some((link, _, link_src)) = links.get(&key) {
+                if clash(link, *link_src, prefix, src) {
+                    report!(found(link, prefix));
+                }
+            }
+            folders.entry(key).or_default().push((prefix.to_vec(), src));
+        }
+    }
+    out
+}
+
+/// The first case collision among `source`'s entries, optionally limited to the literal `paths`
+/// (matched ignoring case, as libgit2 matches checkout paths under `core.ignorecase`), or `None`.
+/// Pure: never touches the work tree.
+pub(crate) fn find_case_collision<P: AsRef<[u8]>>(
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<Option<CaseCollision>, git2::Error> {
+    find_case_collision_in(std::slice::from_ref(source), paths)
+}
+
+/// Every case collision among `source`'s entries (see [`find_case_collision`]).
+fn find_case_collisions<P: AsRef<[u8]>>(
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<Vec<CaseCollision>, git2::Error> {
+    let owned;
+    let index: &git2::Index = match source {
+        GuardSource::Index(index) => index,
+        GuardSource::Tree(tree) => {
+            let mut index = git2::Index::new()?;
+            index.read_tree(tree)?;
+            owned = index;
+            &owned
+        }
+    };
+    Ok(collisions_across(
+        index
+            .iter()
+            .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+            .map(|entry| (entry.path, entry.mode, 0)),
+        true,
+    ))
+}
+
+/// [`find_case_collision`] over the union of several sources an operation writes together (a
+/// stash's work-tree, index and untracked trees), so a link in one and a folder in another
+/// collide too.
+pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
+    sources: &[GuardSource],
+    paths: Option<&[P]>,
+) -> Result<Option<CaseCollision>, git2::Error> {
+    let mut entries = Vec::new();
+    for (i, source) in sources.iter().enumerate() {
+        let owned;
+        let index: &git2::Index = match source {
+            GuardSource::Index(index) => index,
+            GuardSource::Tree(tree) => {
+                let mut index = git2::Index::new()?;
+                index.read_tree(tree)?;
+                owned = index;
+                &owned
+            }
+        };
+        entries.extend(
+            index
+                .iter()
+                .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+                .map(|entry| (entry.path, entry.mode, i)),
+        );
+    }
+    Ok(first_collision_across(entries))
+}
 
 /// `rel` as git spells it: components joined with `/` on every platform.
 fn git_path(rel: &Path) -> String {
@@ -276,6 +563,26 @@ fn tracked_as_link(head_tree: Option<&git2::Tree>, rel: &Path) -> bool {
         .is_some_and(|entry| entry.filemode() as u32 == MODE_LINK)
 }
 
+/// Refuses `source` (optionally limited to `paths`) when it holds a case collision and case
+/// matters for `repo` ([`folds_case`]).
+pub(crate) fn refuse_case_collision<E, P>(
+    repo: &git2::Repository,
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CaseCollision>,
+    P: AsRef<[u8]>,
+{
+    if !folds_case(repo) {
+        return Ok(());
+    }
+    match find_case_collision(source, paths)? {
+        Some(collision) => Err(collision.into()),
+        None => Ok(()),
+    }
+}
+
 /// Clears every hazard of a forced checkout in `repo`'s worktree, optionally limited to the
 /// literal `paths`: those of the checkout's `target` and those of the current HEAD tree and
 /// index. The latter matter because a forced checkout also *deletes* what the baseline tracks
@@ -289,12 +596,28 @@ pub(crate) fn prepare_forced_checkout<E, P>(
     paths: Option<&[P]>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error>,
+    E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
+    // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
+    // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
+    // Every collision of the target must already be in HEAD, not just the first one found.
+    if let (Some(target), true) = (target, folds_case(repo)) {
+        let brought = find_case_collisions(target, paths)?;
+        if !brought.is_empty() {
+            let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
+            let in_head = match &head {
+                Some(tree) => find_case_collisions(&GuardSource::Tree(tree), paths)?,
+                None => Vec::new(),
+            };
+            if let Some(collision) = brought.into_iter().find(|c| !in_head.contains(c)) {
+                return Err(collision.into());
+            }
+        }
+    }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
     // filter here, or `TC` would scan nothing for a tracked `tc`.
     let ignore_case = repo
@@ -350,7 +673,7 @@ pub(crate) fn refuse_linked_folders<E>(
     incoming: &[Incoming],
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<LinkedFolder>,
+    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
@@ -388,26 +711,26 @@ where
             break;
         }
     }
-    match found {
-        Some(dir) => Err(LinkedFolder(git_path(&dir)).into()),
-        None => Ok(()),
+    if let Some(dir) = found {
+        return Err(LinkedFolder(git_path(&dir)).into());
     }
-}
-
-/// Removes the symlink (or Windows junction) `full` itself.
-fn remove_link(full: &Path) -> io::Result<()> {
-    match std::fs::remove_file(full) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        // A Windows directory symlink or junction is removed with `RemoveDirectoryW`, which
-        // removes the link and not the directory it points to.
-        #[cfg(windows)]
-        Err(_) if is_link(full) => match std::fs::remove_dir(full) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
-        },
-        Err(error) => Err(error),
+    // Then case collisions (#156), after the more specific link on disk. Only what the operation
+    // brings in: a HEAD that already holds a collision doesn't lock the repository, but nothing
+    // brings one in (again).
+    if folds_case(repo) {
+        let sources: Vec<GuardSource> = incoming
+            .iter()
+            .map(|source| match source {
+                Incoming::Checkout(tree) => GuardSource::Tree(tree),
+                Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
+                Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
+            })
+            .collect();
+        if let Some(collision) = find_case_collision_in(&sources, ALL)? {
+            return Err(collision.into());
+        }
     }
+    Ok(())
 }
 
 /// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
@@ -441,65 +764,82 @@ pub(crate) fn refuse_linked_path(workdir: &Path, rel: &Path) -> Result<(), Linke
     Ok(())
 }
 
-/// Removes the first symlink among the strict ancestors of `rel` (the link only), so a write to
-/// `rel` lands in a real directory inside the repository.
-pub(crate) fn clear_symlinked_ancestors(workdir: &Path, rel: &str) -> io::Result<()> {
-    let rel = Path::new(rel);
-    if !plain_relative(rel) {
+/// Removes the file or link `rel` without following a link at the leaf or above it. Returns
+/// `Ok(false)` and does nothing when an ancestor is a symlink, `rel` is a directory, or `rel` is
+/// not a plain relative path. A missing `rel` counts as removed.
+pub(crate) fn remove_beneath(workdir: &Path, rel: &str) -> io::Result<bool> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(false);
+    }
+    beneath::remove(workdir, Path::new(rel), &mut no_step)
+}
+
+/// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
+/// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
+/// not a plain relative path. An existing file keeps its mode; a FIFO or device is an error,
+/// never written.
+pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Result<bool> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(false);
+    }
+    beneath::write(workdir, Path::new(rel), bytes, &mut no_step)
+}
+
+/// A work-tree file or link as [`read_beneath`] found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Leaf {
+    File {
+        bytes: Vec<u8>,
+        executable: bool,
+    },
+    /// The link's target (`/`-separated on Windows).
+    Link(Vec<u8>),
+}
+
+/// What [`replace_beneath`] writes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Content<'a> {
+    File {
+        bytes: &'a [u8],
+        /// Windows files have no exec bit.
+        #[cfg_attr(windows, allow(dead_code))]
+        executable: bool,
+    },
+    /// A symbolic link to the target (written as a plain file holding it where links aren't
+    /// created, i.e. Windows).
+    Link(&'a [u8]),
+}
+
+/// Reads the file or link `rel` without following a link at any component, and without blocking
+/// on a FIFO. `None` when it is missing, a folder, not a regular file or link, or beyond a link
+/// (git sees no file there).
+pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(None);
+    }
+    beneath::read(workdir, Path::new(rel), &mut no_step)
+}
+
+/// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
+/// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
+pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<()> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(());
+    }
+    beneath::remove_and_prune(workdir, Path::new(rel), &mut no_step)
+}
+
+/// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that
+/// replaced a folder on the way is removed first and the folder recreated (never written
+/// through); missing folders are created.
+pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -> io::Result<()> {
+    if !plain_relative(Path::new(rel)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "path must be relative to the repository",
         ));
     }
-    let mut current = workdir.to_path_buf();
-    let components: Vec<_> = rel.components().collect();
-    for component in &components[..components.len() - 1] {
-        current.push(component);
-        match entry_kind(&current) {
-            Entry::Dir => {}
-            Entry::Link => return remove_link(&current),
-            Entry::Other => return Ok(()),
-        }
-    }
-    Ok(())
-}
-
-/// Removes the file or link `rel` without following a link at the leaf or above it. Returns
-/// `Ok(false)` and does nothing when an ancestor is a symlink, `rel` is a directory, or `rel` is
-/// not a plain relative path. A missing `rel` counts as removed.
-pub(crate) fn remove_beneath(workdir: &Path, rel: &str) -> io::Result<bool> {
-    if !plain_relative(Path::new(rel)) || has_symlinked_ancestor(workdir, rel) {
-        return Ok(false);
-    }
-    let full = workdir.join(rel);
-    match std::fs::symlink_metadata(&full) {
-        Ok(meta) if meta.is_dir() => Ok(false),
-        Ok(meta) if meta.file_type().is_symlink() => remove_link(&full).map(|()| true),
-        Ok(_) => match std::fs::remove_file(&full) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(true),
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(error),
-    }
-}
-
-/// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
-/// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
-/// not a plain relative path.
-pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Result<bool> {
-    if !plain_relative(Path::new(rel)) || has_symlinked_ancestor(workdir, rel) {
-        return Ok(false);
-    }
-    let full = workdir.join(rel);
-    if is_link(&full) {
-        remove_link(&full)?;
-    }
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&full, bytes)?;
-    Ok(true)
+    beneath::replace(workdir, Path::new(rel), content, &mut no_step)
 }
 
 /// Opens the regular file `rel` below `workdir` for reading without following a symlink at any
@@ -510,146 +850,15 @@ pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Resu
 /// Each step opens relative to the directory handle of the previous step (`openat` with
 /// `O_NOFOLLOW`), so a directory swapped for a symlink at any depth, at any moment, cannot
 /// redirect the read. `workdir` itself may be reached through a symlink (the user chose it).
-#[cfg(unix)]
+///
+/// Windows holds each folder on the way without `FILE_SHARE_DELETE` and opens every component
+/// as itself, so a junction or symbolic link anywhere (to a network share included) is refused
+/// without being contacted; an online-only OneDrive file is reopened so it loads (#150).
 pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std::fs::File>> {
-    use std::ffi::CString;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-    use std::os::unix::ffi::OsStrExt;
-
     if !plain_relative(rel) {
         return Ok(None);
     }
-    let gone = |e: &io::Error| {
-        matches!(
-            e.raw_os_error(),
-            Some(libc::ELOOP | libc::ENOTDIR | libc::ENOENT)
-        )
-    };
-    let open_at =
-        |dir: libc::c_int, name: &std::ffi::OsStr, flags: libc::c_int| -> io::Result<OwnedFd> {
-            let name = CString::new(name.as_bytes())
-                .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-            // SAFETY: `dir` is an open directory descriptor owned by the caller for the duration
-            // of the call and `name` is a NUL-terminated string that outlives it.
-            let fd = unsafe { libc::openat(dir, name.as_ptr(), flags | libc::O_CLOEXEC) };
-            if fd < 0 {
-                Err(io::Error::last_os_error())
-            } else {
-                // SAFETY: `openat` just returned this descriptor; nothing else owns it.
-                Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-            }
-        };
-
-    let root = {
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY)
-            .open(workdir)?
-    };
-    let mut dir: OwnedFd = root.into();
-    let parts: Vec<&std::ffi::OsStr> = rel.components().map(|c| c.as_os_str()).collect();
-    let Some((last, parents)) = parts.split_last() else {
-        return Ok(None);
-    };
-    for part in parents {
-        match open_at(
-            dir.as_raw_fd(),
-            part,
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        ) {
-            Ok(next) => dir = next,
-            Err(e) if gone(&e) => return Ok(None),
-            Err(e) => return Err(e),
-        }
-    }
-    let file = match open_at(
-        dir.as_raw_fd(),
-        last,
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK,
-    ) {
-        Ok(fd) => std::fs::File::from(fd),
-        Err(e) if gone(&e) => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    Ok(file.metadata()?.is_file().then_some(file))
-}
-
-/// Windows: opens `rel` without following a final reparse point, then checks the path the
-/// *opened handle* resolves to: a junction or directory symlink anywhere on the way that leads
-/// out of the repository is detected on the handle itself, so a swap before the open is caught
-/// and a swap after it cannot change what was opened.
-#[cfg(windows)]
-pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std::fs::File>> {
-    use std::os::windows::fs::OpenOptionsExt;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    const ERROR_INVALID_NAME: i32 = 123;
-    const ERROR_DIRECTORY: i32 = 267;
-
-    if !plain_relative(rel) {
-        return Ok(None);
-    }
-    let root = std::fs::canonicalize(workdir)?;
-    // No FILE_FLAG_BACKUP_SEMANTICS: only files can be opened, a directory fails (access denied).
-    let file = match std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(workdir.join(rel))
-    {
-        Ok(file) => file,
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-            ) || matches!(e.raw_os_error(), Some(ERROR_INVALID_NAME | ERROR_DIRECTORY)) =>
-        {
-            return Ok(None)
-        }
-        Err(e) => return Err(e),
-    };
-    let meta = file.metadata()?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Ok(None);
-    }
-    let resolved = final_path(&file)?;
-    Ok(resolved.starts_with(&root).then_some(file))
-}
-
-/// The normalized `\\?\` DOS path of an open handle (`GetFinalPathNameByHandleW`), the same
-/// resolver `std::fs::canonicalize` uses.
-#[cfg(windows)]
-fn final_path(file: &std::fs::File) -> io::Result<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use std::os::windows::io::AsRawHandle;
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetFinalPathNameByHandleW(
-            file: *mut core::ffi::c_void,
-            path: *mut u16,
-            len: u32,
-            flags: u32,
-        ) -> u32;
-    }
-
-    let mut buf = vec![0u16; 512];
-    loop {
-        let capacity = u32::try_from(buf.len()).unwrap_or(u32::MAX);
-        // SAFETY: the handle belongs to `file`, which outlives the call; `buf` has `capacity`
-        // writable u16 slots. Flags 0 = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS.
-        let len = unsafe {
-            GetFinalPathNameByHandleW(file.as_raw_handle(), buf.as_mut_ptr(), capacity, 0)
-        } as usize;
-        if len == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if len < buf.len() {
-            buf.truncate(len);
-            return Ok(PathBuf::from(std::ffi::OsString::from_wide(&buf)));
-        }
-        // Too small: `len` is the size needed, including the terminating NUL.
-        buf.resize(len, 0);
-    }
+    beneath::open_file(workdir, rel, &mut no_step)
 }
 
 #[cfg(test)]
@@ -884,7 +1093,7 @@ mod tests {
         assert!(has_symlinked_ancestor(dir.path(), "../x"));
         assert!(has_symlinked_ancestor(dir.path(), "/etc/passwd"));
         assert!(!has_symlinked_ancestor(dir.path(), "d/f"));
-        assert!(clear_symlinked_ancestors(dir.path(), "../x").is_err());
+        assert!(replace_beneath(dir.path(), "../x", Content::Link(b"x")).is_err());
     }
 
     #[test]
@@ -908,6 +1117,224 @@ mod tests {
         assert!(remove_beneath(dir.path(), "missing.txt").unwrap());
         assert!(!remove_beneath(dir.path(), "d").unwrap());
         assert!(dir.path().join("d/f").exists());
+    }
+
+    /// A tree from `(path, mode, content)` entries, built without touching the work tree.
+    fn tree_of<'r>(repo: &'r Repository, entries: &[(&str, i32, &str)]) -> git2::Tree<'r> {
+        let mut index = git2::Index::new().unwrap();
+        for (path, mode, content) in entries {
+            let id = if *mode == MODE_GITLINK as i32 {
+                repo.head().unwrap().target().unwrap()
+            } else {
+                repo.blob(content.as_bytes()).unwrap()
+            };
+            index
+                .add(&crate::undo::index_entry(path, id, *mode as u32))
+                .unwrap();
+        }
+        let id = index.write_tree_to(repo).unwrap();
+        repo.find_tree(id).unwrap()
+    }
+
+    const LINK: i32 = MODE_LINK as i32;
+    const FILE: i32 = 0o100644;
+
+    fn collision(link: &str, folder: &str) -> Option<CaseCollision> {
+        Some(CaseCollision {
+            link: link.into(),
+            folder: folder.into(),
+        })
+    }
+
+    #[test]
+    fn a_link_and_a_folder_differing_in_case_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("D", "d"));
+    }
+
+    #[test]
+    fn the_reverse_order_collides() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D/x", FILE, "x"), ("d", LINK, "/x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("d", "D"));
+    }
+
+    #[test]
+    fn a_nested_link_collides_with_a_folder_of_another_case() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("A/b/c", FILE, "c"), ("a/B", LINK, "/x")]);
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("a/B", "A/b"));
+    }
+
+    #[test]
+    fn a_gitlink_counts_as_a_link() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(
+            &repo,
+            &[("Sub", MODE_GITLINK as i32, ""), ("sub/x", FILE, "x")],
+        );
+        let found = find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap();
+        assert_eq!(found, collision("Sub", "sub"));
+    }
+
+    #[test]
+    fn the_same_name_as_link_and_folder_collides() {
+        // `TreeBuilder` and `Index::add` both refuse such a pair, so only a crafted tree object
+        // holds one; check the pure core directly.
+        let found = first_collision([(&b"d"[..], MODE_LINK), (&b"d/x"[..], 0o100644)]);
+        assert_eq!(found, collision("d", "d"));
+    }
+
+    #[test]
+    fn unicode_case_and_hfs_ignorables_fold() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("Ä", LINK, "/x"), ("ä/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            collision("Ä", "ä")
+        );
+        let tree = tree_of(&repo, &[("d\u{200c}", LINK, "/x"), ("d/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            collision("d\u{200c}", "d")
+        );
+        assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "strasse".as_bytes());
+        assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[test]
+    fn case_folding_follows_the_file_systems_not_just_lowercase() {
+        for (link, folder) in [("s", "ſ"), ("σ", "ς"), ("µ", "μ"), ("i", "ı")] {
+            let found = first_collision([
+                (link.as_bytes().to_vec(), MODE_LINK),
+                (format!("{folder}/x").into_bytes(), 0o100644),
+            ]);
+            assert_eq!(found, collision(link, folder), "{link} / {folder}");
+        }
+    }
+
+    #[test]
+    fn a_link_and_a_gitlink_of_the_same_folded_name_collide() {
+        let found = first_collision([(&b"A"[..], MODE_GITLINK), (&b"a"[..], MODE_LINK)]);
+        assert_eq!(found, collision("a", "A"));
+        let two_links = first_collision([(&b"A"[..], MODE_LINK), (&b"a"[..], MODE_LINK)]);
+        assert_eq!(two_links, None);
+    }
+
+    #[test]
+    fn every_collision_is_listed_once() {
+        let entries = [
+            (&b"D"[..], MODE_LINK, 0),
+            (&b"Z"[..], MODE_LINK, 0),
+            (&b"d/x"[..], 0o100644, 0),
+            (&b"d/y"[..], 0o100644, 0),
+            (&b"z/x"[..], 0o100644, 0),
+        ];
+        assert_eq!(
+            collisions_across(entries, true),
+            [collision("D", "d").unwrap(), collision("Z", "z").unwrap()]
+        );
+        assert_eq!(collisions_across(entries, false).len(), 1);
+    }
+
+    #[test]
+    fn sources_are_checked_together() {
+        let (_dir, repo) = repo();
+        let links = tree_of(&repo, &[("D", LINK, "/x")]);
+        let folders = tree_of(&repo, &[("d/x", FILE, "x")]);
+        let sources = [GuardSource::Tree(&links), GuardSource::Tree(&folders)];
+        assert_eq!(
+            find_case_collision_in(&sources, ALL).unwrap(),
+            collision("D", "d")
+        );
+        // The same name as a link in one source and a folder in another is one path changing
+        // kind (a stash of a folder that replaced a link), not a collision.
+        let same = tree_of(&repo, &[("d", LINK, "/x")]);
+        let sources = [GuardSource::Tree(&same), GuardSource::Tree(&folders)];
+        assert_eq!(find_case_collision_in(&sources, ALL).unwrap(), None);
+    }
+
+    #[test]
+    fn a_file_and_a_folder_differing_in_case_do_not_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", FILE, "x"), ("d/x", FILE, "x")]);
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn distinct_names_do_not_collide() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(
+            &repo,
+            &[
+                ("D", LINK, "/x"),
+                ("e/x", FILE, "x"),
+                ("Dd/x", FILE, "x"),
+                ("dx", FILE, "x"),
+            ],
+        );
+        assert_eq!(
+            find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn paths_limit_the_check() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let source = GuardSource::Tree(&tree);
+        // Paths match ignoring case, as libgit2's checkout under `core.ignorecase` does: `d`
+        // selects the link `D` too.
+        assert_eq!(find_case_collision(&source, Some(&["d/x"])).unwrap(), None);
+        assert_eq!(find_case_collision(&source, Some(&["e"])).unwrap(), None);
+        assert_eq!(
+            find_case_collision(&source, Some(&["d"])).unwrap(),
+            collision("D", "d")
+        );
+        assert_eq!(
+            find_case_collision(&source, Some(&["D", "d/x"])).unwrap(),
+            collision("D", "d")
+        );
+    }
+
+    #[test]
+    fn an_index_source_is_checked_like_a_tree() {
+        let (_dir, repo) = repo();
+        let tree = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let mut index = git2::Index::new().unwrap();
+        index.read_tree(&tree).unwrap();
+        assert_eq!(
+            find_case_collision(&GuardSource::Index(&index), ALL).unwrap(),
+            collision("D", "d")
+        );
+    }
+
+    #[test]
+    fn folds_case_reads_core_ignorecase() {
+        let (_dir, repo) = repo();
+        let mut config = repo.config().unwrap();
+        config.set_bool("core.ignorecase", false).unwrap();
+        assert_eq!(folds_case(&repo), cfg!(any(target_os = "macos", windows)));
+        config.set_bool("core.ignorecase", true).unwrap();
+        assert!(folds_case(&repo));
+    }
+
+    #[test]
+    fn case_collision_message_is_exact() {
+        assert_eq!(
+            collision("D", "d").unwrap().to_string(),
+            "'D' is a symbolic link and 'd' a folder whose names differ only in case. On this \
+             file system they are the same name, so Browsitory won't check them out. Rename one \
+             of them in the repository."
+        );
     }
 
     fn read_all(file: std::fs::File) -> String {
@@ -989,6 +1416,172 @@ mod tests {
         assert!(open_beneath(dir.path(), Path::new("pipe"))
             .unwrap()
             .is_none());
+    }
+
+    /// A junction `link` -> `target` (no privilege needed).
+    #[cfg(windows)]
+    fn junction(link: &Path, target: &Path) {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "mklink /J failed");
+    }
+
+    #[cfg(windows)]
+    fn outside_dir() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "f", "OUTSIDE\n");
+        dir
+    }
+
+    #[cfg(windows)]
+    fn assert_outside_dir_untouched(out: &Path) {
+        let names: Vec<_> = std::fs::read_dir(out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["f"]);
+        assert_eq!(std::fs::read_to_string(out.join("f")).unwrap(), "OUTSIDE\n");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_junction_to_an_inside_folder() {
+        let (dir, _repo) = repo();
+        junction(&dir.path().join("j"), &dir.path().join("d"));
+        assert!(open_beneath(dir.path(), Path::new("j/f"))
+            .unwrap()
+            .is_none());
+        assert!(open_beneath(dir.path(), Path::new("d/f"))
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_junction_to_an_outside_folder() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        write(dir.path(), "x/y/z", "z");
+        // `mklink` takes backslashes only.
+        junction(&dir.path().join("x").join("y").join("l"), out.path());
+        assert!(open_beneath(dir.path(), Path::new("j/f"))
+            .unwrap()
+            .is_none());
+        assert!(open_beneath(dir.path(), Path::new("x/y/l/f"))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            read_all(
+                open_beneath(dir.path(), Path::new("x/y/z"))
+                    .unwrap()
+                    .unwrap()
+            ),
+            "z"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn open_beneath_refuses_a_file_symlink_leaf() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        if let Err(error) =
+            std::os::windows::fs::symlink_file(out.path().join("f"), dir.path().join("l"))
+        {
+            eprintln!("SKIP no symlink privilege: {error}");
+            return;
+        }
+        assert!(open_beneath(dir.path(), Path::new("l")).unwrap().is_none());
+        assert_eq!(
+            read_beneath(dir.path(), "l")
+                .unwrap()
+                .map(|leaf| matches!(leaf, Leaf::Link(_))),
+            Some(true)
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn write_beneath_refuses_a_junction_ancestor() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert!(!write_beneath(dir.path(), "j/f", b"PWNED").unwrap());
+        assert!(!write_beneath(dir.path(), "j/new", b"PWNED").unwrap());
+        assert!(write_beneath(dir.path(), "d/f", b"new").unwrap());
+        assert_eq!(std::fs::read(dir.path().join("d/f")).unwrap(), b"new");
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn remove_beneath_refuses_a_junction_ancestor() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert!(!remove_beneath(dir.path(), "j/f").unwrap());
+        assert_outside_dir_untouched(out.path());
+        // The junction itself is a link leaf: removed, never its target.
+        assert!(remove_beneath(dir.path(), "j").unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("j")).is_err());
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn clear_hazards_removes_the_junction_not_its_target() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+        junction(&dir.path().join("d"), out.path());
+        clear_hazards(dir.path(), &[Hazard::Ancestor("d".into())]).unwrap();
+        assert!(std::fs::symlink_metadata(dir.path().join("d")).is_err());
+        assert_outside_dir_untouched(out.path());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn replace_beneath_clears_a_junction_on_the_way() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+        junction(&dir.path().join("d"), out.path());
+        replace_beneath(
+            dir.path(),
+            "d/f",
+            Content::File {
+                bytes: b"inside",
+                executable: false,
+            },
+        )
+        .unwrap();
+        let meta = std::fs::symlink_metadata(dir.path().join("d")).unwrap();
+        assert!(meta.is_dir() && !meta.file_type().is_symlink());
+        assert_eq!(std::fs::read(dir.path().join("d/f")).unwrap(), b"inside");
+        assert_outside_dir_untouched(out.path());
+        // Pruning stops at the work tree.
+        remove_and_prune_beneath(dir.path(), "d/f").unwrap();
+        assert!(!dir.path().join("d").exists());
+        assert!(dir.path().join("a.txt").exists());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn read_beneath_does_not_read_through_a_junction() {
+        let (dir, _repo) = repo();
+        let out = outside_dir();
+        junction(&dir.path().join("j"), out.path());
+        assert_eq!(read_beneath(dir.path(), "j/f").unwrap(), None);
+        assert!(matches!(
+            read_beneath(dir.path(), "d/f").unwrap(),
+            Some(Leaf::File { .. })
+        ));
     }
 
     /// Stress test for #138: a thread swaps `rd` between a real directory and a symlink to an

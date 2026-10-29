@@ -335,16 +335,36 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - "Stash all" cannot clear links in between libgit2's record and reset, so with a hazard it goes
   through the path-limited stash (batch 4c) with every changed path: a file link is stashed and
   then replaced, a folder link is refused (`BeyondSymlink`).
-- Browsitory's own raw writes use `write_beneath` / `remove_beneath` (conflict resolution, abort
-  merge's removal of added files); undo/redo's raw writes clear a symlinked folder on the way
-  first, never delete below one, and its snapshots and checks never read below one
-  (`read_worktree_file`).
-- Work-tree reads for the image preview use `open_beneath`: on unix an `openat` walk with
-  `O_NOFOLLOW` on every component (and `O_NONBLOCK`), so a folder swapped for a link at any
-  moment cannot redirect the read (#138); on Windows an open that does not follow a final reparse
-  point, then `GetFinalPathNameByHandleW` on the opened handle must lie under the canonical work
-  tree (a junction on the way is caught on the handle itself). Hand-declared `kernel32` import,
-  no new dependency.
+- All of Browsitory's own raw work-tree I/O goes through `worktree_guard` (#149):
+  `write_beneath` / `remove_beneath` (conflict resolution, abort merge's removal of added
+  files, discarding an untracked file), `read_beneath` + `write_beneath` for **Ignore**'s
+  `.gitignore` append, `clear_hazards`, `open_beneath` (image preview), and for undo/redo and the
+  path-limited stash `read_beneath` (snapshots and checks; never below a symlinked folder, never
+  a FIFO), `replace_beneath` (restore writes; a symlinked folder on the way is removed and
+  recreated, never written through) and `remove_and_prune_beneath` (deletions and the folders
+  they empty). `undo.rs` keeps only its mode logic.
+- Those functions walk the path one component at a time and hold every folder on the way, so a
+  folder swapped for a link at any moment can't redirect them. Unix
+  (`worktree_guard/beneath_unix.rs`): `openat` with `O_NOFOLLOW | O_DIRECTORY` from the previous
+  folder's descriptor, and the leaf acted on through its parent's descriptor (`unlinkat`,
+  `openat(O_NOFOLLOW | O_NONBLOCK)` + `fstat`, `symlinkat`, `readlinkat`, `fchmod`). A write
+  never truncates a FIFO or device; an existing file keeps its mode. Windows
+  (`worktree_guard/beneath_windows.rs`): each component is opened by full path *as itself*
+  (`FILE_FLAG_OPEN_REPARSE_POINT`) and held without `FILE_SHARE_DELETE`, which pins it against
+  rename and delete until the act is done; the handle's attributes and reparse tag
+  (`GetFileInformationByHandleEx`) decide. A name surrogate (symbolic link, junction, WSL link)
+  is refused, or removed itself where the caller clears links, and never contacted (a junction
+  to a UNC share included). Another reparse point (OneDrive/Cloud Files placeholder) is walked
+  through as a folder, or as a file read and written through a second, normal handle (so the
+  file system filter sees it) accepted only with the same file ID. Because an *empty* held
+  folder can still be turned into a junction in place, and the flag only guards a path's last
+  component, every component and leaf opened by path must sit in the held parent
+  (`GetFinalPathNameByHandleW` of both); leaves are deleted through their own handle
+  (`FileDispositionInfo`), new files are created with `create_new` and deleted again through
+  their handle if misplaced. Residual: creating a missing folder (`CreateDirectoryW`) goes by
+  path, so in that instant an empty folder could appear in a junction's target (nothing is
+  written into it). Hand-declared `kernel32` imports, no new dependency. A `Step` seam in both
+  walkers makes the races deterministic in tests.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
@@ -373,12 +393,35 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   "Stage all", which stages each unstaged path in status order (`d` before `d/f`), stages the
   typechange.
 - The forced-checkout path filter follows `core.ignorecase` like libgit2's pathspecs.
-- Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or
-  the refusal check) and libgit2's write; libgit2 has no `openat`-style checkout. Likewise
-  `write_beneath`, undo's raw reads/writes and `clear_hazards` check then act by path. The same
-  threat class as #138 (a local writer racing the app). On Windows `open_beneath` follows
-  intermediate reparse points during the open (a link to an inside folder is allowed; a link to
-  a UNC share is contacted before the refusal); only the final path is checked.
+- Case-insensitive file systems (#156): a tree holding a link (or submodule) `D` and a folder
+  `d/…` names one file twice on APFS/NTFS. libgit2 1.9 writes links after all other files in a
+  checkout and, under `core.ignorecase`, removes what is in the way, so it silently drops `d/x`
+  rather than write through `D` (spec `2026-10-28-security-followups-design.md` §1.1–1.3 has the
+  macOS/Windows probe). `worktree_guard::find_case_collision` refuses such a source anyway: a
+  pure pass over the index entries that folds names (each character upper- then lowercased,
+  without the HFS+ ignorable code points; NFC/NFD is not folded) and compares folded
+  link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
+  and exact duplicates, over all of an operation's incoming sources together; a file next to a
+  folder is fine. A forced checkout whose target holds a collision HEAD already holds (abort,
+  `reset --hard`, discard) is allowed, so such a repository can be cleaned up. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows builds).
+  `refuse_linked_folders` checks each incoming source after its link scan (so a repository
+  whose HEAD already holds a collision isn't locked), `prepare_forced_checkout` its target
+  (path-limited), undo its target work tree before its raw writes, `worktree::create_worktree`
+  the branch's tree before anything is created, clone the fresh HEAD tree (cloned with no
+  checkout, then checked, then checked out forced with the same progress and cancel; a
+  collision fails the clone and cleans up), and submodule update the target commit's tree (an
+  initialized submodule before libgit2 updates it; a fresh one cloned without checkout, then
+  checked, then checked out). `tests/case_insensitive_links.rs` re-runs every operation on a
+  case-insensitive file system in CI (self-skipping elsewhere) and asserts nothing outside the
+  repository changes; its raw libgit2 rows are a canary for a libgit2 upgrade.
+- Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or a
+  refusal check: `scan`, `refuse_linked_folders`, `has_symlinked_ancestor` in stage/stash,
+  `refuse_linked_path`) and libgit2's own write; libgit2 has no `openat`-style checkout. The
+  same threat class as #138 (a local writer racing the app). Browsitory's own raw reads, writes
+  and deletes in the work tree all go through the walker (above); what is left outside it is
+  stat-only checks (the refusal checks listed here, undo's `symlink_metadata` / `read_dir`
+  checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
+  `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
   is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
   the outside name sees the new content). A hardlink is indistinguishable from a regular file by

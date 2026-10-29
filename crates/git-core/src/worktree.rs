@@ -17,6 +17,8 @@ pub enum WorktreeError {
     Locked,
     #[error("git operation failed")]
     Git,
+    #[error(transparent)]
+    CaseCollision(#[from] crate::CaseCollision),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -85,14 +87,28 @@ pub fn create_worktree(
         Err(_) => return Err(WorktreeError::Git),
     }
 
-    let reference = match repo.find_branch(branch, BranchType::Local) {
-        Ok(branch) => branch.into_reference(),
+    let (existing, commit) = match repo.find_branch(branch, BranchType::Local) {
+        Ok(branch) => {
+            let commit = branch.get().peel_to_commit()?;
+            (Some(branch), commit)
+        }
         Err(error) if error.code() == ErrorCode::NotFound => {
             let start_point = start_point.ok_or(WorktreeError::StartPointRequired)?;
-            let commit = repo.revparse_single(start_point)?.peel_to_commit()?;
-            repo.branch(branch, &commit, false)?.into_reference()
+            (None, repo.revparse_single(start_point)?.peel_to_commit()?)
         }
         Err(error) => return Err(error.into()),
+    };
+    // git2 has no checkout options for worktree add, so the tree is checked up front (#156),
+    // before anything (a new branch included) is created.
+    let tree = commit.tree()?;
+    crate::worktree_guard::refuse_case_collision::<WorktreeError, &str>(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(&tree),
+        None,
+    )?;
+    let reference = match existing {
+        Some(branch) => branch.into_reference(),
+        None => repo.branch(branch, &commit, false)?.into_reference(),
     };
     let mut options = git2::WorktreeAddOptions::new();
     options.reference(Some(&reference));

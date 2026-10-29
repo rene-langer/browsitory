@@ -441,6 +441,13 @@ the link: "'d' is a symbolic link where the repository has a folder. Remove or r
 Staging or discarding a file below such a link refuses too ("'d/f' is beyond a symbolic link."),
 like git; **Stage all** stages the link itself in place of the folder.
 
+On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
+and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:
+switching to it, merging, pulling, cherry-picking, rebasing, applying a stash, resetting,
+undo/redo, cloning, adding a worktree or updating a submodule refuses ("'D' is a symbolic link
+and 'd' a folder whose names differ only in case…"). Rename one of them in the repository (on
+Linux, or with git). On Linux this only applies when `core.ignorecase` is set.
+
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
 or from the panel you can **Apply** it (keep the stash), **Pop** it (apply, then drop it) or
@@ -625,9 +632,10 @@ Examples: `code --goto {file}:{line}`, `subl {file}:{line}`, or on Windows
 Without an editor setting, the file opens with your system's default app. Files the system
 might run instead of open are refused on every platform (a Windows installer can still run on
 Linux or macOS through Wine): programs and installers (`.exe`, `.msi`, …), scripts (`.sh`,
-`.py`, `.bat`, `.ps1`, …), shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), files with
-the execute bit on macOS and Linux, and files whose contents start like a script, program,
-installer or desktop launcher. Set an editor to open those.
+`.py`, `.bat`, `.ps1`, …), shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), disk images
+that mount when opened (`.iso`, `.vhd`, `.dmg`, …), also when the name ends in a dot or space
+(`setup.exe.`), files with the execute bit on macOS and Linux, and files whose contents start like
+a script, program, installer or desktop launcher. Set an editor to open those.
 
 Don't wrap an editor or terminal command in `sh -c '…'` or `cmd /c …`: Browsitory deliberately
 passes the file path as one plain argument, and a shell would read shell syntax in file names

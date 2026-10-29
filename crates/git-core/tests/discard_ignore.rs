@@ -359,3 +359,114 @@ fn discard_file_still_refuses_a_path_beyond_a_symlinked_directory() {
     ));
     common::assert_outside_untouched(out.path());
 }
+
+/// Runs `f` on another thread and fails (instead of hanging) after 5 s.
+#[cfg(unix)]
+fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(5))
+        .expect("blocked")
+}
+
+/// #149: `.gitignore` is read and written through the work tree walker, which never opens a
+/// FIFO in blocking mode or writes into one.
+#[cfg(unix)]
+#[test]
+fn ignore_path_does_not_block_on_a_fifo_gitignore() {
+    let (dir, _repo) = common::init_repo();
+    let fifo = std::ffi::CString::new(dir.path().join(".gitignore").to_str().unwrap()).unwrap();
+    // SAFETY: `fifo` is a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    let path = dir.path().to_path_buf();
+    let result = within_5s(move || {
+        let repo = git2::Repository::open(path).unwrap();
+        ignore_path(&repo, "*.log").map_err(|e| e.to_string())
+    });
+    assert!(result.is_err(), "{result:?}");
+}
+
+/// Stress test for #149: a thread swaps `rd` between a real folder and a link to an outside
+/// folder while `discard_file` deletes the untracked `rd/f`. Run manually:
+/// `cargo test -p git-core --test discard_ignore swap_race -- --ignored --nocapture`.
+#[cfg(unix)]
+#[test]
+#[ignore = "stress: run manually"]
+fn discard_swap_race_never_deletes_outside() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "base");
+    let outside = tempfile::TempDir::new().unwrap();
+    let rd = dir.path().join("rd");
+    let real = dir.path().join("rd-real");
+    std::fs::create_dir(&real).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let swapper = {
+        let (stop, rd, real, out) = (
+            stop.clone(),
+            rd.clone(),
+            real.clone(),
+            outside.path().to_path_buf(),
+        );
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = std::fs::rename(&real, &rd);
+                let _ = std::fs::rename(&rd, &real);
+                let _ = std::os::unix::fs::symlink(&out, &rd);
+                let _ = std::fs::remove_file(&rd);
+            }
+        })
+    };
+    let mut leaks = 0;
+    for _ in 0..20_000 {
+        std::fs::write(outside.path().join("f"), "OUTSIDE\n").unwrap();
+        let _ = std::fs::write(real.join("f"), "inside\n");
+        let _ = discard_file(&repo, "rd/f");
+        if !outside.path().join("f").exists() {
+            leaks += 1;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
+    eprintln!("{leaks} outside files deleted");
+    assert_eq!(leaks, 0);
+}
+
+/// Stress test for #149: a thread swaps `.gitignore` between a file and a link to an outside
+/// file while `ignore_path` appends to it. Run manually (see above).
+#[cfg(unix)]
+#[test]
+#[ignore = "stress: run manually"]
+fn ignore_swap_race_never_writes_outside() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let (dir, repo) = common::init_repo();
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("target");
+    std::fs::write(&target, "OUTSIDE\n").unwrap();
+    let gitignore = dir.path().join(".gitignore");
+    let stop = Arc::new(AtomicBool::new(false));
+    let swapper = {
+        let (stop, gitignore, target) = (stop.clone(), gitignore.clone(), target.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = std::fs::remove_file(&gitignore);
+                let _ = std::os::unix::fs::symlink(&target, &gitignore);
+                let _ = std::fs::remove_file(&gitignore);
+                let _ = std::fs::write(&gitignore, "x\n");
+            }
+        })
+    };
+    for i in 0..20_000 {
+        let _ = ignore_path(&repo, &format!("p{i}"));
+    }
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
+    let outside_text = std::fs::read_to_string(&target).unwrap();
+    eprintln!("outside target = {:?}", outside_text.lines().count());
+    assert_eq!(outside_text, "OUTSIDE\n");
+}

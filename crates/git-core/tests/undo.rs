@@ -1039,3 +1039,64 @@ fn restore_never_deletes_through_a_symlinked_directory_swapped_in_after_the_snap
     assert!(out.path().join("x.txt").exists());
     assert_outside_untouched(out.path());
 }
+
+/// A named pipe where undo expects a file must not hang it (#149): it is no file git can
+/// record, and opening it for reading would wait for a writer forever.
+#[cfg(unix)]
+#[test]
+fn undo_skips_a_fifo_that_replaced_a_file_instead_of_blocking() {
+    let (dir, repo) = seeded();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "two\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_file(dir.path().join("a.txt")).unwrap();
+    let pipe = std::ffi::CString::new(dir.path().join("a.txt").to_str().unwrap()).unwrap();
+    // SAFETY: `pipe` is a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+
+    let path = dir.path().to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let repo = Repository::open(path).unwrap();
+        let _ = tx.send(restore(&repo, &after, &before, "undo").map_err(|e| e.to_string()));
+    });
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("undo blocked on the FIFO");
+    // The FIFO is not the file the snapshot recorded.
+    assert_eq!(result, Err(UndoError::RepositoryChanged.to_string()));
+}
+
+/// Windows: an undo whose file sits below a folder that a junction replaced never writes
+/// through the junction (#149, #150).
+#[cfg(windows)]
+#[test]
+fn undo_restore_never_writes_through_a_junction() {
+    let (dir, repo) = init_repo();
+    write(&repo, "d/f", "one\n");
+    stage(&repo, "d/f");
+    commit(&repo, "initial");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "d/f", "two\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+
+    let outside = TempDir::new().unwrap();
+    fs::write(outside.path().join("f"), "OUTSIDE\n").unwrap();
+    fs::remove_dir_all(dir.path().join("d")).unwrap();
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(dir.path().join("d"))
+        .arg(outside.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    // The junction isn't the snapshot's folder: refused, or written inside after removing it.
+    let _ = restore(&repo, &after, &before, "undo");
+    assert_eq!(
+        fs::read_to_string(outside.path().join("f")).unwrap(),
+        "OUTSIDE\n"
+    );
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+}

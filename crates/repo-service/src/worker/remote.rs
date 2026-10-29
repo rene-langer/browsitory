@@ -345,6 +345,7 @@ pub(super) fn pull<S: CredentialStore>(
         | git_core::remote::RemoteError::NoUpstream
         | git_core::remote::RemoteError::CheckoutConflict
         | git_core::remote::RemoteError::LinkedFolder(_)
+        | git_core::remote::RemoteError::CaseCollision(_)
         | git_core::remote::RemoteError::DetachedHead
         // Static, secret-free text: the user asked for this by pressing Cancel.
         | git_core::remote::RemoteError::Cancelled => error.to_string(),

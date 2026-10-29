@@ -128,3 +128,50 @@ fn prunes_stale_worktree_metadata_idempotently() {
     prune_worktrees(&repo).unwrap();
     assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
 }
+
+#[test]
+fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    commit_all(&repo, "initial commit");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    // HEAD's tree plus the link `D` and the file `d/x`, built without a file-system link.
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut inner = repo.treebuilder(None).unwrap();
+    inner
+        .insert("x", repo.blob(b"x").unwrap(), 0o100644)
+        .unwrap();
+    let mut outer = repo.treebuilder(Some(&head.tree().unwrap())).unwrap();
+    outer.insert("d", inner.write().unwrap(), 0o040000).unwrap();
+    outer
+        .insert("D", repo.blob(b"/x").unwrap(), 0o120000)
+        .unwrap();
+    let tree = repo.find_tree(outer.write().unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let evil = repo
+        .commit(None, &sig, &sig, "evil", &tree, &[&head])
+        .unwrap();
+    repo.branch("evil", &repo.find_commit(evil).unwrap(), false)
+        .unwrap();
+    let linked = dir.path().join("evil-tree");
+
+    let error = create_worktree(&repo, "evil-tree", &linked, "evil", None).unwrap_err();
+    assert!(matches!(error, WorktreeError::CaseCollision(_)), "{error}");
+    assert!(!linked.exists());
+    assert!(!repo.path().join("worktrees").join("evil-tree").exists());
+
+    // A new branch at such a start point isn't created either.
+    let error = create_worktree(
+        &repo,
+        "new-tree",
+        &dir.path().join("new-tree"),
+        "new",
+        Some("evil"),
+    )
+    .unwrap_err();
+    assert!(matches!(error, WorktreeError::CaseCollision(_)));
+    assert!(repo.find_branch("new", git2::BranchType::Local).is_err());
+}
