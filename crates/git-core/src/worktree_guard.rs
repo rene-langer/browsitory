@@ -404,6 +404,26 @@ fn first_collision<P: AsRef<[u8]>>(
 fn first_collision_across<P: AsRef<[u8]>>(
     entries: impl IntoIterator<Item = (P, u32, usize)>,
 ) -> Option<CaseCollision> {
+    collisions_across(entries, false).into_iter().next()
+}
+
+/// Every collision among `entries` (or only the first, unless `all`), each reported once.
+fn collisions_across<P: AsRef<[u8]>>(
+    entries: impl IntoIterator<Item = (P, u32, usize)>,
+    all: bool,
+) -> Vec<CaseCollision> {
+    let mut out: Vec<CaseCollision> = Vec::new();
+    macro_rules! report {
+        ($collision:expr) => {{
+            let collision = $collision;
+            if !out.contains(&collision) {
+                out.push(collision);
+            }
+            if !all {
+                return out;
+            }
+        }};
+    }
     let found = |link: &[u8], folder: &[u8]| CaseCollision {
         link: String::from_utf8_lossy(link).into_owned(),
         folder: String::from_utf8_lossy(folder).into_owned(),
@@ -424,14 +444,14 @@ fn first_collision_across<P: AsRef<[u8]>>(
                 .get(&key)
                 .and_then(|all| all.iter().find(|(f, f_src)| clash(path, src, f, *f_src)))
             {
-                return Some(found(path, folder));
+                report!(found(path, folder));
             }
             match links.get(&key) {
                 // A link next to a submodule folder of the same name.
                 Some((other, other_gitlink, other_src))
                     if *other_gitlink != gitlink && clash(path, src, other, *other_src) =>
                 {
-                    return Some(if gitlink {
+                    report!(if gitlink {
                         found(other, path)
                     } else {
                         found(path, other)
@@ -455,13 +475,13 @@ fn first_collision_across<P: AsRef<[u8]>>(
             let key = fold_name(prefix);
             if let Some((link, _, link_src)) = links.get(&key) {
                 if clash(link, *link_src, prefix, src) {
-                    return Some(found(link, prefix));
+                    report!(found(link, prefix));
                 }
             }
             folders.entry(key).or_default().push((prefix.to_vec(), src));
         }
     }
-    None
+    out
 }
 
 /// The first case collision among `source`'s entries, optionally limited to the literal `paths`
@@ -472,6 +492,30 @@ pub(crate) fn find_case_collision<P: AsRef<[u8]>>(
     paths: Option<&[P]>,
 ) -> Result<Option<CaseCollision>, git2::Error> {
     find_case_collision_in(std::slice::from_ref(source), paths)
+}
+
+/// Every case collision among `source`'s entries (see [`find_case_collision`]).
+fn find_case_collisions<P: AsRef<[u8]>>(
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<Vec<CaseCollision>, git2::Error> {
+    let owned;
+    let index: &git2::Index = match source {
+        GuardSource::Index(index) => index,
+        GuardSource::Tree(tree) => {
+            let mut index = git2::Index::new()?;
+            index.read_tree(tree)?;
+            owned = index;
+            &owned
+        }
+    };
+    Ok(collisions_across(
+        index
+            .iter()
+            .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+            .map(|entry| (entry.path, entry.mode, 0)),
+        true,
+    ))
 }
 
 /// [`find_case_collision`] over the union of several sources an operation writes together (a
@@ -560,14 +604,16 @@ where
     };
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
+    // Every collision of the target must already be in HEAD, not just the first one found.
     if let (Some(target), true) = (target, folds_case(repo)) {
-        if let Some(collision) = find_case_collision(target, paths)? {
+        let brought = find_case_collisions(target, paths)?;
+        if !brought.is_empty() {
             let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
             let in_head = match &head {
-                Some(tree) => find_case_collision(&GuardSource::Tree(tree), paths)?,
-                None => None,
+                Some(tree) => find_case_collisions(&GuardSource::Tree(tree), paths)?,
+                None => Vec::new(),
             };
-            if in_head.as_ref() != Some(&collision) {
+            if let Some(collision) = brought.into_iter().find(|c| !in_head.contains(c)) {
                 return Err(collision.into());
             }
         }
@@ -1177,6 +1223,22 @@ mod tests {
         assert_eq!(found, collision("a", "A"));
         let two_links = first_collision([(&b"A"[..], MODE_LINK), (&b"a"[..], MODE_LINK)]);
         assert_eq!(two_links, None);
+    }
+
+    #[test]
+    fn every_collision_is_listed_once() {
+        let entries = [
+            (&b"D"[..], MODE_LINK, 0),
+            (&b"Z"[..], MODE_LINK, 0),
+            (&b"d/x"[..], 0o100644, 0),
+            (&b"d/y"[..], 0o100644, 0),
+            (&b"z/x"[..], 0o100644, 0),
+        ];
+        assert_eq!(
+            collisions_across(entries, true),
+            [collision("D", "d").unwrap(), collision("Z", "z").unwrap()]
+        );
+        assert_eq!(collisions_across(entries, false).len(), 1);
     }
 
     #[test]

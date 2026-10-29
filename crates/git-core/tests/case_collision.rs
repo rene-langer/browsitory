@@ -321,3 +321,40 @@ fn a_head_with_a_collision_can_still_be_reset_and_discarded() {
         "PWNED\n"
     );
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_target_adding_a_second_collision_is_refused_even_when_head_holds_one() {
+    let fx = fixture();
+    let config = || fx.repo.config().unwrap();
+    config().set_bool("core.ignorecase", false).unwrap();
+    branch::switch_branch(&fx.repo, "evil").unwrap();
+    config().set_bool("core.ignorecase", true).unwrap();
+
+    // `evil` (D + d/x) plus a second pair Z + z/x.
+    let evil_tree = fx.repo.find_commit(fx.evil).unwrap().tree().unwrap();
+    let mut inner = fx.repo.treebuilder(None).unwrap();
+    inner
+        .insert("x", fx.repo.blob(b"PWNED\n").unwrap(), 0o100644)
+        .unwrap();
+    let mut outer = fx.repo.treebuilder(Some(&evil_tree)).unwrap();
+    outer.insert("z", inner.write().unwrap(), 0o040000).unwrap();
+    outer
+        .insert("Z", fx.repo.blob(b"/x").unwrap(), 0o120000)
+        .unwrap();
+    let both = commit_tree(&fx.repo, outer.write().unwrap(), &[fx.evil], "both");
+
+    let error = reset::reset_to(&fx.repo, &both.to_string(), ResetMode::Hard).unwrap_err();
+    match error {
+        ResetError::CaseCollision(collision) => assert_eq!(
+            collision,
+            CaseCollision {
+                link: "Z".into(),
+                folder: "z".into()
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(fx.repo.head().unwrap().target(), Some(fx.evil));
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
+}
