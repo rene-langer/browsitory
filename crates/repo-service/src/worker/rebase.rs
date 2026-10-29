@@ -114,9 +114,10 @@ pub(super) fn continue_rebase(
                 .map_err(|error| error.to_string());
             if matches!(outcome, Ok(RebaseStepResult::Done)) {
                 slot.persist(repo, None, outcome)
-            } else if state == loaded {
-                // Refused before anything changed: write nothing, so a refusal in one process
-                // (Tauri vs. VSCode) never puts back a state the other has moved on from.
+            } else if state == loaded || (outcome.is_err() && lost_head(repo, &state)) {
+                // Refused before anything changed, or HEAD was moved by another writer while
+                // this one was landing a step (its commit lost HEAD's compare-and-swap): write
+                // nothing, so this copy never replaces a state the other app has moved on from.
                 outcome
             } else {
                 slot.persist(repo, Some(&state), outcome)
@@ -125,6 +126,16 @@ pub(super) fn continue_rebase(
         None => Err(NO_REBASE.to_string()),
     };
     let _ = reply.send(result);
+}
+
+/// After a failed Continue, HEAD is not where this worker's copy of the rebase expects it: every
+/// error of `rebase_continue` leaves HEAD at `expected_head`, unless something else moved it
+/// meanwhile.
+fn lost_head(repo: &git2::Repository, state: &RebaseState) -> bool {
+    repo.head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .is_none_or(|head| head.id() != state.expected_head)
 }
 
 /// Forgets the rebase only when Abort succeeded: a failed Abort (a refused checkout) must stay

@@ -5683,4 +5683,50 @@ mod tests {
         );
         assert_eq!(b.undo().unwrap(), UndoOutcome::Nothing);
     }
+
+    /// Another writer (the other app) moves HEAD while this worker is landing a step, so the
+    /// step's commit loses HEAD's compare-and-swap. This worker's copy is then stale and must not
+    /// be saved over the stored rebase. The race is provoked with a fake signing program that
+    /// moves HEAD on its second call (the second step's commit).
+    #[test]
+    #[cfg(unix)]
+    fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, tip) = paused_for_edit(dir.path(), &repo);
+        let tools = TempDir::new().unwrap();
+        let mark = tools.path().join("called-once");
+        let script = tools.path().join("fake-gpg");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncat > /dev/null\nif [ -e '{mark}' ]; then git -C '{workdir}' update-ref --no-deref HEAD {tip}; fi\ntouch '{mark}'\nprintf -- '-----BEGIN PGP SIGNATURE-----\\nfake\\n-----END PGP SIGNATURE-----\\n'\necho '[GNUPG:] SIG_CREATED D 1 8 00 0 X' >&2\n",
+                mark = mark.display(),
+                workdir = dir.path().display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_bool("commit.gpgSign", true).unwrap();
+            config
+                .set_str("gpg.program", script.to_str().unwrap())
+                .unwrap();
+        }
+        let stored = std::fs::read_to_string(rebase_file(&repo)).unwrap();
+
+        assert!(handle.rebase_continue().is_err());
+
+        assert!(mark.exists(), "the fake signer never ran");
+        assert_eq!(
+            Repository::open(dir.path())
+                .unwrap()
+                .head()
+                .unwrap()
+                .target(),
+            Some(tip)
+        );
+        assert_eq!(std::fs::read_to_string(rebase_file(&repo)).unwrap(), stored);
+    }
 }
