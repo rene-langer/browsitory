@@ -96,6 +96,70 @@ Reconciled with the code at 404b4ade on 2026-10-29:
 - The probe confirming that a paused rebase is a `CherryPick` state with no `.git/rebase-merge`,
   and the bug 1 repro, are in `target/probe-restart` (not committed; see spec "Current state").
 
+## Pre-flight notes
+
+Reconciled again by the implementer on 2026-10-29 (main had not moved from 404b4ade; baseline
+`cargo test -p git-core --test rebase` 27 passed, `cargo test -p repo-service` 177 passed). The
+line references above held. Where the plan or spec and the code disagreed, the code won; every
+deviation made during implementation:
+
+- **R1/R2, `stop` on errors.** The spec says every `Err` from `rebase_continue` sets `Error`, but
+  R2's own test requires a refused Continue to leave the state untouched. Refusals (`HeadMoved`,
+  `OperationInProgress`, `NotRebasing`) now leave the state as it was; any later error sets
+  `Error` unless the step is still applied and paused (git's pick is still `plan[cursor]`). This
+  also keeps D2 adoption available after a refused Continue.
+- **R2, `land_current_step` clears git's pick.** After landing a step it now calls
+  `cleanup_state`. Otherwise an error between two steps (e.g. the linked-folder check before the
+  next pick) or a failed `finish` would leave the previous step's `CHERRY_PICK_HEAD`, and
+  Continue would refuse with `OperationInProgress`. Error stops and failed finishes are now
+  always `Clean`.
+- **R2, "HEAD at `expected_head`" means detached there.** The spec requires it for the clean
+  row; it now also applies to the paused-pick row, so a branch created at `expected_head` during
+  the pause (`git switch -c`) is never moved by a landed step. `HeadMoved` names the branch.
+- **R4, `cursor == plan.len()`.** Instead of skipping the `CHERRY_PICK_HEAD` comparison, the
+  retry requires git to be clean (`OperationInProgress` otherwise, since `finish` runs
+  `cleanup_state` and would wipe a foreign pick); `rebase_health` reports `OtherOperation`
+  likewise. A Continue on a rebase that already finished (HEAD on the branch at the result)
+  still reports `NotRebasing`, keeping the existing test. `finish` uses `reference_matching`
+  (atomic compare-and-swap); a lost race maps to `BranchMoved`.
+- **R6.** `RebaseError::Merge` was added for `merge::abort_merge`. `tests/symlink_write_through.rs`
+  also called `abort_rebase` by value (not listed above) and was updated.
+- **S2, bug 4.** Keeping the state on a failed Abort was not enough: `restore_original_branch`
+  reattached HEAD before the forced checkout, so a refused checkout left HEAD on the branch with
+  a half-restored work tree. It now checks out the branch's tree first and reattaches after.
+  The failed-Abort test uses a read-only folder that the checkout must create a file in
+  (`#[cfg(unix)]`, skipped when running as root).
+- **S2, session fallback order.** The spec loads the file first, then the fallback. After a
+  failed save the file can hold an *older* state of the same rebase, so the fallback (set only
+  by a failed save, cleared by the next successful save or clear) wins while it is set
+  (`gate::stored_rebase`).
+- **S2 tests.** A rebase replayed onto its own base within the same second can reproduce the old
+  ids, so `a_restarted_worker_continues_the_rebase_to_completion` checks the result, not that the
+  tip changed. For the same reason the rebase undo test (U2) stages an amendment at the edit
+  stop, so the rebase changes something to record.
+- **S3/U2.** `OperationProbe` has no `in_progress`: the worker passes `marker()` and "in
+  progress" is `marker.is_some()`. The merge marker reads `MERGE_HEAD` directly
+  (`mergehead_foreach` needs `&mut Repository`). `settle` takes the repository so a dropped
+  pending entry is saved. `relabel` does not save by itself: it only runs when a sequence
+  completes, and the `finish` right after it records (and saves) the entry.
+- **W2.** `rebase_lifecycle_round_trips_through_the_sidecar` never pauses, so it now checks
+  `get_head_info.rebase == null` instead of `get_rebase_progress`, and the abort result is covered
+  by a new `abort_rebase_reports_whether_head_went_back_to_the_branch`.
+- **F1.** `HeadInfo` literals also lived in `useMutationRunner.test.ts` and `CommitGraph.test.tsx`
+  (not all listed above).
+- **F3.** `RebaseProgressPanel` already had `disabled`/`disabledReason`, so the "disables Continue
+  with the divergence reason" test lives in `DiffPane.test.tsx` only. The palette gets App's
+  toasting `abortRebase` through `buildCommands({ ...appState, abortRebase }, …)`. The
+  interrupted strip's Abort is disabled while an action is pending.
+- **Z1.** The CHANGELOG also has a line for bug 4 (a failed Abort no longer strands HEAD).
+- **E1.** The spike succeeded on the first run: `browser.reloadSession()` deletes the
+  tauri-driver session (closing the app) and starts a new one (a fresh app process on the same
+  `XDG_DATA_HOME`); two distinct session ids were confirmed in the log. The spec is kept. Local
+  E2E runs used `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`/`XDG_DATA_HOME`/`XDG_STATE_HOME` under
+  `target/e2e-xdg/`.
+- The rebase undo label is the pre-existing `Rebase onto <full id>` (the planner passes the full
+  id); the E2E matches its prefix.
+
 ## File map
 
 | File | Tasks | Change |
