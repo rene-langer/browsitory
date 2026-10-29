@@ -458,8 +458,6 @@ export const vscodeRepoClient: RepoClient = {
     call<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
   rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
   abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),
-  getRebaseProgress: (repoPath: string) =>
-    call<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
   detectForgeRepository: (repoPath: string) =>
     call<ForgeRepository[]>("detect_forge_repository", { repoPath }),
   saveForgeToken: (repoPath: string, provider: ForgeProvider, account: string, token: string) =>

@@ -1687,12 +1687,12 @@ fn rebase_lifecycle_round_trips_through_the_sidecar() {
     );
     assert_eq!(started["result"]["kind"], "Done");
 
-    let progress = sidecar.call(
+    let head = sidecar.call(
         4,
-        "get_rebase_progress",
+        "get_head_info",
         serde_json::json!({"repoPath": repo_path}),
     );
-    assert_eq!(progress["result"], serde_json::Value::Null);
+    assert_eq!(head["result"]["rebase"], serde_json::Value::Null);
 }
 
 #[test]

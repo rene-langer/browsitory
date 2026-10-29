@@ -378,8 +378,6 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
   rebaseContinue: (repoPath: string) => loggedInvoke<RebaseStepResult>("rebase_continue", { repoPath }),
   abortRebase: (repoPath: string) => loggedInvoke<RebaseAbort>("abort_rebase", { repoPath }),
-  getRebaseProgress: (repoPath: string) =>
-    loggedInvoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
   detectForgeRepository: (repoPath: string) =>
     loggedInvoke<ForgeRepository[]>("detect_forge_repository", { repoPath }),
   saveForgeToken: (repoPath: string, provider: ForgeProvider, account: string, token: string) =>

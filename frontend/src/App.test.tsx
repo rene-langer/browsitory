@@ -133,7 +133,6 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     startRebase: unused,
     rebaseContinue: unused,
     abortRebase: unused,
-    getRebaseProgress: async () => null,
     detectForgeRepository: async () => [],
     saveForgeToken: unused,
     forgetForgeToken: unused,
@@ -493,7 +492,10 @@ describe("App", () => {
       // Rebase state lives only in the worker's in-memory `rebase_state` (nothing but
       // `set_head_detached` is persisted), so unlike `pending`/`transfer` it must NOT be
       // reported as clear just because this tab's workspace unmounted.
-      getRebaseProgress: async () => ({ currentStep: 1, totalSteps: 3 }),
+      getHeadInfo: async () => ({
+        headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null,
+        rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
+      }),
     });
 
     render(<App client={client} />);

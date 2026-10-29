@@ -124,17 +124,6 @@ pub(super) fn abort(
     let _ = reply.send(result);
 }
 
-pub(super) fn progress(
-    repo: &git2::Repository,
-    slot: RebaseSlot<'_>,
-    reply: Sender<Result<Option<(usize, usize)>, String>>,
-) {
-    let progress = slot
-        .load(repo)
-        .map(|state| (state.current_step(), state.total_steps()));
-    let _ = reply.send(Ok(progress));
-}
-
 impl WorkerHandle {
     #[allow(dead_code)]
     pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, String> {
@@ -179,16 +168,6 @@ impl WorkerHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::AbortRebase { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-    }
-
-    #[allow(dead_code)]
-    pub fn get_rebase_progress(&self) -> Result<Option<(usize, usize)>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetRebaseProgress { reply: tx })
             .map_err(|_| "worker thread stopped".to_string())?;
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?

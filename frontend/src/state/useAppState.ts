@@ -385,7 +385,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
       const limit = graphLimit.current;
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories, headInfo, undoState] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
           client.getCommitGraph(repoPath, limit, graphBranchSelection),
@@ -398,7 +398,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           client.getCurrentUpstream(repoPath),
           client.listStashes(repoPath),
           client.getMergeMessage(repoPath),
-          client.getRebaseProgress(repoPath),
           client.detectForgeRepository(repoPath),
           client.getHeadInfo(repoPath),
           client.getUndoState(repoPath),
@@ -437,7 +436,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         stashes,
         mergeMessage,
         headInfo,
-        rebaseProgress,
+        // The backend reports a paused rebase in `HeadInfo`, restored from disk after a restart.
+        rebaseProgress: headInfo.rebase
+          ? { currentStep: headInfo.rebase.currentStep, totalSteps: headInfo.rebase.totalSteps }
+          : null,
         forgeRepositories,
         undoState,
         error: null,

@@ -48,7 +48,7 @@ pub use merge::{
     resolve_add_delete_conflict, resolve_conflict, resolve_whole_file, set_merge_options,
     start_merge,
 };
-pub use rebase::{abort_rebase, commits_since, get_rebase_progress, rebase_continue, start_rebase};
+pub use rebase::{abort_rebase, commits_since, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use remote::*;
 pub use search::{cancel_search, search_commits};
@@ -1501,13 +1501,6 @@ impl From<git_core::rebase::RebaseStepResult> for RebaseStepResultDto {
             git_core::rebase::RebaseStepResult::Done => RebaseStepResultDto::Done,
         }
     }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RebaseProgressDto {
-    pub current_step: usize,
-    pub total_steps: usize,
 }
 
 #[derive(Serialize)]

@@ -511,10 +511,6 @@ pub(crate) enum Command {
     AbortRebase {
         reply: Sender<Result<git_core::rebase::RebaseAbort, String>>,
     },
-    #[allow(dead_code)]
-    GetRebaseProgress {
-        reply: Sender<Result<Option<(usize, usize)>, String>>,
-    },
     FetchRemote {
         remote_name: String,
         prune: Option<bool>,
@@ -1309,9 +1305,6 @@ impl Worker {
                         rebase::continue_rebase(&repo, rebase_slot!(), reply)
                     }
                     Command::AbortRebase { reply } => rebase::abort(&repo, rebase_slot!(), reply),
-                    Command::GetRebaseProgress { reply } => {
-                        rebase::progress(&repo, rebase_slot!(), reply)
-                    }
                     Command::FetchRemote {
                         remote_name,
                         prune,
@@ -4416,7 +4409,7 @@ mod tests {
         let result = handle.start_rebase(onto, plan).unwrap();
 
         assert_eq!(result, git_core::rebase::RebaseStepResult::Done);
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
     }
 
     #[test]
@@ -4446,11 +4439,11 @@ mod tests {
         let result = handle.start_rebase(onto, plan).unwrap();
         assert_eq!(result, git_core::rebase::RebaseStepResult::PausedForEdit);
         // 1-indexed: the first (and here only) paused step reports "Step 1 of 1", not "0 of 1".
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 1)));
+        assert_eq!(rebase_progress(&handle), Some((1, 1)));
 
         handle.abort_rebase().unwrap();
 
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
         assert!(handle.get_status().unwrap().is_empty());
     }
 
@@ -4989,6 +4982,15 @@ mod tests {
         (worker, handle)
     }
 
+    /// "Step N of M" of the stored rebase, as `HeadInfo.rebase` reports it.
+    fn rebase_progress(handle: &super::WorkerHandle) -> Option<(usize, usize)> {
+        handle
+            .get_head_info()
+            .unwrap()
+            .rebase
+            .map(|rebase| (rebase.current_step, rebase.total_steps))
+    }
+
     fn rebase_file(repo: &Repository) -> std::path::PathBuf {
         repo.path().join("browsitory").join("rebase.json")
     }
@@ -5061,7 +5063,7 @@ mod tests {
 
         let (_worker, handle) = restart(worker, handle, dir.path());
 
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 2)));
+        assert_eq!(rebase_progress(&handle), Some((1, 2)));
     }
 
     #[test]
@@ -5084,7 +5086,7 @@ mod tests {
         assert_eq!(head.parent(0).unwrap().summary().unwrap(), Some("a"));
         assert_eq!(reopened.state(), git2::RepositoryState::Clean);
         assert!(!rebase_file(&repo).exists());
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
     }
 
     #[test]
@@ -5099,7 +5101,7 @@ mod tests {
         let reopened = Repository::open(dir.path()).unwrap();
         assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
         assert!(!rebase_file(&repo).exists());
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
     }
 
     #[test]
@@ -5117,7 +5119,7 @@ mod tests {
         }
         let fresh = ensure_worker(&workers, &path).unwrap();
 
-        assert_eq!(fresh.get_rebase_progress().unwrap(), Some((1, 2)));
+        assert_eq!(rebase_progress(&fresh), Some((1, 2)));
     }
 
     #[test]
@@ -5128,7 +5130,7 @@ mod tests {
         write_file(dir.path(), "f.txt", "local\n");
         assert!(handle.rebase_continue().is_err());
         let (_worker, handle) = restart(worker, handle, dir.path());
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((2, 2)));
+        assert_eq!(rebase_progress(&handle), Some((2, 2)));
 
         write_file(dir.path(), "f.txt", "base\n");
         assert_eq!(
@@ -5190,7 +5192,7 @@ mod tests {
 
         assert!(failed.is_err());
         assert!(rebase_file(&repo).exists());
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 1)));
+        assert_eq!(rebase_progress(&handle), Some((1, 1)));
         assert!(Repository::open(dir.path())
             .unwrap()
             .head_detached()
@@ -5219,12 +5221,12 @@ mod tests {
         assert!(error.contains("could not be saved"), "{error}");
         let short = branch.trim_start_matches("refs/heads/");
         assert!(error.contains(&format!("git switch {short}")), "{error}");
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 2)));
+        assert_eq!(rebase_progress(&handle), Some((1, 2)));
         assert_eq!(
             handle.rebase_continue().unwrap(),
             git_core::rebase::RebaseStepResult::Done
         );
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
     }
 
     /// Every command that would move HEAD or rewrite the index under a stored rebase replies

@@ -189,7 +189,6 @@ pub fn dispatch(
         "start_rebase" => start_rebase(params, repos),
         "rebase_continue" => rebase_continue(params, repos),
         "abort_rebase" => abort_rebase(params, repos),
-        "get_rebase_progress" => get_rebase_progress(params, repos),
         "detect_forge_repository" => detect_forge_repository(params, repos),
         "save_forge_token" => save_forge_token(params, repos),
         "forget_forge_token" => forget_forge_token(params, repos),
@@ -3545,25 +3544,6 @@ fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
     Ok(serde_json::json!({ "restored": abort.restored }))
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RebaseProgressDto {
-    current_step: usize,
-    total_steps: usize,
-}
-
-fn get_rebase_progress(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let progress = worker_handle(repos, &params.repo_path)?
-        .get_rebase_progress()?
-        .map(|(current_step, total_steps)| RebaseProgressDto {
-            current_step,
-            total_steps,
-        });
-    serde_json::to_value(progress).map_err(|error| error.to_string())
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]

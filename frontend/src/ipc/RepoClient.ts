@@ -732,7 +732,6 @@ export interface RepoClient {
   startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
   rebaseContinue(repoPath: string): Promise<RebaseStepResult>;
   abortRebase(repoPath: string): Promise<RebaseAbort>;
-  getRebaseProgress(repoPath: string): Promise<{ currentStep: number; totalSteps: number } | null>;
   detectForgeRepository(repoPath: string): Promise<ForgeRepository[]>;
   saveForgeToken(repoPath: string, provider: ForgeProvider, account: string, token: string): Promise<void>;
   forgetForgeToken(repoPath: string, provider: ForgeProvider, account: string): Promise<void>;
