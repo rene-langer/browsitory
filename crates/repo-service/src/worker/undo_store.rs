@@ -20,10 +20,21 @@ pub(super) struct UndoEntry {
     pub after: RepoSnapshot,
 }
 
+/// A paused operation's entry (a conflicted merge or pick, a stopped sequence, a paused
+/// rebase): recorded with this label once the operation `operation` (an
+/// `OperationProbe::marker`) ends, dropped if another operation, or none, is in progress then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PendingEntry {
+    pub label: String,
+    pub before: RepoSnapshot,
+    pub operation: String,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct UndoStacks {
     pub undo: Vec<UndoEntry>,
     pub redo: Vec<UndoEntry>,
+    pub pending: Option<PendingEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,10 +61,21 @@ struct StoredEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+struct StoredPending {
+    label: String,
+    before: StoredSnapshot,
+    operation: String,
+}
+
+/// Version 1 throughout: `pending` is optional, and builds that predate it ignore it (no
+/// `deny_unknown_fields`) and drop it on their next save, which only loses the pending entry.
+#[derive(Serialize, Deserialize)]
 struct StoredFile {
     version: u32,
     undo: Vec<StoredEntry>,
     redo: Vec<StoredEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending: Option<StoredPending>,
 }
 
 impl From<&RepoSnapshot> for StoredSnapshot {
@@ -154,6 +176,11 @@ impl UndoStore {
             version: FORMAT_VERSION,
             undo: to_stored(&stacks.undo),
             redo: to_stored(&stacks.redo),
+            pending: stacks.pending.as_ref().map(|pending| StoredPending {
+                label: pending.label.clone(),
+                before: (&pending.before).into(),
+                operation: pending.operation.clone(),
+            }),
         };
         let json = serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())?;
         let kept = self
@@ -175,7 +202,8 @@ impl UndoStore {
         }
         self.mtime = modified(&self.file);
 
-        self.delete_stale(repo, kept, stacks.undo.is_empty() && stacks.redo.is_empty())
+        let empty = stacks.undo.is_empty() && stacks.redo.is_empty() && stacks.pending.is_none();
+        self.delete_stale(repo, kept, empty)
             .map_err(|error| error.to_string())
     }
 
@@ -189,6 +217,11 @@ impl UndoStore {
             Ok(file) if file.version == FORMAT_VERSION => UndoStacks {
                 undo: from_stored(file.undo),
                 redo: from_stored(file.redo),
+                pending: file.pending.map(|pending| PendingEntry {
+                    label: pending.label,
+                    before: pending.before.into(),
+                    operation: pending.operation,
+                }),
             },
             Ok(file) => {
                 eprintln!(
@@ -207,33 +240,34 @@ impl UndoStore {
 
     /// Writes the anchor and keep refs; returns how many keep refs are current.
     fn write_anchor(&self, repo: &Repository, stacks: &UndoStacks) -> Result<usize, git2::Error> {
-        let entries: Vec<&UndoEntry> = stacks.undo.iter().chain(stacks.redo.iter()).collect();
-        if entries.is_empty() {
+        let mut snapshots: Vec<(String, &RepoSnapshot)> = Vec::new();
+        for (n, entry) in stacks.undo.iter().chain(stacks.redo.iter()).enumerate() {
+            snapshots.push((format!("{n}-before"), &entry.before));
+            snapshots.push((format!("{n}-after"), &entry.after));
+        }
+        if let Some(pending) = &stacks.pending {
+            snapshots.push(("pending-before".to_string(), &pending.before));
+        }
+        if snapshots.is_empty() {
             return Ok(0);
         }
 
         let mut builder = repo.treebuilder(None)?;
         let mut referenced: BTreeSet<Oid> = BTreeSet::new();
-        for (n, entry) in entries.iter().enumerate() {
-            for (side, snapshot) in [("before", &entry.before), ("after", &entry.after)] {
-                builder.insert(
-                    format!("{n}-{side}-index"),
-                    Oid::from_str(&snapshot.index_tree)?,
-                    0o040000,
-                )?;
-                if let Some(tree) = &snapshot.worktree_tree {
-                    builder.insert(
-                        format!("{n}-{side}-worktree"),
-                        Oid::from_str(tree)?,
-                        0o040000,
-                    )?;
-                }
-                if let HeadState::Detached(oid) = &snapshot.head {
-                    referenced.insert(Oid::from_str(oid)?);
-                }
-                for oid in snapshot.refs.values() {
-                    referenced.insert(Oid::from_str(oid)?);
-                }
+        for (name, snapshot) in snapshots {
+            builder.insert(
+                format!("{name}-index"),
+                Oid::from_str(&snapshot.index_tree)?,
+                0o040000,
+            )?;
+            if let Some(tree) = &snapshot.worktree_tree {
+                builder.insert(format!("{name}-worktree"), Oid::from_str(tree)?, 0o040000)?;
+            }
+            if let HeadState::Detached(oid) = &snapshot.head {
+                referenced.insert(Oid::from_str(oid)?);
+            }
+            for oid in snapshot.refs.values() {
+                referenced.insert(Oid::from_str(oid)?);
             }
         }
         let tree = repo.find_tree(builder.write()?)?;
@@ -599,5 +633,123 @@ mod tests {
             "worktree tree pruned"
         );
         assert!(reopened.find_blob(blob).is_ok(), "untracked blob pruned");
+    }
+
+    fn pending(repo: &Repository, label: &str) -> PendingEntry {
+        PendingEntry {
+            label: label.into(),
+            before: capture(repo, SnapshotScope::Full).unwrap(),
+            operation: "merge abc def".into(),
+        }
+    }
+
+    #[test]
+    fn saves_and_reloads_the_pending_entry() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        assert_eq!(stacks.pending, None);
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        stacks.pending = Some(pending(&repo, "Merge feature"));
+        store.save(&repo, &stacks).unwrap();
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.pending, stacks.pending);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let json: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(json["version"], 1);
+        assert_eq!(json["pending"]["label"], "Merge feature");
+        assert_eq!(json["pending"]["operation"], "merge abc def");
+    }
+
+    #[test]
+    fn a_file_without_pending_loads_with_none() {
+        let (_dir, repo) = repo_with_commit();
+        std::fs::create_dir_all(repo.path().join("browsitory")).unwrap();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            r#"{"version":1,"undo":[],"redo":[]}"#,
+        )
+        .unwrap();
+        let (mut store, stacks) = UndoStore::open(&repo);
+        assert_eq!(stacks.pending, None);
+        // And a save without one writes no `pending` key at all (what older builds wrote).
+        store.save(&repo, &stacks).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(json.get("pending").is_none(), "{json}");
+    }
+
+    #[test]
+    fn an_older_reader_ignores_the_pending_field() {
+        /// `StoredFile` as builds before the pending entry declared it.
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct OldStoredFile {
+            version: u32,
+            undo: Vec<StoredEntry>,
+            redo: Vec<StoredEntry>,
+        }
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        stacks.pending = Some(pending(&repo, "Merge feature"));
+        store.save(&repo, &stacks).unwrap();
+        let bytes = std::fs::read(repo.path().join("browsitory/undo.json")).unwrap();
+        let old: OldStoredFile = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(old.version, 1);
+        assert_eq!(old.undo.len(), 1);
+    }
+
+    #[test]
+    fn pending_alone_keeps_the_anchor() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.pending = Some(pending(&repo, "Merge feature"));
+        store.save(&repo, &stacks).unwrap();
+        assert!(repo.find_reference("refs/browsitory/undo/main").is_ok());
+        stacks.pending = None;
+        store.save(&repo, &stacks).unwrap();
+        assert!(repo.find_reference("refs/browsitory/undo/main").is_err());
+    }
+
+    #[test]
+    fn gc_keeps_the_pending_snapshot_objects() {
+        if Process::new("git").arg("--version").output().is_err() {
+            eprintln!("git CLI not found; skipping gc test");
+            return;
+        }
+        let (dir, repo) = repo_with_commit();
+        std::fs::write(dir.path().join("a.txt"), "staged change\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        std::fs::write(dir.path().join("untracked.txt"), "only in the worktree\n").unwrap();
+        let before = pending(&repo, "Merge feature");
+        let index_tree = Oid::from_str(&before.before.index_tree).unwrap();
+        let worktree_tree = Oid::from_str(before.before.worktree_tree.as_ref().unwrap()).unwrap();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.pending = Some(before);
+        store.save(&repo, &stacks).unwrap();
+        for args in [
+            &["reflog", "expire", "--all", "--expire=now"][..],
+            &["gc", "--prune=now", "--quiet"][..],
+        ] {
+            assert!(Process::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success());
+        }
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert!(reopened.find_tree(index_tree).is_ok(), "index tree pruned");
+        assert!(
+            reopened.find_tree(worktree_tree).is_ok(),
+            "worktree tree pruned"
+        );
     }
 }
