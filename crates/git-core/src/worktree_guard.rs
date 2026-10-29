@@ -390,6 +390,7 @@ impl CasePolicy {
 /// The first link or gitlink entry whose folded path equals the folded path of a folder on the
 /// way to another entry (a strict prefix of it), in either order. A gitlink is a folder too (the
 /// submodule's checkout), so a link and a gitlink of the same folded name collide as well.
+#[cfg(test)]
 fn first_collision<P: AsRef<[u8]>>(
     entries: impl IntoIterator<Item = (P, u32)>,
 ) -> Option<CaseCollision> {
