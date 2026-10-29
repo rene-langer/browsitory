@@ -85,5 +85,17 @@ export function rebaseAbortToast(abort: RebaseAbort, info: RebaseInfo | null): s
   if (info !== null && info.health.kind === "Diverged" && info.health.reason === "BranchMoved") {
     return `Stopped the rebase. ${info.branch} had changed, so HEAD was left where it is.`;
   }
+  if (info !== null && info.health.kind === "Diverged" && info.health.reason === "OtherOperation") {
+    return "Stopped the rebase. Another git operation is in progress, so HEAD was left where it is.";
+  }
   return "Stopped the rebase. HEAD had moved, so it was left where it is.";
+}
+
+/**
+ * The branch the abort toast offers to switch to: after aborting a rebase whose branch moved,
+ * HEAD stays on the rebased work, and going back is one (safe) switch away.
+ */
+export function rebaseAbortSwitchTarget(abort: RebaseAbort, info: RebaseInfo | null): string | null {
+  if (abort.restored || info === null) return null;
+  return info.health.kind === "Diverged" && info.health.reason === "BranchMoved" ? info.branch : null;
 }

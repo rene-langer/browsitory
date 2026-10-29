@@ -4,6 +4,7 @@ import {
   abortToast,
   conflictReason,
   pickToast,
+  rebaseAbortSwitchTarget,
   rebaseAbortToast,
   rebaseDivergenceText,
   sequenceLabel,
@@ -75,6 +76,12 @@ describe("rebase status text", () => {
     expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBe(
       "Stopped the rebase. topic had changed, so HEAD was left where it is.",
     );
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "OtherOperation" }))).toBe(
+      "Stopped the rebase. Another git operation is in progress, so HEAD was left where it is.",
+    );
+    expect(rebaseAbortSwitchTarget({ restored: false }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBe("topic");
+    expect(rebaseAbortSwitchTarget({ restored: true }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBeNull();
+    expect(rebaseAbortSwitchTarget({ restored: false }, info({ kind: "Diverged", reason: "HeadMoved" }))).toBeNull();
     expect(rebaseAbortToast({ restored: false }, null)).toBe(
       "Stopped the rebase. HEAD had moved, so it was left where it is.",
     );

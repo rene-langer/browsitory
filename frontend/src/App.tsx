@@ -56,7 +56,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { abortToast, pickToast, rebaseAbortToast, sequenceToast } from "./lib/operationStatus";
+import { abortToast, pickToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -442,11 +442,28 @@ function RepoWorkspace({
   // went back to the branch, from the rebase as it was before the abort.
   const { abortRebase: abortStoredRebase } = appState;
   const storedRebase = appState.state.headInfo.rebase;
+  // After aborting a rebase whose branch moved, the toast offers "Switch to {branch}" through the
+  // ordinary branch switch (a safe checkout that refuses rather than overwrite local changes).
+  const { switchBranch: switchToBranch } = appState;
   const abortRebase = useCallback(async () => {
     const before = storedRebase;
-    await runPickAction(abortStoredRebase, (abort) => rebaseAbortToast(abort, before));
-    return null;
-  }, [abortStoredRebase, runPickAction, storedRebase]);
+    dismissError();
+    const abort = await abortStoredRebase();
+    if (abort === null || !mounted.current) return abort;
+    const target = rebaseAbortSwitchTarget(abort, before);
+    pushToast(
+      rebaseAbortToast(abort, before),
+      target === null
+        ? undefined
+        : {
+            label: `Switch to ${target}`,
+            run: () => {
+              if (mounted.current) void announce("Switched branch", switchToBranch)(target);
+            },
+          },
+    );
+    return abort;
+  }, [abortStoredRebase, announce, dismissError, pushToast, storedRebase, switchToBranch]);
   const abortMergeOrSequence = useCallback(() => {
     if (sequenceKind !== null) abortSequence();
     else void abortMerge();

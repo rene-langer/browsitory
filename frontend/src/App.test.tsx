@@ -1134,6 +1134,26 @@ describe("App", () => {
       expect(await screen.findByText("Stopped the rebase. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
     });
 
+    it("offers Switch to the branch after aborting a rebase whose branch moved", async () => {
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "BranchMoved" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: false }));
+      const switchBranch = vi.fn(async () => {});
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            abortRebase,
+            switchBranch,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      expect(await screen.findByText("Stopped the rebase. main had changed, so HEAD was left where it is.")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: "Switch to main" }));
+      await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "main"));
+    });
+
     it("a paused rebase reported on the first refresh shows the strip and the dock", async () => {
       // The restart case: the backend restored the rebase from disk before the app asked.
       const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
