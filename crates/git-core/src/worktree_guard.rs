@@ -343,14 +343,17 @@ fn hfs_ignorable(c: char) -> bool {
     )
 }
 
-/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 lowercased
-/// per character without the HFS+ ignorable code points, anything else lowercased as ASCII.
-/// NFC/NFD normalization is not folded (a documented residual, decision D4).
+/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 upper- then
+/// lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
+/// case folding and NTFS's upcase table; `ß` meeting `ss` over-matches, which only refuses
+/// more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
+/// normalization is not folded (a documented residual, decision D4).
 pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
     match std::str::from_utf8(name) {
         Ok(text) => text
             .chars()
             .filter(|c| !hfs_ignorable(*c))
+            .flat_map(char::to_uppercase)
             .flat_map(char::to_lowercase)
             .collect::<String>()
             .into_bytes(),
@@ -385,7 +388,8 @@ impl CasePolicy {
 }
 
 /// The first link or gitlink entry whose folded path equals the folded path of a folder on the
-/// way to another entry (a strict prefix of it), in either order.
+/// way to another entry (a strict prefix of it), in either order. A gitlink is a folder too (the
+/// submodule's checkout), so a link and a gitlink of the same folded name collide as well.
 fn first_collision<P: AsRef<[u8]>>(
     entries: impl IntoIterator<Item = (P, u32)>,
 ) -> Option<CaseCollision> {
@@ -393,18 +397,32 @@ fn first_collision<P: AsRef<[u8]>>(
         link: String::from_utf8_lossy(link).into_owned(),
         folder: String::from_utf8_lossy(folder).into_owned(),
     };
-    // Folded path -> the path as git spells it.
-    let mut links: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+    // Folded path -> the path as git spells it (and, for links, whether it is a gitlink).
+    let mut links: HashMap<Vec<u8>, (Vec<u8>, bool)> = HashMap::new();
     let mut folders: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
     let mut seen_folders: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
     for (path, mode) in entries {
         let path = path.as_ref();
         if mode == MODE_LINK || mode == MODE_GITLINK {
+            let gitlink = mode == MODE_GITLINK;
             let key = fold_name(path);
             if let Some(folder) = folders.get(&key) {
                 return Some(found(path, folder));
             }
-            links.entry(key).or_insert_with(|| path.to_vec());
+            match links.get(&key) {
+                // A link next to a submodule folder of the same name.
+                Some((other, other_gitlink)) if *other_gitlink != gitlink => {
+                    return Some(if gitlink {
+                        found(other, path)
+                    } else {
+                        found(path, other)
+                    });
+                }
+                Some(_) => {}
+                None => {
+                    links.insert(key, (path.to_vec(), gitlink));
+                }
+            }
         }
         for (at, byte) in path.iter().enumerate() {
             if *byte != b'/' {
@@ -416,7 +434,7 @@ fn first_collision<P: AsRef<[u8]>>(
                 continue;
             }
             let key = fold_name(prefix);
-            if let Some(link) = links.get(&key) {
+            if let Some((link, _)) = links.get(&key) {
                 return Some(found(link, prefix));
             }
             folders.entry(key).or_insert_with(|| prefix.to_vec());
@@ -432,22 +450,36 @@ pub(crate) fn find_case_collision<P: AsRef<[u8]>>(
     source: &GuardSource,
     paths: Option<&[P]>,
 ) -> Result<Option<CaseCollision>, git2::Error> {
-    let owned;
-    let index: &git2::Index = match source {
-        GuardSource::Index(index) => index,
-        GuardSource::Tree(tree) => {
-            let mut index = git2::Index::new()?;
-            index.read_tree(tree)?;
-            owned = index;
-            &owned
-        }
-    };
-    Ok(first_collision(
-        index
-            .iter()
-            .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
-            .map(|entry| (entry.path, entry.mode)),
-    ))
+    find_case_collision_in(std::slice::from_ref(source), paths)
+}
+
+/// [`find_case_collision`] over the union of several sources an operation writes together (a
+/// stash's work-tree, index and untracked trees), so a link in one and a folder in another
+/// collide too.
+pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
+    sources: &[GuardSource],
+    paths: Option<&[P]>,
+) -> Result<Option<CaseCollision>, git2::Error> {
+    let mut entries = Vec::new();
+    for source in sources {
+        let owned;
+        let index: &git2::Index = match source {
+            GuardSource::Index(index) => index,
+            GuardSource::Tree(tree) => {
+                let mut index = git2::Index::new()?;
+                index.read_tree(tree)?;
+                owned = index;
+                &owned
+            }
+        };
+        entries.extend(
+            index
+                .iter()
+                .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+                .map(|entry| (entry.path, entry.mode)),
+        );
+    }
+    Ok(first_collision(entries))
 }
 
 /// `rel` as git spells it: components joined with `/` on every platform.
@@ -505,8 +537,19 @@ where
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
-    if let Some(target) = target {
-        refuse_case_collision::<E, P>(repo, target, paths)?;
+    // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
+    // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
+    if let (Some(target), true) = (target, folds_case(repo)) {
+        if let Some(collision) = find_case_collision(target, paths)? {
+            let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
+            let in_head = match &head {
+                Some(tree) => find_case_collision(&GuardSource::Tree(tree), paths)?,
+                None => None,
+            };
+            if in_head.as_ref() != Some(&collision) {
+                return Err(collision.into());
+            }
+        }
     }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
     // filter here, or `TC` would scan nothing for a tracked `tc`.
@@ -607,13 +650,18 @@ where
     // Then case collisions (#156), after the more specific link on disk. Only what the operation
     // brings in: a HEAD that already holds a collision doesn't lock the repository, but nothing
     // brings one in (again).
-    for source in incoming {
-        let source = match source {
-            Incoming::Checkout(tree) => GuardSource::Tree(tree),
-            Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
-            Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
-        };
-        refuse_case_collision::<E, &str>(repo, &source, ALL)?;
+    if folds_case(repo) {
+        let sources: Vec<GuardSource> = incoming
+            .iter()
+            .map(|source| match source {
+                Incoming::Checkout(tree) => GuardSource::Tree(tree),
+                Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
+                Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
+            })
+            .collect();
+        if let Some(collision) = find_case_collision_in(&sources, ALL)? {
+            return Err(collision.into());
+        }
     }
     Ok(())
 }
@@ -1087,8 +1135,39 @@ mod tests {
             find_case_collision(&GuardSource::Tree(&tree), ALL).unwrap(),
             collision("d\u{200c}", "d")
         );
-        assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "straße".as_bytes());
+        assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "strasse".as_bytes());
         assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[test]
+    fn case_folding_follows_the_file_systems_not_just_lowercase() {
+        for (link, folder) in [("s", "ſ"), ("σ", "ς"), ("µ", "μ"), ("i", "ı")] {
+            let found = first_collision([
+                (link.as_bytes().to_vec(), MODE_LINK),
+                (format!("{folder}/x").into_bytes(), 0o100644),
+            ]);
+            assert_eq!(found, collision(link, folder), "{link} / {folder}");
+        }
+    }
+
+    #[test]
+    fn a_link_and_a_gitlink_of_the_same_folded_name_collide() {
+        let found = first_collision([(&b"A"[..], MODE_GITLINK), (&b"a"[..], MODE_LINK)]);
+        assert_eq!(found, collision("a", "A"));
+        let two_links = first_collision([(&b"A"[..], MODE_LINK), (&b"a"[..], MODE_LINK)]);
+        assert_eq!(two_links, None);
+    }
+
+    #[test]
+    fn sources_are_checked_together() {
+        let (_dir, repo) = repo();
+        let links = tree_of(&repo, &[("D", LINK, "/x")]);
+        let folders = tree_of(&repo, &[("d/x", FILE, "x")]);
+        let sources = [GuardSource::Tree(&links), GuardSource::Tree(&folders)];
+        assert_eq!(
+            find_case_collision_in(&sources, ALL).unwrap(),
+            collision("D", "d")
+        );
     }
 
     #[test]
@@ -1301,7 +1380,8 @@ mod tests {
         let out = outside_dir();
         junction(&dir.path().join("j"), out.path());
         write(dir.path(), "x/y/z", "z");
-        junction(&dir.path().join("x/y/l"), out.path());
+        // `mklink` takes backslashes only.
+        junction(&dir.path().join("x").join("y").join("l"), out.path());
         assert!(open_beneath(dir.path(), Path::new("j/f"))
             .unwrap()
             .is_none());

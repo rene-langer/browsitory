@@ -114,7 +114,9 @@ fn cleanup(dest: &Path, state: DestState) {
                 let _ = if is_real_dir {
                     std::fs::remove_dir_all(&path)
                 } else {
-                    std::fs::remove_file(&path)
+                    // A Windows folder link or junction is removed with `RemoveDirectoryW`
+                    // (the link itself, never its target).
+                    std::fs::remove_file(&path).or_else(|_| std::fs::remove_dir(&path))
                 };
             }
         }

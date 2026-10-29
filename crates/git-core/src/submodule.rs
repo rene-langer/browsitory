@@ -152,9 +152,19 @@ fn guarded_update(
             // libgit2 would fetch it from the submodule's default remote too.
             download_target_from_origin(&sub, target)?;
         }
-        let tree = sub.find_commit(target)?.tree()?;
+        let commit = sub.find_commit(target)?;
+        let tree = commit.tree()?;
         check_submodule_tree(&sub, &tree, policy)?;
-        submodule.update(false, None)?;
+        if workdir_is_empty(&sub) {
+            // A clone whose checkout was refused (or never ran): its index already lists every
+            // file, so libgit2's safe checkout would take the missing files for deletions.
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.safe().recreate_missing(true);
+            sub.checkout_tree(commit.as_object(), Some(&mut checkout))?;
+            sub.set_head_detached(target)?;
+        } else {
+            submodule.update(false, None)?;
+        }
         return Ok(());
     }
     let mut no_checkout = git2::build::CheckoutBuilder::new();
@@ -171,6 +181,13 @@ fn guarded_update(
     checkout.safe().recreate_missing(true);
     sub.checkout_head(Some(&mut checkout))?;
     Ok(())
+}
+
+/// True when the submodule's work tree holds nothing but its `.git`.
+fn workdir_is_empty(sub: &Repository) -> bool {
+    sub.workdir()
+        .and_then(|workdir| std::fs::read_dir(workdir).ok())
+        .is_some_and(|entries| entries.flatten().all(|entry| entry.file_name() == ".git"))
 }
 
 fn check_submodule_tree(
@@ -494,6 +511,23 @@ mod case_tests {
         let sub = Repository::open(dir.path().join("sub")).unwrap();
         assert_eq!(sub.head().unwrap().target(), Some(src.clean));
         assert!(std::fs::symlink_metadata(dir.path().join("sub/d")).is_err());
+    }
+
+    #[test]
+    fn a_refused_fresh_submodule_is_complete_after_moving_to_a_clean_commit() {
+        let src = source();
+        let (dir, repo) = super_repo(&src, src.evil);
+        assert!(update(&repo).is_err());
+        set_gitlink(&repo, src.clean);
+        update(&repo).unwrap();
+        let sub_dir = dir.path().join("sub");
+        assert_eq!(
+            std::fs::read_to_string(sub_dir.join("a.txt")).unwrap(),
+            "a\n"
+        );
+        let sub = Repository::open(&sub_dir).unwrap();
+        assert_eq!(sub.head().unwrap().target(), Some(src.clean));
+        assert!(crate::status::status(&sub).unwrap().is_empty());
     }
 
     #[test]

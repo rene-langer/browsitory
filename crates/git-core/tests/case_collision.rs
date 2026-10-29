@@ -292,3 +292,32 @@ fn undo_restoring_a_case_collision_is_refused_before_writing() {
     assert!(matches!(error, UndoError::CaseCollision(_)));
     assert_untouched(&fx, fx.base);
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_can_still_be_reset_and_discarded() {
+    let fx = fixture();
+    fx.repo
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", false)
+        .unwrap();
+    branch::switch_branch(&fx.repo, "evil").unwrap();
+    fx.repo
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    write_file(fx.dir.path(), "a.txt", "edited\n");
+    reset::reset_to(&fx.repo, &fx.evil.to_string(), ResetMode::Hard).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(fx.dir.path().join("a.txt")).unwrap(),
+        "base\n"
+    );
+    write_file(fx.dir.path(), "d/x", "edited\n");
+    stage::discard_all_unstaged(&fx.repo, &["d/x".to_string(), "D".to_string()]).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(fx.dir.path().join("d/x")).unwrap(),
+        "PWNED\n"
+    );
+}

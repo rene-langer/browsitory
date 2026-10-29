@@ -4,16 +4,26 @@
 //! (`FILE_FLAG_OPEN_REPARSE_POINT`, so a link is never followed and its target, a network share
 //! included, never contacted), and held open without `FILE_SHARE_DELETE` until the act is done.
 //! A folder held that way can't be renamed, deleted or replaced (all need `DELETE` access, which
-//! the share mode denies), so once components `0..k` are held, the full path of component `k+1`
-//! resolves through exactly those folders. A process that already holds `DELETE` access makes
-//! the open fail with a sharing violation: the walk fails closed.
+//! the share mode denies). A process that already holds `DELETE` access makes the open fail with
+//! a sharing violation: the walk fails closed.
+//!
+//! A held folder that is *empty* can still be turned into a junction in place
+//! (`FSCTL_SET_REPARSE_POINT` needs no `DELETE`), and `FILE_FLAG_OPEN_REPARSE_POINT` only
+//! protects the last component of a path. So every component and every leaf opened by path is
+//! checked on its own handle to sit directly in the held parent (`GetFinalPathNameByHandleW` of
+//! both); a mismatch fails the act, and a file created by the failed act is deleted through its
+//! handle. Leaves are deleted through their handle (`FileDispositionInfo`), never by path, and
+//! an existing file is written through a handle whose file ID matches the one classified.
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
 //! refused or removed itself; another reparse point (a OneDrive placeholder) is a folder to
-//! walk through or a file to reopen without the flag, which must have the same file ID.
-//! Deleting acts by path under held parents: `DeleteFileW`/`RemoveDirectoryW` never follow a
-//! final reparse point.
+//! walk through or a file reopened without the flag (so the file system filter sees the read or
+//! write), which must have the same file ID.
+//!
+//! Residual: creating a missing folder (`CreateDirectoryW`) goes by path; if the held parent is
+//! turned into a junction in that instant, an empty folder may appear in the junction's target
+//! (the walk then fails on the parent check before anything is written into it).
 
 use std::ffi::{c_void, OsString};
 use std::fs::{File, OpenOptions};
@@ -32,18 +42,22 @@ const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 const FILE_SHARE_READ: u32 = 0x1;
 const FILE_SHARE_WRITE: u32 = 0x2;
+const FILE_SHARE_DELETE: u32 = 0x4;
+const DELETE: u32 = 0x0001_0000;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 
 const ERROR_FILE_NOT_FOUND: i32 = 2;
 const ERROR_PATH_NOT_FOUND: i32 = 3;
 const ERROR_INVALID_NAME: i32 = 123;
+const ERROR_FILE_EXISTS: i32 = 80;
 const ERROR_ALREADY_EXISTS: i32 = 183;
 const ERROR_DIRECTORY: i32 = 267;
 
 /// `FILE_INFO_BY_HANDLE_CLASS` values.
 const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
 const FILE_ID_INFO_CLASS: i32 = 18;
+const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
 
 /// `FILE_ATTRIBUTE_TAG_INFO`.
 #[repr(C)]
@@ -61,8 +75,20 @@ struct FileIdInfo {
     file_id: [u8; 16],
 }
 
+/// `FILE_DISPOSITION_INFO`: a single `BOOLEAN`.
+#[repr(C)]
+struct DispositionInfo {
+    delete_file: u8,
+}
+
 #[link(name = "kernel32")]
 extern "system" {
+    fn SetFileInformationByHandle(
+        file: *mut c_void,
+        class: i32,
+        info: *mut c_void,
+        size: u32,
+    ) -> i32;
     fn GetFileInformationByHandleEx(
         file: *mut c_void,
         class: i32,
@@ -106,6 +132,37 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
         return Err(io::Error::last_os_error());
     }
     Ok(info)
+}
+
+/// Marks the file or folder `file` refers to for deletion when its last handle closes. Acts on
+/// the object itself, never on a name, never following a link; a folder must be empty. The
+/// handle needs `DELETE` access.
+fn delete_by_handle(file: &File) -> io::Result<()> {
+    let mut info = DispositionInfo { delete_file: 1 };
+    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable
+    // `FILE_DISPOSITION_INFO` (one BOOLEAN byte, `repr(C)`) of exactly the size passed.
+    let ok = unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FILE_DISPOSITION_INFO_CLASS,
+            (&mut info as *mut DispositionInfo).cast(),
+            std::mem::size_of::<DispositionInfo>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// True when `child` (opened by path) sits directly in the held folder `parent`: the path
+/// didn't go through a held folder that became a junction meanwhile.
+fn in_parent(child: &File, parent: &File) -> io::Result<bool> {
+    Ok(final_path(child)?.parent() == Some(final_path(parent)?.as_path()))
+}
+
+fn redirected() -> io::Error {
+    io::Error::other("a folder of the working tree changed while it was being written")
 }
 
 /// The normalized `\\?\` DOS path of an open handle (`GetFinalPathNameByHandleW`), the same
@@ -179,46 +236,68 @@ impl Beneath {
 }
 
 /// What stands at a leaf, judged on a handle opened as itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Found {
-    Missing,
     Dir,
-    /// A name surrogate; `dir` when it is a folder link (removed with `RemoveDirectoryW`).
-    Link {
-        dir: bool,
+    /// A name surrogate (symbolic link, junction, …).
+    Link,
+    /// A file; `reopen` for a non-surrogate reparse point (OneDrive), which is read and written
+    /// through a second, normal handle.
+    File {
+        reopen: bool,
     },
-    /// A file, maybe a non-surrogate reparse point (reading reopens it).
-    File,
 }
 
-/// Classifies the leaf at `path` (its parent held). The handle is closed again, so the leaf can
-/// be deleted; whatever replaces it meanwhile is still never followed by the delete.
-fn inspect(path: &Path) -> io::Result<Found> {
-    let file = match open_pinned(path, 0) {
+/// Opens `path` (a child of `at`'s last held folder) as itself with `DELETE` access, checks it
+/// is in that folder, and classifies it. `None` when missing. Shares delete: the handle is
+/// what any later act uses, so a rename of the name meanwhile changes nothing.
+fn open_leaf_at(at: &Beneath, path: &Path) -> io::Result<Option<(File, Found)>> {
+    let file = match OpenOptions::new()
+        .access_mode(DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+    {
         Ok(file) => file,
-        Err(error) if missing(&error) => return Ok(Found::Missing),
+        Err(error) if missing(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
+    if !in_parent(&file, &at.dirs[at.dirs.len() - 1])? {
+        return Err(redirected());
+    }
     let info = attribute_tag(&file)?;
-    let dir = info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
-    Ok(match leaf_action(info.file_attributes, info.reparse_tag) {
-        LeafAction::Refuse => Found::Link { dir },
-        _ if dir => Found::Dir,
-        _ => Found::File,
-    })
+    let found = match leaf_action(info.file_attributes, info.reparse_tag) {
+        LeafAction::Refuse => Found::Link,
+        _ if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 => Found::Dir,
+        action => Found::File {
+            reopen: action == LeafAction::Reopen,
+        },
+    };
+    Ok(Some((file, found)))
 }
 
-/// Removes the link at `path` itself: `RemoveDirectoryW` for a folder link or junction,
-/// `DeleteFileW` otherwise. Neither follows the link.
-fn remove_link_at(path: &Path, dir: bool) -> io::Result<()> {
-    let result = if dir {
-        std::fs::remove_dir(path)
-    } else {
-        std::fs::remove_file(path)
-    };
-    match result {
-        Err(error) if !missing(&error) => Err(error),
-        _ => Ok(()),
+fn open_leaf(at: &Beneath) -> io::Result<Option<(File, Found)>> {
+    open_leaf_at(at, &at.leaf_path())
+}
+
+/// Opens `at`'s leaf a second time, normally (through the file system filter for a OneDrive
+/// file) or as itself, and checks it is the file `first` refers to.
+fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Result<Option<File>> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(access & GENERIC_WRITE != 0)
+        .access_mode(access | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if !reopen {
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
+    let second = match options.open(at.leaf_path()) {
+        Ok(file) => file,
+        Err(error) if missing(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok((file_id(&second)? == file_id(first)?).then_some(second))
 }
 
 /// How often a walk retries one component that keeps changing under it before giving up.
@@ -271,15 +350,20 @@ pub(super) fn walk(
                 },
                 Err(error) => return Err(error),
             };
+            if !in_parent(&dir, &at.dirs[at.dirs.len() - 1])? {
+                return Err(redirected());
+            }
             let info = attribute_tag(&dir)?;
             match leaf_action(info.file_attributes, info.reparse_tag) {
                 LeafAction::Refuse => {
-                    let is_dir = info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
                     drop(dir);
                     match on_link {
                         OnLink::Refuse => return Ok(Walk::Link),
                         OnLink::Clear => {
-                            remove_link_at(&path, is_dir)?;
+                            // Through its own handle, checked to be the link in the held parent.
+                            if let Some((link, Found::Link)) = open_leaf_at(&at, &path)? {
+                                delete_by_handle(&link)?;
+                            }
                             step(Step::Cleared(&name));
                             if on_missing == OnMissing::Stop {
                                 return Ok(Walk::Link);
@@ -321,50 +405,24 @@ fn unreadable(error: &io::Error) -> bool {
 }
 
 /// Opens the regular file at `at`'s leaf for reading: as itself, or (a non-surrogate reparse
-/// point, such as an online-only OneDrive file) reopened normally and checked to be the same
-/// file. `None` for a link, a folder or anything missing.
+/// point, such as an online-only OneDrive file) reopened normally so it hydrates. Either way the
+/// read handle must be the file classified in the held parent. `None` for a link, a folder or
+/// anything missing.
 fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
-    let path = at.leaf_path();
-    let first = match OpenOptions::new()
-        .access_mode(GENERIC_READ | SYNCHRONIZE)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(&path)
-    {
-        Ok(file) => file,
+    let (first, found) = match open_leaf(at) {
+        Ok(Some(leaf)) => leaf,
+        Ok(None) => return Ok(None),
         Err(error) if unreadable(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let info = attribute_tag(&first)?;
-    if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+    let Found::File { reopen } = found else {
         return Ok(None);
-    }
-    let file = match leaf_action(info.file_attributes, info.reparse_tag) {
-        LeafAction::Plain => first,
-        LeafAction::Refuse => return Ok(None),
-        LeafAction::Reopen => {
-            // `first` stays open without FILE_SHARE_DELETE, so the name can't be swapped for
-            // another file before the reopen; the file ID check proves it wasn't.
-            let reopened = match OpenOptions::new()
-                .access_mode(GENERIC_READ | SYNCHRONIZE)
-                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-                .open(&path)
-            {
-                Ok(file) => file,
-                Err(error) if unreadable(&error) => return Ok(None),
-                Err(error) => return Err(error),
-            };
-            if file_id(&reopened)? != file_id(&first)? {
-                return Ok(None);
-            }
-            reopened
-        }
     };
-    // Belt and braces: the opened file resolves below the work tree.
-    if !final_path(&file)?.starts_with(&at.root) {
-        return Ok(None);
+    match reopen_same(at, &first, reopen, GENERIC_READ) {
+        Ok(file) => Ok(file),
+        Err(error) if unreadable(&error) => Ok(None),
+        Err(error) => Err(error),
     }
-    Ok(Some(file))
 }
 
 /// See `worktree_guard::open_beneath`.
@@ -375,6 +433,34 @@ pub(super) fn open_file(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Res
         Err(error) if unreadable(&error) => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// Creates `at`'s leaf as a new empty file, checked to be in the held parent (deleted again
+/// through its handle when it isn't). `None` when something already stands there.
+fn create_leaf(at: &Beneath) -> io::Result<Option<File>> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(at.leaf_path())
+    {
+        Ok(file) => file,
+        Err(error)
+            if error.raw_os_error() == Some(ERROR_FILE_EXISTS)
+                || error.kind() == io::ErrorKind::AlreadyExists =>
+        {
+            return Ok(None)
+        }
+        Err(error) => return Err(error),
+    };
+    if !in_parent(&file, &at.dirs[at.dirs.len() - 1])? {
+        delete_by_handle(&file)?;
+        return Err(redirected());
+    }
+    Ok(Some(file))
 }
 
 /// See `worktree_guard::write_beneath`.
@@ -388,33 +474,36 @@ pub(super) fn write(
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
-    let path = at.leaf_path();
-    if let Found::Link { dir } = inspect(&path)? {
-        remove_link_at(&path, dir)?;
+    for _ in 0..ATTEMPTS {
+        let mut file = match open_leaf(&at)? {
+            None => match create_leaf(&at)? {
+                Some(file) => file,
+                None => continue,
+            },
+            Some((link, Found::Link)) => {
+                delete_by_handle(&link)?;
+                drop(link);
+                continue;
+            }
+            Some((_, Found::Dir)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "not a regular file",
+                ))
+            }
+            Some((first, Found::File { reopen })) => {
+                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE)? {
+                    Some(file) => file,
+                    None => continue,
+                }
+            }
+        };
+        // An existing file keeps its attributes, like `fs::write`.
+        file.set_len(0)?;
+        file.write_all(bytes)?;
+        return Ok(true);
     }
-    // Opened as itself, so a link that appears meanwhile is the handle, never its target; it
-    // is then refused below instead of written.
-    // `write(true)` lets std accept `create`; the access itself is `access_mode`.
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .access_mode(GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .create(true)
-        .open(&path)?;
-    let info = attribute_tag(&file)?;
-    if leaf_action(info.file_attributes, info.reparse_tag) == LeafAction::Refuse
-        || info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "not a regular file",
-        ));
-    }
-    file.set_len(0)?;
-    file.write_all(bytes)?;
-    Ok(true)
+    Err(redirected())
 }
 
 /// See `worktree_guard::remove_beneath`.
@@ -424,16 +513,10 @@ pub(super) fn remove(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result
         Walk::Link => return Ok(false),
         Walk::Missing | Walk::NotDir => return Ok(true),
     };
-    let path = at.leaf_path();
-    match inspect(&path)? {
-        Found::Missing => Ok(true),
-        Found::Dir => Ok(false),
-        Found::Link { dir } => remove_link_at(&path, dir).map(|()| true),
-        // `DeleteFileW` fails on a folder that appeared meanwhile.
-        Found::File => match std::fs::remove_file(&path) {
-            Err(error) if !missing(&error) => Err(error),
-            _ => Ok(true),
-        },
+    match open_leaf(&at)? {
+        None => Ok(true),
+        Some((_, Found::Dir)) => Ok(false),
+        Some((leaf, _)) => delete_by_handle(&leaf).map(|()| true),
     }
 }
 
@@ -442,9 +525,8 @@ pub(super) fn clear_hazard(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
     let Walk::Found(at) = walk(workdir, rel, OnLink::Clear, OnMissing::Stop, step)? else {
         return Ok(());
     };
-    let path = at.leaf_path();
-    match inspect(&path)? {
-        Found::Link { dir } => remove_link_at(&path, dir),
+    match open_leaf(&at)? {
+        Some((link, Found::Link)) => delete_by_handle(&link),
         _ => Ok(()),
     }
 }
@@ -457,17 +539,22 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
         Err(error) if unreadable(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let path = at.leaf_path();
-    match inspect(&path)? {
-        Found::Missing | Found::Dir => Ok(None),
+    let found = match open_leaf(&at) {
+        Ok(Some((_, found))) => found,
+        Ok(None) => return Ok(None),
+        Err(error) if unreadable(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    match found {
+        Found::Dir => Ok(None),
         // `read_link` opens the link as itself (FSCTL_GET_REPARSE_POINT): never followed.
-        Found::Link { .. } => match std::fs::read_link(&path) {
+        Found::Link => match std::fs::read_link(at.leaf_path()) {
             Ok(target) => Ok(Some(Leaf::Link(
                 target.to_string_lossy().replace('\\', "/").into_bytes(),
             ))),
             Err(_) => Ok(None),
         },
-        Found::File => {
+        Found::File { .. } => {
             let Some(mut file) = open_leaf_for_reading(&at)? else {
                 return Ok(None);
             };
@@ -486,21 +573,20 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     let Walk::Found(mut at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(());
     };
-    let path = at.leaf_path();
-    match inspect(&path)? {
-        Found::Missing => {}
-        Found::Dir => std::fs::remove_dir(&path)?,
-        Found::Link { dir } => remove_link_at(&path, dir)?,
-        Found::File => match std::fs::remove_file(&path) {
-            Err(error) if !missing(&error) => return Err(error),
-            _ => {}
-        },
+    if let Some((leaf, _)) = open_leaf(&at)? {
+        delete_by_handle(&leaf)?;
     }
-    // Upwards: each folder's own handle is closed (a held folder can't be removed), while its
-    // parents stay held, then it is removed by path only while empty. Never the work tree root.
+    // Upwards: each folder's own pinning handle is closed (a held folder can't be removed),
+    // while its parents stay held; it is then opened again, checked to be the plain folder in
+    // its held parent, and deleted through that handle, which fails unless it is empty. Never
+    // the work tree root.
     for i in (1..at.dirs.len()).rev() {
         at.dirs.pop();
-        if std::fs::remove_dir(at.path_of(i)).is_err() {
+        at.names.truncate(i);
+        let Ok(Some((dir, Found::Dir))) = open_leaf(&at) else {
+            break;
+        };
+        if delete_by_handle(&dir).is_err() {
             break;
         }
     }
@@ -525,23 +611,21 @@ pub(super) fn replace(
         }
         Walk::Link | Walk::Missing => return Err(io::Error::from(io::ErrorKind::NotFound)),
     };
-    let path = at.leaf_path();
-    match inspect(&path)? {
-        Found::Missing => {}
-        Found::Dir => std::fs::remove_dir(&path)?,
-        Found::Link { dir } => remove_link_at(&path, dir)?,
-        Found::File => std::fs::remove_file(&path)?,
-    }
     let bytes = match content {
         Content::File { bytes, .. } | Content::Link(bytes) => bytes,
     };
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(&path)?;
-    file.write_all(bytes)
+    for _ in 0..ATTEMPTS {
+        if let Some((leaf, _)) = open_leaf(&at)? {
+            // Fails for a folder that isn't empty, as `remove_dir` did. The deletion completes
+            // when the handle closes, right here.
+            delete_by_handle(&leaf)?;
+            drop(leaf);
+        }
+        if let Some(mut file) = create_leaf(&at)? {
+            return file.write_all(bytes);
+        }
+    }
+    Err(redirected())
 }
 
 #[cfg(test)]
