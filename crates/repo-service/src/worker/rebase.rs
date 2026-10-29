@@ -52,9 +52,9 @@ pub(super) fn abort(
     reply: Sender<Result<(), String>>,
 ) {
     let result = match rebase_state.take() {
-        Some(state) => {
-            git_core::rebase::abort_rebase(repo, state).map_err(|error| error.to_string())
-        }
+        Some(state) => git_core::rebase::abort_rebase(repo, &state)
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         None => Err("no rebase is currently in progress".to_string()),
     };
     let _ = reply.send(result);

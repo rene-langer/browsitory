@@ -579,7 +579,7 @@ fn abort_rebase_restores_the_original_branch_and_tip_exactly() {
     let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
     assert_eq!(result, RebaseStepResult::PausedForEdit);
 
-    git_core::rebase::abort_rebase(&repo, state).unwrap();
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
 
     let head_ref = repo.head().unwrap();
     assert_eq!(head_ref.shorthand().unwrap(), branch_name);
@@ -612,7 +612,7 @@ fn abort_rebase_after_a_conflict_also_recovers_cleanly() {
     let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
     assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
 
-    git_core::rebase::abort_rebase(&repo, state).unwrap();
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
 
     let head_ref = repo.head().unwrap();
     assert_eq!(head_ref.shorthand().unwrap(), branch_name);
@@ -922,7 +922,7 @@ fn abort_rebase_replaces_a_typechanged_symlink() {
     let (dir, repo, state) = paused_rebase();
     common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
 
-    git_core::rebase::abort_rebase(&repo, state).unwrap();
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
 
     common::assert_outside_untouched(out.path());
     assert!(!common::is_link(dir.path(), "tc"));
@@ -936,7 +936,7 @@ fn abort_rebase_replaces_a_symlinked_directory() {
     let (dir, repo, state) = paused_rebase();
     common::replace_with_link(dir.path(), "d", out.path());
 
-    git_core::rebase::abort_rebase(&repo, state).unwrap();
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
 
     common::assert_outside_untouched(out.path());
     assert!(!common::is_link(dir.path(), "d"));
@@ -1569,4 +1569,96 @@ fn health_is_other_operation_for_a_foreign_cherry_pick_and_a_merge() {
         rebase_health(&repo, &state).unwrap(),
         diverged(RebaseDivergence::OtherOperation)
     );
+}
+
+use git_core::rebase::RebaseAbort;
+
+#[test]
+fn abort_restores_the_branch_when_head_is_where_the_rebase_left_it() {
+    let (_dir, repo, state, _) = conflicting_rebase();
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+    assert_eq!(abort, RebaseAbort { restored: true });
+    assert_eq!(
+        repo.head().unwrap().name().unwrap(),
+        state.original_branch_ref
+    );
+    assert_eq!(head_id(&repo), state.original_tip);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn abort_after_an_error_stop_restores_the_branch() {
+    let (dir, repo) = init_repo();
+    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    write_file(dir.path(), "f.txt", "local\n");
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: true });
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(head_id(&repo), state.original_tip);
+}
+
+#[test]
+fn abort_after_head_moved_cleans_up_only_its_own_step_and_leaves_head() {
+    let (dir, repo, state, onto) = edit_pause_on_topic();
+    switch_outside(&repo, "elsewhere", git2::Oid::from_str(&onto).unwrap());
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+    write_file(dir.path(), "base.txt", "my unrelated edit\n");
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: false });
+    assert_eq!(repo.head().unwrap().name().unwrap(), "refs/heads/elsewhere");
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(common::read(dir.path(), "base.txt"), "my unrelated edit\n");
+    assert_eq!(branch_tip(&repo, "refs/heads/topic"), state.original_tip);
+}
+
+#[test]
+fn abort_with_the_branch_deleted_leaves_head_detached() {
+    let (dir, repo, state, _) = edit_pause_on_topic();
+    repo.find_reference("refs/heads/topic")
+        .unwrap()
+        .delete()
+        .unwrap();
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: false });
+    assert!(repo.head_detached().unwrap());
+    assert_eq!(head_id(&repo), state.expected_head);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    // The paused step's change is gone from the index and work tree, like `--abort`.
+    assert!(!dir.path().join("a.txt").exists());
+}
+
+#[test]
+fn abort_with_the_branch_moved_reattaches_to_its_new_tip() {
+    let (_dir, repo, state, onto) = edit_pause_on_topic();
+    let moved = git2::Oid::from_str(&onto).unwrap();
+    repo.reference("refs/heads/topic", moved, true, "moved")
+        .unwrap();
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: true });
+    assert_eq!(repo.head().unwrap().name().unwrap(), "refs/heads/topic");
+    assert_eq!(head_id(&repo), moved);
+}
+
+#[test]
+fn abort_leaves_a_foreign_operation_alone() {
+    let (_dir, repo, state, onto) = edit_pause_on_topic();
+    abort_pick_outside(&repo);
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{onto}\n")).unwrap();
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: false });
+    assert!(repo.path().join("MERGE_HEAD").exists());
+    assert!(repo.head_detached().unwrap());
 }

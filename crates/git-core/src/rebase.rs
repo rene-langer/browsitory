@@ -28,6 +28,8 @@ pub enum RebaseError {
          continuing the rebase."
     )]
     OperationInProgress,
+    #[error(transparent)]
+    Merge(#[from] crate::merge::MergeError),
     /// `branch` is the short name.
     #[error("{branch} moved since the rebase started. Abort the rebase and start again.")]
     BranchMoved { branch: String },
@@ -769,8 +771,43 @@ fn short_branch(branch_ref: &str) -> String {
         .to_string()
 }
 
-pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseError> {
-    restore_original_branch(repo, &state.original_branch_ref)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseAbort {
+    /// HEAD went back to the branch. `false` when HEAD was left where it is because the rebase
+    /// no longer owned it (HEAD moved, the branch is gone, another operation is paused).
+    pub restored: bool,
+}
+
+/// Ends a paused rebase, like `abort_sequence` (the caller forgets the state only on `Ok`):
+///
+/// - HEAD is where the rebase left it, the branch exists and git has nothing else paused: go
+///   back to the branch (at its current tip, even if it moved) with a forced checkout, as
+///   `git rebase --abort` does. `restored: true`.
+/// - Otherwise HEAD and every ref stay where they are, and only this rebase's paused step (git's
+///   pick of `plan[cursor]`, or its conflicts left at `expected_head`) is cleaned up like `git
+///   cherry-pick --abort`. `restored: false`.
+pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbort, RebaseError> {
+    let own_pick = is_own_paused_step(repo, state);
+    let other_operation = repo.state() != git2::RepositoryState::Clean && !own_pick;
+    let at_expected = head_at_expected(repo, state)?;
+    let branch_exists = match repo.find_reference(&state.original_branch_ref) {
+        Ok(_) => true,
+        Err(error) if error.code() == git2::ErrorCode::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    if at_expected && branch_exists && !other_operation {
+        restore_original_branch(repo, &state.original_branch_ref)?;
+        return Ok(RebaseAbort { restored: true });
+    }
+    let own_conflicts = repo.state() == git2::RepositoryState::Clean && at_expected && {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        index.has_conflicts()
+    };
+    if own_pick || own_conflicts {
+        crate::merge::abort_merge(repo)?;
+    }
+    Ok(RebaseAbort { restored: false })
 }
 
 /// Undoes an in-progress rebase: the original branch ref is never touched while a rebase runs —
