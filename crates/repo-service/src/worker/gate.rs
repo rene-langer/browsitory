@@ -66,14 +66,10 @@ impl OperationProbe<'_> {
         self.rebase(repo).is_some() || self.sequence.load(repo).is_some()
     }
 
-    pub fn in_progress(&self, repo: &Repository) -> bool {
-        self.marker(repo).is_some()
-    }
-
     /// Names the paused operation, constant for its whole life, so a pending undo entry is only
     /// ever recorded by the operation it was taken for (across restarts and processes). The
     /// stored rebase and sequence come first: their `CHERRY_PICK_HEAD` changes from step to step.
-    /// `None` when nothing is in progress.
+    /// `None` when nothing is in progress (so `marker(..).is_some()` is "in progress").
     pub fn marker(&self, repo: &Repository) -> Option<String> {
         if let Some(rebase) = self.rebase(repo) {
             return Some(format!(

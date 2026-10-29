@@ -760,13 +760,14 @@ impl Worker {
                     }
                 };
             }
-            let in_progress = |repo: &git2::Repository, rebase_fallback: &Option<RebaseState>| {
+            // Names the operation in progress (`None`: nothing is), for the undo recorder.
+            let marker = |repo: &git2::Repository, rebase_fallback: &Option<RebaseState>| {
                 gate::OperationProbe {
                     rebase: &rebase_store,
                     fallback: rebase_fallback,
                     sequence: &sequence_store,
                 }
-                .in_progress(repo)
+                .marker(repo)
             };
             macro_rules! rebase_slot {
                 () => {
@@ -777,7 +778,7 @@ impl Worker {
                 };
             }
             for mut command in rx {
-                undo_recorder.settle(in_progress(&repo, &rebase_fallback));
+                undo_recorder.settle(&repo, marker(&repo, &rebase_fallback).as_deref());
                 let plan = undo::plan_for(&command);
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
@@ -791,7 +792,7 @@ impl Worker {
                     undo::hold_reply(&mut command, &mut held);
                 }
                 if let Some(plan) = plan {
-                    undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_fallback));
+                    undo_recorder.begin(&repo, plan, marker(&repo, &rebase_fallback).as_deref());
                 }
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
@@ -1483,16 +1484,18 @@ impl Worker {
                     ),
                     Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
                     Command::Undo { reply } => {
-                        let _ = reply
-                            .send(undo_recorder.undo(&repo, in_progress(&repo, &rebase_fallback)));
+                        let _ = reply.send(
+                            undo_recorder.undo(&repo, marker(&repo, &rebase_fallback).as_deref()),
+                        );
                     }
                     Command::Redo { reply } => {
-                        let _ = reply
-                            .send(undo_recorder.redo(&repo, in_progress(&repo, &rebase_fallback)));
+                        let _ = reply.send(
+                            undo_recorder.redo(&repo, marker(&repo, &rebase_fallback).as_deref()),
+                        );
                     }
                 }
                 if track {
-                    undo_recorder.finish(&repo, in_progress(&repo, &rebase_fallback), aborts);
+                    undo_recorder.finish(&repo, marker(&repo, &rebase_fallback).as_deref(), aborts);
                 }
                 held.release();
             }
@@ -5396,5 +5399,205 @@ mod tests {
         assert!(handle.get_head_info().unwrap().rebase.is_some());
         handle.rebase_continue().unwrap();
         assert_eq!(handle.get_head_info().unwrap().rebase, None);
+    }
+
+    fn no_undo() -> UndoState {
+        UndoState {
+            undo: None,
+            redo: None,
+        }
+    }
+
+    fn undo_file(repo: &Repository) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(repo.path().join("browsitory/undo.json")).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_sequence_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            handle.cherry_pick_many(ids).unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        assert!(matches!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed { .. }
+        ));
+
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 3 commits".into())
+        );
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[test]
+    fn a_rebase_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        write_file(dir.path(), "a.txt", "amended\n");
+        handle.stage_file("a.txt".into()).unwrap();
+
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+
+        let label = handle.get_undo_state().unwrap().undo.unwrap();
+        assert!(label.starts_with("Rebase onto "), "{label}");
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+    }
+
+    #[test]
+    fn a_merge_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo) = conflicting_branches();
+        let main_tip = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle
+            .commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Merge feature".into())
+        );
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().target().unwrap(), main_tip);
+    }
+
+    #[test]
+    fn a_rebase_aborted_after_a_restart_records_nothing() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        handle.abort_rebase().unwrap();
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        assert!(undo_file(&repo).get("pending").is_none());
+    }
+
+    /// `git merge --abort` in a terminal: forget the merge and reset to HEAD.
+    fn abort_outside(repo: &Repository) {
+        repo.cleanup_state().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.reset(head.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_operation_aborted_outside_while_closed_drops_the_pending_entry() {
+        let (dir, repo) = conflicting_branches();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            worker
+                .handle()
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap();
+        }
+        assert_eq!(undo_file(&repo)["pending"]["label"], "Merge feature");
+        abort_outside(&repo);
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        assert!(undo_file(&repo).get("pending").is_none());
+        handle.create_branch("after".into(), "HEAD".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Create branch after".into())
+        );
+    }
+
+    #[test]
+    fn a_different_operation_started_outside_does_not_inherit_the_pending_entry() {
+        let (dir, repo) = conflicting_branches();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            let base = head.parent(0).unwrap();
+            repo.branch("other", &base, false).unwrap();
+        }
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "a.txt", "other\n");
+        commit_all(&repo, "other change");
+        let main = repo
+            .branches(Some(git2::BranchType::Local))
+            .unwrap()
+            .map(|branch| branch.unwrap().0.name().unwrap().unwrap().to_string())
+            .find(|name| name != "other" && name != "feature")
+            .unwrap();
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            worker
+                .handle()
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap();
+        }
+        abort_outside(&repo);
+        // `git merge other` in a terminal, which conflicts too.
+        let other = repo
+            .find_annotated_commit(repo.refname_to_id("refs/heads/other").unwrap())
+            .unwrap();
+        repo.merge(&[&other], None, None).unwrap();
+        assert!(repo.index().unwrap().has_conflicts());
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle
+            .commit("Merge other".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        // Not "Merge feature"; and "Merge other" can't be recorded: its "before" is unknown.
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
+    fn undo_refuses_while_a_restored_pending_entry_exists() {
+        let (dir, repo) = conflicting_branches();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .create_branch("before".into(), "HEAD".into())
+            .unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+        assert_eq!(handle.redo().unwrap(), UndoOutcome::OperationInProgress);
+        assert!(Repository::open(dir.path())
+            .unwrap()
+            .find_branch("before", git2::BranchType::Local)
+            .is_ok());
+        let _ = repo;
     }
 }
