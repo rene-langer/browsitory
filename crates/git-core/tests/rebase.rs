@@ -1356,3 +1356,101 @@ fn continue_does_not_adopt_a_commit_with_another_author() {
     assert!(matches!(result, Err(RebaseError::HeadMoved { .. })));
     assert_eq!(state, before);
 }
+
+/// An Edit pause on `a` of `[Edit a, Pick b]` on a branch named `topic`.
+fn edit_pause_on_topic() -> (tempfile::TempDir, git2::Repository, RebaseState, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("topic", &base, false).unwrap();
+    }
+    repo.set_head("refs/heads/topic").unwrap();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+    let ids: Vec<String> = git_core::rebase::commits_since(&repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    let (state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+    (dir, repo, state, onto)
+}
+
+#[test]
+fn finish_refuses_when_the_branch_moved_during_the_pause() {
+    let (_dir, repo, mut state, onto) = edit_pause_on_topic();
+    let other = git2::Oid::from_str(&onto).unwrap();
+    repo.reference("refs/heads/topic", other, true, "moved elsewhere")
+        .unwrap();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::BranchMoved { .. })));
+    assert_eq!(branch_tip(&repo, "refs/heads/topic"), other);
+    assert!(repo.head_detached().unwrap());
+    assert_eq!(state.cursor, state.plan.len());
+    assert_eq!(state.stop, RebaseStop::Error);
+}
+
+#[test]
+fn continue_retries_finish_after_the_branch_is_put_back() {
+    let (_dir, repo, mut state, onto) = edit_pause_on_topic();
+    let other = git2::Oid::from_str(&onto).unwrap();
+    repo.reference("refs/heads/topic", other, true, "moved elsewhere")
+        .unwrap();
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+    repo.reference("refs/heads/topic", state.original_tip, true, "put back")
+        .unwrap();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(repo.head().unwrap().name().unwrap(), "refs/heads/topic");
+    assert_eq!(branch_tip(&repo, "refs/heads/topic"), state.expected_head);
+    let summaries: Vec<String> = git_core::rebase::commits_since(&repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect();
+    assert_eq!(summaries, ["add a", "add b"]);
+}
+
+#[test]
+fn finish_refuses_when_the_branch_was_deleted() {
+    let (_dir, repo, mut state, _) = edit_pause_on_topic();
+    repo.find_reference("refs/heads/topic")
+        .unwrap()
+        .delete()
+        .unwrap();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::BranchMissing { .. })));
+    assert!(repo.head_detached().unwrap());
+    assert_eq!(state.cursor, state.plan.len());
+}
+
+#[test]
+fn the_branch_errors_name_the_short_branch() {
+    assert_eq!(
+        RebaseError::BranchMoved {
+            branch: "topic".into()
+        }
+        .to_string(),
+        "topic moved since the rebase started. Abort the rebase and start again."
+    );
+    assert_eq!(
+        RebaseError::BranchMissing {
+            branch: "feature/x".into()
+        }
+        .to_string(),
+        "feature/x no longer exists. Abort the rebase."
+    );
+}
