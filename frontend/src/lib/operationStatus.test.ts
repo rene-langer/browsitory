@@ -72,6 +72,9 @@ describe("rebase status text", () => {
     expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "BranchMissing" }))).toBe(
       "Stopped the rebase. topic no longer exists, so HEAD was left detached.",
     );
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBe(
+      "Stopped the rebase. topic had changed, so HEAD was left where it is.",
+    );
     expect(rebaseAbortToast({ restored: false }, null)).toBe(
       "Stopped the rebase. HEAD had moved, so it was left where it is.",
     );

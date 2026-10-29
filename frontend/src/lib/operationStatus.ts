@@ -82,5 +82,8 @@ export function rebaseAbortToast(abort: RebaseAbort, info: RebaseInfo | null): s
   if (info !== null && info.health.kind === "Diverged" && info.health.reason === "BranchMissing") {
     return `Stopped the rebase. ${info.branch} no longer exists, so HEAD was left detached.`;
   }
+  if (info !== null && info.health.kind === "Diverged" && info.health.reason === "BranchMoved") {
+    return `Stopped the rebase. ${info.branch} had changed, so HEAD was left where it is.`;
+  }
   return "Stopped the rebase. HEAD had moved, so it was left where it is.";
 }

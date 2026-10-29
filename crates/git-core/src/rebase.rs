@@ -305,6 +305,11 @@ pub fn rebase_continue(
                 RebaseStop::Error => RebaseStop::Conflict,
                 applied => applied,
             }
+        } else if is_step_committed_by_hand(repo, state).unwrap_or(false) {
+            // Adopting a step committed by hand failed before it moved anything (e.g. the
+            // reworded commit couldn't be signed): it is still the paused step, so keep its stop
+            // and let Continue adopt it again.
+            state.stop
         } else {
             RebaseStop::Error
         };
@@ -780,32 +785,43 @@ pub struct RebaseAbort {
 
 /// Ends a paused rebase, like `abort_sequence` (the caller forgets the state only on `Ok`):
 ///
-/// - HEAD is where the rebase left it, the branch exists and git has nothing else paused: go
-///   back to the branch (at its current tip, even if it moved) with a forced checkout, as
-///   `git rebase --abort` does. `restored: true`.
-/// - Otherwise HEAD and every ref stay where they are, and only this rebase's paused step (git's
-///   pick of `plan[cursor]`, or its conflicts left at `expected_head`) is cleaned up like `git
-///   cherry-pick --abort`. `restored: false`.
+/// - HEAD is where the rebase left it, the branch is still at the tip the rebase started from and
+///   git has nothing else paused: go back to the branch with a forced checkout, as `git rebase
+///   --abort` does. `restored: true`.
+/// - Otherwise (the rebase diverged) HEAD and every ref stay where they are. With HEAD still at
+///   `expected_head`, this rebase's paused step is undone like `git cherry-pick --abort`; with
+///   HEAD moved, only git's paused-pick state is forgotten, so work staged elsewhere survives.
+///   `restored: false`.
 pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbort, RebaseError> {
     let own_pick = is_own_paused_step(repo, state);
     let other_operation = repo.state() != git2::RepositoryState::Clean && !own_pick;
     let at_expected = head_at_expected(repo, state)?;
-    let branch_exists = match repo.find_reference(&state.original_branch_ref) {
-        Ok(_) => true,
+    // The branch must still be where the rebase found it: a branch moved outside is a
+    // divergence, and Abort then leaves HEAD (and any work made during the pause) alone (D3).
+    let branch_unmoved = match repo.find_reference(&state.original_branch_ref) {
+        Ok(reference) => reference.target() == Some(state.original_tip),
         Err(error) if error.code() == git2::ErrorCode::NotFound => false,
         Err(error) => return Err(error.into()),
     };
-    if at_expected && branch_exists && !other_operation {
+    if at_expected && branch_unmoved && !other_operation {
         restore_original_branch(repo, &state.original_branch_ref)?;
         return Ok(RebaseAbort { restored: true });
     }
-    let own_conflicts = repo.state() == git2::RepositoryState::Clean && at_expected && {
-        let mut index = repo.index()?;
-        index.read(false)?;
-        index.has_conflicts()
-    };
-    if own_pick || own_conflicts {
-        crate::merge::abort_merge(repo)?;
+    if at_expected {
+        let own_conflicts = repo.state() == git2::RepositoryState::Clean && {
+            let mut index = repo.index()?;
+            index.read(false)?;
+            index.has_conflicts()
+        };
+        if own_pick || own_conflicts {
+            // HEAD is where the rebase left it, so the index holds this rebase's step: undo it
+            // like `git cherry-pick --abort`.
+            crate::merge::abort_merge(repo)?;
+        }
+    } else if own_pick {
+        // HEAD moved (e.g. `git checkout other`): the index may now hold work staged there, so
+        // only forget git's paused pick and leave the index and work tree alone.
+        repo.cleanup_state()?;
     }
     Ok(RebaseAbort { restored: false })
 }

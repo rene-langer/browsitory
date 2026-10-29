@@ -1636,18 +1636,102 @@ fn abort_with_the_branch_deleted_leaves_head_detached() {
     assert!(!dir.path().join("a.txt").exists());
 }
 
+/// D3: a branch moved outside is a divergence, so Abort leaves HEAD (and an uncommitted edit
+/// made during the pause) alone instead of force-checking-out the moved branch.
 #[test]
-fn abort_with_the_branch_moved_reattaches_to_its_new_tip() {
-    let (_dir, repo, state, onto) = edit_pause_on_topic();
+fn abort_with_the_branch_moved_leaves_head_and_work_alone() {
+    let (dir, repo, state, onto) = edit_pause_on_topic();
     let moved = git2::Oid::from_str(&onto).unwrap();
     repo.reference("refs/heads/topic", moved, true, "moved")
         .unwrap();
+    write_file(dir.path(), "base.txt", "edit made during the pause\n");
 
     let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
 
-    assert_eq!(abort, RebaseAbort { restored: true });
-    assert_eq!(repo.head().unwrap().name().unwrap(), "refs/heads/topic");
-    assert_eq!(head_id(&repo), moved);
+    assert_eq!(abort, RebaseAbort { restored: false });
+    assert!(repo.head_detached().unwrap());
+    assert_eq!(head_id(&repo), state.expected_head);
+    assert_eq!(branch_tip(&repo, "refs/heads/topic"), moved);
+    assert_eq!(
+        common::read(dir.path(), "base.txt"),
+        "edit made during the pause\n"
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn abort_after_head_moved_keeps_work_staged_on_the_other_branch() {
+    let (dir, repo, state, onto) = edit_pause_on_topic();
+    switch_outside(&repo, "elsewhere", git2::Oid::from_str(&onto).unwrap());
+    write_file(dir.path(), "staged.txt", "staged on elsewhere\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("staged.txt")).unwrap();
+    index.write().unwrap();
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(abort, RebaseAbort { restored: false });
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    assert!(index
+        .get_path(std::path::Path::new("staged.txt"), 0)
+        .is_some());
+    assert_eq!(
+        common::read(dir.path(), "staged.txt"),
+        "staged on elsewhere\n"
+    );
+}
+
+/// A Reword step committed by hand whose re-commit with the planned message fails (here an
+/// unusable signing config) must stay adoptable once the problem is fixed.
+#[test]
+fn a_failed_reword_of_an_adopted_step_can_be_retried() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let picked = commit_id_at(&repo, 0);
+    let plan = vec![RebasePlanEntry {
+        commit_id: picked.clone(),
+        action: RebaseAction::Reword {
+            message: "planned message".into(),
+        },
+        combined_message: None,
+    }];
+    let (mut state, _) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    resolve_shared(&repo);
+    commit_by_hand(&repo, &author_of(&repo, &picked), "typed in a terminal");
+    {
+        let mut config = repo.config().unwrap();
+        config.set_bool("commit.gpgSign", true).unwrap();
+        config.set_str("gpg.format", "no-such-format").unwrap();
+    }
+
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+
+    repo.config()
+        .unwrap()
+        .set_bool("commit.gpgSign", false)
+        .unwrap();
+    assert_eq!(
+        git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
+        RebaseStepResult::Done
+    );
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .message()
+            .unwrap(),
+        "planned message"
+    );
 }
 
 #[test]
