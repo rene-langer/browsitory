@@ -186,10 +186,8 @@ enum Found {
     Link {
         dir: bool,
     },
-    /// A file, maybe a non-surrogate reparse point (`reopen`).
-    File {
-        reopen: bool,
-    },
+    /// A file, maybe a non-surrogate reparse point (reading reopens it).
+    File,
 }
 
 /// Classifies the leaf at `path` (its parent held). The handle is closed again, so the leaf can
@@ -205,9 +203,7 @@ fn inspect(path: &Path) -> io::Result<Found> {
     Ok(match leaf_action(info.file_attributes, info.reparse_tag) {
         LeafAction::Refuse => Found::Link { dir },
         _ if dir => Found::Dir,
-        action => Found::File {
-            reopen: action == LeafAction::Reopen,
-        },
+        _ => Found::File,
     })
 }
 
@@ -434,7 +430,7 @@ pub(super) fn remove(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result
         Found::Dir => Ok(false),
         Found::Link { dir } => remove_link_at(&path, dir).map(|()| true),
         // `DeleteFileW` fails on a folder that appeared meanwhile.
-        Found::File { .. } => match std::fs::remove_file(&path) {
+        Found::File => match std::fs::remove_file(&path) {
             Err(error) if !missing(&error) => Err(error),
             _ => Ok(true),
         },
@@ -471,7 +467,7 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
             ))),
             Err(_) => Ok(None),
         },
-        Found::File { .. } => {
+        Found::File => {
             let Some(mut file) = open_leaf_for_reading(&at)? else {
                 return Ok(None);
             };
@@ -495,7 +491,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
         Found::Missing => {}
         Found::Dir => std::fs::remove_dir(&path)?,
         Found::Link { dir } => remove_link_at(&path, dir)?,
-        Found::File { .. } => match std::fs::remove_file(&path) {
+        Found::File => match std::fs::remove_file(&path) {
             Err(error) if !missing(&error) => return Err(error),
             _ => {}
         },
@@ -534,7 +530,7 @@ pub(super) fn replace(
         Found::Missing => {}
         Found::Dir => std::fs::remove_dir(&path)?,
         Found::Link { dir } => remove_link_at(&path, dir)?,
-        Found::File { .. } => std::fs::remove_file(&path)?,
+        Found::File => std::fs::remove_file(&path)?,
     }
     let bytes = match content {
         Content::File { bytes, .. } | Content::Link(bytes) => bytes,

@@ -686,6 +686,8 @@ pub(crate) enum Leaf {
 pub(crate) enum Content<'a> {
     File {
         bytes: &'a [u8],
+        /// Windows files have no exec bit.
+        #[cfg_attr(windows, allow(dead_code))]
         executable: bool,
     },
     /// A symbolic link to the target (written as a plain file holding it where links aren't
