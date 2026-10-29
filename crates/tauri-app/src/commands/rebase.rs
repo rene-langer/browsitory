@@ -1,6 +1,6 @@
 use super::{
-    worker_handle, AppState, RebasePlanCommitDto, RebasePlanEntryDto, RebaseProgressDto,
-    RebaseStepResultDto,
+    worker_handle, AppState, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
+    RebaseProgressDto, RebaseStepResultDto,
 };
 use tauri::State;
 
@@ -41,10 +41,13 @@ pub async fn rebase_continue(
 }
 
 #[tauri::command]
-pub async fn abort_rebase(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?
-        .abort_rebase()
-        .map(|_| ())
+pub async fn abort_rebase(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<RebaseAbortDto, String> {
+    Ok(RebaseAbortDto::from(
+        worker_handle(&state, &repo_path)?.abort_rebase()?,
+    ))
 }
 
 #[tauri::command]

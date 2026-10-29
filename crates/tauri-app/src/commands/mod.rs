@@ -631,6 +631,7 @@ pub struct HeadInfoDto {
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
+    pub rebase: Option<RebaseInfoDto>,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -648,6 +649,60 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
+            rebase: info.rebase.map(RebaseInfoDto::from),
+        }
+    }
+}
+
+/// A paused interactive rebase: `health` is `{ "kind": "Paused" }` or `{ "kind": "Diverged",
+/// "reason": "HeadMoved" | "BranchMoved" | "BranchMissing" | "OtherOperation" }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseInfoDto {
+    pub branch: String,
+    pub onto: String,
+    pub current_step: usize,
+    pub total_steps: usize,
+    pub health: RebaseHealthDto,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "reason")]
+pub enum RebaseHealthDto {
+    Paused,
+    Diverged(&'static str),
+}
+
+impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
+    fn from(info: git_core::repo::RebaseInfo) -> Self {
+        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        Self {
+            branch: info.branch,
+            onto: info.onto,
+            current_step: info.current_step,
+            total_steps: info.total_steps,
+            health: match info.health {
+                RebaseHealth::Paused => RebaseHealthDto::Paused,
+                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
+                    RebaseDivergence::HeadMoved => "HeadMoved",
+                    RebaseDivergence::BranchMoved => "BranchMoved",
+                    RebaseDivergence::BranchMissing => "BranchMissing",
+                    RebaseDivergence::OtherOperation => "OtherOperation",
+                }),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct RebaseAbortDto {
+    pub restored: bool,
+}
+
+impl From<git_core::rebase::RebaseAbort> for RebaseAbortDto {
+    fn from(abort: git_core::rebase::RebaseAbort) -> Self {
+        Self {
+            restored: abort.restored,
         }
     }
 }
@@ -2778,7 +2833,7 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
@@ -3185,5 +3240,68 @@ mod tests {
         assert_eq!(handle_a.get_status().unwrap().len(), 1);
         assert!(handle_a.get_status().unwrap()[0].staged);
         assert!(handle_b.get_status().unwrap().is_empty());
+    }
+
+    fn head_info_with_rebase(health: git_core::rebase::RebaseHealth) -> serde_json::Value {
+        serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
+            head_id: None,
+            detached_at: None,
+            head_pushed: false,
+            operation: Some(git_core::repo::OperationKind::CherryPick),
+            squash_message: None,
+            commit_hooks: vec![],
+            sequence: None,
+            rebase: Some(git_core::repo::RebaseInfo {
+                branch: "feature/x".into(),
+                onto: "c0ffee".into(),
+                current_step: 1,
+                total_steps: 2,
+                health,
+            }),
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn head_info_dto_serializes_a_paused_rebase() {
+        let json = head_info_with_rebase(git_core::rebase::RebaseHealth::Paused);
+        assert_eq!(
+            json["rebase"],
+            serde_json::json!({
+                "branch": "feature/x",
+                "onto": "c0ffee",
+                "currentStep": 1,
+                "totalSteps": 2,
+                "health": { "kind": "Paused" },
+            })
+        );
+    }
+
+    #[test]
+    fn head_info_dto_serializes_a_diverged_rebase_reason() {
+        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        for (reason, name) in [
+            (RebaseDivergence::HeadMoved, "HeadMoved"),
+            (RebaseDivergence::BranchMoved, "BranchMoved"),
+            (RebaseDivergence::BranchMissing, "BranchMissing"),
+            (RebaseDivergence::OtherOperation, "OtherOperation"),
+        ] {
+            let json = head_info_with_rebase(RebaseHealth::Diverged(reason));
+            assert_eq!(
+                json["rebase"]["health"],
+                serde_json::json!({ "kind": "Diverged", "reason": name })
+            );
+        }
+    }
+
+    #[test]
+    fn rebase_abort_dto_serializes_restored() {
+        assert_eq!(
+            serde_json::to_value(super::RebaseAbortDto::from(git_core::rebase::RebaseAbort {
+                restored: false
+            }))
+            .unwrap(),
+            serde_json::json!({ "restored": false })
+        );
     }
 }
