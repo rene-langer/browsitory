@@ -204,10 +204,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   names differ only in case…"), instead of letting the checkout silently drop the folder's files.
   A clone of such a repository fails and removes what it downloaded. Linux refuses only when
   `core.ignorecase` is set (#156).
-- Conflict resolution, aborting a merge, undo/redo, stashing a single file and the removal of
-  symbolic links before a checkout act on the folders they checked, so a folder swapped for a
+- Conflict resolution, aborting a merge, undo/redo, stashing a single file, discarding an
+  untracked file, **Ignore** (appending to `.gitignore`) and the removal of symbolic links
+  before a checkout act on the folders they checked, so a folder swapped for a
   link at the same moment can't redirect them outside the repository. Undo no longer hangs on a
-  named pipe that replaced a file, and resolving a conflict never writes into a pipe or device
+  named pipe that replaced a file, **Ignore** no longer hangs on a named pipe `.gitignore`, and
+  resolving a conflict never writes into a pipe or device
   (#149).
 - Windows: the image preview, conflict resolution, undo/redo and the removal of links before a
   checkout no longer follow a junction or symbolic link in the middle of a path (even one

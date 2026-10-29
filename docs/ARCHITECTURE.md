@@ -337,7 +337,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   then replaced, a folder link is refused (`BeyondSymlink`).
 - All of Browsitory's own raw work-tree I/O goes through `worktree_guard` (#149):
   `write_beneath` / `remove_beneath` (conflict resolution, abort merge's removal of added
-  files), `clear_hazards`, `open_beneath` (image preview), and for undo/redo and the
+  files, discarding an untracked file), `read_beneath` + `write_beneath` for **Ignore**'s
+  `.gitignore` append, `clear_hazards`, `open_beneath` (image preview), and for undo/redo and the
   path-limited stash `read_beneath` (snapshots and checks; never below a symlinked folder, never
   a FIFO), `replace_beneath` (restore writes; a symlinked folder on the way is removed and
   recreated, never written through) and `remove_and_prune_beneath` (deletions and the folders
@@ -416,8 +417,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or a
   refusal check: `scan`, `refuse_linked_folders`, `has_symlinked_ancestor` in stage/stash,
   `refuse_linked_path`) and libgit2's own write; libgit2 has no `openat`-style checkout. The
-  same threat class as #138 (a local writer racing the app). Browsitory's own raw I/O is not
-  affected (above).
+  same threat class as #138 (a local writer racing the app). Browsitory's own raw reads, writes
+  and deletes in the work tree all go through the walker (above); what is left outside it is
+  stat-only checks (the refusal checks listed here, undo's `symlink_metadata` / `read_dir`
+  checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
+  `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
   is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
   the outside name sees the new content). A hardlink is indistinguishable from a regular file by

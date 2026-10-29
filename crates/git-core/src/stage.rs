@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::diff::{working_diff_options, DiffOptions};
 use crate::line_patch::{self, Direction, FileRef, HunkRef, LinePatchError, PatchLine};
+use crate::worktree_guard::Leaf;
 
 fn staging_opts(context_lines: u32) -> DiffOptions {
     // Partial staging is disabled in the UI while ignore-whitespace is on, so staging always
@@ -154,12 +155,13 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         checkout.force().path(rel).disable_pathspec_match(true);
         repo.checkout_index(None, Some(&mut checkout))?;
     } else {
-        let full = workdir.join(rel);
-        if let Ok(meta) = full.symlink_metadata() {
-            if meta.is_dir() {
-                return Err(StageError::IsFolder(path.to_string()));
+        // Through the held-folder walker, so a folder swapped for a link after the checks above
+        // can't redirect the delete outside the repository (#149).
+        if !crate::worktree_guard::remove_beneath(workdir, path)? {
+            if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
+                return Err(StageError::BeyondSymlink(path.to_string()));
             }
-            std::fs::remove_file(full)?;
+            return Err(StageError::IsFolder(path.to_string()));
         }
     }
     Ok(())
@@ -212,20 +214,19 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {
         return Err(StageError::InvalidPattern);
     }
-    let file = repo
-        .workdir()
-        .ok_or(StageError::NoWorkdir)?
-        .join(".gitignore");
-    if file
-        .symlink_metadata()
-        .is_ok_and(|meta| meta.file_type().is_symlink())
-    {
-        return Err(StageError::InvalidPath);
-    }
-    let existing = match std::fs::read_to_string(&file) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e.into()),
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    // Read and written through the work tree walker: never through a link (a linked
+    // `.gitignore` is refused), never blocking on or writing into a FIFO (#149).
+    let existing = match crate::worktree_guard::read_beneath(workdir, ".gitignore")? {
+        Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+        Some(Leaf::Link(_)) => return Err(StageError::InvalidPath),
+        None => match std::fs::symlink_metadata(workdir.join(".gitignore")) {
+            // Missing: a new file.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            // A folder, FIFO or device: not a file to append to.
+            _ => return Err(StageError::InvalidPath),
+        },
     };
     if existing.lines().any(|line| line.trim_end() == pattern) {
         return Ok(());
@@ -236,7 +237,10 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     }
     next.push_str(pattern);
     next.push('\n');
-    std::fs::write(&file, next)?;
+    // A link swapped in meanwhile is removed, never written through.
+    if !crate::worktree_guard::write_beneath(workdir, ".gitignore", next.as_bytes())? {
+        return Err(StageError::InvalidPath);
+    }
     Ok(())
 }
 
