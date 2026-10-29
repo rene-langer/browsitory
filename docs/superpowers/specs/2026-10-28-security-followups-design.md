@@ -111,12 +111,119 @@ The CI run of this test fills the table below (Task C1, Step 5). **Expected**, f
 row intact; raw clone and merge leave `D` as a link and `d/x` missing (dropped by `rmdir_r`);
 `ignorecase=false` rows fail the checkout with "file exists".
 
-| Row | macOS ic=true | macOS ic=false | Windows ic=true | Windows ic=false |
-|---|---|---|---|---|
-| *(to be filled from CI, Task C1 Step 5)* | | | | |
+**Result: no row wrote, deleted or changed anything outside the repository, on either
+platform, before or after the fix.** The CHANGELOG therefore says "refuses … instead of letting
+the checkout drop … files", not "could write outside".
 
-If any row writes outside, Tasks C3/C4 fix it anyway. The table and the CHANGELOG wording then
-say "fixed" rather than "hardened".
+Each cell is the operation's result, then what stood under any spelling of `d` afterwards
+(`D=link`: a link named `D`; `d=dir[x]`: a folder `d` holding `x`; `none`: nothing; `D=file`:
+the link checked out as a plain file). "conflict" is libgit2's "1 conflict prevents checkout";
+"could not create symlink" / "access denied" is libgit2 failing to create the link because the
+folder of the other case already exists (`ignorecase=false`, so `REMOVE_EXISTING` is off).
+`n/a`: a fresh clone's or submodule's `core.ignorecase` can't be preset (the `ic=false` raw
+clone row clones without a checkout, sets it, then checks out forced).
+
+Findings:
+- **macOS (APFS), `ignorecase=true`:** as predicted, libgit2 writes the link last and removes
+  the folder of the other case first, so clone, merge, cherry-pick, stash apply, reset, undo,
+  worktree add, submodule update and pull silently end with the link only: `d/x` is dropped. A
+  forced checkout ends with the folder only (the next forced checkout removes the link again).
+  The existing guard already refused switch/checkout/rebase start on the two-step rows
+  (`LinkedFolder`: `lstat("d")` answers with the link `D`).
+- **`ignorecase=false` on a case-insensitive file system:** every checkout fails half-way when
+  it creates the link; nothing outside changes.
+- **Windows (NTFS):** with the hermetic global `.gitconfig` saying `core.symlinks=true`, a fresh
+  repository on the GitHub runner still gets `core.symlinks=false` (libgit2's own link test in
+  the work tree fails there, although `std::os::windows::fs::symlink_dir` succeeds), so links
+  are checked out as plain files and nothing can redirect a write. The probe then sets
+  `core.symlinks=true` per repository (commit `eb972d48`) to exercise real links: the raw
+  libgit2 rows behave as on macOS (links created, outside intact). A fresh clone or submodule
+  decides on its own and still writes plain files.
+- **After C3/C4:** every git-core row is refused with `CaseCollision` before anything is written
+  (clone and worktree leave no folder); the raw libgit2 rows stay as the canary.
+
+Before the fix (CI run 40821290813, commit `007f8622`; Windows links checked out as files):
+
+| Row | Link | macOS ic=true | macOS ic=false | Windows ic=true | Windows ic=false |
+|---|---|---|---|---|---|
+| raw clone | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | access denied; d=dir[x] |
+| raw safe checkout_tree x2 | D | conflict; D=link | could not create symlink; d=dir[x] | conflict; D=file | access denied; d=dir[x] |
+| raw forced checkout_tree x2 | D | Ok; d=dir[x] | could not create symlink; d=dir[x] | Ok; d=dir[x] | access denied; d=dir[x] |
+| raw merge_commits + checkout_index | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | access denied; d=dir[x] |
+| raw submodule.update | D | Ok; D=link | n/a | Ok; D=file | n/a |
+| clone_repo | D | Ok; D=link | n/a | Ok; D=file | n/a |
+| switch_branch x2 | D | refused: LinkedFolder; D=link | could not create symlink; d=dir[x] | conflict; D=file | git operation failed: failed to create f; d=dir[x] |
+| checkout_commit x2 | D | refused: LinkedFolder; D=link | could not create symlink; d=dir[x] | conflict; D=file | git operation failed: failed to create f; d=dir[x] |
+| start_merge ff | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | git operation failed: failed to create f; d=dir[x] |
+| start_merge --no-ff | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | git operation failed: failed to create f; d=dir[x] |
+| cherry_pick | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | access denied; d=dir[x] |
+| start_rebase | D | refused: LinkedFolder; none | could not create symlink; d=dir[x] | Ok; D=file | git operation failed: failed to create f; d=dir[x] |
+| apply_stash | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | git operation failed: failed to create f; d=dir[x] |
+| reset_to Hard x2 | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; d=dir[x] | access denied; d=dir[x] |
+| undo::restore | D | Ok; D=link | could not create symlink; d=dir[x] | file exists (os 183); D=file | git operation failed: failed to create f; d=dir[x] |
+| create_worktree | D | Ok; D=link | git operation failed; d=dir[x] | Ok; D=file | git operation failed; d=dir[x] |
+| update_submodule | D | Ok; D=link | n/a | Ok; D=file | n/a |
+| pull_after_fetch ff | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | git remote operation failed: failed to c; d=dir[x] |
+| raw clone | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | access denied; D=dir[x] |
+| raw safe checkout_tree x2 | d | conflict; d=link | could not create symlink; D=dir[x] | conflict; d=file | access denied; D=dir[x] |
+| raw forced checkout_tree x2 | d | Ok; D=dir[x] | could not create symlink; D=dir[x] | Ok; D=dir[x] | access denied; D=dir[x] |
+| raw merge_commits + checkout_index | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | access denied; D=dir[x] |
+| raw submodule.update | d | Ok; d=link | n/a | Ok; d=file | n/a |
+| clone_repo | d | Ok; d=link | n/a | Ok; d=file | n/a |
+| switch_branch x2 | d | refused: LinkedFolder; d=link | could not create symlink; D=dir[x] | conflict; d=file | git operation failed: failed to create f; D=dir[x] |
+| checkout_commit x2 | d | refused: LinkedFolder; d=link | could not create symlink; D=dir[x] | conflict; d=file | git operation failed: failed to create f; D=dir[x] |
+| start_merge ff | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | git operation failed: failed to create f; D=dir[x] |
+| start_merge --no-ff | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | git operation failed: failed to create f; D=dir[x] |
+| cherry_pick | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | access denied; D=dir[x] |
+| start_rebase | d | refused: LinkedFolder; none | could not create symlink; D=dir[x] | Ok; d=file | git operation failed: failed to create f; D=dir[x] |
+| apply_stash | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | git operation failed: failed to create f; D=dir[x] |
+| reset_to Hard x2 | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; D=dir[x] | access denied; D=dir[x] |
+| undo::restore | d | Ok; d=link | could not create symlink; D=dir[x] | file exists (os 183); d=file | git operation failed: failed to create f; D=dir[x] |
+| create_worktree | d | Ok; d=link | git operation failed; D=dir[x] | Ok; d=file | git operation failed; D=dir[x] |
+| update_submodule | d | Ok; d=link | n/a | Ok; d=file | n/a |
+| pull_after_fetch ff | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | git remote operation failed: failed to c; D=dir[x] |
+
+After C3/C4 (CI run 40823890236, commit `176c108a`; Windows with `core.symlinks=true` per
+repository, so the raw rows there create real links except the fresh clone and submodule):
+
+| Row | Link | macOS ic=true | macOS ic=false | Windows ic=true | Windows ic=false |
+|---|---|---|---|---|---|
+| raw clone | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=file | could not create symlink; d=dir[x] |
+| raw safe checkout_tree x2 | D | conflict; D=link | could not create symlink; d=dir[x] | conflict; D=link | could not create symlink; d=dir[x] |
+| raw forced checkout_tree x2 | D | Ok; d=dir[x] | could not create symlink; d=dir[x] | Ok; d=dir[x] | could not create symlink; d=dir[x] |
+| raw merge_commits + checkout_index | D | Ok; D=link | could not create symlink; d=dir[x] | Ok; D=link | could not create symlink; d=dir[x] |
+| raw submodule.update | D | Ok; D=link | n/a | Ok; D=file | n/a |
+| clone_repo | D | refused: CaseCollision; workdir missing | n/a | refused: CaseCollision; workdir missing | n/a |
+| switch_branch x2 | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| checkout_commit x2 | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_merge ff | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_merge --no-ff | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| cherry_pick | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_rebase | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| apply_stash | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| reset_to Hard x2 | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| undo::restore | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| create_worktree | D | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing |
+| update_submodule | D | refused: CaseCollision; none | n/a | refused: CaseCollision; none | n/a |
+| pull_after_fetch ff | D | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| raw clone | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=file | could not create symlink; D=dir[x] |
+| raw safe checkout_tree x2 | d | conflict; d=link | could not create symlink; D=dir[x] | conflict; d=link | could not create symlink; D=dir[x] |
+| raw forced checkout_tree x2 | d | Ok; D=dir[x] | could not create symlink; D=dir[x] | Ok; d=link | could not create symlink; D=dir[x] |
+| raw merge_commits + checkout_index | d | Ok; d=link | could not create symlink; D=dir[x] | Ok; d=link | could not create symlink; D=dir[x] |
+| raw submodule.update | d | Ok; d=link | n/a | Ok; d=file | n/a |
+| clone_repo | d | refused: CaseCollision; workdir missing | n/a | refused: CaseCollision; workdir missing | n/a |
+| switch_branch x2 | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| checkout_commit x2 | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_merge ff | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_merge --no-ff | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| cherry_pick | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| start_rebase | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| apply_stash | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| reset_to Hard x2 | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| undo::restore | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
+| create_worktree | d | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing | refused: CaseCollision; workdir missing |
+| update_submodule | d | refused: CaseCollision; none | n/a | refused: CaseCollision; none | n/a |
+| pull_after_fetch ff | d | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none | refused: CaseCollision; none |
 
 ### 1.4 Fix: refuse case-colliding link/folder entries (defense in depth)
 

@@ -78,6 +78,53 @@ Reconciled with the code at 3dabf144 on 2026-10-28:
 - Linux probe results and libgit2 source facts: spec §1.1–1.2. Scratch notes and the probe
   live outside the repo.
 
+Implementation notes and deviations (2026-10-29; code wins):
+
+- **Missed raw I/O:** `stash.rs`'s path-limited stash removed untracked files and pruned their
+  folders by path (`remove_file` / `remove_dir` after `has_symlinked_ancestor`). It now calls
+  `remove_and_prune_beneath`.
+- **Undo writes before its forced checkout.** `restore` writes raw files (`apply`) before
+  `checkout_from_index` reaches `prepare_forced_checkout`, so the C3 hook alone came too late;
+  `restore` also checks the target work tree (limited to the changed paths) in its verify phase.
+- **Path filter:** `find_case_collision` matches `paths` ignoring case (as libgit2 under
+  `core.ignorecase`), so `paths = ["d"]` selects the link `D` too and is refused; the C2 test
+  checks `["d/x"]` → `None` and `["d"]` → `Some` instead of the plan's `["d"]` → `None`.
+- **Ordering:** `refuse_linked_folders` runs its link scan first and the case check after it.
+  macOS CI showed a merge result holding the link `d` and `d/new.txt` (exact same name) refused
+  as `CaseCollision` instead of the existing, more specific `LinkedFolder`.
+- **Submodule update:** git2 0.21's `CheckoutBuilder` has no `baseline`, so an initialized
+  submodule is checked against its target commit *before* libgit2 updates it (fetching the
+  commit from its origin first if missing, as libgit2 would); a fresh one is cloned with
+  `dry_run`, checked, then `checkout_head(safe + recreate_missing)` (the no-checkout pass already
+  wrote the index, so plain safe recreates nothing). A refused fresh submodule stays cloned with
+  an empty work tree.
+- **Worktree add:** a new branch at the start point is created only after the check passes.
+- **Clone DTO:** `CloneError::CaseCollision` needed a `kind` in `tauri-app`'s `CloneErrorDto`
+  (`"CaseCollision"`, exhaustive match) and the TS `CloneErrorKind` union; the dialog shows the
+  message (its default case). No other DTO change.
+- **Probe:** the `ic=false` raw clone row clones without a checkout, sets the config, then checks
+  out forced. On the GitHub Windows runner libgit2 decided `core.symlinks=false` for fresh
+  repositories despite the global opt-in, so the probe sets `core.symlinks=true` per repository
+  on Windows (fresh clones and submodules still decide on their own). The temporary CI step also
+  needed `fail-fast: false` on the `rust` matrix, so one OS failing doesn't cancel the others'
+  tables; both are removed in Z2.
+- **Walker layout:** the leaf operations live next to each walker (`beneath_unix.rs`,
+  `beneath_windows.rs`, same function set) and `worktree_guard` dispatches; the shared
+  `OnLink`/`OnMissing`/`Step`/`Walk` types are in `worktree_guard`. `clear_symlinked_ancestors`
+  is gone (its only caller, undo's write, uses `replace_beneath`, whose walk clears the link).
+  The old path-based non-unix fallbacks are gone too: unix and Windows are the only targets.
+  The pure reparse-tag rules are in `worktree_guard/reparse.rs` (tested on every platform).
+- **FIFO test:** libgit2's status never lists a FIFO, so a snapshot never read one; the hang was
+  in undo's verify of a tracked file replaced by a FIFO. `undo_skips_a_fifo_that_replaced_a_file…`
+  covers that (verified to time out on the pre-R code).
+- **Commits:** R1–R4 landed as one commit, L1+L2 as one, W1+W2 as one.
+- **Stress (Linux, debug build):** `write_swap_race_never_writes_outside` 199,966 of 200,000
+  writes landed inside, outside file unchanged; `directory_swap_race_never_reads_outside`
+  57,444 inside reads, 0 leaks.
+- **Still path-based (stat/listing only, no write):** undo's `verify_directory_is_removable`
+  (`read_dir`) and its `symlink_metadata` checks, `has_symlinked_ancestor`, `refuse_linked_path`
+  and the `Scanner`; the refusal checks before libgit2 operations are the documented residual.
+
 ## Review Focus
 
 1. **Nothing outside the repo is written, deleted or read through a link, even with a racing
