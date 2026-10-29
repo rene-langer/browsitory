@@ -260,6 +260,19 @@ const RUNNABLE_EXTENSIONS: &[&str] = &[
     "vb",
     "prefpane",
     "mobileconfig",
+    "wsc",
+    "psc1",
+    "ps1xml",
+    "mht",
+    "mhtml",
+    "hlp",
+    // Disk images: opening one mounts it (Windows `.iso`/`.img`/`.vhd`/`.vhdx`, macOS `.dmg`),
+    // and its autorun or app is one click away.
+    "iso",
+    "img",
+    "vhd",
+    "vhdx",
+    "dmg",
 ];
 
 /// Old Office documents share the OLE container format (`D0 CF 11 E0`) with `.msi` installers;
@@ -270,8 +283,14 @@ const OLE_DOCUMENTS: &[&str] = &[
 
 const OLE_MAGIC: &[u8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
 
+/// The extension of `path`'s file name in lower case, after dropping trailing dots and spaces
+/// (Windows strips them when it opens the file, so `x.exe.` and `x.bat ` run as `x.exe` and
+/// `x.bat`). Empty for none or a non-UTF-8 name.
 fn lower_extension(path: &Path) -> String {
-    path.extension()
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.trim_end_matches(['.', ' ']))
+        .and_then(|name| Path::new(name).extension())
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
         .unwrap_or_default()
@@ -289,6 +308,10 @@ pub fn may_execute(path: &Path, os: Os, has_exec_bit: bool) -> bool {
 /// (`.msi` installers), or a freedesktop `[Desktop Entry]` launcher, judged by the first bytes.
 /// A file can be both runnable and misnamed, and desktop handlers sniff contents.
 pub fn looks_runnable(head: &[u8]) -> bool {
+    has_magic(head) || is_desktop_entry(head, true) == Some(true)
+}
+
+fn has_magic(head: &[u8]) -> bool {
     const MAGICS: &[&[u8]] = &[
         b"#!",
         b"\x7fELF",
@@ -300,16 +323,46 @@ pub fn looks_runnable(head: &[u8]) -> bool {
         b"\xca\xfe\xba\xbe",
         OLE_MAGIC,
     ];
-    MAGICS.iter().any(|magic| head.starts_with(magic)) || is_desktop_entry(head)
+    MAGICS.iter().any(|magic| head.starts_with(magic))
 }
 
-/// The first line that is not blank or a `#` comment is `[Desktop Entry]` (after a UTF-8 BOM).
-fn is_desktop_entry(head: &[u8]) -> bool {
+/// How much of a file the `[Desktop Entry]` sniff reads at most before it gives up and counts
+/// the file as runnable.
+const DESKTOP_SNIFF_LIMIT: u64 = 64 * 1024;
+
+/// Whether the first line that is not blank or a `#` comment (after a UTF-8 BOM) is a desktop
+/// launcher's group header: `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]`.
+/// `None` when `head` ends before such a line and isn't the whole file (`complete`): the rest
+/// must be read to decide. Whitespace includes the vertical tab, as GLib's key-file parser.
+fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
     let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
-    head.split(|b| *b == b'\n')
-        .map(|line| line.trim_ascii())
-        .find(|line| !line.is_empty() && !line.starts_with(b"#"))
-        .is_some_and(|line| line == b"[Desktop Entry]")
+    let blank = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c');
+    let mut lines = head.split(|b| *b == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        // The last piece of a partial head may be a cut-off line.
+        if !complete && lines.peek().is_none() {
+            return None;
+        }
+        let start = line.iter().position(|b| !blank(b)).unwrap_or(line.len());
+        let end = line
+            .iter()
+            .rposition(|b| !blank(b))
+            .map_or(start, |i| i + 1);
+        let line = &line[start..end.max(start)];
+        if line.is_empty() || line.starts_with(b"#") {
+            continue;
+        }
+        return Some(
+            line == b"[Desktop Entry]"
+                || line == b"[KDE Desktop Entry]"
+                || (line.starts_with(b"[Desktop Action ") && line.ends_with(b"]")),
+        );
+    }
+    if complete {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 #[cfg(unix)]
@@ -449,14 +502,24 @@ pub fn terminal_invocation(
 /// Whether opening `file` with the OS default app could run it: its name, its execute bit, its
 /// first bytes, and for a symlink the same checks on the file it points to.
 fn file_may_run(file: &Path, os: Os) -> bool {
-    let check = |path: &Path| {
-        may_execute(path, os, has_exec_bit(path))
-            || read_head(path).is_some_and(|head| {
-                looks_runnable(&head)
-                    && !(head.starts_with(OLE_MAGIC)
-                        && OLE_DOCUMENTS.contains(&lower_extension(path).as_str()))
-            })
-    };
+    let check =
+        |path: &Path| {
+            may_execute(path, os, has_exec_bit(path))
+                || read_head(path, 1024).is_some_and(|(head, complete)| {
+                    let magic = has_magic(&head)
+                        && !(head.starts_with(OLE_MAGIC)
+                            && OLE_DOCUMENTS.contains(&lower_extension(path).as_str()));
+                    magic
+                        || match is_desktop_entry(&head, complete) {
+                            Some(launcher) => launcher,
+                            // Only blank lines and comments so far: read on, and count a file
+                            // still undecided at the limit as runnable.
+                            None => read_head(path, DESKTOP_SNIFF_LIMIT).is_none_or(
+                                |(head, complete)| is_desktop_entry(&head, complete) != Some(false),
+                            ),
+                        }
+                })
+        };
     if check(file) {
         return true;
     }
@@ -470,18 +533,21 @@ fn file_may_run(file: &Path, os: Os) -> bool {
     }
 }
 
-fn read_head(path: &Path) -> Option<Vec<u8>> {
+/// Up to `limit` first bytes of the regular file `path`, and whether that is the whole file.
+fn read_head(path: &Path, limit: u64) -> Option<(Vec<u8>, bool)> {
     use std::io::Read;
     if !std::fs::metadata(path).ok()?.is_file() {
         return None;
     }
-    let mut head = Vec::with_capacity(1024);
+    let mut head = Vec::new();
     std::fs::File::open(path)
         .ok()?
-        .take(1024)
+        .take(limit + 1)
         .read_to_end(&mut head)
         .ok()?;
-    Some(head)
+    let complete = head.len() as u64 <= limit;
+    head.truncate(limit as usize);
+    Some((head, complete))
 }
 
 pub fn prepare_editor(
@@ -780,6 +846,73 @@ mod tests {
         assert!(looks_runnable(b"\xef\xbb\xbf[Desktop Entry]\n"));
         assert!(looks_runnable(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rest"));
         assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+    }
+
+    #[test]
+    fn may_execute_refuses_the_added_extensions() {
+        for os in [Os::Linux, Os::MacOs, Os::Windows] {
+            for name in [
+                "x.wsc", "x.psc1", "x.ps1xml", "x.mht", "x.mhtml", "x.hlp", "x.iso", "x.img",
+                "x.vhd", "x.vhdx", "x.dmg", "X.ISO",
+            ] {
+                assert!(may_execute(Path::new(name), os, false), "{name} on {os:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn trailing_dots_and_spaces_do_not_hide_the_extension() {
+        for os in [Os::Linux, Os::MacOs, Os::Windows] {
+            for name in ["x.exe.", "x.bat ", "x.cmd. .", "X.EXE.", "dir/x.ps1 ."] {
+                assert!(
+                    may_execute(Path::new(name), os, false),
+                    "{name:?} on {os:?}"
+                );
+            }
+            for name in ["notes.txt.", "notes.txt ", "...", "x."] {
+                assert!(
+                    !may_execute(Path::new(name), os, false),
+                    "{name:?} on {os:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn looks_runnable_detects_desktop_entry_variants() {
+        assert!(looks_runnable(b"[KDE Desktop Entry]\nExec=x\n"));
+        assert!(looks_runnable(b"[Desktop Action new]\nExec=x\n"));
+        assert!(looks_runnable(b"\x0b[Desktop Entry]\n"));
+        assert!(looks_runnable(b"#c\n\x0b\n[Desktop Entry]\x0b\n"));
+        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+        assert!(!looks_runnable(b"[Desktop Actions]\n"));
+        assert_eq!(is_desktop_entry(b"# a\n# b", false), None);
+        assert_eq!(is_desktop_entry(b"# a\n# b", true), Some(false));
+        assert_eq!(
+            is_desktop_entry(b"# a\n[Desktop Entry]\n", false),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn the_desktop_sniff_reads_past_long_comment_headers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let comments = |bytes: usize| "# comment\n".repeat(bytes / 10);
+        let write = |name: &str, text: String| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let late = write("late", comments(2048) + "[Desktop Entry]\nExec=x\n");
+        assert!(file_may_run(&late, Os::Linux));
+        let endless = write("endless", comments(70 * 1024));
+        assert!(file_may_run(&endless, Os::Linux));
+        let short = write("short", comments(100));
+        assert!(!file_may_run(&short, Os::Linux));
+        let notes = write("notes", "# Notes\n[Desktop Entry] is a header\n".into());
+        assert!(!file_may_run(&notes, Os::Linux));
+        let long_text = write("long", comments(2048) + "plain text\n");
+        assert!(!file_may_run(&long_text, Os::Linux));
     }
 
     #[test]
