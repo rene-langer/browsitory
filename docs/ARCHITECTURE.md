@@ -181,6 +181,18 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 - **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
   recordable command; failed/no-op commands record nothing; operations that stop on conflicts
   stay pending until completed (one entry) or aborted (none).
+- **Pending entry**: the paused operation's label and pre-operation snapshot are stored in
+  `undo.json` as `pending` (optional, still version 1: older builds ignore it and drop it on
+  their next save), pinned by the undo anchor like the stacks. It carries the marker of the
+  operation it belongs to (`worker::gate::OperationProbe::marker`): `rebase <branch ref>
+  <original tip> <onto>`, `sequence <kind> <original HEAD> <first commit> <count>`, `merge
+  <HEAD> <MERGE_HEAD…>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD>`, `revert <HEAD> <REVERT_HEAD>`,
+  or `git <state> <HEAD>`, each constant for the operation's whole life (the stored rebase and
+  sequence come first because their `CHERRY_PICK_HEAD` changes per step). Before every command
+  the recorder re-reads `undo.json` and drops a pending entry whose marker isn't the current one
+  (`None` included), so an operation finished after an app restart, a closed tab, a crashed
+  worker or in the other app (Tauri vs. VSCode) is still one entry, and an operation aborted or
+  replaced outside the app never records under the old label.
 - **Storage**: `<gitdir>/browsitory/undo.json` per worktree (50 entries); objects pinned by
   `refs/browsitory/undo/main` (main worktree) or `refs/browsitory/undo/wt/<name>` (linked
   worktree), an anchor commit visible in `git log --all`, plus
@@ -264,22 +276,94 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   otherwise `OperationInProgress` / `HeadMoved`. With git state clean and HEAD unchanged (an
   error stop, or `git cherry-pick --abort` from a terminal) Continue retries the step. Only a
   conflict stop (`stoppedOnConflict`) accepts HEAD one commit further as the step finished by
-  hand, and only if git's pick state is gone and the commit is recognisably the step (same
-  author name/email/time for a cherry-pick; "This reverts commit <id>" for a revert). The index
+  hand, and only if git's pick state is gone and the commit is recognisably the step (for a
+  cherry-pick `pick::commit_matches_pick`: same author name/email/time, the step's message, and
+  every path the step changes cleanly changed too; "This reverts commit <id>" for a revert). The index
   is re-read before use, so a terminal `git add` is seen. Abort aborts its own paused step (or
   the step's conflicts if `CHERRY_PICK_HEAD` was deleted), rewinds only when HEAD still names
   the ref the sequence started on (`originalRef`) and is still at the stop point and git has
   nothing else in progress, and otherwise just forgets the sequence (`rewound: false`).
 - A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
   blocks picks, merge, rebase, commit/amend, reset, checkout, branch switch, pull, stash
-  apply/pop and reflog restore in the worker (`history::gate_during_sequence`), and is reported
+  apply/pop and reflog restore in the worker (`gate::gate_during_operation`), and is reported
   as `HeadInfo.sequence`. The undo entry is labelled with the number of commits applied. `AbortMerge` aborts the
-  whole sequence when one is stored, so a stale frontend can't strand the file. The pending undo
-  entry is in memory, so a sequence finished after an app restart is not undoable as one step.
+  whole sequence when one is stored, so a stale frontend can't strand the file.
 - Empty steps are skipped (git stops for `--skip`). Steps, including the one Continue commits,
   run no hooks, matching Browsitory's single cherry-pick/revert. Real git runs
   `prepare-commit-msg`/`post-commit` on a clean pick and the full commit hooks on
   `--continue`.
+
+## Interactive rebase
+
+- `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
+  or write git's `.git/rebase-merge`. `start_rebase` checks out `onto` and detaches HEAD; each
+  step is `repo.cherrypick` on the detached HEAD, committed by `land_current_step` (which then
+  clears `CHERRY_PICK_HEAD`); squash/fixup groups collapse when the group ends; `finish` moves
+  the branch and reattaches HEAD. The branch ref is untouched until `finish`.
+- To git a paused Browsitory rebase is a cherry-pick on a detached HEAD: an edit or conflict
+  stop is `CherryPick` with `CHERRY_PICK_HEAD` = the step (plus `MERGE_MSG` and, for a conflict,
+  the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.
+  `git status` suggests `git cherry-pick --continue/--abort`; `git rebase --continue` says no
+  rebase is in progress.
+- `RebaseState` is plain public data (`plan`, `cursor`, `original_branch_ref`, `original_tip`,
+  `onto`, `group_start_parent`, `expected_head`, `stop: Conflict | Edit | Error`). `Conflict`/
+  `Edit` mean the step at `cursor` is applied to the index; `Error` means it isn't.
+  `cursor == plan.len()` after a failed `finish`.
+- **Persistence**: `repo-service`'s `RebaseStore` (`worker/rebase_store.rs`) writes
+  `<gitdir>/browsitory/rebase.json` (per worktree, `version` 1, camelCase, temp file +
+  `sync_all` + rename) when a start or Continue pauses or fails, deletes it on `Done` and after a
+  successful Abort, and is read on every use (no cache), so a restarted or respawned worker and
+  the other app see the same rebase. On load the plan must be non-empty with `cursor <=
+  plan.len()` and not on a `Drop`, the branch a valid `refs/heads/` name, every id a commit in
+  the repository and a `Reword` message non-empty; anything else is logged once and treated as
+  absent. Versioning follows `sequence.json`: an additive change bumps the version and keeps
+  reading the older one. When saving fails the worker keeps the state in memory for the session
+  (`rebase_fallback`, preferred over the file until the next successful save or clear) and
+  reports the failure with the outcome.
+- **Health** (`rebase_health`, reported as `HeadInfo.rebase.health`; the first failing check
+  decides): the branch is gone (`BranchMissing`); it isn't at `original_tip` (`BranchMoved`);
+  git has an operation other than this rebase's own pick paused (`OtherOperation`); HEAD isn't
+  detached at `expected_head` and isn't the step committed by hand (`HeadMoved`). Otherwise
+  `Paused`. A diverged rebase stays stored and visible ("interrupted"); only Abort is offered.
+- **Continue** (`rebase_continue`):
+
+  | Situation | Action |
+  |---|---|
+  | `cursor == plan.len()` | HEAD at `expected_head`, git clean: retry `finish` |
+  | own paused pick, HEAD at `expected_head` | commit the index as the step, go on |
+  | clean, HEAD at `expected_head` | re-apply the step (error stop, or `--abort` outside) |
+  | clean, conflict/edit stop, HEAD = the step committed by hand | adopt it (a `Reword` gets its planned message; a group still collapses), go on |
+  | another pick/merge/revert paused | `OperationInProgress` |
+  | anything else | `HeadMoved` |
+
+  "Committed by hand" is `pick::commit_matches_pick`: one parent, `expected_head`; the picked
+  commit's author name/email/time; its message (or a `Reword`'s planned message; comment lines
+  and trailing whitespace ignored); and every path that applying the step onto `expected_head`
+  changes cleanly is changed by the commit too (conflicted paths may be resolved any way, and an
+  edit stop may change more). Author and time alone would accept another plan commit by the same
+  author. Refusals leave the state untouched; a later error
+  marks the stop `Error` unless the step is still applied and paused. `finish` moves the branch
+  with `reference_matching` against `original_tip` and refuses `BranchMoved`/`BranchMissing`
+  instead of overwriting a branch that moved during the pause.
+- **Abort** (`abort_rebase` → `RebaseAbort { restored }`): with HEAD at `expected_head` (or at
+  the step committed by hand, which health reports as `Paused`), the
+  branch still at `original_tip` and nothing else paused, it force-checks-out the branch, then
+  reattaches HEAD (checkout first, so a refused checkout leaves HEAD where the rebase can still
+  abort) — `restored: true`. Otherwise (diverged) HEAD and refs stay where they are —
+  `restored: false`: with HEAD still at `expected_head` the paused step is undone like `git
+  cherry-pick --abort`; with HEAD moved only git's pick state is forgotten, so work staged on
+  the other branch survives. The worker forgets the state only when Abort succeeded.
+- **Writes in the worker**: a refused Continue (state unchanged) writes nothing, and neither does
+  a failed Continue that finds HEAD moved by another writer (its commit lost HEAD's
+  compare-and-swap), so one app never puts back a state the other app moved on from. A file that can't be deleted
+  when the rebase ends is remembered as ended for the session (`gate::RebaseMemory::forgotten`),
+  so it doesn't keep gating the repository.
+- A stored rebase blocks the same commands as a sequence (`gate::gate_during_operation`, also
+  after an error stop where git sees nothing in progress; both also refuse creating a branch,
+  which checks it out), plus deleting or renaming the rebased branch or adding a worktree on it
+  (it isn't checked out, so git would allow it) and stash save, counts as in progress for undo, and
+  is reported as `HeadInfo.rebase { branch, onto, currentStep, totalSteps, health }`, which the
+  frontend reads on every refresh (there is no separate progress call).
 
 ## Git hooks
 

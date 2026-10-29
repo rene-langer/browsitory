@@ -63,10 +63,42 @@ pub struct HeadInfo {
     /// A stopped multi-commit cherry-pick/revert. Filled by `repo-service` from its stored
     /// sequence state; `git-core` has no persistence and always reports `None`.
     pub sequence: Option<crate::pick::SequenceProgress>,
+    /// A paused interactive rebase. Filled by `repo-service` from its stored rebase state, like
+    /// `sequence`; `git-core` always reports `None`.
+    pub rebase: Option<RebaseInfo>,
 }
 
-/// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. Rebase
-/// is deliberately absent — it has its own richer `rebase::rebase_progress`.
+/// A paused interactive rebase as the UI shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RebaseInfo {
+    /// The branch being rebased (short name).
+    pub branch: String,
+    /// Full id of the commit the branch is rebased onto.
+    pub onto: String,
+    pub current_step: usize,
+    pub total_steps: usize,
+    pub health: crate::rebase::RebaseHealth,
+}
+
+impl RebaseInfo {
+    pub fn new(state: &crate::rebase::RebaseState, health: crate::rebase::RebaseHealth) -> Self {
+        let progress = state.progress();
+        Self {
+            branch: state
+                .original_branch_ref
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&state.original_branch_ref)
+                .to_string(),
+            onto: state.onto.to_string(),
+            current_step: progress.current_step,
+            total_steps: progress.total_steps,
+            health,
+        }
+    }
+}
+
+/// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. A
+/// stored sequence or rebase is filled in by `repo-service`.
 pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
     use git2::RepositoryState;
     let commit_hooks = crate::hooks::installed_hooks(repo, &crate::hooks::SKIPPABLE_COMMIT_HOOKS);
@@ -89,6 +121,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 squash_message: crate::merge::squash_message(repo),
                 commit_hooks,
                 sequence: None,
+                rebase: None,
             });
         }
         Err(error) => return Err(error.into()),
@@ -105,6 +138,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         squash_message: crate::merge::squash_message(repo),
         commit_hooks,
         sequence: None,
+        rebase: None,
     })
 }
 

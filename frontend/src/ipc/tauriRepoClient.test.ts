@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriRepoClient } from "./tauriRepoClient";
+import type { HeadInfo, RebaseAbort } from "./RepoClient";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -481,6 +482,40 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("get_head_info", { repoPath: "/repo" });
     await tauriRepoClient.forcePushCurrentBranch("/repo", "origin", true);
     expect(invoke).toHaveBeenLastCalledWith("force_push_current_branch", { repoPath: "/repo", remoteName: "origin", noVerify: true });
+  });
+});
+
+describe("tauriRepoClient rebase wiring", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("abortRebase resolves to the restored flag", async () => {
+    const abort: RebaseAbort = { restored: false };
+    vi.mocked(invoke).mockResolvedValue(abort);
+    await expect(tauriRepoClient.abortRebase("/r")).resolves.toEqual({ restored: false });
+    expect(invoke).toHaveBeenLastCalledWith("abort_rebase", { repoPath: "/r" });
+  });
+
+  it("getHeadInfo passes rebase through, including a diverged reason", async () => {
+    const head: HeadInfo = {
+      headId: "abc",
+      detachedAt: "abc",
+      headPushed: false,
+      operation: "CherryPick",
+      squashMessage: null,
+      commitHooks: [],
+      sequence: null,
+      rebase: {
+        branch: "main",
+        onto: "def",
+        currentStep: 1,
+        totalSteps: 2,
+        health: { kind: "Diverged", reason: "BranchMissing" },
+      },
+    };
+    vi.mocked(invoke).mockResolvedValue(head);
+    await expect(tauriRepoClient.getHeadInfo("/r")).resolves.toEqual(head);
   });
 });
 

@@ -95,3 +95,26 @@ fn reports_revert_and_merge_in_progress() {
         Some(OperationKind::Merge)
     );
 }
+
+#[test]
+fn head_info_never_reports_a_rebase_itself() {
+    // git-core has no persistence; `repo-service` fills `rebase` from its stored state.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "first");
+    let onto = repo.head().unwrap().target().unwrap().to_string();
+    common::write_file(dir.path(), "b.txt", "b\n");
+    common::commit_all(&repo, "second");
+    let picked = repo.head().unwrap().target().unwrap().to_string();
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: picked,
+        action: git_core::rebase::RebaseAction::Edit,
+        combined_message: None,
+    }];
+    git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    let info = head_info(&repo).unwrap();
+
+    assert_eq!(info.rebase, None);
+    assert_eq!(info.operation, Some(OperationKind::CherryPick));
+}

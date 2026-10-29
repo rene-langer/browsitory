@@ -23,6 +23,18 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    #[error(
+        "Another merge, cherry-pick or revert is in progress. Finish or abort it before \
+         continuing the rebase."
+    )]
+    OperationInProgress,
+    #[error(transparent)]
+    Merge(#[from] crate::merge::MergeError),
+    /// `branch` is the short name.
+    #[error("{branch} moved since the rebase started. Abort the rebase and start again.")]
+    BranchMoved { branch: String },
+    #[error("{branch} no longer exists. Abort the rebase.")]
+    BranchMissing { branch: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,32 +112,60 @@ pub enum RebaseStepResult {
     Done,
 }
 
+/// Why a rebase is stopped. `Conflict` and `Edit` mean the current step was applied to the
+/// index (`CHERRY_PICK_HEAD` written); `Error` means a step (or `finish`) failed, so the step at
+/// `cursor` is not applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseStop {
+    Conflict,
+    Edit,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseProgress {
+    pub current_step: usize,
+    pub total_steps: usize,
+}
+
+/// A paused rebase. Plain data, so `repo-service` can persist it and rebuild it after a
+/// restart; whether it still matches the repository is `rebase_health`'s job.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RebaseState {
-    plan: Vec<RebasePlanEntry>,
-    cursor: usize,
-    original_branch_ref: String,
-    // Not read by this task's code — recorded here for `abort_rebase` (Task 3), which reattaches
-    // to `original_branch_ref` at this tip to fully undo an in-progress rebase.
-    #[allow(dead_code)]
-    original_tip: Oid,
-    group_start_parent: Option<Oid>,
+    pub plan: Vec<RebasePlanEntry>,
+    /// Index of the stopped entry; `plan.len()` after a failed `finish`.
+    pub cursor: usize,
+    /// `refs/heads/<name>`: the branch being rebased, moved only by `finish`.
+    pub original_branch_ref: String,
+    /// The branch tip when the rebase started; `finish` refuses when the branch moved.
+    pub original_tip: Oid,
+    pub onto: Oid,
+    pub group_start_parent: Option<Oid>,
     /// The OID this crate last moved `HEAD` to (the initial detach, then each landed step or
     /// group collapse). `rebase_continue` refuses to run when the real `HEAD` has drifted from
     /// it — e.g. because something else switched branches on the same repo mid-pause — since
     /// continuing would commit the rebased step onto whatever ref happened to be checked out.
-    expected_head: Oid,
+    pub expected_head: Oid,
+    pub stop: RebaseStop,
 }
 
 impl RebaseState {
     /// 1-indexed number of the plan entry currently in flight, for a "Step N of M" display —
-    /// the first pause reports step 1, not 0. Clamped to `total_steps()` so a state whose cursor
-    /// has run past the end (the rebase is finished) still reports "N of N" rather than N+1.
+    /// the first pause reports step 1, not 0. Clamped to `total_steps` so a state whose cursor
+    /// has run past the end (a failed `finish`) still reports "N of N" rather than N+1.
+    pub fn progress(&self) -> RebaseProgress {
+        RebaseProgress {
+            current_step: (self.cursor + 1).min(self.plan.len()),
+            total_steps: self.plan.len(),
+        }
+    }
+
     pub fn current_step(&self) -> usize {
-        (self.cursor + 1).min(self.plan.len())
+        self.progress().current_step
     }
 
     pub fn total_steps(&self) -> usize {
-        self.plan.len()
+        self.progress().total_steps
     }
 }
 
@@ -208,8 +248,10 @@ pub fn start_rebase(
         cursor: 0,
         original_branch_ref,
         original_tip,
+        onto: onto_commit.id(),
         group_start_parent: None,
         expected_head: onto_commit.id(),
+        stop: RebaseStop::Error,
     };
 
     // Everything past the detach above must roll back on failure: an `Err` escaping here would
@@ -227,35 +269,258 @@ pub fn start_rebase(
     }
 }
 
+/// Goes on with a paused rebase, deciding from the repository what the pause left behind (the
+/// table mirrors `pick::continue_sequence`):
+///
+/// - git's paused pick is this rebase's step and HEAD is where the rebase left it: commit the
+///   index as the step (a resolved conflict or an edit), then go on;
+/// - nothing is paused and HEAD is where the rebase left it: the step never landed (an error
+///   stop, or `git cherry-pick --abort` outside), so apply it again instead of committing the
+///   unchanged index as an empty step;
+/// - another operation is paused: `OperationInProgress`; HEAD moved: `HeadMoved`.
+///
+/// Refusals leave `state` untouched. Any later error marks the stop as `Error` unless the
+/// step is still applied and paused; the caller keeps the state as returned (the cursor may
+/// have moved past steps that landed).
 pub fn rebase_continue(
     repo: &Repository,
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
+    let resume = resume_kind(repo, state)?;
+    let result = match resume {
+        Resume::Land => land_current_step(repo, state).and_then(|()| {
+            state.cursor += 1;
+            advance(repo, state)
+        }),
+        Resume::Reapply => advance(repo, state),
+        Resume::Finish => finish(repo, state),
+        Resume::Adopt => adopt_step(repo, state).and_then(|()| {
+            state.cursor += 1;
+            advance(repo, state)
+        }),
+    };
+    if result.is_err() {
+        state.stop = if is_own_paused_step(repo, state) {
+            match state.stop {
+                RebaseStop::Error => RebaseStop::Conflict,
+                applied => applied,
+            }
+        } else if is_step_committed_by_hand(repo, state).unwrap_or(false) {
+            // Adopting a step committed by hand failed before it moved anything (e.g. the
+            // reworded commit couldn't be signed): it is still the paused step, so keep its stop
+            // and let Continue adopt it again.
+            state.stop
+        } else {
+            RebaseStop::Error
+        };
+    }
+    result
+}
+
+enum Resume {
+    /// Commit the index as the paused step.
+    Land,
+    /// Apply the step at the cursor again.
+    Reapply,
+    /// HEAD is the paused step, committed outside the app: take it as the step.
+    Adopt,
+    /// Every step landed but `finish` failed: retry it.
+    Finish,
+}
+
+fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseError> {
     // Past the end of the plan there's no step left to land — without this guard,
     // `land_current_step`'s `state.plan[state.cursor]` panics and takes the whole worker thread
     // (and every later command for this repo) down with it. Reachable from a double-clicked
     // Continue, or from a `finish()` that failed after the cursor had already run off the end.
-    if state.cursor >= state.plan.len() {
+    if state.cursor > state.plan.len() {
         return Err(RebaseError::NotRebasing);
     }
-
-    // Nothing but this module is supposed to move HEAD while a rebase is paused. If something
-    // did (a branch switch, an external `git checkout`), landing this step would commit it onto
-    // the wrong ref and silently rewrite unrelated history — refuse instead, leaving `abort` as
-    // the way out.
-    let actual_head = repo.head()?.peel_to_commit()?.id();
-    if actual_head != state.expected_head {
-        return Err(RebaseError::HeadMoved {
-            expected: state.expected_head.to_string(),
-            actual: actual_head.to_string(),
-        });
+    use git2::RepositoryState::{CherryPick, CherryPickSequence, Clean};
+    if state.cursor == state.plan.len() {
+        // Every step landed and `finish` failed (the branch moved or was deleted): retry it.
+        if repo.state() != Clean {
+            return Err(RebaseError::OperationInProgress);
+        }
+        if !head_at_expected(repo, state)? {
+            let head = repo.head()?;
+            let finished = head.name().ok() == Some(state.original_branch_ref.as_str())
+                && head.target() == Some(state.expected_head);
+            if finished {
+                // A stale caller (a double-clicked Continue) on a rebase that already finished.
+                return Err(RebaseError::NotRebasing);
+            }
+            return Err(head_moved(repo, state)?);
+        }
+        return Ok(Resume::Finish);
     }
+    match repo.state() {
+        CherryPick | CherryPickSequence => {
+            if !is_own_paused_step(repo, state) {
+                return Err(RebaseError::OperationInProgress);
+            }
+            // Nothing but this module is supposed to move HEAD while a rebase is paused. If
+            // something did (a branch switch, an external `git checkout`), landing this step
+            // would commit it onto the wrong ref and silently rewrite unrelated history —
+            // refuse instead, leaving `abort` as the way out.
+            check_head_at_expected(repo, state)?;
+            Ok(Resume::Land)
+        }
+        Clean => {
+            if head_at_expected(repo, state)? {
+                return Ok(Resume::Reapply);
+            }
+            if is_step_committed_by_hand(repo, state)? {
+                return Ok(Resume::Adopt);
+            }
+            Err(head_moved(repo, state)?)
+        }
+        _ => Err(RebaseError::OperationInProgress),
+    }
+}
 
-    // The working index is presumed ready — either a conflict was just resolved, or an `Edit`
-    // pause's amendment is staged. Land it as this step's commit, then keep advancing.
-    land_current_step(repo, state)?;
-    state.cursor += 1;
-    advance(repo, state)
+/// True when git's paused pick is this rebase's current step, not one started some other way.
+fn is_own_paused_step(repo: &Repository, state: &RebaseState) -> bool {
+    use git2::RepositoryState::{CherryPick, CherryPickSequence};
+    let Some(entry) = state.plan.get(state.cursor) else {
+        return false;
+    };
+    matches!(repo.state(), CherryPick | CherryPickSequence)
+        && repo
+            .find_reference("CHERRY_PICK_HEAD")
+            .ok()
+            .and_then(|reference| reference.target())
+            .map(|oid| oid.to_string())
+            .as_deref()
+            == Some(entry.commit_id.as_str())
+}
+
+/// Whether a stored rebase still matches the repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseHealth {
+    Paused,
+    Diverged(RebaseDivergence),
+}
+
+/// What changed outside the app while the rebase was paused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseDivergence {
+    HeadMoved,
+    BranchMoved,
+    BranchMissing,
+    OtherOperation,
+}
+
+/// Classifies a stored rebase against the repository. The first failing check decides: the
+/// branch is gone, the branch moved, git has another operation paused, HEAD is not where the
+/// rebase left it (a step committed by hand that Continue would adopt still counts as paused).
+/// A diverged rebase can only be aborted.
+pub fn rebase_health(repo: &Repository, state: &RebaseState) -> Result<RebaseHealth, RebaseError> {
+    use RebaseDivergence::{BranchMissing, BranchMoved, HeadMoved, OtherOperation};
+    let tip = match repo.find_reference(&state.original_branch_ref) {
+        Ok(reference) => reference.target(),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => {
+            return Ok(RebaseHealth::Diverged(BranchMissing))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if tip != Some(state.original_tip) {
+        return Ok(RebaseHealth::Diverged(BranchMoved));
+    }
+    let own_pick = state.cursor < state.plan.len() && is_own_paused_step(repo, state);
+    if repo.state() != git2::RepositoryState::Clean && !own_pick {
+        return Ok(RebaseHealth::Diverged(OtherOperation));
+    }
+    if head_at_expected(repo, state)? || is_step_committed_by_hand(repo, state)? {
+        return Ok(RebaseHealth::Paused);
+    }
+    Ok(RebaseHealth::Diverged(HeadMoved))
+}
+
+/// After a conflict or edit stop the user may finish the step with git (`git cherry-pick
+/// --continue` or `git commit`, which `git status` suggests). HEAD counts as that step only when
+/// git has nothing paused, HEAD is detached exactly one commit past the stop, and it keeps the
+/// planned commit's author (`pick::commit_matches_pick`). After an error stop the step was
+/// never applied, so nothing is adopted.
+fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
+    let Some(entry) = state.plan.get(state.cursor) else {
+        return Ok(false);
+    };
+    if state.stop == RebaseStop::Error
+        || matches!(entry.action, RebaseAction::Drop)
+        || repo.state() != git2::RepositoryState::Clean
+        || !repo.head_detached()?
+    {
+        return Ok(false);
+    }
+    let head = repo.head()?.peel_to_commit()?;
+    let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    // git keeps the picked commit's message during the pause; a Reword step may also have been
+    // committed with its planned message.
+    let original = String::from_utf8_lossy(picked.message_bytes()).into_owned();
+    let mut messages = vec![original.as_str()];
+    if let RebaseAction::Reword { message } = &entry.action {
+        messages.push(message);
+    }
+    Ok(crate::pick::commit_matches_pick(
+        repo,
+        &head,
+        state.expected_head,
+        &picked,
+        &messages,
+    )?)
+}
+
+/// Takes HEAD (checked by `is_step_committed_by_hand`) as the current step: a `Reword` entry
+/// gets its planned message, then the bookkeeping `land_current_step` does after its commit.
+fn adopt_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+    let entry = state.plan[state.cursor].clone();
+    if let RebaseAction::Reword { message } = &entry.action {
+        let head = repo.head()?.peel_to_commit()?;
+        if head.message_bytes() != message.as_bytes() {
+            let parent = head.parent(0)?;
+            let committer = repo.signature()?;
+            let reworded = crate::signing::create_commit(
+                repo,
+                None,
+                &head.author(),
+                &committer,
+                message,
+                &head.tree()?,
+                &[&parent],
+            )?;
+            repo.set_head_detached(reworded)?;
+        }
+    }
+    state.expected_head = repo.head()?.peel_to_commit()?.id();
+    after_landed(repo, state)
+}
+
+/// HEAD detached at `expected_head`, where the rebase left it.
+fn head_at_expected(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
+    Ok(repo.head_detached()? && repo.head()?.peel_to_commit()?.id() == state.expected_head)
+}
+
+fn check_head_at_expected(repo: &Repository, state: &RebaseState) -> Result<(), RebaseError> {
+    if head_at_expected(repo, state)? {
+        return Ok(());
+    }
+    Err(head_moved(repo, state)?)
+}
+
+/// The `HeadMoved` refusal, naming where HEAD is now.
+fn head_moved(repo: &Repository, state: &RebaseState) -> Result<RebaseError, RebaseError> {
+    let head = repo.head()?;
+    let id = head.peel_to_commit()?.id().to_string();
+    let actual = if repo.head_detached()? {
+        id
+    } else {
+        format!("{} at {id}", head.shorthand().unwrap_or("a branch"))
+    };
+    Ok(RebaseError::HeadMoved {
+        expected: state.expected_head.to_string(),
+        actual,
+    })
 }
 
 /// Auto-advances through plan entries starting at `state.cursor`: applies each via cherry-pick,
@@ -292,12 +557,14 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         repo.cherrypick(&commit, None)?;
 
         if repo.index()?.has_conflicts() {
+            state.stop = RebaseStop::Conflict;
             return Ok(RebaseStepResult::Conflicted {
                 files: conflicted_paths(repo)?,
             });
         }
 
         if matches!(entry.action, RebaseAction::Edit) {
+            state.stop = RebaseStop::Edit;
             return Ok(RebaseStepResult::PausedForEdit);
         }
 
@@ -355,7 +622,9 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
             .to_string(),
     };
 
+    // Re-read the index from disk: a terminal `git add` during the pause must be seen.
     let mut index = repo.index()?;
+    index.read(false)?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
@@ -376,7 +645,14 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     // cancelled), and a retried Continue must see the HEAD this step just landed, not a stale
     // one that would read as `HeadMoved`.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
+    after_landed(repo, state)
+}
 
+/// What follows a landed step (committed here, or by hand and adopted): if the entry ends a
+/// squash/fixup group, collapse the group; then re-baseline `expected_head` and forget git's
+/// paused pick.
+fn after_landed(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+    let committer = repo.signature()?;
     if ends_a_group(&state.plan, state.cursor) {
         // Walk backward to the nearest preceding entry that's neither `Squash`/`Fixup` (a group
         // member) nor `Drop` (never landed, so it can't be the leader either) — that's the group
@@ -442,6 +718,9 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     // This function is the only place (besides `start_rebase`'s initial detach) that moves HEAD
     // during a rebase, so re-baseline the drift check from wherever it just landed.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
+    // The step is committed: forget its CHERRY_PICK_HEAD/MERGE_MSG, so a later stop (an error
+    // before the next pick, a failed `finish`) is a clean state, never a stale pick.
+    repo.cleanup_state()?;
 
     Ok(())
 }
@@ -460,10 +739,36 @@ fn conflicted_paths(repo: &Repository) -> Result<Vec<String>, RebaseError> {
     Ok(files)
 }
 
+/// Moves the original branch to the rebased HEAD and reattaches HEAD. The branch must still be
+/// where the rebase found it (compare-and-swap): a branch moved during the pause (another
+/// worktree, `git branch -f`) would otherwise lose those commits. On an error the caller keeps
+/// the state with `cursor == plan.len()`, and Continue retries.
 fn finish(repo: &Repository, state: &RebaseState) -> Result<RebaseStepResult, RebaseError> {
+    let branch = short_branch(&state.original_branch_ref);
+    let current = match repo.find_reference(&state.original_branch_ref) {
+        Ok(reference) => reference.target(),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => {
+            return Err(RebaseError::BranchMissing { branch })
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if current != Some(state.original_tip) {
+        return Err(RebaseError::BranchMoved { branch });
+    }
     let final_oid = repo.head()?.peel_to_commit()?.id();
-    let mut branch_ref = repo.find_reference(&state.original_branch_ref)?;
-    branch_ref.set_target(final_oid, "rebase (finish): returning to branch")?;
+    repo.reference_matching(
+        &state.original_branch_ref,
+        final_oid,
+        true,
+        state.original_tip,
+        "rebase (finish): returning to branch",
+    )
+    .map_err(|error| match error.code() {
+        git2::ErrorCode::Modified => RebaseError::BranchMoved {
+            branch: branch.clone(),
+        },
+        _ => error.into(),
+    })?;
     repo.set_head(&state.original_branch_ref)?;
     // Clears CHERRY_PICK_HEAD and any other in-progress-operation state left behind by the
     // `cherrypick()` calls in `advance` — without this, `repo.state()` stays `CherryPick` even
@@ -472,8 +777,65 @@ fn finish(repo: &Repository, state: &RebaseState) -> Result<RebaseStepResult, Re
     Ok(RebaseStepResult::Done)
 }
 
-pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseError> {
-    restore_original_branch(repo, &state.original_branch_ref)
+/// `refs/heads/topic` → `topic`.
+fn short_branch(branch_ref: &str) -> String {
+    branch_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(branch_ref)
+        .to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseAbort {
+    /// HEAD went back to the branch. `false` when HEAD was left where it is because the rebase
+    /// no longer owned it (HEAD moved, the branch is gone, another operation is paused).
+    pub restored: bool,
+}
+
+/// Ends a paused rebase, like `abort_sequence` (the caller forgets the state only on `Ok`):
+///
+/// - HEAD is where the rebase left it (or is the paused step committed by hand), the branch is still at the tip the rebase started from and
+///   git has nothing else paused: go back to the branch with a forced checkout, as `git rebase
+///   --abort` does. `restored: true`.
+/// - Otherwise (the rebase diverged) HEAD and every ref stay where they are. With HEAD still at
+///   `expected_head`, this rebase's paused step is undone like `git cherry-pick --abort`; with
+///   HEAD moved, only git's paused-pick state is forgotten, so work staged elsewhere survives.
+///   `restored: false`.
+pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbort, RebaseError> {
+    let own_pick = is_own_paused_step(repo, state);
+    let other_operation = repo.state() != git2::RepositoryState::Clean && !own_pick;
+    let at_expected = head_at_expected(repo, state)?;
+    // The branch must still be where the rebase found it: a branch moved outside is a
+    // divergence, and Abort then leaves HEAD (and any work made during the pause) alone (D3).
+    let branch_unmoved = match repo.find_reference(&state.original_branch_ref) {
+        Ok(reference) => reference.target() == Some(state.original_tip),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    // A step committed by hand that Continue would adopt is still a pause (`rebase_health`
+    // says Paused), so it is aborted like one.
+    let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
+    if paused_here && branch_unmoved && !other_operation {
+        restore_original_branch(repo, &state.original_branch_ref)?;
+        return Ok(RebaseAbort { restored: true });
+    }
+    if at_expected {
+        let own_conflicts = repo.state() == git2::RepositoryState::Clean && {
+            let mut index = repo.index()?;
+            index.read(false)?;
+            index.has_conflicts()
+        };
+        if own_pick || own_conflicts {
+            // HEAD is where the rebase left it, so the index holds this rebase's step: undo it
+            // like `git cherry-pick --abort`.
+            crate::merge::abort_merge(repo)?;
+        }
+    } else if own_pick {
+        // HEAD moved (e.g. `git checkout other`): the index may now hold work staged there, so
+        // only forget git's paused pick and leave the index and work tree alone.
+        repo.cleanup_state()?;
+    }
+    Ok(RebaseAbort { restored: false })
 }
 
 /// Undoes an in-progress rebase: the original branch ref is never touched while a rebase runs —
@@ -481,10 +843,11 @@ pub fn abort_rebase(repo: &Repository, state: RebaseState) -> Result<(), RebaseE
 /// its tree over whatever the in-progress rebase left in the working directory/index. Shared by
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
 fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
-    repo.set_head(branch_ref)?;
+    // Check out first, reattach after: a refused checkout (a folder that can't be written)
+    // then leaves HEAD detached where the rebase left it, so Abort can simply be retried.
+    let tree = repo.find_reference(branch_ref)?.peel_to_tree()?;
     // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
     // folder; remove such links first, like git (#114).
-    let tree = repo.head()?.peel_to_tree()?;
     crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
         repo,
         Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
@@ -492,7 +855,8 @@ fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), Re
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_head(Some(&mut checkout))?;
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    repo.set_head(branch_ref)?;
     repo.cleanup_state()?;
     Ok(())
 }

@@ -7,48 +7,31 @@ use std::sync::mpsc::Sender;
 
 const NO_SEQUENCE: &str = "No cherry-pick or revert is in progress.";
 
-/// `HeadInfo` with the stored sequence's progress filled in (git-core has no persistence).
+/// `HeadInfo` with the stored sequence's progress and the stored rebase filled in (git-core has
+/// no persistence). A rebase whose health can't be read counts as diverged: Abort is then the
+/// safe way out.
 pub(super) fn head_info(
     repo: &git2::Repository,
-    sequence_store: &SequenceStore,
+    probe: &super::gate::OperationProbe<'_>,
     reply: Sender<Result<HeadInfo, String>>,
 ) {
     let result = git_core::repo::head_info(repo)
         .map(|mut info| {
-            info.sequence = sequence_store.load(repo).map(|state| state.progress());
+            info.sequence = probe.sequence.load(repo).map(|state| state.progress());
+            info.rebase = probe.rebase(repo).map(|state| {
+                let health =
+                    git_core::rebase::rebase_health(repo, &state).unwrap_or_else(|error| {
+                        eprintln!("browsitory: can't check the paused rebase: {error}");
+                        git_core::rebase::RebaseHealth::Diverged(
+                            git_core::rebase::RebaseDivergence::OtherOperation,
+                        )
+                    });
+                git_core::repo::RebaseInfo::new(&state, health)
+            });
             info
         })
         .map_err(|error| error.to_string());
     let _ = reply.send(result);
-}
-
-/// Replaces a command that must not run while a sequence is stored with a no-op, after
-/// replying with git-core's `OperationInProgress` text on its own reply. Refused: anything that
-/// starts another operation or moves HEAD or the index under the sequence (picks, merge, rebase,
-/// commit and amend, reset, checkout, branch switch, pull, stash apply/pop, reflog restore).
-/// Read-only commands, fetch, staging and conflict resolution stay available.
-pub(super) fn gate_during_sequence(command: Command) -> Command {
-    fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
-        let _ = reply.send(Err(
-            git_core::pick::PickError::OperationInProgress.to_string()
-        ));
-        let (reply, _) = std::sync::mpsc::channel();
-        Command::Ping { reply }
-    }
-    match command {
-        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => refuse(reply),
-        Command::CherryPickMany { reply, .. } | Command::RevertMany { reply, .. } => refuse(reply),
-        Command::StartMerge { reply, .. } => refuse(reply),
-        Command::StartRebase { reply, .. } => refuse(reply),
-        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => refuse(reply),
-        Command::ResetToCommit { reply, .. }
-        | Command::CheckoutCommit { reply, .. }
-        | Command::SwitchBranch { reply, .. }
-        | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
-        Command::PullCurrentUpstream { reply, .. } => refuse(reply),
-        Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
-        other => other,
-    }
 }
 
 /// Keeps or forgets the sequence as `run.state` says and turns the run into the reply. A state

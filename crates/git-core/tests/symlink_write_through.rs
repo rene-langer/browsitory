@@ -627,7 +627,7 @@ fn abort_rebase_leaf_never_writes_through() {
     let f = fx();
     let state = paused_rebase(&f);
     f.link_leaf();
-    git_core::rebase::abort_rebase(&f.repo, state).unwrap();
+    git_core::rebase::abort_rebase(&f.repo, &state).unwrap();
     f.untouched();
     assert_eq!(common::read(f.path(), "tc"), "plain\n");
 }
@@ -637,7 +637,7 @@ fn abort_rebase_ancestor_never_writes_through() {
     let f = fx();
     let state = paused_rebase(&f);
     f.link_ancestor();
-    git_core::rebase::abort_rebase(&f.repo, state).unwrap();
+    git_core::rebase::abort_rebase(&f.repo, &state).unwrap();
     f.untouched();
     assert_eq!(common::read(f.path(), "d/f"), "inner\n");
 }
@@ -1008,7 +1008,7 @@ fn abort_rebase_from_a_committed_folder_link_restores_the_folder() {
         git_core::rebase::RebaseStepResult::Conflicted { .. }
     ));
     assert!(common::is_link(f.path(), "d"));
-    git_core::rebase::abort_rebase(&f.repo, state).unwrap();
+    git_core::rebase::abort_rebase(&f.repo, &state).unwrap();
     f.untouched();
     d_is_the_folder_again(&f);
 }

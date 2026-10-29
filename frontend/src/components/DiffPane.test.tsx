@@ -97,7 +97,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
@@ -113,7 +113,6 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     startRebase: unused,
     rebaseContinue: unused,
     abortRebase: unused,
-    getRebaseProgress: async () => null,
     detectForgeRepository: async () => [],
     saveForgeToken: unused,
     forgetForgeToken: unused,
@@ -239,7 +238,7 @@ describe("DiffPane", () => {
       const onCommitMessageFocused = vi.fn();
       renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
         amendMode: true,
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null },
         focusCommitMessage: true,
         onCommitMessageFocused,
       });
@@ -825,7 +824,7 @@ describe("DiffPane", () => {
           headPushed: false,
           operation: null,
           squashMessage: "Squashed commit of the following:\n",
-          commitHooks: [], sequence: null,
+          commitHooks: [], sequence: null, rebase: null,
         },
       });
 
@@ -841,11 +840,29 @@ describe("DiffPane", () => {
       expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
     });
 
+    it("disables Continue with the divergence reason", () => {
+      const onRebaseAbort = vi.fn();
+      renderUncommitted(fakeClient({}), status, {
+        rebaseProgress: { currentStep: 1, totalSteps: 3 },
+        headInfo: {
+          headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null,
+          rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged", reason: "BranchMoved" } },
+        },
+        onRebaseAbort,
+      });
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: /continue rebase/i })).toBeDisabled();
+      expect(within(dock).getByText("topic was changed outside Browsitory.")).toBeInTheDocument();
+      fireEvent.click(within(dock).getByRole("button", { name: /abort rebase/i }));
+      expect(onRebaseAbort).toHaveBeenCalled();
+    });
+
     it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
       const onSequenceContinue = vi.fn();
       const onSequenceAbort = vi.fn();
       const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
-      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence, rebase: null };
       const { unmount } = renderUncommitted(
         fakeClient({ getConflictHunks: async () => [] }),
         [...status, { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }],
@@ -864,7 +881,7 @@ describe("DiffPane", () => {
 
       // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
       renderUncommitted(fakeClient({}), status, {
-        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" } },
+        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null },
         onSequenceContinue,
         onSequenceAbort,
       });
@@ -877,7 +894,7 @@ describe("DiffPane", () => {
     it("disables the sequence's Continue and Abort while an action is pending", () => {
       const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
       renderUncommitted(fakeClient({}), status, {
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null },
         sequencePending: true,
       });
       const dock = screen.getByRole("group", { name: "Commit actions" });
@@ -2227,7 +2244,7 @@ describe("DiffPane commit message settings", () => {
 });
 
 describe("DiffPane co-authors and amend author", () => {
-  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null };
+  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null };
   const head = {
     id: "h1",
     shortId: "h1",

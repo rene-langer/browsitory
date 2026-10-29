@@ -506,6 +506,31 @@ Drop and Interactive rebase… work for any selection. Selections that include a
 root commit, or commits that aren't on the current branch, can't be rebased. Esc collapses a
 selection back to one commit.
 
+**A paused rebase survives restarts.** Browsitory stores a paused rebase in the repository's
+`.git/browsitory/` folder, so quitting the app, closing the tab, reloading the VSCode window or a
+backend crash doesn't lose it: when the repository opens again the status strip and the commit
+area show the rebase where you left it, and Continue or Abort work as before. A rebase finished
+after a restart is still one step for **Undo** ("Rebase onto …").
+
+**Working on a paused rebase with git.** To the git command line a paused Browsitory rebase looks
+like a cherry-pick on a detached HEAD: `git status` says "You are currently cherry-picking". Finishing
+the paused step with `git cherry-pick --continue` or `git commit` is fine — Continue in Browsitory
+takes that commit as the step (a reworded step still gets the message you planned) and goes on.
+It does so only when the commit is recognisably that step: the step's author and message (keep the
+message git suggests) and the step's changes; any other commit counts as HEAD moved.
+`git cherry-pick --abort` is fine too: Continue then applies the step again.
+
+**Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
+strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example
+`git switch`), the branch was changed or deleted, or another git operation is in progress. Such a
+rebase can only be aborted, and **Abort rebase** then stops it without moving HEAD or touching your
+branches; it only cleans up the rebase's own paused step. When the branch had changed, the toast
+offers **Switch to ⟨branch⟩**, an ordinary branch switch that refuses rather than overwrite local
+changes. While a rebase is paused, the branch being rebased can't be deleted, renamed or checked
+out in a new worktree. Continue also refuses to finish if the
+branch being rebased moved during the pause, rather than overwriting those commits; put the branch
+back and Continue again, or abort and start over.
+
 ## Rewriting and moving commits
 
 Right-click a commit in the graph:
@@ -568,8 +593,8 @@ branch switching, pull and stash apply/pop are unavailable.
 
 If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
 **Continue** recognises it when it is exactly that step: one commit on top of where the sequence
-stopped, with the picked commit's author (for a cherry-pick) or git's "This reverts commit …"
-message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
+stopped, with the picked commit's author, message and changes (for a cherry-pick) or git's
+"This reverts commit …" message (for a revert). Any other commit, or any commit after a stop that wasn't a conflict,
 means HEAD moved, and Continue refuses.
 
 **Abort** puts the branch back where it was before the first commit was applied, keeping
@@ -597,7 +622,10 @@ targeting a source/target branch.
 command palette, and the toast's Undo/Redo button do the same; each names the operation it
 will act on. Undo covers staging, commits, amend, reset, branch and tag changes, checkout,
 cherry-pick, revert, merge, rebase, pull and every discard, so discarded changes are
-recoverable. Up to 50 steps are kept, across restarts.
+recoverable. Up to 50 steps are kept, across restarts. An operation that stopped on a conflict
+or an edit step (merge, cherry-pick, revert, a multi-commit sequence, rebase) becomes one undo
+step when it finishes, even if you restarted the app in between; one aborted, or replaced by
+another operation outside Browsitory, leaves nothing to undo.
 
 Undo refuses, instead of overwriting, when the repository changed since the operation, or
 when it would delete, move or switch to a branch that is checked out in another worktree; the

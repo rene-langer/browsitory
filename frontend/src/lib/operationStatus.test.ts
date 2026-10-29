@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { abortToast, conflictReason, pickToast, sequenceLabel, sequenceToast } from "./operationStatus";
+import type { RebaseInfo } from "../ipc/RepoClient";
+import {
+  abortToast,
+  conflictReason,
+  pickToast,
+  rebaseAbortSwitchTarget,
+  rebaseAbortToast,
+  rebaseDivergenceText,
+  sequenceLabel,
+  sequenceToast,
+} from "./operationStatus";
 
 describe("operationStatus", () => {
   it("explains blocked steps by conflict count", () => {
@@ -42,6 +52,38 @@ describe("operationStatus", () => {
     );
     expect(abortToast("Revert", { rewound: false })).toBe(
       "Stopped the revert. HEAD had moved, so it was left where it is.",
+    );
+  });
+});
+
+describe("rebase status text", () => {
+  it("rebaseDivergenceText covers each reason", () => {
+    expect(rebaseDivergenceText("HeadMoved", "main")).toBe("HEAD was moved outside Browsitory.");
+    expect(rebaseDivergenceText("BranchMoved", "main")).toBe("main was changed outside Browsitory.");
+    expect(rebaseDivergenceText("BranchMissing", "feature/x")).toBe("feature/x was deleted outside Browsitory.");
+    expect(rebaseDivergenceText("OtherOperation", "main")).toBe("Another git operation is in progress.");
+  });
+
+  it("rebaseAbortToast for restored, moved, and branch missing", () => {
+    const info = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health });
+    expect(rebaseAbortToast({ restored: true }, info({ kind: "Paused" }))).toBe("Aborted rebase");
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "HeadMoved" }))).toBe(
+      "Stopped the rebase. HEAD had moved, so it was left where it is.",
+    );
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "BranchMissing" }))).toBe(
+      "Stopped the rebase. topic no longer exists, so HEAD was left detached.",
+    );
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBe(
+      "Stopped the rebase. topic had changed, so HEAD was left where it is.",
+    );
+    expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "OtherOperation" }))).toBe(
+      "Stopped the rebase. Another git operation is in progress, so HEAD was left where it is.",
+    );
+    expect(rebaseAbortSwitchTarget({ restored: false }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBe("topic");
+    expect(rebaseAbortSwitchTarget({ restored: true }, info({ kind: "Diverged", reason: "BranchMoved" }))).toBeNull();
+    expect(rebaseAbortSwitchTarget({ restored: false }, info({ kind: "Diverged", reason: "HeadMoved" }))).toBeNull();
+    expect(rebaseAbortToast({ restored: false }, null)).toBe(
+      "Stopped the rebase. HEAD had moved, so it was left where it is.",
     );
   });
 });

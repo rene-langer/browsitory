@@ -56,7 +56,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
+import { abortToast, pickToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -438,6 +438,32 @@ function RepoWorkspace({
     if (sequenceKind === null) return;
     void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
   }, [abortStoredSequence, runPickAction, sequenceKind]);
+  // Abort rebase from the strip, the commit dock and the palette: the toast says whether HEAD
+  // went back to the branch, from the rebase as it was before the abort.
+  const { abortRebase: abortStoredRebase } = appState;
+  const storedRebase = appState.state.headInfo.rebase;
+  // After aborting a rebase whose branch moved, the toast offers "Switch to {branch}" through the
+  // ordinary branch switch (a safe checkout that refuses rather than overwrite local changes).
+  const { switchBranch: switchToBranch } = appState;
+  const abortRebase = useCallback(async () => {
+    const before = storedRebase;
+    dismissError();
+    const abort = await abortStoredRebase();
+    if (abort === null || !mounted.current) return abort;
+    const target = rebaseAbortSwitchTarget(abort, before);
+    pushToast(
+      rebaseAbortToast(abort, before),
+      target === null
+        ? undefined
+        : {
+            label: `Switch to ${target}`,
+            run: () => {
+              if (mounted.current) void announce("Switched branch", switchToBranch)(target);
+            },
+          },
+    );
+    return abort;
+  }, [abortStoredRebase, announce, dismissError, pushToast, storedRebase, switchToBranch]);
   const abortMergeOrSequence = useCallback(() => {
     if (sequenceKind !== null) abortSequence();
     else void abortMerge();
@@ -483,26 +509,12 @@ function RepoWorkspace({
   useEffect(() => {
     onBusyChange(repoPath, repositoryOperationDisabled);
   }, [repoPath, repositoryOperationDisabled, onBusyChange]);
-  // Mirrors `appState.state.rebaseProgress` into a ref so the unmount cleanup below can read its
-  // current value instead of a stale one closed over when that effect was first set up.
-  const rebaseProgressRef = useRef(appState.state.rebaseProgress);
-  useEffect(() => {
-    rebaseProgressRef.current = appState.state.rebaseProgress;
-  }, [appState.state.rebaseProgress]);
   // Only the active tab's workspace is mounted (PERF-001), so switching away mid-operation
   // unmounts this component before its "no longer busy" report can ever fire — which would leave
-  // the backgrounded tab's close button disabled for good. Clear it on the way out for
-  // `pending`/`transfer`/merge, which are all safe to lose track of: the worker finishes its
-  // current command and exits cleanly, and merge state (`MERGE_HEAD`) lives on disk so
-  // `refresh()` re-reads it correctly on remount. Rebase state is the exception — it lives only
-  // in the worker's in-memory `rebase_state`, nothing beyond `set_head_detached` is persisted —
-  // so unmounting mid-rebase must NOT clear busy, or closing this tab drops the worker (and its
-  // rebase state) while HEAD is still detached with a conflicted index and no way to Continue or
-  // Abort from the app.
-  useEffect(
-    () => () => onBusyChange(repoPath, rebaseProgressRef.current !== null),
-    [repoPath, onBusyChange],
-  );
+  // the backgrounded tab's close button disabled for good. Clear it on the way out: the worker
+  // finishes its current command and exits cleanly, and every paused operation lives on disk
+  // (`MERGE_HEAD`, `sequence.json`, `rebase.json`), so `refresh()` re-reads it on remount.
+  useEffect(() => () => onBusyChange(repoPath, false), [repoPath, onBusyChange]);
 
   return (
     // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
@@ -522,11 +534,12 @@ function RepoWorkspace({
         merging={appState.state.mergeMessage !== null}
         operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
+        rebase={appState.state.headInfo.rebase}
         sequence={appState.state.headInfo.sequence}
         pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={abortMergeOrSequence}
-        onAbortRebase={appState.abortRebase}
+        onAbortRebase={() => void abortRebase()}
         onContinueSequence={continueSequence}
         onAbortSequence={abortSequence}
       />
@@ -661,7 +674,7 @@ function RepoWorkspace({
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
             commands={buildCommands(
-              appState,
+              { ...appState, abortRebase },
               onOpenRepoTab,
               openRepos.filter((repo) => repo.path !== repoPath),
               onSwitchRepoTab,
@@ -1071,7 +1084,7 @@ function RepoWorkspace({
                   onCommitMessageCleared={appState.clearCommitMessageHandled}
                   rebaseProgress={appState.state.rebaseProgress}
                   onRebaseContinue={appState.rebaseContinue}
-                  onRebaseAbort={appState.abortRebase}
+                  onRebaseAbort={() => void abortRebase()}
                 />
               )
             }

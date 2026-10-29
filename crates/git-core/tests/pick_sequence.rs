@@ -421,7 +421,7 @@ fn continue_counts_a_step_the_user_committed_elsewhere() {
     stage(&repo, "shared.txt");
     git_core::commit::commit(
         &mut repo,
-        "side two (by hand)",
+        "side two",
         git_core::hooks::HookOptions::default(),
     )
     .unwrap();
@@ -433,10 +433,7 @@ fn continue_counts_a_step_the_user_committed_elsewhere() {
             skipped: vec![]
         }
     );
-    assert_eq!(
-        summaries(&repo, 3),
-        ["side three", "side two (by hand)", "side one"]
-    );
+    assert_eq!(summaries(&repo, 3), ["side three", "side two", "side one"]);
 }
 
 #[test]
@@ -797,4 +794,68 @@ fn reverting_a_revert_of_a_revert_stays_a_revert() {
         tip.summary().unwrap().unwrap(),
         "Revert \"Revert \"Revert \"x\"\"\""
     );
+}
+
+/// The verifier's repro for sequences: at the conflict stop the pick is aborted outside and
+/// the *next* commit of the sequence (same author and time) is committed instead. That is not
+/// the stopped step, so Continue refuses rather than counting it.
+#[test]
+fn continue_does_not_count_another_commit_with_the_same_author() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "shared.txt", "base\n");
+    common::commit_all(&repo, "base");
+    let base_ref = base_branch_ref(&repo);
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    repo.set_head("refs/heads/side").unwrap();
+    let author = git2::Signature::new(
+        "Same",
+        "same@example.com",
+        &git2::Time::new(1_700_000_000, 0),
+    )
+    .unwrap();
+    let mut ids = Vec::new();
+    for (path, contents, message) in [
+        ("shared.txt", "theirs\n", "conflicts"),
+        ("other.txt", "o\n", "other"),
+    ] {
+        common::write_file(dir.path(), path, contents);
+        stage(&repo, path);
+        let mut index = repo.index().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        ids.push(
+            repo.commit(Some("HEAD"), &author, &author, message, &tree, &[&parent])
+                .unwrap()
+                .to_string(),
+        );
+    }
+    repo.set_head(&base_ref).unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    common::write_file(dir.path(), "shared.txt", "ours\n");
+    common::commit_all(&repo, "ours edit");
+    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    git_core::merge::abort_merge(&repo).unwrap();
+    let other = repo
+        .find_commit(git2::Oid::from_str(&ids[1]).unwrap())
+        .unwrap();
+    repo.cherrypick(&other, None).unwrap();
+    let mut index = repo.index().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &author, &author, "other", &tree, &[&parent])
+        .unwrap();
+    repo.cleanup_state().unwrap();
+
+    let run = continue_sequence(&repo, state);
+
+    assert!(run.outcome.is_err(), "{:?}", run.outcome);
+    assert!(run.state.is_some());
 }

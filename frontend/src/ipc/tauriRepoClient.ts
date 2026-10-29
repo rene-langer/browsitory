@@ -61,6 +61,7 @@ import type {
   HeadInfo,
   PickOutcome,
   SequenceAbort,
+  RebaseAbort,
   SequenceOutcome,
   ConflictSide,
   UndoOutcome,
@@ -376,9 +377,7 @@ export const tauriRepoClient: RepoClient = {
   startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
     loggedInvoke<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
   rebaseContinue: (repoPath: string) => loggedInvoke<RebaseStepResult>("rebase_continue", { repoPath }),
-  abortRebase: (repoPath: string) => loggedInvoke("abort_rebase", { repoPath }),
-  getRebaseProgress: (repoPath: string) =>
-    loggedInvoke<{ currentStep: number; totalSteps: number } | null>("get_rebase_progress", { repoPath }),
+  abortRebase: (repoPath: string) => loggedInvoke<RebaseAbort>("abort_rebase", { repoPath }),
   detectForgeRepository: (repoPath: string) =>
     loggedInvoke<ForgeRepository[]>("detect_forge_repository", { repoPath }),
   saveForgeToken: (repoPath: string, provider: ForgeProvider, account: string, token: string) =>

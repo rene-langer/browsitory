@@ -129,7 +129,6 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     startRebase: unused,
     rebaseContinue: unused,
     abortRebase: unused,
-    getRebaseProgress: unused,
     detectForgeRepository: async () => [],
     saveForgeToken: unused,
     forgetForgeToken: unused,

@@ -6,6 +6,7 @@ import type {
   ConflictSide,
   PickOutcome,
   SequenceAbort,
+  RebaseAbort,
   SequenceOutcome,
   CreatePullRequest,
   FileConflictChoice,
@@ -275,7 +276,7 @@ export interface UseAppStateResult {
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
-  abortRebase(): Promise<void>;
+  abortRebase(): Promise<RebaseAbort | null>;
   /** See `HistoryActions`: outcomes, or `null` on failure. */
   cherryPick(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
   revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
@@ -346,7 +347,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     remoteDialog: null,
     stashes: [],
     mergeMessage: null,
-    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null },
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null },
     forcePushOffer: null,
     forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),
@@ -385,7 +386,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
       const limit = graphLimit.current;
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, rebaseProgress, forgeRepositories, headInfo, undoState] =
+      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
           client.getCommitGraph(repoPath, limit, graphBranchSelection),
@@ -398,7 +399,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           client.getCurrentUpstream(repoPath),
           client.listStashes(repoPath),
           client.getMergeMessage(repoPath),
-          client.getRebaseProgress(repoPath),
           client.detectForgeRepository(repoPath),
           client.getHeadInfo(repoPath),
           client.getUndoState(repoPath),
@@ -437,7 +437,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         stashes,
         mergeMessage,
         headInfo,
-        rebaseProgress,
+        // The backend reports a paused rebase in `HeadInfo`, restored from disk after a restart.
+        rebaseProgress: headInfo.rebase
+          ? { currentStep: headInfo.rebase.currentStep, totalSteps: headInfo.rebase.totalSteps }
+          : null,
         forgeRepositories,
         undoState,
         error: null,

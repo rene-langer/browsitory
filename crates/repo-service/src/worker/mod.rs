@@ -11,7 +11,7 @@ use git_core::diff::DiffHunk;
 use git_core::forge::{ForgeProvider, ForgeRepository};
 use git_core::graph::GraphCommit;
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
-use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult};
+use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
 use git_core::reflog::ReflogEntry;
 use git_core::remote::{
     PullOutcome, RemoteInfo, TagInfo, TransferErrorKind, TransferOperation, UpstreamInfo,
@@ -31,10 +31,12 @@ use crate::pull_requests::{
 mod branch;
 mod compare;
 mod forge;
+mod gate;
 mod history;
 mod hooks;
 mod merge;
 mod rebase;
+mod rebase_store;
 mod reflog;
 mod remote;
 mod search;
@@ -507,11 +509,7 @@ pub(crate) enum Command {
     },
     #[allow(dead_code)]
     AbortRebase {
-        reply: Sender<Result<(), String>>,
-    },
-    #[allow(dead_code)]
-    GetRebaseProgress {
-        reply: Sender<Result<Option<(usize, usize)>, String>>,
+        reply: Sender<Result<git_core::rebase::RebaseAbort, String>>,
     },
     FetchRemote {
         remote_name: String,
@@ -738,21 +736,45 @@ impl Worker {
             let cancelled = worker_cancelled;
             let search_generation = worker_search_generation;
             let mut repo = repo;
-            let mut rebase_state: Option<RebaseState> = None;
             let credential_service = CredentialService::new(credential_store);
             let pull_request_service = PullRequestService::new(forge_api);
             let mut undo_recorder = undo::UndoRecorder::open(&repo);
             // A stopped multi-commit cherry-pick/revert, persisted so it survives a restart.
             let sequence_store = sequence_store::SequenceStore::open(&repo);
-            // Browsitory's own rebase leaves `repo.state()` clean, so its paused state lives in
-            // `rebase_state` instead; a sequence stopped by an error is clean too.
-            let in_progress = |repo: &git2::Repository, rebase_state: &Option<RebaseState>| {
-                repo.state() != git2::RepositoryState::Clean
-                    || rebase_state.is_some()
-                    || sequence_store.load(repo).is_some()
+            // A paused rebase, persisted likewise (`rebase.json`), plus this session's copy when
+            // saving it failed. To git a paused rebase is a cherry-pick on a detached HEAD, or
+            // nothing at all after an error stop, so only the store says a rebase is going on;
+            // a sequence stopped by an error is clean too.
+            let rebase_store = rebase_store::RebaseStore::open(&repo);
+            let mut rebase_memory = gate::RebaseMemory::default();
+            macro_rules! probe {
+                () => {
+                    gate::OperationProbe {
+                        rebase: &rebase_store,
+                        memory: &rebase_memory,
+                        sequence: &sequence_store,
+                    }
+                };
+            }
+            // Names the operation in progress (`None`: nothing is), for the undo recorder.
+            let marker = |repo: &git2::Repository, rebase_memory: &gate::RebaseMemory| {
+                gate::OperationProbe {
+                    rebase: &rebase_store,
+                    memory: rebase_memory,
+                    sequence: &sequence_store,
+                }
+                .marker(repo)
             };
+            macro_rules! rebase_slot {
+                () => {
+                    rebase::RebaseSlot {
+                        store: &rebase_store,
+                        memory: &mut rebase_memory,
+                    }
+                };
+            }
             for mut command in rx {
-                undo_recorder.settle(in_progress(&repo, &rebase_state));
+                undo_recorder.settle(&repo, marker(&repo, &rebase_memory).as_deref());
                 let plan = undo::plan_for(&command);
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
@@ -766,12 +788,13 @@ impl Worker {
                     undo::hold_reply(&mut command, &mut held);
                 }
                 if let Some(plan) = plan {
-                    undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_state));
+                    undo_recorder.begin(&repo, plan, marker(&repo, &rebase_memory).as_deref());
                 }
-                // While a cherry-pick/revert sequence is stored, commands that would move HEAD
-                // or rewrite the index under it are refused before git-core runs.
-                if sequence_store.load(&repo).is_some() {
-                    command = history::gate_during_sequence(command);
+                // While a cherry-pick/revert sequence or a rebase is stored, commands that would
+                // move HEAD or rewrite the index under it are refused before git-core runs.
+                let rebased_branch = probe!().rebased_branch(&repo);
+                if rebased_branch.is_some() || sequence_store.load(&repo).is_some() {
+                    command = gate::gate_during_operation(command, rebased_branch.as_deref());
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -1158,9 +1181,7 @@ impl Worker {
                             merge::abort(&repo, reply)
                         }
                     }
-                    Command::GetHeadInfo { reply } => {
-                        history::head_info(&repo, &sequence_store, reply)
-                    }
+                    Command::GetHeadInfo { reply } => history::head_info(&repo, &probe!(), reply),
                     Command::AmendCommit {
                         message,
                         no_verify,
@@ -1279,15 +1300,12 @@ impl Worker {
                         rebase::commits_since(&repo, onto, reply)
                     }
                     Command::StartRebase { onto, plan, reply } => {
-                        rebase::start(&repo, onto, plan, &mut rebase_state, reply)
+                        rebase::start(&repo, onto, plan, rebase_slot!(), reply)
                     }
                     Command::RebaseContinue { reply } => {
-                        rebase::continue_rebase(&repo, &mut rebase_state, reply)
+                        rebase::continue_rebase(&repo, rebase_slot!(), reply)
                     }
-                    Command::AbortRebase { reply } => {
-                        rebase::abort(&repo, &mut rebase_state, reply)
-                    }
-                    Command::GetRebaseProgress { reply } => rebase::progress(&rebase_state, reply),
+                    Command::AbortRebase { reply } => rebase::abort(&repo, rebase_slot!(), reply),
                     Command::FetchRemote {
                         remote_name,
                         prune,
@@ -1460,16 +1478,18 @@ impl Worker {
                     ),
                     Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
                     Command::Undo { reply } => {
-                        let _ = reply
-                            .send(undo_recorder.undo(&repo, in_progress(&repo, &rebase_state)));
+                        let _ = reply.send(
+                            undo_recorder.undo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                        );
                     }
                     Command::Redo { reply } => {
-                        let _ = reply
-                            .send(undo_recorder.redo(&repo, in_progress(&repo, &rebase_state)));
+                        let _ = reply.send(
+                            undo_recorder.redo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                        );
                     }
                 }
                 if track {
-                    undo_recorder.finish(&repo, in_progress(&repo, &rebase_state), aborts);
+                    undo_recorder.finish(&repo, marker(&repo, &rebase_memory).as_deref(), aborts);
                 }
                 held.release();
             }
@@ -4390,7 +4410,7 @@ mod tests {
         let result = handle.start_rebase(onto, plan).unwrap();
 
         assert_eq!(result, git_core::rebase::RebaseStepResult::Done);
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
     }
 
     #[test]
@@ -4420,11 +4440,11 @@ mod tests {
         let result = handle.start_rebase(onto, plan).unwrap();
         assert_eq!(result, git_core::rebase::RebaseStepResult::PausedForEdit);
         // 1-indexed: the first (and here only) paused step reports "Step 1 of 1", not "0 of 1".
-        assert_eq!(handle.get_rebase_progress().unwrap(), Some((1, 1)));
+        assert_eq!(rebase_progress(&handle), Some((1, 1)));
 
         handle.abort_rebase().unwrap();
 
-        assert_eq!(handle.get_rebase_progress().unwrap(), None);
+        assert_eq!(rebase_progress(&handle), None);
         assert!(handle.get_status().unwrap().is_empty());
     }
 
@@ -4945,5 +4965,795 @@ mod tests {
             undone += 1;
         }
         assert_eq!(undone, 50);
+    }
+
+    // --- Restart resilience (#108, #134) ----------------------------------------------------
+
+    /// An app restart: drop the worker and every handle (held replies mean everything was
+    /// persisted before the last reply), then start a fresh worker on the same path.
+    fn restart(
+        worker: Worker,
+        handle: super::WorkerHandle,
+        path: &Path,
+    ) -> (Worker, super::WorkerHandle) {
+        drop(handle);
+        drop(worker);
+        let worker = Worker::spawn(path.to_path_buf()).unwrap();
+        let handle = worker.handle();
+        (worker, handle)
+    }
+
+    /// "Step N of M" of the stored rebase, as `HeadInfo.rebase` reports it.
+    fn rebase_progress(handle: &super::WorkerHandle) -> Option<(usize, usize)> {
+        handle
+            .get_head_info()
+            .unwrap()
+            .rebase
+            .map(|rebase| (rebase.current_step, rebase.total_steps))
+    }
+
+    fn rebase_file(repo: &Repository) -> std::path::PathBuf {
+        repo.path().join("browsitory").join("rebase.json")
+    }
+
+    /// `base` (onto; f.txt = "base\n") → "a" (a.txt) → "b" (f.txt = "from b\n") on the
+    /// checked-out branch. Returns `(onto, plan [Edit a, Pick b], branch ref, branch tip)`.
+    fn edit_then_pick(
+        dir: &Path,
+        repo: &Repository,
+    ) -> (
+        String,
+        Vec<git_core::rebase::RebasePlanEntry>,
+        String,
+        git2::Oid,
+    ) {
+        write_file(dir, "f.txt", "base\n");
+        commit_all(repo, "base");
+        let onto = repo.head().unwrap().target().unwrap().to_string();
+        write_file(dir, "a.txt", "a\n");
+        commit_all(repo, "a");
+        let a = repo.head().unwrap().target().unwrap().to_string();
+        write_file(dir, "f.txt", "from b\n");
+        commit_all(repo, "b");
+        let head = repo.head().unwrap();
+        let tip = head.target().unwrap();
+        let entry = |id: String, action| git_core::rebase::RebasePlanEntry {
+            commit_id: id,
+            action,
+            combined_message: None,
+        };
+        (
+            onto,
+            vec![
+                entry(a, git_core::rebase::RebaseAction::Edit),
+                entry(tip.to_string(), git_core::rebase::RebaseAction::Pick),
+            ],
+            head.name().unwrap().to_string(),
+            tip,
+        )
+    }
+
+    fn paused_for_edit(
+        dir: &Path,
+        repo: &Repository,
+    ) -> (Worker, super::WorkerHandle, String, git2::Oid) {
+        let (onto, plan, branch, tip) = edit_then_pick(dir, repo);
+        let worker = Worker::spawn(dir.to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(
+            handle.start_rebase(onto, plan).unwrap(),
+            git_core::rebase::RebaseStepResult::PausedForEdit
+        );
+        (worker, handle, branch, tip)
+    }
+
+    fn branch_target(path: &Path, branch: &str) -> git2::Oid {
+        Repository::open(path)
+            .unwrap()
+            .find_reference(branch)
+            .unwrap()
+            .target()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_paused_rebase_survives_a_worker_restart() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        assert!(rebase_file(&repo).exists());
+
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        assert_eq!(rebase_progress(&handle), Some((1, 2)));
+    }
+
+    #[test]
+    fn a_restarted_worker_continues_the_rebase_to_completion() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+
+        // Replayed onto its own base, b may get its old id back; check the result instead.
+        let _ = tip;
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+        let head = reopened.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.summary().unwrap(), Some("b"));
+        assert_eq!(head.parent(0).unwrap().summary().unwrap(), Some("a"));
+        assert_eq!(reopened.state(), git2::RepositoryState::Clean);
+        assert!(!rebase_file(&repo).exists());
+        assert_eq!(rebase_progress(&handle), None);
+    }
+
+    #[test]
+    fn a_restarted_worker_aborts_the_rebase() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        handle.abort_rebase().unwrap();
+
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+        assert!(!rebase_file(&repo).exists());
+        assert_eq!(rebase_progress(&handle), None);
+    }
+
+    #[test]
+    fn a_crashed_worker_keeps_the_paused_rebase() {
+        let (dir, repo) = init_repo();
+        let (onto, plan, _, _) = edit_then_pick(dir.path(), &repo);
+        let path = dir.path().to_string_lossy().into_owned();
+        let workers: Mutex<HashMap<String, Worker>> = Mutex::new(HashMap::new());
+        let handle = ensure_worker(&workers, &path).unwrap();
+        handle.start_rebase(onto, plan).unwrap();
+
+        handle.crash_for_test();
+        while handle.get_status().is_ok() {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let fresh = ensure_worker(&workers, &path).unwrap();
+
+        assert_eq!(rebase_progress(&fresh), Some((1, 2)));
+    }
+
+    #[test]
+    fn a_rebase_error_stop_is_persisted_with_its_cursor() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        // A local edit in the way of b: a lands, b is refused.
+        write_file(dir.path(), "f.txt", "local\n");
+        assert!(handle.rebase_continue().is_err());
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        assert_eq!(rebase_progress(&handle), Some((2, 2)));
+
+        write_file(dir.path(), "f.txt", "base\n");
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+
+        let reopened = Repository::open(dir.path()).unwrap();
+        let head = reopened.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.summary().unwrap(), Some("b"));
+        assert_ne!(head.tree_id(), head.parent(0).unwrap().tree_id());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+            "from b\n"
+        );
+    }
+
+    /// The forced checkout of Abort can't create a file in a read-only folder, so Abort fails.
+    /// The rebase must stay stored and HEAD where the rebase left it, so Abort can be retried.
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_abort_keeps_the_stored_rebase() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = init_repo();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        write_file(dir.path(), "d/g.txt", "base\n");
+        commit_all(&repo, "base");
+        let onto = repo.head().unwrap().target().unwrap().to_string();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "a");
+        let a = repo.head().unwrap().target().unwrap().to_string();
+        // The branch tip has d/new.txt, which going back to the branch must create.
+        write_file(dir.path(), "d/new.txt", "new\n");
+        commit_all(&repo, "b");
+        let branch = repo.head().unwrap().name().unwrap().to_string();
+        let tip = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: a,
+            action: git_core::rebase::RebaseAction::Edit,
+            combined_message: None,
+        }];
+        assert_eq!(
+            handle.start_rebase(onto, plan).unwrap(),
+            git_core::rebase::RebaseStepResult::PausedForEdit
+        );
+        assert!(!dir.path().join("d/new.txt").exists());
+        let folder = dir.path().join("d");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(folder.join("probe"), "").is_ok() {
+            // Root ignores folder permissions: no reliable failure to provoke here.
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let failed = handle.abort_rebase();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(failed.is_err());
+        assert!(rebase_file(&repo).exists());
+        assert_eq!(rebase_progress(&handle), Some((1, 1)));
+        assert!(Repository::open(dir.path())
+            .unwrap()
+            .head_detached()
+            .unwrap());
+        handle.abort_rebase().unwrap();
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+        assert_eq!(reopened.head().unwrap().target().unwrap(), tip);
+        assert_eq!(
+            std::fs::read_to_string(folder.join("new.txt")).unwrap(),
+            "new\n"
+        );
+        assert!(!rebase_file(&repo).exists());
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_rebase_for_the_session() {
+        let (dir, repo) = init_repo();
+        let (onto, plan, branch, _) = edit_then_pick(dir.path(), &repo);
+        std::fs::create_dir_all(rebase_file(&repo)).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let error = handle.start_rebase(onto, plan).unwrap_err();
+
+        assert!(error.contains("could not be saved"), "{error}");
+        let short = branch.trim_start_matches("refs/heads/");
+        assert!(error.contains(&format!("git switch {short}")), "{error}");
+        assert_eq!(rebase_progress(&handle), Some((1, 2)));
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+        assert_eq!(rebase_progress(&handle), None);
+    }
+
+    /// Every command that would move HEAD or rewrite the index under a stored rebase replies
+    /// with the operation-in-progress text, and HEAD stays put.
+    fn assert_moves_are_refused(handle: &super::WorkerHandle, path: &Path) {
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+        let repo = Repository::open(path).unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        let id = head.to_string();
+        let branch = repo
+            .branches(Some(git2::BranchType::Local))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .0
+            .name()
+            .unwrap()
+            .unwrap()
+            .to_string();
+        assert_eq!(handle.switch_branch(branch.clone()).unwrap_err(), busy);
+        assert_eq!(handle.cherry_pick(id.clone(), None).unwrap_err(), busy);
+        assert_eq!(handle.cherry_pick_many(vec![id.clone()]).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .commit("x".into(), false, Vec::new(), mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .amend_commit("x".into(), false, None, Vec::new(), mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .start_merge(branch, git_core::merge::MergeOptions::default())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.start_rebase(id.clone(), vec![]).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .reset_to_commit(id.clone(), git_core::reset::ResetMode::Hard)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.checkout_commit(id.clone()).unwrap_err(), busy);
+        assert_eq!(handle.pop_stash(0, id, false).unwrap_err(), busy);
+        assert_eq!(repo.head().unwrap().target().unwrap(), head);
+    }
+
+    #[test]
+    fn commands_are_refused_while_a_rebase_is_stored() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        assert_moves_are_refused(&handle, dir.path());
+    }
+
+    #[test]
+    fn commands_are_refused_after_a_rebase_error_stop() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        write_file(dir.path(), "f.txt", "local\n");
+        assert!(handle.rebase_continue().is_err());
+        // To git nothing is going on now; only the stored rebase says otherwise.
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+        assert_moves_are_refused(&handle, dir.path());
+    }
+
+    #[test]
+    fn staging_and_conflict_resolution_stay_available_during_a_rebase() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let onto = repo.head().unwrap().target().unwrap().to_string();
+        write_file(dir.path(), "a.txt", "on top\n");
+        commit_all(&repo, "on top");
+        write_file(dir.path(), "a.txt", "again\n");
+        commit_all(&repo, "again");
+        let picked = repo.head().unwrap().target().unwrap().to_string();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: picked,
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        }];
+        assert!(matches!(
+            handle.start_rebase(onto, plan).unwrap(),
+            git_core::rebase::RebaseStepResult::Conflicted { .. }
+        ));
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        write_file(dir.path(), "notes.txt", "notes\n");
+        handle.stage_file("notes.txt".into()).unwrap();
+        handle.unstage_file("notes.txt".into()).unwrap();
+
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "resolved\n"
+        );
+    }
+
+    fn health(info: &git_core::repo::HeadInfo) -> git_core::rebase::RebaseHealth {
+        info.rebase.as_ref().expect("a stored rebase").health
+    }
+
+    #[test]
+    fn get_head_info_reports_a_paused_rebase_after_restart() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        // An edit pause leaves HEAD on `onto`: the step is applied to the index only.
+        let onto = Repository::open(dir.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        let info = handle.get_head_info().unwrap();
+
+        let rebase = info.rebase.unwrap();
+        assert_eq!(rebase.branch, branch.trim_start_matches("refs/heads/"));
+        assert_eq!(rebase.onto, onto.to_string());
+        assert_eq!((rebase.current_step, rebase.total_steps), (1, 2));
+        assert_eq!(rebase.health, git_core::rebase::RebaseHealth::Paused);
+    }
+
+    #[test]
+    fn get_head_info_reports_a_diverged_rebase_when_head_moved_outside() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        drop((worker, handle));
+        // `git switch <branch>` in a terminal while the app is closed.
+        repo.set_head(&branch).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let info = handle.get_head_info().unwrap();
+
+        assert_eq!(
+            health(&info),
+            git_core::rebase::RebaseHealth::Diverged(git_core::rebase::RebaseDivergence::HeadMoved)
+        );
+        assert_eq!(
+            handle.checkout_commit(info.head_id.unwrap()).unwrap_err(),
+            "Finish or abort the current merge/cherry-pick/revert/rebase first."
+        );
+        assert_eq!(
+            handle.abort_rebase().unwrap(),
+            git_core::rebase::RebaseAbort { restored: false }
+        );
+        assert_eq!(handle.get_head_info().unwrap().rebase, None);
+        assert!(!rebase_file(&repo).exists());
+    }
+
+    #[test]
+    fn get_head_info_reports_no_rebase_after_it_finishes() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        assert!(handle.get_head_info().unwrap().rebase.is_some());
+        handle.rebase_continue().unwrap();
+        assert_eq!(handle.get_head_info().unwrap().rebase, None);
+    }
+
+    fn no_undo() -> UndoState {
+        UndoState {
+            undo: None,
+            redo: None,
+        }
+    }
+
+    fn undo_file(repo: &Repository) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(repo.path().join("browsitory/undo.json")).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_sequence_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            handle.cherry_pick_many(ids).unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        assert!(matches!(
+            handle.continue_sequence().unwrap(),
+            git_core::pick::SequenceOutcome::Completed { .. }
+        ));
+
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Cherry-pick 3 commits".into())
+        );
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[test]
+    fn a_rebase_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        write_file(dir.path(), "a.txt", "amended\n");
+        handle.stage_file("a.txt".into()).unwrap();
+
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+
+        let label = handle.get_undo_state().unwrap().undo.unwrap();
+        assert!(label.starts_with("Rebase onto "), "{label}");
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+    }
+
+    #[test]
+    fn a_merge_finished_after_a_restart_is_one_undo_entry() {
+        let (dir, repo) = conflicting_branches();
+        let main_tip = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle
+            .commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Merge feature".into())
+        );
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert_eq!(reopened.head().unwrap().target().unwrap(), main_tip);
+    }
+
+    #[test]
+    fn a_rebase_aborted_after_a_restart_records_nothing() {
+        let (dir, repo) = init_repo();
+        let (worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        handle.abort_rebase().unwrap();
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        assert!(undo_file(&repo).get("pending").is_none());
+    }
+
+    /// `git merge --abort` in a terminal: forget the merge and reset to HEAD.
+    fn abort_outside(repo: &Repository) {
+        repo.cleanup_state().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.reset(head.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_operation_aborted_outside_while_closed_drops_the_pending_entry() {
+        let (dir, repo) = conflicting_branches();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            worker
+                .handle()
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap();
+        }
+        assert_eq!(undo_file(&repo)["pending"]["label"], "Merge feature");
+        abort_outside(&repo);
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        assert!(undo_file(&repo).get("pending").is_none());
+        handle.create_branch("after".into(), "HEAD".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Create branch after".into())
+        );
+    }
+
+    #[test]
+    fn a_different_operation_started_outside_does_not_inherit_the_pending_entry() {
+        let (dir, repo) = conflicting_branches();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            let base = head.parent(0).unwrap();
+            repo.branch("other", &base, false).unwrap();
+        }
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "a.txt", "other\n");
+        commit_all(&repo, "other change");
+        let main = repo
+            .branches(Some(git2::BranchType::Local))
+            .unwrap()
+            .map(|branch| branch.unwrap().0.name().unwrap().unwrap().to_string())
+            .find(|name| name != "other" && name != "feature")
+            .unwrap();
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            worker
+                .handle()
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap();
+        }
+        abort_outside(&repo);
+        // `git merge other` in a terminal, which conflicts too.
+        let other = repo
+            .find_annotated_commit(repo.refname_to_id("refs/heads/other").unwrap())
+            .unwrap();
+        repo.merge(&[&other], None, None).unwrap();
+        assert!(repo.index().unwrap().has_conflicts());
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle
+            .commit("Merge other".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        // Not "Merge feature"; and "Merge other" can't be recorded: its "before" is unknown.
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
+    fn undo_refuses_while_a_restored_pending_entry_exists() {
+        let (dir, repo) = conflicting_branches();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .create_branch("before".into(), "HEAD".into())
+            .unwrap();
+        handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        let (_worker, handle) = restart(worker, handle, dir.path());
+        assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+        assert_eq!(handle.redo().unwrap(), UndoOutcome::OperationInProgress);
+        assert!(Repository::open(dir.path())
+            .unwrap()
+            .find_branch("before", git2::BranchType::Local)
+            .is_ok());
+        let _ = repo;
+    }
+
+    #[test]
+    fn branch_and_stash_commands_are_refused_during_a_rebase() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+        let short = branch.trim_start_matches("refs/heads/").to_string();
+        assert_eq!(handle.delete_branch(short.clone(), true).unwrap_err(), busy);
+        assert_eq!(
+            handle.rename_branch(short, "renamed".into()).unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .save_stash(git_core::stash::StashOptions::default())
+                .unwrap_err(),
+            busy
+        );
+        let parent = TempDir::new().unwrap();
+        assert_eq!(
+            handle
+                .create_worktree(
+                    "rebased".into(),
+                    parent.path().join("rebased"),
+                    branch.trim_start_matches("refs/heads/").into(),
+                    None,
+                )
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+
+        // Creating a branch checks it out (`git checkout -b`), which would move HEAD.
+        assert_eq!(
+            handle
+                .create_branch("new".into(), tip.to_string())
+                .unwrap_err(),
+            busy
+        );
+        // Other branches stay manageable.
+        repo.branch("other", &repo.find_commit(tip).unwrap(), false)
+            .unwrap();
+        handle
+            .rename_branch("other".into(), "renamed".into())
+            .unwrap();
+        handle.delete_branch("renamed".into(), true).unwrap();
+    }
+
+    /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the
+    /// repository after the rebase ended.
+    #[test]
+    #[cfg(unix)]
+    fn a_rebase_file_that_cannot_be_removed_is_still_forgotten() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, _) = paused_for_edit(dir.path(), &repo);
+        let folder = repo.path().join("browsitory");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(folder.join("probe"), "").is_ok() {
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // root: no reliable failure to provoke
+        }
+
+        let aborted = handle.abort_rebase();
+        let rebase = handle.get_head_info().map(|info| info.rebase);
+        let switched = handle.switch_branch(branch.trim_start_matches("refs/heads/").into());
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            aborted.unwrap(),
+            git_core::rebase::RebaseAbort { restored: true }
+        );
+        assert!(rebase_file(&repo).exists());
+        assert_eq!(rebase.unwrap(), None);
+        assert!(switched.is_ok(), "{switched:?}");
+    }
+
+    #[test]
+    fn a_pending_entry_recorded_by_another_worker_is_not_recorded_twice() {
+        let (dir, _repo) = conflicting_branches();
+        let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (a, b) = (first.handle(), second.handle());
+        a.start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .unwrap();
+        assert_eq!(b.get_undo_state().unwrap(), no_undo()); // b now knows the pending entry
+        a.resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        a.commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+
+        b.create_branch("after".into(), "HEAD".into()).unwrap();
+
+        assert_eq!(
+            b.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Create branch after".into()
+            }
+        );
+        assert_eq!(
+            b.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Merge feature".into()
+            }
+        );
+        assert_eq!(b.undo().unwrap(), UndoOutcome::Nothing);
+    }
+
+    /// Another writer (the other app) moves HEAD while this worker is landing a step, so the
+    /// step's commit loses HEAD's compare-and-swap. This worker's copy is then stale and must not
+    /// be saved over the stored rebase. The race is provoked with a fake signing program that
+    /// moves HEAD on its second call (the second step's commit).
+    #[test]
+    #[cfg(unix)]
+    fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, tip) = paused_for_edit(dir.path(), &repo);
+        let tools = TempDir::new().unwrap();
+        let mark = tools.path().join("called-once");
+        let script = tools.path().join("fake-gpg");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncat > /dev/null\nif [ -e '{mark}' ]; then git -C '{workdir}' update-ref --no-deref HEAD {tip}; fi\ntouch '{mark}'\nprintf -- '-----BEGIN PGP SIGNATURE-----\\nfake\\n-----END PGP SIGNATURE-----\\n'\necho '[GNUPG:] SIG_CREATED D 1 8 00 0 X' >&2\n",
+                mark = mark.display(),
+                workdir = dir.path().display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_bool("commit.gpgSign", true).unwrap();
+            config
+                .set_str("gpg.program", script.to_str().unwrap())
+                .unwrap();
+        }
+        let stored = std::fs::read_to_string(rebase_file(&repo)).unwrap();
+
+        assert!(handle.rebase_continue().is_err());
+
+        assert!(mark.exists(), "the fake signer never ran");
+        assert_eq!(
+            Repository::open(dir.path())
+                .unwrap()
+                .head()
+                .unwrap()
+                .target(),
+            Some(tip)
+        );
+        assert_eq!(std::fs::read_to_string(rebase_file(&repo)).unwrap(), stored);
     }
 }

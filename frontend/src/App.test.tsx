@@ -118,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -133,7 +133,6 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     startRebase: unused,
     rebaseContinue: unused,
     abortRebase: unused,
-    getRebaseProgress: async () => null,
     detectForgeRepository: async () => [],
     saveForgeToken: unused,
     forgetForgeToken: unused,
@@ -475,7 +474,7 @@ describe("App", () => {
     await waitFor(() => expect(closeA()).toBeEnabled());
   });
 
-  it("keeps a tab's close button disabled after it's switched away from mid-rebase, unlike a plain pending/transfer busy state", async () => {
+  it("switching away from a tab mid-rebase does not keep its close button disabled", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({
         entries: [
@@ -490,10 +489,12 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      // Rebase state lives only in the worker's in-memory `rebase_state` (nothing but
-      // `set_head_detached` is persisted), so unlike `pending`/`transfer` it must NOT be
-      // reported as clear just because this tab's workspace unmounted.
-      getRebaseProgress: async () => ({ currentStep: 1, totalSteps: 3 }),
+      // The paused rebase is stored on disk (`rebase.json`), so closing this tab no longer loses
+      // it: a backgrounded tab mid-rebase is not kept busy.
+      getHeadInfo: async () => ({
+        headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null,
+        rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
+      }),
     });
 
     render(<App client={client} />);
@@ -505,10 +506,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
     await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
 
-    // Unlike the plain pending/transfer case above, this stays disabled: `a`'s `RepoWorkspace`
-    // unmounted while `rebaseProgress !== null`, and dropping that worker mid-rebase would leave
-    // the repo with a detached HEAD and a conflicted index with no way to Continue or Abort.
-    expect(closeA()).toBeDisabled();
+    // Like the plain pending/transfer case above: reopening the tab restores the rebase.
+    await waitFor(() => expect(closeA()).toBeEnabled());
   });
 
   it("opens the shortcut sheet on ? outside of a text input", async () => {
@@ -832,7 +831,7 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null }),
       getCommitMessage: async () => "HEAD's message",
       commit,
     });
@@ -872,7 +871,7 @@ describe("App", () => {
         { name: "Ada", email: "ada@x.org" },
         { name: "Bob", email: "bob@x.org" },
       ],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null }),
       getCommitMessage: async () => "HEAD's message",
       amendCommit,
     });
@@ -1044,7 +1043,7 @@ describe("App", () => {
         getCommitFiles: async () => [],
         getCommitMessage: async () => "two",
         getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
-        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null }),
         ...overrides,
       });
     }
@@ -1079,7 +1078,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored, rebase: null }),
             continueSequence,
           })}
         />,
@@ -1104,7 +1103,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null }),
             abortSequence,
             abortMerge,
           })}
@@ -1115,6 +1114,65 @@ describe("App", () => {
       await waitFor(() => expect(abortSequence).toHaveBeenCalledWith("/repos/a"));
       expect(abortMerge).not.toHaveBeenCalled();
       expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+    });
+
+    it("toasts \"Stopped the rebase. HEAD had moved…\" when abort did not restore", async () => {
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: false }));
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            abortRebase,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Rebase of main interrupted");
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      await waitFor(() => expect(abortRebase).toHaveBeenCalledWith("/repos/a"));
+      expect(await screen.findByText("Stopped the rebase. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+    });
+
+    it("offers Switch to the branch after aborting a rebase whose branch moved", async () => {
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "BranchMoved" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: false }));
+      const switchBranch = vi.fn(async () => {});
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            abortRebase,
+            switchBranch,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      expect(await screen.findByText("Stopped the rebase. main had changed, so HEAD was left where it is.")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: "Switch to main" }));
+      await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "main"));
+    });
+
+    it("a paused rebase reported on the first refresh shows the strip and the dock", async () => {
+      // The restart case: the backend restored the rebase from disk before the app asked.
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: true }));
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            getMergeMessage: async () => "two",
+            abortRebase,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Rebasing, step 1 of 2");
+      const dock = await screen.findByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeEnabled();
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      expect(await screen.findByText("Aborted rebase")).toBeInTheDocument();
     });
 
     it("toasts a finished multi-commit revert with its skipped count", async () => {

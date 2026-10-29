@@ -1,5 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RepoClient } from "./RepoClient";
+import type { HeadInfo, RebaseAbort, RepoClient } from "./RepoClient";
+
+/** `abortRebase` resolves to the restored flag. */
+const ABORTED_REBASE: RebaseAbort = { restored: false };
+/** `getHeadInfo` passes `rebase` through, including a diverged reason. */
+const DIVERGED_HEAD: HeadInfo = {
+  headId: "abc",
+  detachedAt: null,
+  headPushed: false,
+  operation: null,
+  squashMessage: null,
+  commitHooks: [],
+  sequence: null,
+  rebase: {
+    branch: "main",
+    onto: "def",
+    currentStep: 2,
+    totalSteps: 3,
+    health: { kind: "Diverged", reason: "HeadMoved" },
+  },
+};
 
 describe("vscodeRepoClient", () => {
   let postMessage: ReturnType<typeof vi.fn>;
@@ -125,6 +145,8 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.revertMany("/r", ["a"]), "revert_many", { repoPath: "/r", commitIds: ["a"] }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.continueSequence("/r"), "continue_sequence", { repoPath: "/r" }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r" }, { rewound: false }],
+      [() => vscodeRepoClient.abortRebase("/r"), "abort_rebase", { repoPath: "/r" }, ABORTED_REBASE],
+      [() => vscodeRepoClient.getHeadInfo("/r"), "get_head_info", { repoPath: "/r" }, DIVERGED_HEAD],
       [() => vscodeRepoClient.resolveWholeFile("/r", "a.txt", "Theirs"), "resolve_whole_file", { repoPath: "/r", path: "a.txt", side: "Theirs" }, null],
       [() => vscodeRepoClient.getFileSides("/r", "a.png", { kind: "Commit", commitId: "c", oldPath: "b.png" }), "get_file_sides", { repoPath: "/r", path: "a.png", source: { kind: "Commit", commitId: "c", oldPath: "b.png" } }, { old: { kind: "Missing" }, new: { kind: "Missing" } }],
       [() => vscodeRepoClient.listRecentAuthors("/r"), "list_recent_authors", { repoPath: "/r" }, [{ name: "Ada", email: "ada@x.org" }]],
@@ -1079,7 +1101,7 @@ describe("vscodeRepoClient", () => {
     await expect(resolveAddDeletePromise).resolves.toBeNull();
   });
 
-  it("wires commitsSince, startRebase, rebaseContinue, abortRebase, and getRebaseProgress", async () => {
+  it("wires commitsSince, startRebase, rebaseContinue, and abortRebase", async () => {
     const sincePromise = vscodeRepoClient.commitsSince("/repo", "main");
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
@@ -1106,12 +1128,8 @@ describe("vscodeRepoClient", () => {
     await expect(continuePromise).resolves.toEqual({ kind: "Advanced" });
 
     const abortPromise = vscodeRepoClient.abortRebase("/repo");
-    respond(4, null);
-    await expect(abortPromise).resolves.toBeNull();
-
-    const progressPromise = vscodeRepoClient.getRebaseProgress("/repo");
-    respond(5, { currentStep: 1, totalSteps: 3 });
-    await expect(progressPromise).resolves.toEqual({ currentStep: 1, totalSteps: 3 });
+    respond(4, { restored: true });
+    await expect(abortPromise).resolves.toEqual({ restored: true });
   });
 
   it("wires detectForgeRepository, saveForgeToken, and forgetForgeToken", async () => {

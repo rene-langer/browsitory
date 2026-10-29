@@ -336,12 +336,15 @@ export function buildCommands(
     });
   }
   if (state.rebaseProgress !== null) {
-    commands.push({
-      id: "rebase-continue",
-      label: "Continue rebase",
-      keywords: ["rebase", "continue"],
-      run: () => void appState.rebaseContinue(),
-    });
+    // An interrupted rebase (changed outside Browsitory) can only be aborted.
+    if (state.headInfo.rebase?.health.kind !== "Diverged") {
+      commands.push({
+        id: "rebase-continue",
+        label: "Continue rebase",
+        keywords: ["rebase", "continue"],
+        run: () => void appState.rebaseContinue(),
+      });
+    }
     commands.push({
       id: "rebase-abort",
       label: "Abort rebase",
