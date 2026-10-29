@@ -27,7 +27,7 @@ pub(super) struct RebaseSlot<'a> {
 
 impl RebaseSlot<'_> {
     pub fn load(&self, repo: &git2::Repository) -> Option<RebaseState> {
-        self.fallback.clone().or_else(|| self.store.load(repo))
+        super::gate::stored_rebase(repo, self.store, self.fallback)
     }
 
     /// Keeps `state` (or forgets the rebase when it's `None`) and turns `outcome` into the

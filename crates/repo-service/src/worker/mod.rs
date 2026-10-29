@@ -31,6 +31,7 @@ use crate::pull_requests::{
 mod branch;
 mod compare;
 mod forge;
+mod gate;
 mod history;
 mod hooks;
 mod merge;
@@ -750,11 +751,22 @@ impl Worker {
             // a sequence stopped by an error is clean too.
             let rebase_store = rebase_store::RebaseStore::open(&repo);
             let mut rebase_fallback: Option<RebaseState> = None;
+            macro_rules! probe {
+                () => {
+                    gate::OperationProbe {
+                        rebase: &rebase_store,
+                        fallback: &rebase_fallback,
+                        sequence: &sequence_store,
+                    }
+                };
+            }
             let in_progress = |repo: &git2::Repository, rebase_fallback: &Option<RebaseState>| {
-                repo.state() != git2::RepositoryState::Clean
-                    || rebase_fallback.is_some()
-                    || rebase_store.load(repo).is_some()
-                    || sequence_store.load(repo).is_some()
+                gate::OperationProbe {
+                    rebase: &rebase_store,
+                    fallback: rebase_fallback,
+                    sequence: &sequence_store,
+                }
+                .in_progress(repo)
             };
             macro_rules! rebase_slot {
                 () => {
@@ -781,10 +793,10 @@ impl Worker {
                 if let Some(plan) = plan {
                     undo_recorder.begin(&repo, plan, in_progress(&repo, &rebase_fallback));
                 }
-                // While a cherry-pick/revert sequence is stored, commands that would move HEAD
-                // or rewrite the index under it are refused before git-core runs.
-                if sequence_store.load(&repo).is_some() {
-                    command = history::gate_during_sequence(command);
+                // While a cherry-pick/revert sequence or a rebase is stored, commands that would
+                // move HEAD or rewrite the index under it are refused before git-core runs.
+                if probe!().stored_operation(&repo) {
+                    command = gate::gate_during_operation(command);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -5212,5 +5224,114 @@ mod tests {
             git_core::rebase::RebaseStepResult::Done
         );
         assert_eq!(handle.get_rebase_progress().unwrap(), None);
+    }
+
+    /// Every command that would move HEAD or rewrite the index under a stored rebase replies
+    /// with the operation-in-progress text, and HEAD stays put.
+    fn assert_moves_are_refused(handle: &super::WorkerHandle, path: &Path) {
+        let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+        let repo = Repository::open(path).unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        let id = head.to_string();
+        let branch = repo
+            .branches(Some(git2::BranchType::Local))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .0
+            .name()
+            .unwrap()
+            .unwrap()
+            .to_string();
+        assert_eq!(handle.switch_branch(branch.clone()).unwrap_err(), busy);
+        assert_eq!(handle.cherry_pick(id.clone(), None).unwrap_err(), busy);
+        assert_eq!(handle.cherry_pick_many(vec![id.clone()]).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .commit("x".into(), false, Vec::new(), mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .amend_commit("x".into(), false, None, Vec::new(), mpsc::channel().0)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .start_merge(branch, git_core::merge::MergeOptions::default())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.start_rebase(id.clone(), vec![]).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .reset_to_commit(id.clone(), git_core::reset::ResetMode::Hard)
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(handle.checkout_commit(id.clone()).unwrap_err(), busy);
+        assert_eq!(handle.pop_stash(0, id, false).unwrap_err(), busy);
+        assert_eq!(repo.head().unwrap().target().unwrap(), head);
+    }
+
+    #[test]
+    fn commands_are_refused_while_a_rebase_is_stored() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        assert_moves_are_refused(&handle, dir.path());
+    }
+
+    #[test]
+    fn commands_are_refused_after_a_rebase_error_stop() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
+        write_file(dir.path(), "f.txt", "local\n");
+        assert!(handle.rebase_continue().is_err());
+        // To git nothing is going on now; only the stored rebase says otherwise.
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+        assert_moves_are_refused(&handle, dir.path());
+    }
+
+    #[test]
+    fn staging_and_conflict_resolution_stay_available_during_a_rebase() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let onto = repo.head().unwrap().target().unwrap().to_string();
+        write_file(dir.path(), "a.txt", "on top\n");
+        commit_all(&repo, "on top");
+        write_file(dir.path(), "a.txt", "again\n");
+        commit_all(&repo, "again");
+        let picked = repo.head().unwrap().target().unwrap().to_string();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: picked,
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        }];
+        assert!(matches!(
+            handle.start_rebase(onto, plan).unwrap(),
+            git_core::rebase::RebaseStepResult::Conflicted { .. }
+        ));
+
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        write_file(dir.path(), "notes.txt", "notes\n");
+        handle.stage_file("notes.txt".into()).unwrap();
+        handle.unstage_file("notes.txt".into()).unwrap();
+
+        assert_eq!(
+            handle.rebase_continue().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "resolved\n"
+        );
     }
 }

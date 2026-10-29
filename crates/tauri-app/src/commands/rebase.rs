@@ -42,7 +42,9 @@ pub async fn rebase_continue(
 
 #[tauri::command]
 pub async fn abort_rebase(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.abort_rebase().map(|_| ())
+    worker_handle(&state, &repo_path)?
+        .abort_rebase()
+        .map(|_| ())
 }
 
 #[tauri::command]

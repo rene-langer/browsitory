@@ -22,35 +22,6 @@ pub(super) fn head_info(
     let _ = reply.send(result);
 }
 
-/// Replaces a command that must not run while a sequence is stored with a no-op, after
-/// replying with git-core's `OperationInProgress` text on its own reply. Refused: anything that
-/// starts another operation or moves HEAD or the index under the sequence (picks, merge, rebase,
-/// commit and amend, reset, checkout, branch switch, pull, stash apply/pop, reflog restore).
-/// Read-only commands, fetch, staging and conflict resolution stay available.
-pub(super) fn gate_during_sequence(command: Command) -> Command {
-    fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
-        let _ = reply.send(Err(
-            git_core::pick::PickError::OperationInProgress.to_string()
-        ));
-        let (reply, _) = std::sync::mpsc::channel();
-        Command::Ping { reply }
-    }
-    match command {
-        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => refuse(reply),
-        Command::CherryPickMany { reply, .. } | Command::RevertMany { reply, .. } => refuse(reply),
-        Command::StartMerge { reply, .. } => refuse(reply),
-        Command::StartRebase { reply, .. } => refuse(reply),
-        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => refuse(reply),
-        Command::ResetToCommit { reply, .. }
-        | Command::CheckoutCommit { reply, .. }
-        | Command::SwitchBranch { reply, .. }
-        | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
-        Command::PullCurrentUpstream { reply, .. } => refuse(reply),
-        Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
-        other => other,
-    }
-}
-
 /// Keeps or forgets the sequence as `run.state` says and turns the run into the reply. A state
 /// that can't be saved is reported with the outcome, since Continue/Abort would not find it.
 fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceOutcome, String> {
