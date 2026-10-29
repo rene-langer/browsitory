@@ -1454,3 +1454,119 @@ fn the_branch_errors_name_the_short_branch() {
         "feature/x no longer exists. Abort the rebase."
     );
 }
+
+use git_core::rebase::{rebase_health, RebaseDivergence, RebaseHealth};
+
+fn diverged(reason: RebaseDivergence) -> RebaseHealth {
+    RebaseHealth::Diverged(reason)
+}
+
+/// `git switch <name>` (created at `at`) in a terminal.
+fn switch_outside(repo: &git2::Repository, name: &str, at: git2::Oid) {
+    let commit = repo.find_commit(at).unwrap();
+    repo.branch(name, &commit, true).unwrap();
+    repo.set_head(&format!("refs/heads/{name}")).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+}
+
+#[test]
+fn health_is_paused_at_a_conflict_an_edit_and_an_error_stop() {
+    let (_dir, repo, state, _) = conflicting_rebase();
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+
+    let (_dir, repo, state, _) = edit_pause_on_topic();
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+
+    let (dir, repo) = init_repo();
+    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    write_file(dir.path(), "f.txt", "local\n");
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+}
+
+#[test]
+fn health_is_head_moved_after_switching_to_a_branch_outside() {
+    let (_dir, repo, state, onto) = edit_pause_on_topic();
+    switch_outside(&repo, "elsewhere", git2::Oid::from_str(&onto).unwrap());
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::HeadMoved)
+    );
+}
+
+#[test]
+fn health_is_head_moved_after_a_commit_that_is_not_the_step() {
+    let (_dir, repo, state, _) = conflicting_rebase();
+    resolve_shared(&repo);
+    let other = git2::Signature::now("Someone Else", "else@example.com").unwrap();
+    commit_by_hand(&repo, &other, "not the step");
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::HeadMoved)
+    );
+}
+
+#[test]
+fn health_is_paused_when_the_step_was_committed_by_hand() {
+    let (_dir, repo, state, _) = conflicting_rebase();
+    resolve_shared(&repo);
+    commit_by_hand(
+        &repo,
+        &author_of(&repo, &state.plan[0].commit_id),
+        "conflicting change",
+    );
+    assert_eq!(rebase_health(&repo, &state).unwrap(), RebaseHealth::Paused);
+}
+
+#[test]
+fn health_is_branch_moved_and_branch_missing() {
+    let (_dir, repo, state, onto) = edit_pause_on_topic();
+    repo.reference(
+        "refs/heads/topic",
+        git2::Oid::from_str(&onto).unwrap(),
+        true,
+        "moved",
+    )
+    .unwrap();
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::BranchMoved)
+    );
+    repo.find_reference("refs/heads/topic")
+        .unwrap()
+        .delete()
+        .unwrap();
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::BranchMissing)
+    );
+}
+
+#[test]
+fn health_is_other_operation_for_a_foreign_cherry_pick_and_a_merge() {
+    let (_dir, repo, state, _) = edit_pause_on_topic();
+    abort_pick_outside(&repo);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let unrelated = detached_commit_adding(&repo, &head, "z.txt", "z\n", "unrelated");
+    repo.cherrypick(
+        &repo
+            .find_commit(git2::Oid::from_str(&unrelated).unwrap())
+            .unwrap(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::OtherOperation)
+    );
+
+    abort_pick_outside(&repo);
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{unrelated}\n")).unwrap();
+    assert_eq!(
+        rebase_health(&repo, &state).unwrap(),
+        diverged(RebaseDivergence::OtherOperation)
+    );
+}

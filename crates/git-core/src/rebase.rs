@@ -388,6 +388,48 @@ fn is_own_paused_step(repo: &Repository, state: &RebaseState) -> bool {
             == Some(entry.commit_id.as_str())
 }
 
+/// Whether a stored rebase still matches the repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseHealth {
+    Paused,
+    Diverged(RebaseDivergence),
+}
+
+/// What changed outside the app while the rebase was paused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebaseDivergence {
+    HeadMoved,
+    BranchMoved,
+    BranchMissing,
+    OtherOperation,
+}
+
+/// Classifies a stored rebase against the repository. The first failing check decides: the
+/// branch is gone, the branch moved, git has another operation paused, HEAD is not where the
+/// rebase left it (a step committed by hand that Continue would adopt still counts as paused).
+/// A diverged rebase can only be aborted.
+pub fn rebase_health(repo: &Repository, state: &RebaseState) -> Result<RebaseHealth, RebaseError> {
+    use RebaseDivergence::{BranchMissing, BranchMoved, HeadMoved, OtherOperation};
+    let tip = match repo.find_reference(&state.original_branch_ref) {
+        Ok(reference) => reference.target(),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => {
+            return Ok(RebaseHealth::Diverged(BranchMissing))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if tip != Some(state.original_tip) {
+        return Ok(RebaseHealth::Diverged(BranchMoved));
+    }
+    let own_pick = state.cursor < state.plan.len() && is_own_paused_step(repo, state);
+    if repo.state() != git2::RepositoryState::Clean && !own_pick {
+        return Ok(RebaseHealth::Diverged(OtherOperation));
+    }
+    if head_at_expected(repo, state)? || is_step_committed_by_hand(repo, state)? {
+        return Ok(RebaseHealth::Paused);
+    }
+    Ok(RebaseHealth::Diverged(HeadMoved))
+}
+
 /// After a conflict or edit stop the user may finish the step with git (`git cherry-pick
 /// --continue` or `git commit`, which `git status` suggests). HEAD counts as that step only when
 /// git has nothing paused, HEAD is detached exactly one commit past the stop, and it keeps the
