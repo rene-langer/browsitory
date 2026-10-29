@@ -792,9 +792,9 @@ impl Worker {
                 }
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
-                let (rebase_stored, sequence_stored) = probe!().stored_operations(&repo);
-                if rebase_stored || sequence_stored {
-                    command = gate::gate_during_operation(command, rebase_stored);
+                let rebased_branch = probe!().rebased_branch(&repo);
+                if rebased_branch.is_some() || sequence_store.load(&repo).is_some() {
+                    command = gate::gate_during_operation(command, rebased_branch.as_deref());
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -5621,7 +5621,34 @@ mod tests {
                 .unwrap_err(),
             busy
         );
+        let parent = TempDir::new().unwrap();
+        assert_eq!(
+            handle
+                .create_worktree(
+                    "rebased".into(),
+                    parent.path().join("rebased"),
+                    branch.trim_start_matches("refs/heads/").into(),
+                    None,
+                )
+                .unwrap_err(),
+            busy
+        );
         assert_eq!(branch_target(dir.path(), &branch), tip);
+
+        // Creating a branch checks it out (`git checkout -b`), which would move HEAD.
+        assert_eq!(
+            handle
+                .create_branch("new".into(), tip.to_string())
+                .unwrap_err(),
+            busy
+        );
+        // Other branches stay manageable.
+        repo.branch("other", &repo.find_commit(tip).unwrap(), false)
+            .unwrap();
+        handle
+            .rename_branch("other".into(), "renamed".into())
+            .unwrap();
+        handle.delete_branch("renamed".into(), true).unwrap();
     }
 
     /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the

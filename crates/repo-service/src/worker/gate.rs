@@ -12,13 +12,15 @@ use super::Command;
 /// Replaces a command that must not run while a sequence or a rebase is stored with a no-op,
 /// after replying with git-core's `OperationInProgress` text on its own reply. Refused: anything
 /// that starts another operation or moves HEAD or the index under it (picks, merge, rebase,
-/// commit and amend, reset, checkout, branch switch, pull, stash apply/pop, reflog restore).
+/// commit and amend, reset, checkout, branch switch or create (it checks the branch out), pull,
+/// stash apply/pop, reflog restore).
 /// Read-only commands, fetch, staging and conflict resolution stay available.
 ///
-/// While a rebase is stored, branch delete/rename and stash save are refused too: the rebased
-/// branch isn't checked out (git would let it be deleted or renamed under the rebase), and a
-/// stash would carry the paused step away from the index.
-pub(super) fn gate_during_operation(command: Command, rebase_stored: bool) -> Command {
+/// While a rebase of `rebased_branch` (short name) is stored, deleting or renaming that branch
+/// or checking it out in a new worktree is refused too (it isn't checked out, so git would let
+/// it go under the rebase), and so is a stash save (it would carry the paused step away from the
+/// index). Other branches stay manageable.
+pub(super) fn gate_during_operation(command: Command, rebased_branch: Option<&str>) -> Command {
     fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
         let _ = reply.send(Err(
             git_core::pick::PickError::OperationInProgress.to_string()
@@ -33,18 +35,24 @@ pub(super) fn gate_during_operation(command: Command, rebase_stored: bool) -> Co
         Command::StartRebase { reply, .. } => refuse(reply),
         Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => refuse(reply),
         Command::ResetToCommit { reply, .. }
+        | Command::CreateBranch { reply, .. }
         | Command::CheckoutCommit { reply, .. }
         | Command::SwitchBranch { reply, .. }
         | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
         Command::PullCurrentUpstream { reply, .. } => refuse(reply),
         Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
-        Command::DeleteBranch { reply, .. }
-        | Command::RenameBranch { reply, .. }
-        | Command::SaveStash { reply, .. }
-            if rebase_stored =>
+        Command::DeleteBranch { name, reply, .. } if rebased_branch == Some(name.as_str()) => {
+            refuse(reply)
+        }
+        Command::RenameBranch {
+            old_name, reply, ..
+        } if rebased_branch == Some(old_name.as_str()) => refuse(reply),
+        Command::CreateWorktree { branch, reply, .. }
+            if rebased_branch == Some(branch.as_str()) =>
         {
             refuse(reply)
         }
+        Command::SaveStash { reply, .. } if rebased_branch.is_some() => refuse(reply),
         other => other,
     }
 }
@@ -86,12 +94,15 @@ impl OperationProbe<'_> {
         stored_rebase(repo, self.rebase, self.memory)
     }
 
-    /// `(rebase stored, sequence stored)`: either makes `gate_during_operation` apply.
-    pub fn stored_operations(&self, repo: &Repository) -> (bool, bool) {
-        (
-            self.rebase(repo).is_some(),
-            self.sequence.load(repo).is_some(),
-        )
+    /// The short name of the branch a stored rebase is rebasing.
+    pub fn rebased_branch(&self, repo: &Repository) -> Option<String> {
+        self.rebase(repo).map(|state| {
+            state
+                .original_branch_ref
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&state.original_branch_ref)
+                .to_string()
+        })
     }
 
     /// Names the paused operation, constant for its whole life, so a pending undo entry is only
@@ -289,6 +300,6 @@ mod tests {
             sequence: &sequence_store,
         };
         assert!(probe.marker(&repo).unwrap().starts_with("rebase "));
-        assert_eq!(probe.stored_operations(&repo), (true, false));
+        assert!(probe.rebased_branch(&repo).is_some());
     }
 }
