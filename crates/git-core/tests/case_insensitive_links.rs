@@ -149,6 +149,11 @@ fn configure(repo: &Repository) {
     config
         .set_str("core.hooksPath", hooks.to_str().unwrap())
         .unwrap();
+    // Windows: as a user who enabled links in Git for Windows. libgit2 decides at init from the
+    // global config and a test link; this makes sure every repository here creates real links.
+    if cfg!(windows) {
+        config.set_bool("core.symlinks", true).unwrap();
+    }
 }
 
 fn slash_path(path: &Path) -> String {
@@ -401,6 +406,7 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
                 .branch("evil")
                 .with_checkout(none)
                 .clone(&slash_path(&fx.src), dir.path())?;
+            configure(&repo);
             repo.config()?.set_bool("core.ignorecase", false)?;
             repo.checkout_head(Some(CheckoutBuilder::new().force()))
         })();
@@ -603,6 +609,19 @@ fn case_insensitive_links_never_write_outside() {
     if let Err(error) = linked {
         eprintln!("SKIP links unsupported: {error}");
         return;
+    }
+
+    {
+        // What a fresh repository decides on its own (Windows: from the global config above).
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let config = repo.config().unwrap();
+        eprintln!(
+            "global config file: {:?}; fresh repo core.symlinks = {:?}, core.ignorecase = {:?}",
+            git2::Config::find_global().ok(),
+            config.get_bool("core.symlinks").ok(),
+            config.get_bool("core.ignorecase").ok()
+        );
     }
 
     let mut rows = Vec::new();
