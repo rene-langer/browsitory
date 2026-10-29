@@ -840,6 +840,24 @@ describe("DiffPane", () => {
       expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
     });
 
+    it("disables Continue with the divergence reason", () => {
+      const onRebaseAbort = vi.fn();
+      renderUncommitted(fakeClient({}), status, {
+        rebaseProgress: { currentStep: 1, totalSteps: 3 },
+        headInfo: {
+          headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null,
+          rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged", reason: "BranchMoved" } },
+        },
+        onRebaseAbort,
+      });
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: /continue rebase/i })).toBeDisabled();
+      expect(within(dock).getByText("topic was changed outside Browsitory.")).toBeInTheDocument();
+      fireEvent.click(within(dock).getByRole("button", { name: /abort rebase/i }));
+      expect(onRebaseAbort).toHaveBeenCalled();
+    });
+
     it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
       const onSequenceContinue = vi.fn();
       const onSequenceAbort = vi.fn();

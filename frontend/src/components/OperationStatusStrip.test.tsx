@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { RebaseInfo } from "../ipc/RepoClient";
 import { OperationStatusStrip } from "./OperationStatusStrip";
 
 const noop = () => {};
@@ -128,5 +129,57 @@ describe("OperationStatusStrip", () => {
     );
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toBeDisabled();
+  });
+
+  describe("a stored rebase", () => {
+    const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health });
+
+    it("keeps \"Rebasing, step N of M\" while paused", () => {
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+          rebase={rebase({ kind: "Paused" })}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByRole("status")).toHaveTextContent("Rebasing, step 1 of 2");
+      expect(screen.queryByText(/interrupted/)).toBeNull();
+    });
+
+    it("shows the interrupted label and reason for a diverged rebase", () => {
+      const onAbortRebase = vi.fn();
+      const reasons = [
+        ["HeadMoved", "HEAD was moved outside Browsitory."],
+        ["BranchMoved", "topic was changed outside Browsitory."],
+        ["BranchMissing", "topic was deleted outside Browsitory."],
+        ["OtherOperation", "Another git operation is in progress."],
+      ] as const;
+      for (const [reason, text] of reasons) {
+        const { unmount } = render(
+          <OperationStatusStrip
+            merging={false}
+            operation={null}
+            rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+            rebase={rebase({ kind: "Diverged", reason })}
+            conflictCount={0}
+            onAbortMerge={noop}
+            onAbortRebase={onAbortRebase}
+          />,
+        );
+        const strip = screen.getByRole("status");
+        expect(strip).toHaveTextContent("Rebase of topic interrupted");
+        expect(strip).toHaveTextContent(text);
+        expect(within(strip).queryByRole("button", { name: /continue/i })).toBeNull();
+        const abort = within(strip).getByRole("button", { name: "Abort rebase" });
+        expect(abort).toHaveAttribute("title", "Stops the rebase. HEAD stays where it is.");
+        fireEvent.click(abort);
+        unmount();
+      }
+      expect(onAbortRebase).toHaveBeenCalledTimes(4);
+    });
   });
 });

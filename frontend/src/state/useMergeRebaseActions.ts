@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type {
+  RebaseAbort,
   ConflictSide,
   FileConflictChoice,
   MarkResolvedOutcome,
@@ -42,7 +43,8 @@ export interface MergeRebaseActions {
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
-  abortRebase(): Promise<void>;
+  /** The abort's outcome, or `null` when it failed (the error is in `state.error`). */
+  abortRebase(): Promise<RebaseAbort | null>;
 }
 
 export function useMergeRebaseActions(
@@ -150,10 +152,13 @@ export function useMergeRebaseActions(
     [client, runMutation, repoPath],
   );
   const abortRebase = useCallback(
-    () =>
-      runMutation(async () => {
-        await client.abortRebase(repoPath);
-      }),
+    async (): Promise<RebaseAbort | null> => {
+      let abort: RebaseAbort | null = null;
+      await runMutation(async () => {
+        abort = await client.abortRebase(repoPath);
+      });
+      return abort;
+    },
     [client, runMutation, repoPath],
   );
 

@@ -6,6 +6,7 @@ import type {
   ConflictSide,
   PickOutcome,
   SequenceAbort,
+  RebaseAbort,
   SequenceOutcome,
   CreatePullRequest,
   FileConflictChoice,
@@ -275,7 +276,7 @@ export interface UseAppStateResult {
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
   rebaseContinue(): Promise<void>;
-  abortRebase(): Promise<void>;
+  abortRebase(): Promise<RebaseAbort | null>;
   /** See `HistoryActions`: outcomes, or `null` on failure. */
   cherryPick(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
   revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;

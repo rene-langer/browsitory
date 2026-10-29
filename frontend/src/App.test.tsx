@@ -1119,6 +1119,45 @@ describe("App", () => {
       expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
     });
 
+    it("toasts \"Stopped the rebase. HEAD had moved…\" when abort did not restore", async () => {
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: false }));
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            abortRebase,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Rebase of main interrupted");
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      await waitFor(() => expect(abortRebase).toHaveBeenCalledWith("/repos/a"));
+      expect(await screen.findByText("Stopped the rebase. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+    });
+
+    it("a paused rebase reported on the first refresh shows the strip and the dock", async () => {
+      // The restart case: the backend restored the rebase from disk before the app asked.
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
+      const abortRebase = vi.fn(async () => ({ restored: true }));
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase }),
+            getMergeMessage: async () => "two",
+            abortRebase,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Rebasing, step 1 of 2");
+      const dock = await screen.findByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeEnabled();
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      expect(await screen.findByText("Aborted rebase")).toBeInTheDocument();
+    });
+
     it("toasts a finished multi-commit revert with its skipped count", async () => {
       const revertMany = vi.fn(async () => ({ kind: "Completed" as const, applied: 1, skipped: ["c1"] }));
       render(<App client={pickClient({ revertMany })} />);

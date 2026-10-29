@@ -1,4 +1,13 @@
-import type { PickOutcome, SequenceAbort, SequenceKind, SequenceOutcome, SequenceProgress } from "../ipc/RepoClient";
+import type {
+  PickOutcome,
+  RebaseAbort,
+  RebaseDivergence,
+  RebaseInfo,
+  SequenceAbort,
+  SequenceKind,
+  SequenceOutcome,
+  SequenceProgress,
+} from "../ipc/RepoClient";
 
 /** Visible reason a merge/rebase step is blocked, or `undefined` when nothing blocks it. */
 export function conflictReason(conflictCount: number): string | undefined {
@@ -45,4 +54,33 @@ export function sequenceToast(kind: SequenceKind, outcome: SequenceOutcome): str
 export function abortToast(kind: SequenceKind, abort: SequenceAbort): string {
   const noun = sequenceNoun(kind);
   return abort.rewound ? `Aborted ${noun}` : `Stopped the ${noun}. HEAD had moved, so it was left where it is.`;
+}
+
+/** Why a stored rebase can only be aborted: what changed outside Browsitory while it was paused. */
+export function rebaseDivergenceText(reason: RebaseDivergence, branch: string): string {
+  switch (reason) {
+    case "HeadMoved":
+      return "HEAD was moved outside Browsitory.";
+    case "BranchMoved":
+      return `${branch} was changed outside Browsitory.`;
+    case "BranchMissing":
+      return `${branch} was deleted outside Browsitory.`;
+    case "OtherOperation":
+      return "Another git operation is in progress.";
+  }
+}
+
+/** The divergence text of an interrupted rebase, `undefined` while it is simply paused. */
+export function rebaseInterruption(rebase: RebaseInfo | null): string | undefined {
+  if (rebase === null || rebase.health.kind !== "Diverged") return undefined;
+  return rebaseDivergenceText(rebase.health.reason, rebase.branch);
+}
+
+/** Result toast for Abort rebase; `info` is the rebase as it was before the abort. */
+export function rebaseAbortToast(abort: RebaseAbort, info: RebaseInfo | null): string {
+  if (abort.restored) return "Aborted rebase";
+  if (info !== null && info.health.kind === "Diverged" && info.health.reason === "BranchMissing") {
+    return `Stopped the rebase. ${info.branch} no longer exists, so HEAD was left detached.`;
+  }
+  return "Stopped the rebase. HEAD had moved, so it was left where it is.";
 }

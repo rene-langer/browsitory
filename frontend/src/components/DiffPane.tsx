@@ -1,5 +1,5 @@
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { conflictReason, sequenceNoun } from "../lib/operationStatus";
+import { conflictReason, rebaseInterruption, sequenceNoun } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -1252,11 +1252,12 @@ function UncommittedDiffPane({
             abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
           />
         ) : rebaseProgress !== null ? (
+          // An interrupted rebase (changed outside Browsitory) can only be aborted.
           <RebaseProgressPanel
             currentStep={rebaseProgress.currentStep}
             totalSteps={rebaseProgress.totalSteps}
-            disabled={conflictCount > 0}
-            disabledReason={conflictReason(conflictCount)}
+            disabled={conflictCount > 0 || rebaseInterruption(headInfo.rebase) !== undefined}
+            disabledReason={rebaseInterruption(headInfo.rebase) ?? conflictReason(conflictCount)}
             onContinue={onRebaseContinue}
             onAbort={onRebaseAbort}
           />

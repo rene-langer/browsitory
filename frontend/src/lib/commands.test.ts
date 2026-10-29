@@ -425,6 +425,16 @@ describe("buildCommands", () => {
     expect(withRebase.some((c) => c.id === "rebase-abort")).toBe(true);
   });
 
+  it("omits Continue rebase while the rebase is interrupted but keeps Abort", () => {
+    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+    const base = makeAppState().state.headInfo;
+    const commands = buildCommands(
+      makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }),
+    );
+    expect(commands.some((c) => c.id === "rebase-continue")).toBe(false);
+    expect(commands.some((c) => c.id === "rebase-abort")).toBe(true);
+  });
+
   it("only includes abort merge while a merge is in progress", () => {
     const noMerge = buildCommands(makeAppState());
     expect(noMerge.some((c) => c.id === "merge-abort")).toBe(false);

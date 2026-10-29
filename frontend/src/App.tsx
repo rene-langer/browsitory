@@ -56,7 +56,7 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { abortToast, pickToast, sequenceToast } from "./lib/operationStatus";
+import { abortToast, pickToast, rebaseAbortToast, sequenceToast } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -438,6 +438,15 @@ function RepoWorkspace({
     if (sequenceKind === null) return;
     void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
   }, [abortStoredSequence, runPickAction, sequenceKind]);
+  // Abort rebase from the strip, the commit dock and the palette: the toast says whether HEAD
+  // went back to the branch, from the rebase as it was before the abort.
+  const { abortRebase: abortStoredRebase } = appState;
+  const storedRebase = appState.state.headInfo.rebase;
+  const abortRebase = useCallback(async () => {
+    const before = storedRebase;
+    await runPickAction(abortStoredRebase, (abort) => rebaseAbortToast(abort, before));
+    return null;
+  }, [abortStoredRebase, runPickAction, storedRebase]);
   const abortMergeOrSequence = useCallback(() => {
     if (sequenceKind !== null) abortSequence();
     else void abortMerge();
@@ -522,11 +531,12 @@ function RepoWorkspace({
         merging={appState.state.mergeMessage !== null}
         operation={appState.state.headInfo.operation}
         rebaseProgress={appState.state.rebaseProgress}
+        rebase={appState.state.headInfo.rebase}
         sequence={appState.state.headInfo.sequence}
         pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={abortMergeOrSequence}
-        onAbortRebase={appState.abortRebase}
+        onAbortRebase={() => void abortRebase()}
         onContinueSequence={continueSequence}
         onAbortSequence={abortSequence}
       />
@@ -661,7 +671,7 @@ function RepoWorkspace({
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
             commands={buildCommands(
-              appState,
+              { ...appState, abortRebase },
               onOpenRepoTab,
               openRepos.filter((repo) => repo.path !== repoPath),
               onSwitchRepoTab,
@@ -1071,7 +1081,7 @@ function RepoWorkspace({
                   onCommitMessageCleared={appState.clearCommitMessageHandled}
                   rebaseProgress={appState.state.rebaseProgress}
                   onRebaseContinue={appState.rebaseContinue}
-                  onRebaseAbort={appState.abortRebase}
+                  onRebaseAbort={() => void abortRebase()}
                 />
               )
             }
