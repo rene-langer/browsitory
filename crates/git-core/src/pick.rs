@@ -636,14 +636,29 @@ fn is_step_committed_by_hand(
     let target = repo.find_commit(Oid::from_str(&state.commits[state.next])?)?;
     Ok(match state.kind {
         SequenceKind::CherryPick => {
-            let (ours, theirs) = (head.author(), target.author());
-            ours.name_bytes() == theirs.name_bytes()
-                && ours.email_bytes() == theirs.email_bytes()
-                && ours.when() == theirs.when()
+            commit_matches_pick(head, Oid::from_str(&state.expected_head)?, &target)
         }
         SequenceKind::Revert => String::from_utf8_lossy(head.message_bytes())
             .contains(&format!("This reverts commit {}", target.id())),
     })
+}
+
+/// True when `head` is recognisably `picked` committed by hand on top of `expected_parent`:
+/// exactly one parent, `expected_parent`, and the picked commit's author (name, email and
+/// time), which `git commit`/`git cherry-pick --continue` keep during a cherry-pick. Shared by
+/// sequences and rebases.
+pub(crate) fn commit_matches_pick(
+    head: &Commit<'_>,
+    expected_parent: Oid,
+    picked: &Commit<'_>,
+) -> bool {
+    if head.parent_count() != 1 || head.parent_id(0).ok() != Some(expected_parent) {
+        return false;
+    }
+    let (ours, theirs) = (head.author(), picked.author());
+    ours.name_bytes() == theirs.name_bytes()
+        && ours.email_bytes() == theirs.email_bytes()
+        && ours.when() == theirs.when()
 }
 
 /// Ends a stopped sequence. A paused step of this sequence is aborted like `git cherry-pick

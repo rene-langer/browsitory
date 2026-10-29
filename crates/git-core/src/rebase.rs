@@ -286,6 +286,10 @@ pub fn rebase_continue(
             advance(repo, state)
         }),
         Resume::Reapply => advance(repo, state),
+        Resume::Adopt => adopt_step(repo, state).and_then(|()| {
+            state.cursor += 1;
+            advance(repo, state)
+        }),
     };
     if result.is_err() {
         state.stop = if is_own_paused_step(repo, state) {
@@ -305,6 +309,8 @@ enum Resume {
     Land,
     /// Apply the step at the cursor again.
     Reapply,
+    /// HEAD is the paused step, committed outside the app: take it as the step.
+    Adopt,
 }
 
 fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseError> {
@@ -329,8 +335,13 @@ fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseE
             Ok(Resume::Land)
         }
         Clean => {
-            check_head_at_expected(repo, state)?;
-            Ok(Resume::Reapply)
+            if head_at_expected(repo, state)? {
+                return Ok(Resume::Reapply);
+            }
+            if is_step_committed_by_hand(repo, state)? {
+                return Ok(Resume::Adopt);
+            }
+            Err(head_moved(repo, state)?)
         }
         _ => Err(RebaseError::OperationInProgress),
     }
@@ -352,6 +363,56 @@ fn is_own_paused_step(repo: &Repository, state: &RebaseState) -> bool {
             == Some(entry.commit_id.as_str())
 }
 
+/// After a conflict or edit stop the user may finish the step with git (`git cherry-pick
+/// --continue` or `git commit`, which `git status` suggests). HEAD counts as that step only when
+/// git has nothing paused, HEAD is detached exactly one commit past the stop, and it keeps the
+/// planned commit's author (`pick::commit_matches_pick`). After an error stop the step was
+/// never applied, so nothing is adopted.
+fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
+    let Some(entry) = state.plan.get(state.cursor) else {
+        return Ok(false);
+    };
+    if state.stop == RebaseStop::Error
+        || matches!(entry.action, RebaseAction::Drop)
+        || repo.state() != git2::RepositoryState::Clean
+        || !repo.head_detached()?
+    {
+        return Ok(false);
+    }
+    let head = repo.head()?.peel_to_commit()?;
+    let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    Ok(crate::pick::commit_matches_pick(
+        &head,
+        state.expected_head,
+        &picked,
+    ))
+}
+
+/// Takes HEAD (checked by `is_step_committed_by_hand`) as the current step: a `Reword` entry
+/// gets its planned message, then the bookkeeping `land_current_step` does after its commit.
+fn adopt_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+    let entry = state.plan[state.cursor].clone();
+    if let RebaseAction::Reword { message } = &entry.action {
+        let head = repo.head()?.peel_to_commit()?;
+        if head.message_bytes() != message.as_bytes() {
+            let parent = head.parent(0)?;
+            let committer = repo.signature()?;
+            let reworded = crate::signing::create_commit(
+                repo,
+                None,
+                &head.author(),
+                &committer,
+                message,
+                &head.tree()?,
+                &[&parent],
+            )?;
+            repo.set_head_detached(reworded)?;
+        }
+    }
+    state.expected_head = repo.head()?.peel_to_commit()?.id();
+    after_landed(repo, state)
+}
+
 /// HEAD detached at `expected_head`, where the rebase left it.
 fn head_at_expected(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
     Ok(repo.head_detached()? && repo.head()?.peel_to_commit()?.id() == state.expected_head)
@@ -361,6 +422,11 @@ fn check_head_at_expected(repo: &Repository, state: &RebaseState) -> Result<(), 
     if head_at_expected(repo, state)? {
         return Ok(());
     }
+    Err(head_moved(repo, state)?)
+}
+
+/// The `HeadMoved` refusal, naming where HEAD is now.
+fn head_moved(repo: &Repository, state: &RebaseState) -> Result<RebaseError, RebaseError> {
     let head = repo.head()?;
     let id = head.peel_to_commit()?.id().to_string();
     let actual = if repo.head_detached()? {
@@ -368,7 +434,7 @@ fn check_head_at_expected(repo: &Repository, state: &RebaseState) -> Result<(), 
     } else {
         format!("{} at {id}", head.shorthand().unwrap_or("a branch"))
     };
-    Err(RebaseError::HeadMoved {
+    Ok(RebaseError::HeadMoved {
         expected: state.expected_head.to_string(),
         actual,
     })
@@ -496,7 +562,14 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     // cancelled), and a retried Continue must see the HEAD this step just landed, not a stale
     // one that would read as `HeadMoved`.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
+    after_landed(repo, state)
+}
 
+/// What follows a landed step (committed here, or by hand and adopted): if the entry ends a
+/// squash/fixup group, collapse the group; then re-baseline `expected_head` and forget git's
+/// paused pick.
+fn after_landed(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+    let committer = repo.signature()?;
     if ends_a_group(&state.plan, state.cursor) {
         // Walk backward to the nearest preceding entry that's neither `Squash`/`Fixup` (a group
         // member) nor `Drop` (never landed, so it can't be the leader either) — that's the group

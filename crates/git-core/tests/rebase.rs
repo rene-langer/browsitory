@@ -1160,3 +1160,199 @@ fn continue_refuses_during_a_merge() {
     assert!(matches!(result, Err(RebaseError::OperationInProgress)));
     assert!(repo.path().join("MERGE_HEAD").exists());
 }
+
+/// `git commit` in a terminal during the pause: commits the index on HEAD with `author` and
+/// ends git's paused pick.
+fn commit_by_hand(repo: &git2::Repository, author: &git2::Signature, message: &str) -> git2::Oid {
+    let mut index = repo.index().unwrap();
+    index.read(false).unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let committer = repo.signature().unwrap();
+    let id = repo
+        .commit(Some("HEAD"), author, &committer, message, &tree, &[&head])
+        .unwrap();
+    repo.cleanup_state().unwrap();
+    id
+}
+
+fn resolve_shared(repo: &git2::Repository) {
+    let workdir = repo.workdir().unwrap();
+    std::fs::write(workdir.join("shared.txt"), "line one\nresolved\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("shared.txt")).unwrap();
+    index.write().unwrap();
+}
+
+fn author_of(repo: &git2::Repository, id: &str) -> git2::Signature<'static> {
+    repo.find_commit(git2::Oid::from_str(id).unwrap())
+        .unwrap()
+        .author()
+        .to_owned()
+}
+
+fn branch_tip(repo: &git2::Repository, branch_ref: &str) -> git2::Oid {
+    repo.find_reference(branch_ref).unwrap().target().unwrap()
+}
+
+#[test]
+fn continue_adopts_a_conflicted_step_committed_with_git() {
+    let (_dir, repo, mut state, onto) = conflicting_rebase();
+    let picked = state.plan[0].commit_id.clone();
+    resolve_shared(&repo);
+    let by_hand = commit_by_hand(&repo, &author_of(&repo, &picked), "conflicting change");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let tip = branch_tip(&repo, &state.original_branch_ref);
+    assert_eq!(
+        tip, by_hand,
+        "the hand-made commit is the step, not a duplicate"
+    );
+    let tip = repo.find_commit(tip).unwrap();
+    assert_eq!(tip.parent_id(0).unwrap().to_string(), onto);
+    assert!(!repo.head_detached().unwrap());
+}
+
+#[test]
+fn continue_adopts_an_edit_step_committed_with_git() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, branch) = two_commits_on_a_branch(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    write_file(dir.path(), "a.txt", "amended\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("a.txt")).unwrap();
+    index.write().unwrap();
+    commit_by_hand(&repo, &author_of(&repo, &ids[0]), "add a, amended");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let summaries: Vec<String> = git_core::rebase::commits_since(&repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.summary)
+        .collect();
+    assert_eq!(summaries, ["add a, amended", "add b"]);
+    assert_eq!(repo.head().unwrap().name().unwrap(), branch);
+    assert_eq!(common::read(dir.path(), "a.txt"), "amended\n");
+}
+
+#[test]
+fn continue_gives_an_adopted_reword_step_its_planned_message() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "conflicting change");
+    let picked = commit_id_at(&repo, 0);
+    let plan = vec![RebasePlanEntry {
+        commit_id: picked.clone(),
+        action: RebaseAction::Reword {
+            message: "planned message".into(),
+        },
+        combined_message: None,
+    }];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    resolve_shared(&repo);
+    commit_by_hand(&repo, &author_of(&repo, &picked), "typed in a terminal");
+
+    assert_eq!(
+        git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
+        RebaseStepResult::Done
+    );
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.message().unwrap(), "planned message");
+    assert_eq!(head.parent_id(0).unwrap().to_string(), onto);
+    assert_eq!(
+        common::read(dir.path(), "shared.txt"),
+        "line one\nresolved\n"
+    );
+}
+
+#[test]
+fn continue_adopts_a_squash_member_and_still_collapses_the_group() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "shared.txt", "line one\nline two\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "shared.txt", "line one\nchanged on top\n");
+    commit_all(&repo, "change on top of onto");
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "leader");
+    write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
+    commit_all(&repo, "member");
+    let (leader, member) = (commit_id_at(&repo, 1), commit_id_at(&repo, 0));
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: leader,
+            action: RebaseAction::Pick,
+            combined_message: Some("combined".into()),
+        },
+        RebasePlanEntry {
+            commit_id: member.clone(),
+            action: RebaseAction::Squash,
+            combined_message: None,
+        },
+    ];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    resolve_shared(&repo);
+    commit_by_hand(&repo, &author_of(&repo, &member), "member");
+
+    assert_eq!(
+        git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
+        RebaseStepResult::Done
+    );
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.message().unwrap(), "combined");
+    assert_eq!(head.parent_id(0).unwrap().to_string(), onto);
+    assert_eq!(common::read(dir.path(), "a.txt"), "a\n");
+    assert_eq!(
+        common::read(dir.path(), "shared.txt"),
+        "line one\nresolved\n"
+    );
+}
+
+#[test]
+fn continue_does_not_adopt_after_an_error_stop() {
+    let (dir, repo) = init_repo();
+    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    write_file(dir.path(), "f.txt", "local\n");
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+    assert_eq!(state.stop, RebaseStop::Error);
+    // A commit with b's author on top of the stop, but b was never applied by the rebase.
+    write_file(dir.path(), "f.txt", "from b\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("f.txt")).unwrap();
+    index.write().unwrap();
+    commit_by_hand(&repo, &author_of(&repo, &ids[1]), "b");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::HeadMoved { .. })));
+}
+
+#[test]
+fn continue_does_not_adopt_a_commit_with_another_author() {
+    let (_dir, repo, mut state, _) = conflicting_rebase();
+    resolve_shared(&repo);
+    let other = git2::Signature::now("Someone Else", "else@example.com").unwrap();
+    commit_by_hand(&repo, &other, "conflicting change");
+    let before = state.clone();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::HeadMoved { .. })));
+    assert_eq!(state, before);
+}
