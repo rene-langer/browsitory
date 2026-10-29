@@ -815,10 +815,11 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
 /// its tree over whatever the in-progress rebase left in the working directory/index. Shared by
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
 fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
-    repo.set_head(branch_ref)?;
+    // Check out first, reattach after: a refused checkout (a folder that can't be written)
+    // then leaves HEAD detached where the rebase left it, so Abort can simply be retried.
+    let tree = repo.find_reference(branch_ref)?.peel_to_tree()?;
     // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
     // folder; remove such links first, like git (#114).
-    let tree = repo.head()?.peel_to_tree()?;
     crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
         repo,
         Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
@@ -826,7 +827,8 @@ fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), Re
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_head(Some(&mut checkout))?;
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    repo.set_head(branch_ref)?;
     repo.cleanup_state()?;
     Ok(())
 }

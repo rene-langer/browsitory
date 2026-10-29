@@ -444,8 +444,8 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
         | Command::CheckoutCommit { reply, .. }
         | Command::ResetToCommit { reply, .. }
         | Command::RestoreReflogEntry { reply, .. }
-        | Command::AbortMerge { reply, .. }
-        | Command::AbortRebase { reply, .. } => held.hold(reply),
+        | Command::AbortMerge { reply, .. } => held.hold(reply),
+        Command::AbortRebase { reply } => held.hold(reply),
         Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => held.hold(reply),
         Command::StartMerge { reply, .. } => held.hold(reply),
         Command::StartRebase { reply, .. } | Command::RebaseContinue { reply, .. } => {
