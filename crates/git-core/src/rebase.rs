@@ -23,6 +23,11 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    #[error(
+        "Another merge, cherry-pick or revert is in progress. Finish or abort it before \
+         continuing the rebase."
+    )]
+    OperationInProgress,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,21 +262,52 @@ pub fn start_rebase(
     }
 }
 
+/// Goes on with a paused rebase, deciding from the repository what the pause left behind (the
+/// table mirrors `pick::continue_sequence`):
+///
+/// - git's paused pick is this rebase's step and HEAD is where the rebase left it: commit the
+///   index as the step (a resolved conflict or an edit), then go on;
+/// - nothing is paused and HEAD is where the rebase left it: the step never landed (an error
+///   stop, or `git cherry-pick --abort` outside), so apply it again instead of committing the
+///   unchanged index as an empty step;
+/// - another operation is paused: `OperationInProgress`; HEAD moved: `HeadMoved`.
+///
+/// Refusals leave `state` untouched. Any later error marks the stop as `Error` unless the
+/// step is still applied and paused; the caller keeps the state as returned (the cursor may
+/// have moved past steps that landed).
 pub fn rebase_continue(
     repo: &Repository,
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
-    let result = continue_steps(repo, state);
+    let resume = resume_kind(repo, state)?;
+    let result = match resume {
+        Resume::Land => land_current_step(repo, state).and_then(|()| {
+            state.cursor += 1;
+            advance(repo, state)
+        }),
+        Resume::Reapply => advance(repo, state),
+    };
     if result.is_err() {
-        state.stop = RebaseStop::Error;
+        state.stop = if is_own_paused_step(repo, state) {
+            match state.stop {
+                RebaseStop::Error => RebaseStop::Conflict,
+                applied => applied,
+            }
+        } else {
+            RebaseStop::Error
+        };
     }
     result
 }
 
-fn continue_steps(
-    repo: &Repository,
-    state: &mut RebaseState,
-) -> Result<RebaseStepResult, RebaseError> {
+enum Resume {
+    /// Commit the index as the paused step.
+    Land,
+    /// Apply the step at the cursor again.
+    Reapply,
+}
+
+fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseError> {
     // Past the end of the plan there's no step left to land — without this guard,
     // `land_current_step`'s `state.plan[state.cursor]` panics and takes the whole worker thread
     // (and every later command for this repo) down with it. Reachable from a double-clicked
@@ -279,24 +315,63 @@ fn continue_steps(
     if state.cursor >= state.plan.len() {
         return Err(RebaseError::NotRebasing);
     }
-
-    // Nothing but this module is supposed to move HEAD while a rebase is paused. If something
-    // did (a branch switch, an external `git checkout`), landing this step would commit it onto
-    // the wrong ref and silently rewrite unrelated history — refuse instead, leaving `abort` as
-    // the way out.
-    let actual_head = repo.head()?.peel_to_commit()?.id();
-    if actual_head != state.expected_head {
-        return Err(RebaseError::HeadMoved {
-            expected: state.expected_head.to_string(),
-            actual: actual_head.to_string(),
-        });
+    use git2::RepositoryState::{CherryPick, CherryPickSequence, Clean};
+    match repo.state() {
+        CherryPick | CherryPickSequence => {
+            if !is_own_paused_step(repo, state) {
+                return Err(RebaseError::OperationInProgress);
+            }
+            // Nothing but this module is supposed to move HEAD while a rebase is paused. If
+            // something did (a branch switch, an external `git checkout`), landing this step
+            // would commit it onto the wrong ref and silently rewrite unrelated history —
+            // refuse instead, leaving `abort` as the way out.
+            check_head_at_expected(repo, state)?;
+            Ok(Resume::Land)
+        }
+        Clean => {
+            check_head_at_expected(repo, state)?;
+            Ok(Resume::Reapply)
+        }
+        _ => Err(RebaseError::OperationInProgress),
     }
+}
 
-    // The working index is presumed ready — either a conflict was just resolved, or an `Edit`
-    // pause's amendment is staged. Land it as this step's commit, then keep advancing.
-    land_current_step(repo, state)?;
-    state.cursor += 1;
-    advance(repo, state)
+/// True when git's paused pick is this rebase's current step, not one started some other way.
+fn is_own_paused_step(repo: &Repository, state: &RebaseState) -> bool {
+    use git2::RepositoryState::{CherryPick, CherryPickSequence};
+    let Some(entry) = state.plan.get(state.cursor) else {
+        return false;
+    };
+    matches!(repo.state(), CherryPick | CherryPickSequence)
+        && repo
+            .find_reference("CHERRY_PICK_HEAD")
+            .ok()
+            .and_then(|reference| reference.target())
+            .map(|oid| oid.to_string())
+            .as_deref()
+            == Some(entry.commit_id.as_str())
+}
+
+/// HEAD detached at `expected_head`, where the rebase left it.
+fn head_at_expected(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
+    Ok(repo.head_detached()? && repo.head()?.peel_to_commit()?.id() == state.expected_head)
+}
+
+fn check_head_at_expected(repo: &Repository, state: &RebaseState) -> Result<(), RebaseError> {
+    if head_at_expected(repo, state)? {
+        return Ok(());
+    }
+    let head = repo.head()?;
+    let id = head.peel_to_commit()?.id().to_string();
+    let actual = if repo.head_detached()? {
+        id
+    } else {
+        format!("{} at {id}", head.shorthand().unwrap_or("a branch"))
+    };
+    Err(RebaseError::HeadMoved {
+        expected: state.expected_head.to_string(),
+        actual,
+    })
 }
 
 /// Auto-advances through plan entries starting at `state.cursor`: applies each via cherry-pick,
@@ -398,7 +473,9 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
             .to_string(),
     };
 
+    // Re-read the index from disk: a terminal `git add` during the pause must be seen.
     let mut index = repo.index()?;
+    index.read(false)?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
@@ -485,6 +562,9 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     // This function is the only place (besides `start_rebase`'s initial detach) that moves HEAD
     // during a rebase, so re-baseline the drift check from wherever it just landed.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
+    // The step is committed: forget its CHERRY_PICK_HEAD/MERGE_MSG, so a later stop (an error
+    // before the next pick, a failed `finish`) is a clean state, never a stale pick.
+    repo.cleanup_state()?;
 
     Ok(())
 }

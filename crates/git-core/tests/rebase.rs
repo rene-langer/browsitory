@@ -1046,3 +1046,117 @@ fn progress_reports_the_paused_step_one_based() {
     let progress = state.progress();
     assert_eq!((progress.current_step, progress.total_steps), (1, 2));
 }
+
+/// `base` (onto, f.txt = "base\n") → "a" (a.txt) → "b" (f.txt = "from b\n"). Returns
+/// `(onto, [a, b])`.
+fn a_then_b_changing_f(dir: &std::path::Path, repo: &git2::Repository) -> (String, Vec<String>) {
+    write_file(dir, "f.txt", "base\n");
+    commit_all(repo, "base commit");
+    let onto = commit_id_at(repo, 0);
+    write_file(dir, "a.txt", "a\n");
+    commit_all(repo, "a");
+    write_file(dir, "f.txt", "from b\n");
+    commit_all(repo, "b");
+    let ids = git_core::rebase::commits_since(repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    (onto, ids)
+}
+
+/// `git cherry-pick --abort` in a terminal: forget the pick and reset to HEAD.
+fn abort_pick_outside(repo: &git2::Repository) {
+    repo.cleanup_state().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+}
+
+#[test]
+fn continue_after_an_error_stop_retries_the_step_instead_of_committing_it_empty() {
+    let (dir, repo) = init_repo();
+    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (mut state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+
+    // A local edit in the way of b: a lands, b's cherry-pick is refused.
+    write_file(dir.path(), "f.txt", "local\n");
+    assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
+    assert_eq!(state.stop, RebaseStop::Error);
+    assert_eq!(state.cursor, 1);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+
+    write_file(dir.path(), "f.txt", "base\n");
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.summary().unwrap(), Some("b"));
+    assert_ne!(
+        head.tree_id(),
+        head.parent(0).unwrap().tree_id(),
+        "b is empty"
+    );
+    assert_eq!(common::read(dir.path(), "f.txt"), "from b\n");
+    assert_eq!(head.parent(0).unwrap().summary().unwrap(), Some("a"));
+}
+
+#[test]
+fn continue_after_the_paused_pick_was_aborted_outside_reapplies_the_step() {
+    let (_dir, repo, mut state, _) = conflicting_rebase();
+    abort_pick_outside(&repo);
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    assert_eq!(state.cursor, 0);
+    assert_eq!(state.stop, RebaseStop::Conflict);
+}
+
+#[test]
+fn continue_refuses_while_another_cherry_pick_is_paused() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = two_commits_on_a_branch(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    let before = state.clone();
+    abort_pick_outside(&repo);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let unrelated = detached_commit_adding(&repo, &head, "z.txt", "z\n", "unrelated");
+    repo.cherrypick(
+        &repo
+            .find_commit(git2::Oid::from_str(&unrelated).unwrap())
+            .unwrap(),
+        None,
+    )
+    .unwrap();
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::OperationInProgress)));
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Another merge, cherry-pick or revert is in progress. Finish or abort it before \
+         continuing the rebase."
+    );
+    assert_eq!(state, before);
+    assert_eq!(head_id(&repo), head.id());
+}
+
+#[test]
+fn continue_refuses_during_a_merge() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = two_commits_on_a_branch(dir.path(), &repo);
+    let (mut state, _) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
+    repo.cleanup_state().unwrap();
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{}\n", ids[1])).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state);
+
+    assert!(matches!(result, Err(RebaseError::OperationInProgress)));
+    assert!(repo.path().join("MERGE_HEAD").exists());
+}
