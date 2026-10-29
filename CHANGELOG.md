@@ -8,7 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Restart resilience
 
-- A paused rebase survives an app restart (in progress).
+- A paused rebase (conflict, edit stop or error) now survives an app restart, a VSCode window
+  reload, closing its tab and a backend crash, and the status strip shows it again on start
+  (#108).
+- A cherry-pick/revert sequence, rebase or conflicted merge finished after a restart is still
+  recorded as one undo step (#134).
+- If the repository was changed outside Browsitory while a rebase was paused (HEAD moved, the
+  branch moved or was deleted, another git operation started), the strip shows "Rebase of
+  <branch> interrupted" with the reason. Abort then stops the rebase without moving HEAD or
+  discarding work it no longer owns.
+- Continue accepts a paused rebase step that was finished with git (`git cherry-pick
+  --continue` or `git commit`).
+- Fixed: continuing a rebase after a step failed (for example because a local edit was in the
+  way) committed that step empty and lost its changes.
+- Fixed: a rebase whose branch moved during the pause no longer overwrites the branch; Continue
+  reports it, and a failed final step can be retried instead of only aborted.
+- Fixed: a failed Abort rebase (for example a folder that couldn't be written) no longer forgets
+  the rebase and strands HEAD detached; Abort can be retried.
 
 ### Interface refresh
 
