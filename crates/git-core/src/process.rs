@@ -29,6 +29,16 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+#[cfg(windows)]
+mod job_windows;
+
+/// The Windows job object holding a hook's process tree (#122). Uninhabited elsewhere, so
+/// `Option<&Job>` is always `None` there and one signature serves every platform.
+#[cfg(windows)]
+use job_windows::Job;
+#[cfg(not(windows))]
+enum Job {}
+
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// How long to keep reading after the program exited. A background grandchild that inherited
 /// the pipe (and escaped the process group) would otherwise keep it open, and this call
@@ -165,8 +175,15 @@ fn spawn_retrying(command: &mut Command) -> std::io::Result<Child> {
 /// Kills the program and, on Unix, every process in its group (it leads its own session and
 /// process group, see `detach`), so a hook's test runner or linter dies with it. Only called
 /// while the child is not yet reaped, so its pid (and therefore the group id) cannot have been
-/// reused. On Windows only the direct child is terminated.
-fn kill_tree(child: &mut Child) {
+/// reused. On Windows a hook's `job` is terminated first, which takes every process the hook
+/// started with it (#122); without a job only the direct child is terminated.
+fn kill_tree(child: &mut Child, job: Option<&Job>) {
+    #[cfg(windows)]
+    if let Some(job) = job {
+        job.terminate();
+    }
+    #[cfg(not(windows))]
+    let _ = job;
     #[cfg(unix)]
     {
         // SAFETY: plain syscall; the group id is the unreaped child's pid (see above).
@@ -178,8 +195,8 @@ fn kill_tree(child: &mut Child) {
 }
 
 /// Kills and reaps: never leaves a zombie behind.
-fn kill_and_reap(child: &mut Child) -> std::io::Result<ExitStatus> {
-    kill_tree(child);
+fn kill_and_reap(child: &mut Child, job: Option<&Job>) -> std::io::Result<ExitStatus> {
+    kill_tree(child, job);
     child.wait()
 }
 
@@ -232,6 +249,7 @@ fn wait_bounded(
     child: &mut Child,
     cancel: &dyn Fn() -> bool,
     timeout: Duration,
+    job: Option<&Job>,
 ) -> Result<(ExitStatus, bool), RunError> {
     let started = Instant::now();
     loop {
@@ -239,16 +257,16 @@ fn wait_bounded(
             Ok(Some(status)) => return Ok((status, false)),
             Ok(None) => {}
             Err(error) => {
-                let _ = kill_and_reap(child);
+                let _ = kill_and_reap(child, job);
                 return Err(RunError::Wait(error));
             }
         }
         if cancel() {
-            let _ = kill_and_reap(child);
+            let _ = kill_and_reap(child, job);
             return Err(RunError::Cancelled);
         }
         if started.elapsed() >= timeout {
-            return kill_and_reap(child)
+            return kill_and_reap(child, job)
                 .map(|status| (status, true))
                 .map_err(RunError::Wait);
         }
@@ -278,6 +296,12 @@ pub(crate) fn run_captured(
     // `command` still owns the pipe's write ends; until they close the reader never sees EOF.
     drop(command);
     let mut child = spawned.map_err(RunError::Spawn)?;
+    // Put the hook in a job right away, before it has started anything (see `job_windows` for
+    // the residual race).
+    #[cfg(windows)]
+    let job = job_windows::Job::assign(&child);
+    #[cfg(not(windows))]
+    let job: Option<Job> = None;
 
     // The reader drains the pipe continuously, so a chatty program never blocks on a full pipe.
     let buffer = Arc::new(Mutex::new(TailBuffer::new(limit)));
@@ -301,7 +325,7 @@ pub(crate) fn run_captured(
         });
     }
     feed_stdin(&mut child, stdin);
-    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout)?;
+    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout, job.as_ref())?;
     let _ = done_rx.recv_timeout(DRAIN_GRACE);
     let collected = std::mem::replace(
         &mut *buffer.lock().unwrap_or_else(|error| error.into_inner()),
@@ -406,7 +430,9 @@ pub(crate) fn run_captured_split(
     }
     drop(done_tx);
     feed_stdin(&mut child, stdin);
-    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout)?;
+    // No job for signing programs: a job kill on a signing timeout would also end a `gpg-agent`
+    // that gpg auto-started during the call.
+    let (status, timed_out) = wait_bounded(&mut child, cancel, timeout, None)?;
     // Both drains, sharing one grace period.
     let deadline = Instant::now() + DRAIN_GRACE;
     let mut drained = true;
@@ -1314,5 +1340,85 @@ mod tests {
         .unwrap();
         assert_eq!(captured.output, "none\n");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// Git for Windows' `sh.exe` running `script`, with `MARKER` pointing at `marker`.
+    #[cfg(windows)]
+    fn windows_sh(script: &str, marker: &std::path::Path) -> Option<Command> {
+        let sh = find_sh()?;
+        let mut command = Command::new(sh);
+        command.args(["-c", script]).env("MARKER", marker);
+        Some(command)
+    }
+
+    #[cfg(windows)]
+    fn marker_path() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("alive");
+        (dir, marker)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn timeout_kills_a_hooks_background_grandchild_on_windows() {
+        let (_dir, marker) = marker_path();
+        let Some(command) = windows_sh(
+            r#"(sleep 3; echo alive > "$MARKER") >/dev/null 2>&1 & sleep 30"#,
+            &marker,
+        ) else {
+            eprintln!("no sh.exe found; skipping");
+            return;
+        };
+        let captured =
+            run_captured(command, None, &|| false, Duration::from_millis(500), 1024).unwrap();
+        assert!(captured.timed_out);
+        std::thread::sleep(Duration::from_secs(6));
+        assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancel_kills_a_hooks_background_grandchild_on_windows() {
+        let (_dir, marker) = marker_path();
+        let Some(command) = windows_sh(
+            r#"(sleep 3; echo alive > "$MARKER") >/dev/null 2>&1 & sleep 30"#,
+            &marker,
+        ) else {
+            eprintln!("no sh.exe found; skipping");
+            return;
+        };
+        let cancel_at = Instant::now() + Duration::from_millis(500);
+        let result = run_captured(
+            command,
+            None,
+            &|| Instant::now() >= cancel_at,
+            Duration::from_secs(60),
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        std::thread::sleep(Duration::from_secs(6));
+        assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    /// D6-A: only a timeout or cancel kills the job, as on Unix.
+    #[cfg(windows)]
+    #[test]
+    fn a_normal_exit_leaves_a_hooks_background_process_running_on_windows() {
+        let (_dir, marker) = marker_path();
+        let Some(command) = windows_sh(
+            r#"(sleep 2; echo alive > "$MARKER") >/dev/null 2>&1 & exit 0"#,
+            &marker,
+        ) else {
+            eprintln!("no sh.exe found; skipping");
+            return;
+        };
+        let captured =
+            run_captured(command, None, &|| false, Duration::from_secs(30), 1024).unwrap();
+        assert!(captured.success, "{}", captured.output);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(marker.exists(), "the background process was killed");
     }
 }
