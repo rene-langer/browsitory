@@ -741,6 +741,12 @@ pub enum SequenceOutcomeDto {
         files: Vec<String>,
         progress: SequenceProgressDto,
     },
+    /// Continue's commit hook failed; the step is still paused (#133).
+    HookFailed {
+        hook: String,
+        output: String,
+        progress: SequenceProgressDto,
+    },
 }
 
 impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
@@ -751,6 +757,15 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
             }
             git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
                 files,
+                progress: progress.into(),
+            },
+            git_core::pick::SequenceOutcome::HookFailed {
+                hook,
+                output,
+                progress,
+            } => Self::HookFailed {
+                hook,
+                output,
                 progress: progress.into(),
             },
         }
@@ -2841,6 +2856,33 @@ mod tests {
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
             serde_json::json!("Squashed commit of the following:\n")
+        );
+    }
+
+    #[test]
+    fn sequence_outcome_hook_failed_serializes_with_hook_output_and_progress() {
+        use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
+        let failed = serde_json::to_value(super::SequenceOutcomeDto::from(
+            SequenceOutcome::HookFailed {
+                hook: "commit-msg".into(),
+                output: "x".into(),
+                progress: SequenceProgress {
+                    kind: SequenceKind::CherryPick,
+                    current_step: 2,
+                    total_steps: 3,
+                    current_commit: "abc".into(),
+                },
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            failed,
+            serde_json::json!({
+                "kind": "HookFailed",
+                "hook": "commit-msg",
+                "output": "x",
+                "progress": { "kind": "CherryPick", "currentStep": 2, "totalSteps": 3, "currentCommit": "abc" }
+            })
         );
     }
 

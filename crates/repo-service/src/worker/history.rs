@@ -81,7 +81,8 @@ pub(super) fn continue_sequence(
         return (None, Err(NO_SEQUENCE.to_string()));
     };
     let kind = state.kind;
-    let run = git_core::pick::continue_sequence(repo, state);
+    let run =
+        git_core::pick::continue_sequence(repo, state, git_core::hooks::HookOptions::default());
     (Some(kind), persist(sequence_store, run))
 }
 

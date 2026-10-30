@@ -2642,6 +2642,12 @@ enum SequenceOutcomeDto {
         files: Vec<String>,
         progress: SequenceProgressDto,
     },
+    /// Continue's commit hook failed; the step is still paused (#133).
+    HookFailed {
+        hook: String,
+        output: String,
+        progress: SequenceProgressDto,
+    },
 }
 
 impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
@@ -2652,6 +2658,15 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
             }
             git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
                 files,
+                progress: progress.into(),
+            },
+            git_core::pick::SequenceOutcome::HookFailed {
+                hook,
+                output,
+                progress,
+            } => Self::HookFailed {
+                hook,
+                output,
                 progress: progress.into(),
             },
         }
