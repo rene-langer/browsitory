@@ -17,6 +17,12 @@ pub(super) const MAX_LABEL_CHARS: usize = 80;
 pub(super) const UNDO_BUSY: &str =
     "Another Browsitory window is changing this repository's undo history. Try again in a moment.";
 
+/// The reply of a command that destroys work-tree content with no other way back (discards, a
+/// hard reset) while another holder keeps the state lock past `LOCK_WAIT`: it would run
+/// unrecorded, so it is refused instead (M4, option C).
+pub(super) const DISCARD_BUSY: &str = "Another Browsitory window is changing this repository's \
+undo history. Try again in a moment, so this change can be undone.";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UndoPlan {
     pub label: String,
@@ -127,12 +133,29 @@ pub(super) fn locks_state(command: &Command) -> bool {
         )
 }
 
-/// Replies `UNDO_BUSY` to Undo/Redo, which must not run without the lock (D7-A). `false` for
-/// every other command, which runs unrecorded instead (D6-A).
+/// While another holder keeps the state lock past `LOCK_WAIT`, replies `UNDO_BUSY` to Undo/Redo
+/// (D7-A) and `DISCARD_BUSY` to the commands that destroy work-tree content with no other way
+/// back: discarding a hunk, lines, a file or all unstaged changes, and a hard reset (they would
+/// run unrecorded, so nothing could bring the content back). `true` when it replied (the command
+/// must not run); `false` for every other command, which runs unrecorded instead (D6-A). Branch,
+/// tag and reflog changes stay recoverable from the reflog; switches, merges, picks and pulls
+/// refuse to overwrite local changes.
 pub(super) fn reply_busy(command: &mut Command) -> bool {
     match command {
         Command::Undo { reply } | Command::Redo { reply } => {
             let _ = reply.send(Err(UNDO_BUSY.to_string()));
+            true
+        }
+        Command::DiscardHunk { reply, .. }
+        | Command::DiscardLines { reply, .. }
+        | Command::DiscardFile { reply, .. }
+        | Command::DiscardAllUnstaged { reply, .. }
+        | Command::ResetToCommit {
+            mode: ResetMode::Hard,
+            reply,
+            ..
+        } => {
+            let _ = reply.send(Err(DISCARD_BUSY.to_string()));
             true
         }
         _ => false,

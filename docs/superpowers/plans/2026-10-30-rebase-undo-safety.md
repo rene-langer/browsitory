@@ -174,6 +174,15 @@ Where the code won over the plan, or the plan was extended:
     another window's pending entry (`a_relabel_with_nothing_pending_never_labels_a_later_entry`);
   - after one `LOCK_WAIT` timeout, later locked commands try once until the lock is taken again
     (`only_the_first_locked_command_waits_while_the_lock_stays_held`).
+- **M4 (user chose option C):** while the lock stays busy past the wait, the commands that
+  destroy work-tree content with no other recovery are refused with `DISCARD_BUSY` ("Another
+  Browsitory window is changing this repository's undo history. Try again in a moment, so this
+  change can be undone."): `DiscardHunk`, `DiscardLines`, `DiscardFile`, `DiscardAllUnstaged`
+  and `ResetToCommit { mode: Hard }`. Everything else runs unrecorded as before.
+  `RestoreReflogEntry`, branch/tag changes and soft/mixed resets only move refs or the index
+  (recoverable from the reflog, the work tree kept); switch, checkout, merge, picks, pull and
+  stash apply refuse to overwrite local changes; `IgnorePath` only appends to `.gitignore`.
+  Test: `work_tree_destroying_commands_are_refused_while_the_lock_stays_held`.
 
 ---
 

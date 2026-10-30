@@ -18,7 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   branch and saving a stash are refused, as during a rebase (#171).
 - Fixed: with the desktop app and the VSCode extension open on one repository, finishing a
   paused operation in one could lose its undo entry, and two saves could drop an entry. Undo
-  history changes now take a lock in .git/browsitory (#172).
+  history changes now take a lock in .git/browsitory (#172). If the other window keeps it for
+  more than about 10 seconds, Undo, Redo, discards and a hard reset ask you to try again rather
+  than run without an undo entry; other operations run but can't be undone.
 - Fixed: a merge, cherry-pick or revert aborted outside Browsitory and started again with the
   same commits reused the first one's undo snapshot. A paused merge or pick from the previous
   version is not undoable as one step after upgrading (#172).

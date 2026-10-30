@@ -213,7 +213,11 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   dropped before the held replies are released. A locked command that can't get the lock within
   `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
   other app) logs once and runs unrecorded, and later locked commands try only once until the
-  lock is taken again, so the worker's queue waits once, not once per click; Undo/Redo instead reply "Another Browsitory window is changing this repository's
+  lock is taken again, so the worker's queue waits once, not once per click. The commands that
+  destroy work-tree content with no other way back (discard hunk, lines, file or all unstaged,
+  and a hard reset) are refused instead with "Another Browsitory window is changing this
+  repository's undo history. Try again in a moment, so this change can be undone."
+  (`undo::reply_busy`); Undo/Redo instead reply "Another Browsitory window is changing this repository's
   undo history. Try again in a moment." The lock is an OS lock on a handle, so a process that
   exits or is killed, or a worker thread that panics, releases it; the file is never deleted
   (that would let the next opener lock a new inode). Where locks aren't supported (some network

@@ -634,6 +634,12 @@ Undo refuses, instead of overwriting, when the repository changed since the oper
 when it would delete, move or switch to a branch that is checked out in another worktree; the
 reflog stays available for those cases.
 
+With the desktop app and the VSCode extension open on the same repository, they share one undo
+history. If the other window keeps it busy for more than about 10 seconds (a pull, a commit
+hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Browsitory window
+is changing this repository's undo history. Try again in a moment…" and change nothing; other
+operations still run, but can't be undone.
+
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
 buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.
 

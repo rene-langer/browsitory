@@ -6059,7 +6059,7 @@ mod state_lock_tests {
     use tempfile::TempDir;
 
     use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
-    use super::undo::UNDO_BUSY;
+    use super::undo::{DISCARD_BUSY, UNDO_BUSY};
     use super::{UndoOutcome, UndoState, Worker};
 
     fn init_repo() -> (TempDir, Repository) {
@@ -6310,6 +6310,47 @@ mod state_lock_tests {
         assert_eq!(
             handle.get_undo_state().unwrap().undo,
             Some("Unstage b.txt".into())
+        );
+    }
+
+    #[test]
+    fn work_tree_destroying_commands_are_refused_while_the_lock_stays_held() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        let first = commit_all(&repo, "a");
+        write_file(dir.path(), "a.txt", "b\n");
+        commit_all(&repo, "b");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "my edit\n");
+        let edited = || std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
+
+        let guard = hold(&repo);
+        let busy = Err(DISCARD_BUSY.to_string());
+        assert_eq!(handle.discard_file("a.txt".into()), busy);
+        assert_eq!(handle.discard_all_unstaged(vec!["a.txt".into()]), busy);
+        assert_eq!(
+            handle.reset_to_commit(first.to_string(), git_core::reset::ResetMode::Hard),
+            busy
+        );
+        assert_eq!(edited(), "my edit\n");
+        // A mixed reset keeps the work tree, so it runs (unrecorded, D6-A).
+        handle
+            .reset_to_commit(first.to_string(), git_core::reset::ResetMode::Mixed)
+            .unwrap();
+        assert_eq!(edited(), "my edit\n");
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        drop(guard);
+        handle.discard_file("a.txt".into()).unwrap();
+        assert_eq!(edited(), "a\n");
+    }
+
+    #[test]
+    fn discard_busy_copy_is_exact() {
+        assert_eq!(
+            DISCARD_BUSY,
+            "Another Browsitory window is changing this repository's undo history. Try again in \
+             a moment, so this change can be undone."
         );
     }
 
