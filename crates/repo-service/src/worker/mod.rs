@@ -5056,6 +5056,50 @@ mod tests {
             .unwrap()
     }
 
+    /// `edit_then_pick`'s repository with `f.txt` modified on disk (#170).
+    fn dirty_before_rebase(
+        dir: &Path,
+        repo: &Repository,
+    ) -> (
+        Worker,
+        super::WorkerHandle,
+        String,
+        Vec<git_core::rebase::RebasePlanEntry>,
+    ) {
+        let (onto, plan, _, _) = edit_then_pick(dir, repo);
+        write_file(dir, "f.txt", "DIRTY\n");
+        let worker = Worker::spawn(dir.to_path_buf()).unwrap();
+        let handle = worker.handle();
+        (worker, handle, onto, plan)
+    }
+
+    #[test]
+    fn a_refused_rebase_start_records_no_undo_entry_and_keeps_the_edit() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
+        let before = handle.get_undo_state().unwrap();
+
+        let error = handle.start_rebase(onto, plan).unwrap_err();
+        assert_eq!(
+            error,
+            "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
+        );
+        assert_eq!(handle.get_undo_state().unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+            "DIRTY\n"
+        );
+    }
+
+    #[test]
+    fn a_refused_rebase_start_leaves_no_rebase_stored() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
+        handle.start_rebase(onto, plan).unwrap_err();
+        assert_eq!(rebase_progress(&handle), None);
+        assert!(!rebase_file(&repo).exists());
+    }
+
     #[test]
     fn a_paused_rebase_survives_a_worker_restart() {
         let (dir, repo) = init_repo();
