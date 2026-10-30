@@ -191,6 +191,30 @@ fn failing_pre_commit_blocks_the_commit_and_returns_its_output() {
 }
 
 #[test]
+fn a_pre_commit_reading_the_terminal_fails_instead_of_stopping() {
+    let (dir, mut repo) = common::init_repo();
+    stage(dir.path(), &repo, "a.txt", "a");
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "pre-commit",
+        "exec < /dev/tty; read answer; exit 0",
+    );
+
+    let started = std::time::Instant::now();
+    let error = commit(&mut repo, "add a", HookOptions::default()).unwrap_err();
+
+    assert!(started.elapsed() < Duration::from_secs(10));
+    match error {
+        CommitError::HookFailed { hook, output } => {
+            assert_eq!(hook, "pre-commit");
+            assert!(output.contains("/dev/tty"), "{output}");
+        }
+        other => panic!("expected HookFailed, got {other:?}"),
+    }
+    assert!(repo.head().is_err(), "no commit may be created");
+}
+
+#[test]
 fn pre_commit_that_stages_a_file_gets_it_committed() {
     if !common::program_available("git") {
         eprintln!("git CLI not found; skipping");

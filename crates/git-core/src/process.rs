@@ -3,9 +3,11 @@
 //! Two shapes live here:
 //! - `run_captured` (batch 4e, hooks): combined, size-capped output, a timeout and a cancel
 //!   check. Stdout and stderr go through one pipe (true `2>&1` ordering), only the last `limit`
-//!   bytes are kept, the child is polled for exit / cancel / deadline, and on Unix it leads its
-//!   own process group so a timeout or cancel takes its children down with it. The child is
-//!   always reaped before this returns, so no zombie is left behind.
+//!   bytes are kept, the child is polled for exit / cancel / deadline, and on Unix it starts a
+//!   new session (`setsid`, no controlling terminal) whose process group a timeout or cancel
+//!   kills (`killpg`), taking its children down with it. The child is always reaped before this
+//!   returns, so no zombie is left behind. `run_captured_split` (signing programs) does the same
+//!   with stdout and stderr kept apart.
 //! - `spawn` / `spawn_detached` (batch 4f, external tools): long-lived programs (editors,
 //!   terminals, diff/merge tools) with stdin/stdout closed and stderr optionally drained into a
 //!   tail buffer (`drain_tail`).
@@ -160,20 +162,17 @@ fn spawn_retrying(command: &mut Command) -> std::io::Result<Child> {
     command.spawn()
 }
 
-/// Kills the program and, on Unix, every process in its group (it was spawned as the group
-/// leader), so a hook's test runner or linter dies with it. Uses the POSIX `kill` utility rather
-/// than a `libc` dependency. Only called while the child is not yet reaped, so its pid (and
-/// therefore the group id) cannot have been reused. On Windows only the direct child is
-/// terminated.
+/// Kills the program and, on Unix, every process in its group (it leads its own session and
+/// process group, see `detach`), so a hook's test runner or linter dies with it. Only called
+/// while the child is not yet reaped, so its pid (and therefore the group id) cannot have been
+/// reused. On Windows only the direct child is terminated.
 fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{}", child.id())])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // SAFETY: plain syscall; the group id is the unreaped child's pid (see above).
+        unsafe {
+            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        }
     }
     let _ = child.kill();
 }
@@ -184,16 +183,26 @@ fn kill_and_reap(child: &mut Child) -> std::io::Result<ExitStatus> {
     child.wait()
 }
 
-/// On Unix the program leads its own process group, so timeout/cancel can kill the whole tree;
-/// on Windows it gets no console window.
-fn own_group_without_window(command: &mut Command) {
+/// On Unix the program starts a new session (`setsid`): it leads its own process group, so
+/// timeout/cancel can kill the whole tree (`kill_tree`), and it has no controlling terminal, so
+/// a program that opens `/dev/tty` fails at once (`ENXIO`) instead of being stopped by `SIGTTIN`
+/// when Browsitory was started from a terminal (#126). On Windows it gets no console window.
+fn detach(command: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // Known limitation: launched from a terminal, a program that reads `/dev/tty` from this
-        // background group is stopped by SIGTTIN until cancel/timeout (a new session would avoid
-        // it but needs `setsid`).
-        command.process_group(0);
+        // Not combined with `process_group(0)`: std applies that `setpgid` before `pre_exec`
+        // closures, and a group leader can't call `setsid` (`EPERM`).
+        // SAFETY: `setsid` is async-signal-safe; nothing else runs between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
     }
     #[cfg(windows)]
     {
@@ -264,7 +273,7 @@ pub(crate) fn run_captured(
         })
         .stdout(writer)
         .stderr(writer_for_stderr);
-    own_group_without_window(&mut command);
+    detach(&mut command);
     let spawned = spawn_retrying(&mut command);
     // `command` still owns the pipe's write ends; until they close the reader never sees EOF.
     drop(command);
@@ -340,7 +349,7 @@ pub(crate) fn run_captured_split(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    own_group_without_window(&mut command);
+    detach(&mut command);
     let mut child = spawn_retrying(&mut command).map_err(RunError::Spawn)?;
     drop(command);
 
@@ -1240,5 +1249,70 @@ mod tests {
         assert!(
             matches!(result, Err(RunError::Spawn(ref error)) if error.kind() == std::io::ErrorKind::NotFound)
         );
+    }
+
+    /// `pid pgrp sid tty_nr` of the shell, from `/proc/$$/stat` (field 2, the command name, may
+    /// contain spaces, so everything up to ") " is dropped first).
+    #[cfg(target_os = "linux")]
+    const SESSION_PROBE: &str = r#"read -r s < /proc/$$/stat; set -- ${s#*) }; echo "$$ $3 $4 $5""#;
+
+    #[cfg(target_os = "linux")]
+    fn assert_leads_its_own_session_without_a_terminal(line: &str) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        assert_eq!(fields.len(), 4, "unexpected probe output {line:?}");
+        let (pid, pgrp, sid, tty_nr) = (fields[0], fields[1], fields[2], fields[3]);
+        assert_eq!(pid, pgrp, "the program leads its process group");
+        assert_eq!(pid, sid, "the program leads its own session");
+        assert_eq!(tty_nr, "0", "the program has no controlling terminal");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_program_leads_its_own_session_without_a_terminal() {
+        let captured = run_captured(
+            sh(SESSION_PROBE),
+            None,
+            &|| false,
+            Duration::from_secs(10),
+            1024,
+        )
+        .unwrap();
+        assert!(captured.success, "{}", captured.output);
+        assert_leads_its_own_session_without_a_terminal(&captured.output);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn split_program_leads_its_own_session_without_a_terminal() {
+        let captured = run_captured_split(
+            sh(SESSION_PROBE),
+            None,
+            &|| false,
+            Duration::from_secs(10),
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.success, "{}", captured.stderr);
+        assert_leads_its_own_session_without_a_terminal(&String::from_utf8_lossy(&captured.stdout));
+    }
+
+    /// Only discriminates when the test runner has a controlling terminal (run it locally from
+    /// one): without one, `/dev/tty` fails either way. With one, a program in a background
+    /// process group of that terminal's session would be stopped by `SIGTTIN` instead.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_opening_dev_tty_fails_at_once() {
+        let started = Instant::now();
+        let captured = run_captured(
+            sh("if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi"),
+            None,
+            &|| false,
+            Duration::from_secs(30),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(captured.output, "none\n");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

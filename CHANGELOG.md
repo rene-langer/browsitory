@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Hooks bundle
+
+- Fixed: started from a terminal, a hook (or signing program) that reads the terminal no longer hangs until Cancel or the time limit; it fails at once (#126).
+
 ### Rebase/undo safety
 
 - Fixed: starting a rebase over uncommitted changes could discard them (when the first step
