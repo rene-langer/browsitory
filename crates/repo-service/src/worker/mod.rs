@@ -43,6 +43,7 @@ mod remote;
 mod search;
 mod sequence_store;
 mod stash;
+mod state_lock;
 mod status;
 mod submodule;
 mod tag;
