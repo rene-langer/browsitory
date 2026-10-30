@@ -4,24 +4,62 @@ use git_core::merge::{
     MergeOutcome,
 };
 use std::sync::mpsc::Sender;
+/// A merge this worker started and that stopped without conflicts (`MergeOutcome::Merged`),
+/// remembered so that the commit concluding it runs `git merge`'s hooks
+/// (`CommitHookSet::CleanMerge`: `pre-merge-commit`, then `post-merge 0` after the commit,
+/// #124). It is only trusted while the repository still shows that very merge: state `Merge`,
+/// the same HEAD and the same `MERGE_HEAD` commits.
+///
+/// Kept in memory only (D2-A). After a restart, or for a merge started by the other window or
+/// outside Browsitory, there is none, and the commit runs `git commit`'s hooks, which is what
+/// git does for `git merge --no-commit` followed by `git commit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CleanMerge {
+    head: git2::Oid,
+    merge_heads: Vec<git2::Oid>,
+}
+
+impl CleanMerge {
+    /// The merge `repo` shows now, if any.
+    pub(super) fn capture(repo: &mut git2::Repository) -> Option<Self> {
+        if repo.state() != git2::RepositoryState::Merge {
+            return None;
+        }
+        let head = repo.head().ok()?.peel_to_commit().ok()?.id();
+        let mut merge_heads = Vec::new();
+        repo.mergehead_foreach(|oid| {
+            merge_heads.push(*oid);
+            true
+        })
+        .ok()?;
+        Some(Self { head, merge_heads })
+    }
+
+    /// `repo` still shows this merge.
+    pub(super) fn matches(&self, repo: &mut git2::Repository) -> bool {
+        Self::capture(repo).as_ref() == Some(self)
+    }
+}
+
+/// Starts a merge and replies; returns the result too, so the loop can remember a clean merge.
 pub(super) fn start(
     repo: &git2::Repository,
     branch_name: String,
     options: MergeOptions,
     reply: Sender<Result<MergeOutcome, String>>,
-) {
+) -> Result<MergeOutcome, String> {
     let result = git_core::merge::start_merge(repo, &branch_name, options)
         .map_err(|error| error.to_string());
     // git runs post-merge after a merge that completed (or a squash, with "1"); not after a
-    // conflicted or no-op one.
+    // conflicted or no-op one. A clean non-fast-forward merge (`Merged`) is only staged here:
+    // its post-merge runs after the commit that concludes it (`status::commit`).
     match result {
-        Ok(MergeOutcome::FastForwarded) | Ok(MergeOutcome::Merged) => {
-            super::hooks::run_post_hook(repo, "post-merge", &["0"])
-        }
+        Ok(MergeOutcome::FastForwarded) => super::hooks::run_post_hook(repo, "post-merge", &["0"]),
         Ok(MergeOutcome::Squashed) => super::hooks::run_post_hook(repo, "post-merge", &["1"]),
         _ => {}
     }
-    let _ = reply.send(result);
+    let _ = reply.send(result.clone());
+    result
 }
 pub(super) fn defaults(repo: &git2::Repository, reply: Sender<Result<MergeOptions, String>>) {
     let _ = reply.send(Ok(git_core::merge::merge_defaults(repo)));

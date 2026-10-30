@@ -776,6 +776,9 @@ impl Worker {
             // a sequence stopped by an error is clean too.
             let rebase_store = rebase_store::RebaseStore::open(&repo);
             let mut rebase_memory = gate::RebaseMemory::default();
+            // The clean merge this worker staged, so its commit runs `git merge`'s hooks
+            // (#124). Memory only: see `merge::CleanMerge` for the fallback (D2-A).
+            let mut clean_merge: Option<merge::CleanMerge> = None;
             macro_rules! probe {
                 () => {
                     gate::OperationProbe {
@@ -1081,18 +1084,31 @@ impl Worker {
                         operation_id,
                         events,
                         reply,
-                    } => status::commit(
-                        &mut repo,
-                        message,
-                        no_verify,
-                        trailers,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
-                        events,
-                        reply,
-                    ),
+                    } => {
+                        let set = if clean_merge.as_ref().is_some_and(|m| m.matches(&mut repo)) {
+                            git_core::commit::CommitHookSet::CleanMerge
+                        } else {
+                            git_core::commit::CommitHookSet::Commit
+                        };
+                        let committed = status::commit(
+                            &mut repo,
+                            message,
+                            no_verify,
+                            trailers,
+                            set,
+                            remote::TransferOp {
+                                id: operation_id,
+                                cancelled: &cancelled,
+                            },
+                            events,
+                            reply,
+                        );
+                        // A failed or cancelled commit keeps it: "Commit without hooks" still
+                        // concludes the clean merge (`git merge --no-verify`).
+                        if committed {
+                            clean_merge = None;
+                        }
+                    }
                     Command::ListBranches { reply } => branch::list(&repo, reply),
                     Command::CreateBranch {
                         name,
@@ -1239,7 +1255,13 @@ impl Worker {
                         branch_name,
                         options,
                         reply,
-                    } => merge::start(&repo, branch_name, options, reply),
+                    } => {
+                        let result = merge::start(&repo, branch_name, options, reply);
+                        clean_merge = match result {
+                            Ok(MergeOutcome::Merged) => merge::CleanMerge::capture(&mut repo),
+                            _ => None,
+                        };
+                    }
                     Command::GetMergeDefaults { reply } => merge::defaults(&repo, reply),
                     Command::GetConflictHunks { path, reply } => {
                         merge::conflict_hunks(&repo, path, reply)
@@ -1250,6 +1272,7 @@ impl Worker {
                         reply,
                     } => merge::resolve(&repo, path, resolved_content, reply),
                     Command::AbortMerge { reply } => {
+                        clean_merge = None;
                         // A stale UI's Abort during a sequence must not strand sequence.json.
                         if sequence_store.load(&repo).is_some() {
                             history::abort_sequence_for_merge(&repo, &sequence_store, reply)
@@ -2073,7 +2096,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn post_merge_runs_after_a_merge_and_a_squash() {
+    fn post_merge_runs_after_a_fast_forward_and_a_squash() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "a.txt", "a");
         commit_all(&repo, "first");
@@ -2117,6 +2140,205 @@ mod tests {
         assert_eq!(squashed, MergeOutcome::Squashed);
 
         assert_eq!(std::fs::read_to_string(&record).unwrap(), "0\n1\n");
+    }
+
+    /// HEAD on the initial branch, with `feature` diverged from it: both sides added a different
+    /// file, or (with `conflict`) both changed `a.txt`.
+    #[cfg(unix)]
+    fn diverged_repo(conflict: bool) -> (TempDir, Repository) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "first");
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        {
+            let first = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &first, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        if conflict {
+            write_file(dir.path(), "a.txt", "feature\n");
+        } else {
+            write_file(dir.path(), "feature.txt", "feature\n");
+        }
+        commit_all(&repo, "feature work");
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        if conflict {
+            write_file(dir.path(), "a.txt", "main\n");
+        } else {
+            let _ = std::fs::remove_file(dir.path().join("feature.txt"));
+            write_file(dir.path(), "main.txt", "main\n");
+        }
+        commit_all(&repo, "main work");
+        (dir, repo)
+    }
+
+    #[cfg(unix)]
+    fn merge_no_ff(handle: &super::WorkerHandle) -> MergeOutcome {
+        handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions {
+                    fast_forward: git_core::merge::FastForward::Never,
+                    ..git_core::merge::MergeOptions::default()
+                },
+            )
+            .unwrap()
+    }
+
+    /// A hook that appends `<name> <args>` to `<git dir>/hook-log`; returns the log's path.
+    #[cfg(unix)]
+    fn log_hook(repo: &Repository, name: &str) -> std::path::PathBuf {
+        let log = repo.path().join("hook-log");
+        install_hook(
+            repo,
+            name,
+            &format!(r#"echo "{name} $*" >> '{}'"#, log.display()),
+        );
+        log
+    }
+
+    #[cfg(unix)]
+    fn commit_message(
+        handle: &super::WorkerHandle,
+        no_verify: bool,
+    ) -> git_core::commit::CommitOutcome {
+        handle
+            .commit(
+                "Merge feature".into(),
+                no_verify,
+                Vec::new(),
+                mpsc::channel().0,
+            )
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_staged_merge_runs_no_post_merge_until_it_is_committed() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "post-merge");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        assert!(
+            !log.exists(),
+            "post-merge ran before the merge commit existed"
+        );
+
+        assert!(matches!(
+            commit_message(&handle, false),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_clean_merge_commit_runs_pre_merge_commit_not_pre_commit() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "pre-commit");
+        log_hook(&repo, "pre-merge-commit");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let outcome = handle
+            .commit("Merge feature".into(), false, Vec::new(), events_tx)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "pre-merge-commit \n"
+        );
+        let events: Vec<HookEvent> = events_rx.iter().collect();
+        assert!(
+            matches!(&events[0], HookEvent::Started { hook, .. } if hook == "pre-merge-commit"),
+            "{events:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_pre_merge_commit_replies_hook_failed_and_commit_without_hooks_lands_the_merge() {
+        let (dir, repo) = diverged_repo(false);
+        install_hook(&repo, "pre-merge-commit", "echo blocked; exit 1");
+        let log = log_hook(&repo, "post-merge");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+
+        assert_eq!(
+            commit_message(&handle, false),
+            git_core::commit::CommitOutcome::HookFailed {
+                hook: "pre-merge-commit".into(),
+                output: "blocked\n".into()
+            }
+        );
+        assert_eq!(
+            handle.get_head_info().unwrap().operation,
+            Some(git_core::repo::OperationKind::Merge)
+        );
+        assert!(!log.exists());
+
+        assert!(matches!(
+            commit_message(&handle, true),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_merge_commit_after_conflicts_runs_post_commit_not_post_merge() {
+        let (dir, repo) = diverged_repo(true);
+        let log = log_hook(&repo, "post-merge");
+        log_hook(&repo, "post-commit");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            merge_no_ff(&handle),
+            MergeOutcome::Conflicted { .. }
+        ));
+        write_file(dir.path(), "a.txt", "resolved\n");
+        handle.stage_file("a.txt".into()).unwrap();
+
+        assert!(matches!(
+            commit_message(&handle, false),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-commit \n");
+    }
+
+    /// D2-A: the memory of a clean merge doesn't survive a restart, and the commit then runs
+    /// `git commit`'s hooks, as `git merge --no-commit` + `git commit` does.
+    #[cfg(unix)]
+    #[test]
+    fn a_clean_merge_committed_after_a_worker_restart_runs_the_commit_hooks() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "pre-commit");
+        log_hook(&repo, "pre-merge-commit");
+        log_hook(&repo, "post-merge");
+        {
+            let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            assert_eq!(merge_no_ff(&first.handle()), MergeOutcome::Merged);
+        }
+        let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        assert!(matches!(
+            commit_message(&second.handle(), false),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "pre-commit \n");
     }
 
     #[cfg(unix)]
