@@ -345,7 +345,8 @@ sidecar runs each request on its own thread and is unaffected.
   step's index away). A detached or unknown `originalRef` protects no branch. It is reported
   as `HeadInfo.sequence`. The undo entry is labelled with the number of commits applied. `AbortMerge` aborts the
   whole sequence when one is stored, so a stale frontend can't strand the file.
-- Empty steps are skipped (git stops for `--skip`), without hooks. The step Continue commits
+- Empty steps are skipped (git stops for `--skip`), without hooks; so is a step that the
+  continued step's `pre-commit` put back to HEAD's tree. The step Continue commits
   (the resolved, paused one) runs `git cherry-pick --continue`'s commit hooks through the commit
   path's helpers (`commit::run_commit_hooks` with `pre-commit` and source `merge`, then
   `create_commit_reporting` with the signing pseudo-hook and cancel, then `post-commit`), #133.
@@ -481,7 +482,11 @@ sidecar runs each request on its own thread and is unaffected.
   `git merge --no-verify`. After a restart, or for a merge started by the other window or
   outside Browsitory, there is none and the commit runs `git commit`'s hooks, which is what git
   does for `merge --no-commit` + `commit`. A merge that had conflicts always runs the commit
-  hooks, as in git.
+  hooks, as in git. The same fallback applies when Undo takes back a clean merge's commit (the
+  merge is staged again, but the memory was cleared by the commit). The worker's
+  `GetHeadInfo` lists only the pre-hook the commit will run in `commitHooks` (`pre-merge-commit`
+  while the remembered merge matches, else `pre-commit`), so **Skip hooks** and its tooltip
+  name the right hook.
 - A hook failure crosses IPC as data: `CommitOutcome::HookFailed` for commit/amend, and
   `TransferErrorKind::HookFailed` + `hookOutput` for pushes. Hook output is the only process
   output forwarded over IPC; remote sideband text still is not.

@@ -88,7 +88,7 @@ export function CommitBox({
   /** Commit hooks: the "Skip hooks" toggle (only when installed) and the running hook's status. */
   hooks?: {
     installed: boolean;
-    /** A merge is staged: its commit may run `pre-merge-commit` instead of `pre-commit`. */
+    /** The commit concludes a clean merge and runs `pre-merge-commit` instead of `pre-commit`. */
     merging?: boolean;
     skip: boolean;
     onToggleSkip: (on: boolean) => void;

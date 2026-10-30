@@ -579,8 +579,12 @@ function RepoWorkspace({
           failure={appState.state.hookFailure}
           onRetry={() => {
             const retry = appState.state.hookFailure!.retry;
-            // A Continue's toast comes from its outcome, like a plain Continue's.
-            if (retry.kind === "continueSequence") runContinueSequence(true);
+            // A Continue's toast comes from its outcome, like a plain Continue's. Dismissed first
+            // (as every retry is), also when the sequence has gone meanwhile and nothing runs.
+            if (retry.kind === "continueSequence") {
+              dismissError();
+              runContinueSequence(true);
+            }
             else void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
           }}
           onClose={appState.closeHookFailure}

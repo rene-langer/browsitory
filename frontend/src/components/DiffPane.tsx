@@ -1289,7 +1289,8 @@ function UncommittedDiffPane({
                 ? undefined
                 : {
                     installed: headInfo.commitHooks.length > 0,
-                    merging: headInfo.operation === "Merge",
+                    // The worker lists `pre-merge-commit` only when the commit will run it.
+                    merging: headInfo.commitHooks.includes("pre-merge-commit"),
                     ...commitHooks,
                   }
             }

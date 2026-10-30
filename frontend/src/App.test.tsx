@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { CommitOutcome, RepoClient } from "./ipc/RepoClient";
+import type { CommitOutcome, RepoClient, SequenceOutcome } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
@@ -663,7 +663,11 @@ describe("App", () => {
         output: "lint failed\n",
         progress: { kind: "CherryPick", currentStep: 2, totalSteps: 3, currentCommit: "c2" },
       })
-      .mockResolvedValueOnce({ kind: "Completed", applied: 3, skipped: [] });
+      .mockImplementationOnce(() => retried);
+    let finishRetry: (outcome: SequenceOutcome) => void = () => {};
+    const retried = new Promise<SequenceOutcome>((resolve) => {
+      finishRetry = resolve;
+    });
     const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 3, currentCommit: "c2" };
     const client = fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
@@ -699,7 +703,10 @@ describe("App", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Continue without hooks" }));
 
     await waitFor(() => expect(continueSequence).toHaveBeenLastCalledWith("/repos/a", true));
+    // Closed while the retry still runs, so it can't be clicked twice and doesn't hide the
+    // panel's running-hook line.
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+    finishRetry({ kind: "Completed", applied: 3, skipped: [] });
     expect(await screen.findByText("Cherry-picked 3 commits")).toBeInTheDocument();
   });
 
