@@ -651,7 +651,9 @@ fn rebase_abort_restores_an_original_tree_holding_a_collision() {
 }
 
 #[test]
-#[cfg(unix)]
+// Linux only, like the other HEAD-holds-the-pair tests: a case-insensitive file system can't
+// hold both `D` and `d/` (gpg `/bin/false` also needs unix).
+#[cfg(target_os = "linux")]
 fn a_failed_rebase_start_rolls_back_to_an_original_tree_holding_a_collision() {
     let fx = fixture();
     let (e, rm) = rebase_fixture(&fx);
