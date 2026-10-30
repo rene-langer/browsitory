@@ -183,6 +183,27 @@ Where the code won over the plan, or the plan was extended:
   (recoverable from the reflog, the work tree kept); switch, checkout, merge, picks, pull and
   stash apply refuse to overwrite local changes; `IgnorePath` only appends to `.gitignore`.
   Test: `work_tree_destroying_commands_are_refused_while_the_lock_stays_held`.
+- **Verifier follow-ups (F1–F3) and CI:**
+  - F1 (#170): libgit2's status hides an edited skip-worktree file, so Abort's forced checkout
+    overwrote it. `local_changes` now hashes every existing skip-worktree file (raw first; with
+    git's filters through `blob_writer` only when that differs, which writes a loose object)
+    and refuses on a difference. libgit2 reports a sparse checkout's *missing* skip-worktree
+    file as `WT_DELETED`; that one is not counted (git doesn't, and the forced checkout only
+    recreates it). Tests: the verifier's repro, unchanged/missing, CRLF under `autocrlf`, and
+    the failed-start rollback (`#[cfg(unix)]`).
+  - F2 (#167): a known collision is exempt only when every incoming source holds its link with
+    the known blob id and mode (`brought_in`); a retargeted link is a new link. This is the
+    D9-B direction for the link; entries below the folder may still change (the disk scan
+    guards the folder). Tests: the verifier's probe, and `also_known` with a retargeted link; a
+    probe row "retargeting the link" on macOS/Windows.
+  - F3 (#172): only a store blocked by a newer version keeps the in-memory stacks
+    authoritative (`UndoStore::is_blocked`); the `unsaved` flag from the first review fix is
+    gone. Test `a_transient_save_failure_keeps_reloading` (the overwrite reproduced first under
+    a held guard).
+  - CI: `a_failed_rebase_start_rolls_back_to_an_original_tree_holding_a_collision` failed on
+    macOS (APFS can't hold `D` and `d/`); it is Linux-only now. The rust job prints the
+    case-insensitive probe table on macOS/Windows (`--nocapture` step), since `cargo test`
+    captures it.
 
 ---
 

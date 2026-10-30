@@ -222,8 +222,10 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   exits or is killed, or a worker thread that panics, releases it; the file is never deleted
   (that would let the next opener lock a new inode). Where locks aren't supported (some network
   file systems) the worker logs once and runs unlocked, as before. Each linked worktree has its
-  own lock, like its own `undo.json`. After a failed save (e.g. `undo.json` written by a newer
-  version) the in-memory stacks stay authoritative for the session and aren't reloaded. On NFS,
+  own lock, like its own `undo.json`. While `undo.json` was written by a newer version (never
+  overwritten) the in-memory stacks are the session's history and aren't reloaded; after any
+  other failed save the next locked write reloads the file first, so a stale copy never
+  overwrites the other window's entries. On NFS,
   Linux emulates `flock` with per-process `fcntl` locks, so only separate processes exclude
   each other there. `undo.json`, `sequence.json` and `rebase.json` are written
   by `atomic_file::write_atomically` (temp file `<name>.<pid>.<n>.tmp`, unique per write in a
@@ -336,8 +338,10 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
   or write git's `.git/rebase-merge`. `start_rebase` first refuses tracked local changes
-  (`RebaseError::LocalChanges`, #170: any staged change, or an unstaged change to a tracked file;
-  untracked and ignored files and submodules don't count, as with `git rebase`), because its
+  (`RebaseError::LocalChanges`, #170: any staged change, or an unstaged change to a tracked file,
+  including a skip-worktree file whose content (after git's filters) differs from the index,
+  which libgit2's status hides; untracked and ignored files, submodules and a sparse checkout's
+  missing skip-worktree files don't count, as with `git rebase`), because its
   rollback after a failed first step and Abort force-check-out the whole branch tree; from a clean
   tracked tree they can only discard what the rebase itself wrote (or edits made during a pause,
   as `git rebase --abort` does). It then checks out `onto` and detaches HEAD; each
@@ -533,7 +537,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder is fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows
   builds). Only collisions an operation *brings in* are refused: `known_collisions` (every
   collision of HEAD's tree, plus `also_known`'s) are exempt with the identical `(link, folder)`
-  spelling (#167, decision D9-A), so with HEAD holding `D` + `d/x` unrelated merges,
+  spelling and an identical link entry, the same blob id and mode in every incoming source
+  (#167; D9-A tightened toward D9-B: a retargeted link is a new link), so with HEAD holding `D` + `d/x` unrelated merges,
   cherry-picks, reverts, stash applies, pulls, rebases and a switch to a branch with the same pair
   work, while a second collision or a differently spelled one is still refused. Rebase Abort and
   its start rollback (`restore_original_branch`) and a sequence's rewind pass the tree they

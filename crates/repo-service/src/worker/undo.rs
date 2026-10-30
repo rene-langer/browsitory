@@ -298,9 +298,6 @@ pub(super) struct UndoRecorder {
     lock: StateLock,
     logged_busy: bool,
     logged_unavailable: bool,
-    /// The last save failed (e.g. `undo.json` was written by a newer version): the in-memory
-    /// stacks are authoritative for the session, so they aren't replaced by a reload.
-    unsaved: bool,
 }
 
 impl UndoRecorder {
@@ -314,7 +311,6 @@ impl UndoRecorder {
             lock: StateLock::open(repo),
             logged_busy: false,
             logged_unavailable: false,
-            unsaved: false,
         }
     }
 
@@ -355,9 +351,11 @@ impl UndoRecorder {
         Some(own)
     }
 
-    /// A forced reload, unless the last save failed (see `unsaved`).
+    /// A forced reload, except while `undo.json` was written by a newer version: it is never
+    /// overwritten, so the in-memory stacks are this session's history. After any other failed
+    /// save the file stays authoritative (it may hold the other window's newer entries).
     fn reload(&mut self) {
-        if !self.unsaved {
+        if !self.store.is_blocked() {
             self.store.reload(&mut self.stacks);
         }
     }
@@ -606,15 +604,13 @@ impl UndoRecorder {
         Ok(UndoOutcome::Done { label })
     }
 
-    /// A failed save (e.g. the history file was written by a newer version) never fails the
-    /// user's command: the in-memory stacks stay authoritative for this session.
+    /// A failed save never fails the user's command. When the file was written by a newer
+    /// version the in-memory stacks are this session's history (see `reload`); after a transient
+    /// failure the next locked write reloads the file first, so this entry may be lost but the
+    /// other window's never are.
     fn persist(&mut self, repo: &Repository) {
-        match self.store.save(repo, &self.stacks) {
-            Ok(()) => self.unsaved = false,
-            Err(error) => {
-                self.unsaved = true;
-                eprintln!("browsitory: could not save undo history: {error}");
-            }
+        if let Err(error) = self.store.save(repo, &self.stacks) {
+            eprintln!("browsitory: could not save undo history: {error}");
         }
     }
 }
@@ -914,6 +910,36 @@ mod tests {
             Ok(UndoOutcome::Done { label: "A1".into() })
         );
         assert!(!dir.path().join("A1").exists());
+    }
+
+    /// F3: only "written by a newer version" makes the session's history authoritative. After a
+    /// transient save failure the next write still reloads, so it can't overwrite the other
+    /// window's entries with stale stacks.
+    #[test]
+    #[cfg(unix)]
+    fn a_transient_save_failure_keeps_reloading() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, repo, mut a, mut b) = two_recorders();
+        record_write(&mut a, &repo, "A0"); // creates the folder
+        let folder = repo.path().join("browsitory");
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(folder.join("probe"), "").is_ok() {
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // root: no reliable failure to provoke
+        }
+        record_write(&mut a, &repo, "A1"); // its save fails
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        record_write(&mut b, &repo, "B1");
+        // A's next command holds the lock, as the worker does for recordable commands.
+        let guard = hold(&repo);
+        a.settle(&repo, Some(&guard), || None);
+        a.begin(&repo, plan("A2"), None);
+        std::fs::write(repo.workdir().unwrap().join("A2"), "A2").unwrap();
+        a.finish(&repo, Some(&guard), || None, false);
+        drop(guard);
+        let (_, stored) = UndoStore::open(&repo);
+        let labels: Vec<_> = stored.undo.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(labels, ["A0", "B1", "A2"]);
     }
 
     #[test]

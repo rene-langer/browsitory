@@ -160,6 +160,11 @@ impl UndoStore {
         (store, stacks)
     }
 
+    /// `undo.json` was written by a newer version and is never overwritten.
+    pub fn is_blocked(&self) -> bool {
+        self.blocked
+    }
+
     /// Reads `undo.json` again whatever its mtime says: under the state lock, before a write
     /// (another process may have written within one mtime tick).
     pub fn reload(&mut self, stacks: &mut UndoStacks) {
