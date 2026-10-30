@@ -28,6 +28,11 @@ async function stripText(): Promise<string> {
 // app process against the same XDG_DATA_HOME and fixture repo.
 describe("Browsitory restart resilience", () => {
   before(() => {
+    // A rebase start refuses tracked local changes (#170).
+    const dirty = git("status", "--porcelain", "--untracked-files=no", "--ignore-submodules");
+    if (dirty !== "") {
+      throw new Error(`restart-resilience.spec.ts needs a clean tracked tree, but the fixture repo has:\n${dirty}`);
+    }
     commitFile("restart-base.txt", "base\n", "e2e: restart onto-point commit");
     commitFile("restart-a.txt", "a\n", "e2e: restart commit a");
     commitFile("restart-b.txt", "b\n", "e2e: restart commit b");

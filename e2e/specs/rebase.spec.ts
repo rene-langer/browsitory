@@ -6,8 +6,24 @@ import { expect } from "@wdio/globals";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
+// A rebase start refuses tracked local changes (#170), so every case here needs a clean tracked
+// tree. Untracked files and submodules don't count, as in the app.
+function assertCleanTrackedTree() {
+  const dirty = execFileSync(
+    "git",
+    ["status", "--porcelain", "--untracked-files=no", "--ignore-submodules"],
+    { cwd: E2E_REPO_PATH },
+  )
+    .toString()
+    .trim();
+  if (dirty !== "") {
+    throw new Error(`rebase.spec.ts needs a clean tracked tree, but the fixture repo has:\n${dirty}`);
+  }
+}
+
 describe("Browsitory interactive rebase", () => {
   before(() => {
+    assertCleanTrackedTree();
     const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: E2E_REPO_PATH,
     })
@@ -271,6 +287,56 @@ describe("Browsitory interactive rebase", () => {
 
     const stillOnTopEntry = await $("li*=e2e: conflict-abort conflicting change");
     await stillOnTopEntry.waitForExist({ timeout: 10000 });
+  });
+
+  it("refuses to start a rebase over uncommitted changes and keeps them", async () => {
+    assertCleanTrackedTree();
+    writeConflictCommit("dirty-onto.txt", "onto\n", "e2e: dirty onto point");
+    writeConflictCommit("dirty-tracked.txt", "committed\n", "e2e: dirty tracked file");
+    const headBefore = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH })
+      .toString()
+      .trim();
+    const dirtyFile = path.join(E2E_REPO_PATH, "dirty-tracked.txt");
+    fs.writeFileSync(dirtyFile, "my uncommitted edit\n");
+
+    try {
+      await browser.refresh();
+      const ontoEntry = await $("li*=e2e: dirty onto point");
+      await ontoEntry.waitForExist({ timeout: 10000 });
+      await browser.execute((el) => {
+        el.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+        );
+      }, ontoEntry);
+      const rebaseButton = await $("button*=Rebase onto here");
+      await rebaseButton.waitForExist({ timeout: 10000 });
+      await rebaseButton.click();
+      await $("//li[contains(., 'e2e: dirty tracked file')]//select[@aria-label='Action']").waitForExist({
+        timeout: 10000,
+      });
+
+      await (await $("button=Start rebase")).click();
+
+      const alert = await $("//p[@role='alert'][contains(., 'You have uncommitted changes to')]");
+      await alert.waitForExist({ timeout: 10000 });
+      const alertText = await browser.execute((el) => (el as HTMLElement).textContent ?? "", alert);
+      expect(alertText).toContain(
+        "You have uncommitted changes to dirty-tracked.txt. Commit or stash them before starting a rebase.",
+      );
+      // The planner stays open, nothing moved, and the edit is intact.
+      await expect($("button=Start rebase")).toBeExisting();
+      expect(fs.readFileSync(dirtyFile, "utf8")).toBe("my uncommitted edit\n");
+      const headAfter = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH })
+        .toString()
+        .trim();
+      expect(headAfter).toBe(headBefore);
+      expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(false);
+
+      await (await $("button=Cancel")).click();
+      await $("button=Start rebase").waitForExist({ reverse: true, timeout: 10000 });
+    } finally {
+      execFileSync("git", ["checkout", "--", "dirty-tracked.txt"], { cwd: E2E_REPO_PATH });
+    }
   });
 
   it("ctrl-selects two non-adjacent commits, drops them through the planner, and keeps the rest", async () => {
