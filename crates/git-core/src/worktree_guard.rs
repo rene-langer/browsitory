@@ -1392,6 +1392,49 @@ mod tests {
     }
 
     #[test]
+    fn also_known_exempts_only_its_own_collisions() {
+        let (_dir, repo) = repo();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        let target = tree_of(
+            &repo,
+            &[
+                ("D", LINK, "/x"),
+                ("Z", LINK, "/x"),
+                ("d/x", FILE, "x"),
+                ("z/x", FILE, "x"),
+            ],
+        );
+        let known = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let result: Result<(), crate::reset::ResetError> = prepare_forced_checkout_known(
+            &repo,
+            Some(&GuardSource::Tree(&target)),
+            ALL,
+            Some(&known),
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            collision("Z", "z").unwrap().to_string()
+        );
+        let only_d = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let result: Result<(), crate::reset::ResetError> = prepare_forced_checkout_known(
+            &repo,
+            Some(&GuardSource::Tree(&only_d)),
+            ALL,
+            Some(&known),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let result: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders_known(&repo, &[Incoming::Checkout(&target)], Some(&known));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            collision("Z", "z").unwrap().to_string()
+        );
+    }
+
+    #[test]
     fn a_file_and_a_folder_differing_in_case_do_not_collide() {
         let (_dir, repo) = repo();
         let tree = tree_of(&repo, &[("D", FILE, "x"), ("d/x", FILE, "x")]);

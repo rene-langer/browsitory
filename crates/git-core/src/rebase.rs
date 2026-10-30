@@ -263,7 +263,7 @@ pub fn start_rebase(
         Err(err) => {
             // Best-effort: report the *original* failure even if the rollback itself fails,
             // since that's the actionable one.
-            let _ = restore_original_branch(repo, &state.original_branch_ref);
+            let _ = restore_original_branch(repo, &state.original_branch_ref, state.original_tip);
             Err(err)
         }
     }
@@ -816,7 +816,7 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
     // says Paused), so it is aborted like one.
     let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
     if paused_here && branch_unmoved && !other_operation {
-        restore_original_branch(repo, &state.original_branch_ref)?;
+        restore_original_branch(repo, &state.original_branch_ref, state.original_tip)?;
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {
@@ -842,16 +842,24 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
 /// only the detached HEAD moves — so recovery is just reattaching to it and force-checking-out
 /// its tree over whatever the in-progress rebase left in the working directory/index. Shared by
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
-fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
+/// Both run only while the branch is still at `original_tip`, so this restores a tree the user
+/// already had (#161): its case collisions are not "brought in".
+fn restore_original_branch(
+    repo: &Repository,
+    branch_ref: &str,
+    original_tip: Oid,
+) -> Result<(), RebaseError> {
     // Check out first, reattach after: a refused checkout (a folder that can't be written)
     // then leaves HEAD detached where the rebase left it, so Abort can simply be retried.
     let tree = repo.find_reference(branch_ref)?.peel_to_tree()?;
     // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
     // folder; remove such links first, like git (#114).
-    crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
+    let original_tree = repo.find_commit(original_tip)?.tree()?;
+    crate::worktree_guard::prepare_forced_checkout_known::<RebaseError, &str>(
         repo,
         Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
         None,
+        Some(&original_tree),
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();

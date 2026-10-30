@@ -766,11 +766,13 @@ pub fn abort_sequence(
     }
     if head_id == state.expected_head && state.expected_head != state.original_head {
         let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
-        // Safe checkouts create files through a symlinked folder (#114).
+        // Safe checkouts create files through a symlinked folder (#114). The original tree is
+        // one the user already had (#161), so its case collisions are not "brought in".
         let tree = original.tree()?;
-        crate::worktree_guard::refuse_linked_folders::<PickError>(
+        crate::worktree_guard::refuse_linked_folders_known::<PickError>(
             repo,
             &[crate::worktree_guard::Incoming::Checkout(&tree)],
+            Some(&tree),
         )?;
         repo.checkout_tree(original.as_object(), None)?;
         let reflog = match state.kind {

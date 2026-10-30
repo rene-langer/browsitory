@@ -386,6 +386,8 @@ fn with_second_pair(repo: &Repository, parent: Oid) -> Oid {
 /// Points `branch` at `tip` and switches to it with case folding off (Linux writes both `D` and
 /// `d/x`), then turns folding back on: HEAD holds the pair.
 fn head_with_pair_at(fx: &Fixture, branch: &str, tip: Oid) {
+    // Detach first, so moving the current branch doesn't leave the switch a no-op.
+    fx.repo.set_head_detached(head(fx)).unwrap();
     fx.repo
         .reference(&format!("refs/heads/{branch}"), tip, true, "")
         .unwrap();
@@ -583,4 +585,99 @@ fn a_cherry_pick_bringing_a_second_collision_is_refused_even_when_head_holds_one
     }
     assert_eq!(head(&fx), work);
     assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
+}
+
+/// `parent`'s tree without the link `D` (the pair is gone).
+fn without_link(repo: &Repository, parent: Oid) -> Oid {
+    let base = repo.find_commit(parent).unwrap().tree().unwrap();
+    let mut tree = repo.treebuilder(Some(&base)).unwrap();
+    tree.remove("D").unwrap();
+    commit_tree(repo, tree.write().unwrap(), &[parent], "rm D")
+}
+
+fn assert_pair_back(fx: &Fixture) {
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(read(fx, "d/x"), "PWNED\n");
+}
+
+/// `main` = evil → `e` (edits `a.txt`), checked out holding the pair; returns `(e, rm)`, where
+/// `rm` = evil without `D`.
+fn rebase_fixture(fx: &Fixture) -> (Oid, Oid) {
+    let e = with_file(&fx.repo, fx.evil, "a.txt", "e\n");
+    head_with_pair_at(fx, "main", e);
+    let rm = without_link(&fx.repo, fx.evil);
+    (e, rm)
+}
+
+fn plan_of(id: Oid, action: RebaseAction) -> Vec<RebasePlanEntry> {
+    vec![RebasePlanEntry {
+        commit_id: id.to_string(),
+        action,
+        combined_message: None,
+    }]
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn rebase_abort_restores_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let (e, rm) = rebase_fixture(&fx);
+    let (state, result) =
+        rebase::start_rebase(&fx.repo, &rm.to_string(), plan_of(e, RebaseAction::Edit)).unwrap();
+    assert_eq!(result, rebase::RebaseStepResult::PausedForEdit);
+    assert!(fx.repo.head_detached().unwrap());
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D")).is_err());
+
+    let abort = rebase::abort_rebase(&fx.repo, &state).unwrap();
+    assert!(abort.restored);
+    assert_eq!(fx.repo.head().unwrap().name().ok(), Some("refs/heads/main"));
+    assert_eq!(head(&fx), e);
+    assert_pair_back(&fx);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_failed_rebase_start_rolls_back_to_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let (e, rm) = rebase_fixture(&fx);
+    let mut config = fx.repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config.set_str("gpg.program", "/bin/false").unwrap();
+    let Err(error) =
+        rebase::start_rebase(&fx.repo, &rm.to_string(), plan_of(e, RebaseAction::Pick))
+    else {
+        panic!("rebase started");
+    };
+    assert!(!matches!(error, RebaseError::CaseCollision(_)), "{error:?}");
+    assert!(!fx.repo.head_detached().unwrap());
+    assert_eq!(fx.repo.head().unwrap().name().ok(), Some("refs/heads/main"));
+    assert_eq!(head(&fx), e);
+    assert_pair_back(&fx);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn sequence_abort_rewinds_to_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let local = with_file(&fx.repo, fx.evil, "a.txt", "local\n");
+    head_with_pair_at(&fx, "main", local);
+    let rm = without_link(&fx.repo, fx.evil);
+    let conflicting = with_file(&fx.repo, fx.evil, "a.txt", "theirs\n");
+
+    let run = pick::cherry_pick_many(&fx.repo, &[rm.to_string(), conflicting.to_string()]);
+    assert!(
+        matches!(run.outcome, Ok(pick::SequenceOutcome::Conflicted { .. })),
+        "{:?}",
+        run.outcome
+    );
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D")).is_err());
+    let state = run.state.unwrap();
+
+    let abort = pick::abort_sequence(&fx.repo, &state).unwrap();
+    assert!(abort.rewound);
+    assert_eq!(head(&fx), local);
+    assert_pair_back(&fx);
 }
