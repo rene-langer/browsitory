@@ -1,12 +1,13 @@
-use super::{worker_handle, AppState, BranchInfoDto};
+use super::{repo_worker, AppState, BranchInfoDto};
 use tauri::State;
 #[tauri::command]
 pub async fn list_branches(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<BranchInfoDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .list_branches()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_branches())
+        .await?
         .into_iter()
         .map(BranchInfoDto::from)
         .collect())
@@ -18,7 +19,9 @@ pub async fn create_branch(
     start_point: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.create_branch(name, start_point)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.create_branch(name, start_point))
+        .await
 }
 #[tauri::command]
 pub async fn switch_branch(
@@ -26,7 +29,9 @@ pub async fn switch_branch(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.switch_branch(name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.switch_branch(name))
+        .await
 }
 #[tauri::command]
 pub async fn delete_branch(
@@ -35,7 +40,9 @@ pub async fn delete_branch(
     force: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.delete_branch(name, force)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.delete_branch(name, force))
+        .await
 }
 #[tauri::command]
 pub async fn rename_branch(
@@ -44,5 +51,7 @@ pub async fn rename_branch(
     new_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.rename_branch(old_name, new_name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.rename_branch(old_name, new_name))
+        .await
 }

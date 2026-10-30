@@ -1,5 +1,5 @@
 use super::{
-    worker_handle, AppState, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
+    repo_worker, AppState, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
     RebaseStepResultDto,
 };
 use tauri::State;
@@ -10,8 +10,9 @@ pub async fn commits_since(
     onto: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<RebasePlanCommitDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .commits_since(onto)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.commits_since(onto))
+        .await?
         .into_iter()
         .map(RebasePlanCommitDto::from)
         .collect())
@@ -25,8 +26,9 @@ pub async fn start_rebase(
     state: State<'_, AppState>,
 ) -> Result<RebaseStepResultDto, String> {
     Ok(RebaseStepResultDto::from(
-        worker_handle(&state, &repo_path)?
-            .start_rebase(onto, plan.into_iter().map(Into::into).collect())?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.start_rebase(onto, plan.into_iter().map(Into::into).collect()))
+            .await?,
     ))
 }
 
@@ -36,7 +38,9 @@ pub async fn rebase_continue(
     state: State<'_, AppState>,
 ) -> Result<RebaseStepResultDto, String> {
     Ok(RebaseStepResultDto::from(
-        worker_handle(&state, &repo_path)?.rebase_continue()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.rebase_continue())
+            .await?,
     ))
 }
 
@@ -46,6 +50,8 @@ pub async fn abort_rebase(
     state: State<'_, AppState>,
 ) -> Result<RebaseAbortDto, String> {
     Ok(RebaseAbortDto::from(
-        worker_handle(&state, &repo_path)?.abort_rebase()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.abort_rebase())
+            .await?,
     ))
 }

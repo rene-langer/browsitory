@@ -3,15 +3,18 @@ pub async fn list_remotes(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<RemoteInfoDto>, String> {
-    let worker = worker_handle(&state, &repo_path)?;
-    worker
-        .list_remotes()?
-        .into_iter()
-        .map(|remote| {
-            let profile = worker.get_remote_auth_mode(remote.name.clone())?;
-            Ok(RemoteInfoDto::from((remote, profile)))
+    repo_worker(&state, &repo_path)?
+        .call(move |worker| {
+            worker
+                .list_remotes()?
+                .into_iter()
+                .map(|remote| {
+                    let profile = worker.get_remote_auth_mode(remote.name.clone())?;
+                    Ok(RemoteInfoDto::from((remote, profile)))
+                })
+                .collect()
         })
-        .collect()
+        .await
 }
 
 use std::sync::mpsc;
@@ -19,8 +22,8 @@ use std::sync::mpsc;
 use tauri::{AppHandle, State};
 
 use super::{
-    emit_transfer_events, worker_handle, AppState, PullOutcomeDto, RemoteAuthModeDto,
-    RemoteInfoDto, UpstreamInfoDto,
+    emit_transfer_events, repo_worker, AppState, PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto,
+    UpstreamInfoDto,
 };
 
 #[tauri::command]
@@ -29,7 +32,9 @@ pub async fn list_remote_branches(
     remote_name: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    worker_handle(&state, &repo_path)?.list_remote_branches(remote_name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_remote_branches(remote_name))
+        .await
 }
 
 #[tauri::command]
@@ -37,7 +42,9 @@ pub async fn get_current_upstream(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Option<UpstreamInfoDto>, String> {
-    let upstream = worker_handle(&state, &repo_path)?.get_current_upstream()?;
+    let upstream = repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_current_upstream())
+        .await?;
     Ok(upstream.map(UpstreamInfoDto::from))
 }
 #[tauri::command]
@@ -46,8 +53,9 @@ pub async fn get_remote_upstreams(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<UpstreamInfoDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_remote_upstreams(name)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_remote_upstreams(name))
+        .await?
         .into_iter()
         .map(UpstreamInfoDto::from)
         .collect())
@@ -61,7 +69,9 @@ pub async fn add_remote(
     push_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.add_remote(name, fetch_url, push_url)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.add_remote(name, fetch_url, push_url))
+        .await
 }
 
 #[tauri::command]
@@ -71,7 +81,9 @@ pub async fn rename_remote(
     new_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.rename_remote(old_name, new_name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.rename_remote(old_name, new_name))
+        .await
 }
 
 #[tauri::command]
@@ -82,7 +94,9 @@ pub async fn update_remote_urls(
     push_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.update_remote_urls(name, fetch_url, push_url)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.update_remote_urls(name, fetch_url, push_url))
+        .await
 }
 
 #[tauri::command]
@@ -92,7 +106,9 @@ pub async fn remove_remote(
     clear_upstreams: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.remove_remote(name, clear_upstreams)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.remove_remote(name, clear_upstreams))
+        .await
 }
 
 #[tauri::command]
@@ -103,7 +119,9 @@ pub async fn save_https_credential(
     token: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.save_https_credential(remote_name, username, token)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.save_https_credential(remote_name, username, token))
+        .await
 }
 
 #[tauri::command]
@@ -112,7 +130,9 @@ pub async fn forget_https_credential(
     remote_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.forget_https_credential(remote_name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.forget_https_credential(remote_name))
+        .await
 }
 
 #[tauri::command]
@@ -131,7 +151,9 @@ pub async fn set_remote_auth_mode(
         },
         RemoteAuthModeDto::SshAgent => git_core::remote::RemoteAuthMode::SshAgent,
     };
-    worker_handle(&state, &repo_path)?.set_remote_auth_mode(remote_name, mode)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.set_remote_auth_mode(remote_name, mode))
+        .await
 }
 
 #[tauri::command]
@@ -141,7 +163,9 @@ pub async fn set_current_upstream(
     remote_branch: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.set_current_upstream(remote_name, remote_branch)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.set_current_upstream(remote_name, remote_branch))
+        .await
 }
 
 #[tauri::command]
@@ -149,7 +173,9 @@ pub async fn clear_current_upstream(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.clear_current_upstream()
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.clear_current_upstream())
+        .await
 }
 
 #[tauri::command]
@@ -161,8 +187,9 @@ pub async fn fetch_remote(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id =
-        worker_handle(&state, &repo_path)?.fetch_remote(remote_name, prune, event_tx)?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.fetch_remote(remote_name, prune, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -175,7 +202,9 @@ pub async fn fetch_all_remotes(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.fetch_all_remotes(prune, event_tx)?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.fetch_all_remotes(prune, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -193,14 +222,18 @@ pub async fn push_branch(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.push_branch(
-        remote_name,
-        local_branch,
-        remote_branch,
-        set_upstream,
-        no_verify,
-        event_tx,
-    )?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| {
+            w.push_branch(
+                remote_name,
+                local_branch,
+                remote_branch,
+                set_upstream,
+                no_verify,
+                event_tx,
+            )
+        })
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -215,12 +248,9 @@ pub async fn delete_remote_branch(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.delete_remote_branch(
-        remote_name,
-        branch_name,
-        no_verify,
-        event_tx,
-    )?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.delete_remote_branch(remote_name, branch_name, no_verify, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -237,7 +267,9 @@ pub async fn cancel_transfer(
     operation_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.cancel_transfer(&operation_id);
+    repo_worker(&state, &repo_path)?
+        .signal()
+        .cancel_transfer(&operation_id);
     Ok(())
 }
 
@@ -250,8 +282,9 @@ pub async fn push_current_branch(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id =
-        worker_handle(&state, &repo_path)?.push_current_branch(remote_name, no_verify, event_tx)?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.push_current_branch(remote_name, no_verify, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -265,11 +298,9 @@ pub async fn force_push_current_branch(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id = worker_handle(&state, &repo_path)?.force_push_current_branch(
-        remote_name,
-        no_verify,
-        event_tx,
-    )?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.force_push_current_branch(remote_name, no_verify, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -284,8 +315,9 @@ pub async fn push_tags(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (event_tx, event_rx) = mpsc::channel();
-    let operation_id =
-        worker_handle(&state, &repo_path)?.push_tags(remote_name, names, no_verify, event_tx)?;
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.push_tags(remote_name, names, no_verify, event_tx))
+        .await?;
     emit_transfer_events(app, event_rx);
     Ok(operation_id)
 }
@@ -298,11 +330,8 @@ pub async fn pull_current_upstream(
 ) -> Result<PullOutcomeDto, String> {
     let (event_tx, event_rx) = mpsc::channel();
     emit_transfer_events(app, event_rx);
-    let handle = worker_handle(&state, &repo_path)?;
-    Ok(
-        tauri::async_runtime::spawn_blocking(move || handle.pull_current_upstream(event_tx))
-            .await
-            .map_err(|_| "pull worker task stopped".to_string())??
-            .into(),
-    )
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.pull_current_upstream(event_tx))
+        .await?
+        .into())
 }

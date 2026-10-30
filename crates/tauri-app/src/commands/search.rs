@@ -1,4 +1,4 @@
-use super::{worker_handle, AppState, SearchPageDto};
+use super::{repo_worker, AppState, SearchPageDto};
 use tauri::State;
 
 #[tauri::command]
@@ -9,8 +9,9 @@ pub async fn search_commits(
     cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SearchPageDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .search_commits(query, refs, cursor)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.search_commits(query, refs, cursor))
+        .await?
         .into())
 }
 
@@ -18,6 +19,6 @@ pub async fn search_commits(
 /// `WorkerHandle::cancel_search`.
 #[tauri::command]
 pub async fn cancel_search(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.cancel_search();
+    repo_worker(&state, &repo_path)?.signal().cancel_search();
     Ok(())
 }

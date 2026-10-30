@@ -1,5 +1,5 @@
 use super::{
-    emit_hook_events, worker_handle, AppState, BlameLineDto, CommitOutcomeDto, CommitSignatureDto,
+    emit_hook_events, repo_worker, AppState, BlameLineDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
 };
 use std::path::Path;
@@ -10,8 +10,9 @@ pub async fn get_status(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<StatusEntryDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_status()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_status())
+        .await?
         .into_iter()
         .map(StatusEntryDto::from)
         .collect())
@@ -24,8 +25,9 @@ pub async fn get_commit_graph(
     selected_branches: Option<Vec<String>>,
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_commit_graph(limit, selected_branches)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_graph(limit, selected_branches))
+        .await?
         .into_iter()
         .map(GraphCommitDto::from)
         .collect())
@@ -69,8 +71,9 @@ pub async fn get_working_diff(
     old_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_working_diff(path, staged, opts.into(), old_path)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_working_diff(path, staged, opts.into(), old_path))
+        .await?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -84,8 +87,9 @@ pub async fn get_commit_diff(
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_commit_diff(commit_id, path, opts.into())?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_diff(commit_id, path, opts.into()))
+        .await?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -97,7 +101,9 @@ pub async fn get_commit_files(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    worker_handle(&state, &repo_path)?.get_commit_files(commit_id)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_files(commit_id))
+        .await
 }
 
 #[tauri::command]
@@ -106,7 +112,9 @@ pub async fn get_commit_message(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    worker_handle(&state, &repo_path)?.get_commit_message(commit_id)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_message(commit_id))
+        .await
 }
 
 #[tauri::command]
@@ -116,7 +124,9 @@ pub async fn get_commit_signature(
     state: State<'_, AppState>,
 ) -> Result<CommitSignatureDto, String> {
     Ok(CommitSignatureDto::from(
-        worker_handle(&state, &repo_path)?.get_commit_signature(commit_id)?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.get_commit_signature(commit_id))
+            .await?,
     ))
 }
 
@@ -127,8 +137,9 @@ pub async fn get_blame(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<BlameLineDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_blame(commit_id, path)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_blame(commit_id, path))
+        .await?
         .into_iter()
         .map(BlameLineDto::from)
         .collect())
@@ -141,8 +152,9 @@ pub async fn get_file_history(
     limit: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<FileHistoryEntryDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_file_history(path, limit)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_file_history(path, limit))
+        .await?
         .into_iter()
         .map(FileHistoryEntryDto::from)
         .collect())
@@ -157,8 +169,9 @@ pub async fn get_commit_rename_diff(
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_commit_rename_diff(commit_id, old_path, new_path, opts.into())?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_rename_diff(commit_id, old_path, new_path, opts.into()))
+        .await?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -170,7 +183,9 @@ pub async fn stage_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_file(path)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.stage_file(path))
+        .await
 }
 
 #[tauri::command]
@@ -179,7 +194,9 @@ pub async fn unstage_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_file(path)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.unstage_file(path))
+        .await
 }
 
 #[tauri::command]
@@ -191,7 +208,9 @@ pub async fn stage_hunk(
     context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_hunk(path, old_start, new_start, context_lines)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.stage_hunk(path, old_start, new_start, context_lines))
+        .await
 }
 
 #[tauri::command]
@@ -203,7 +222,9 @@ pub async fn unstage_hunk(
     context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_hunk(path, old_start, new_start, context_lines)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.unstage_hunk(path, old_start, new_start, context_lines))
+        .await
 }
 
 #[tauri::command]
@@ -215,7 +236,9 @@ pub async fn discard_hunk(
     context_lines: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_hunk(path, old_start, new_start, context_lines)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.discard_hunk(path, old_start, new_start, context_lines))
+        .await
 }
 
 // Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
@@ -231,14 +254,18 @@ pub async fn stage_lines(
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.stage_lines(
-        path,
-        old_start,
-        new_start,
-        context_lines,
-        line_indices,
-        expected_lines,
-    )
+    repo_worker(&state, &repo_path)?
+        .call(move |w| {
+            w.stage_lines(
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+            )
+        })
+        .await
 }
 
 // Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
@@ -254,14 +281,18 @@ pub async fn unstage_lines(
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.unstage_lines(
-        path,
-        old_start,
-        new_start,
-        context_lines,
-        line_indices,
-        expected_lines,
-    )
+    repo_worker(&state, &repo_path)?
+        .call(move |w| {
+            w.unstage_lines(
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+            )
+        })
+        .await
 }
 
 // Each argument is a top-level IPC field, so they can't be grouped without changing the wire.
@@ -277,14 +308,18 @@ pub async fn discard_lines(
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_lines(
-        path,
-        old_start,
-        new_start,
-        context_lines,
-        line_indices,
-        expected_lines,
-    )
+    repo_worker(&state, &repo_path)?
+        .call(move |w| {
+            w.discard_lines(
+                path,
+                old_start,
+                new_start,
+                context_lines,
+                line_indices,
+                expected_lines,
+            )
+        })
+        .await
 }
 
 #[tauri::command]
@@ -293,7 +328,9 @@ pub async fn discard_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_file(path)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.discard_file(path))
+        .await
 }
 
 #[tauri::command]
@@ -302,7 +339,9 @@ pub async fn discard_all_unstaged(
     paths: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.discard_all_unstaged(paths)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.discard_all_unstaged(paths))
+        .await
 }
 
 #[tauri::command]
@@ -311,7 +350,9 @@ pub async fn ignore_path(
     pattern: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.ignore_path(pattern)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.ignore_path(pattern))
+        .await
 }
 
 /// `trailers` (absent: none) are appended before the hooks run.
@@ -327,11 +368,8 @@ pub async fn commit(
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.commit(
-            message,
-            no_verify,
-            super::trailers_from(trailers),
-            event_tx,
-        )?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.commit(message, no_verify, super::trailers_from(trailers), event_tx))
+            .await?,
     ))
 }

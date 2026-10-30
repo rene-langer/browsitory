@@ -1,6 +1,4 @@
-use super::{
-    worker_handle, AppState, ChangedFileDto, CompareRangeDto, DiffHunkDto, DiffOptionsDto,
-};
+use super::{repo_worker, AppState, ChangedFileDto, CompareRangeDto, DiffHunkDto, DiffOptionsDto};
 use tauri::State;
 
 #[tauri::command]
@@ -10,8 +8,9 @@ pub async fn get_range_files(
     to_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ChangedFileDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_range_files(from_id, to_id)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_range_files(from_id, to_id))
+        .await?
         .into_iter()
         .map(ChangedFileDto::from)
         .collect())
@@ -27,8 +26,9 @@ pub async fn get_range_diff(
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_range_diff(from_id, to_id, path, old_path, opts.into())?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_range_diff(from_id, to_id, path, old_path, opts.into()))
+        .await?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -40,8 +40,9 @@ pub async fn get_working_tree_compare_files(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ChangedFileDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_working_tree_compare_files(commit_id)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_working_tree_compare_files(commit_id))
+        .await?
         .into_iter()
         .map(ChangedFileDto::from)
         .collect())
@@ -56,8 +57,9 @@ pub async fn get_working_tree_compare_diff(
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_working_tree_compare_diff(commit_id, path, old_path, opts.into())?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_working_tree_compare_diff(commit_id, path, old_path, opts.into()))
+        .await?
         .into_iter()
         .map(DiffHunkDto::from)
         .collect())
@@ -69,7 +71,8 @@ pub async fn get_branch_compare_range(
     ref_name: String,
     state: State<'_, AppState>,
 ) -> Result<CompareRangeDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_branch_compare_range(ref_name)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_branch_compare_range(ref_name))
+        .await?
         .into())
 }
