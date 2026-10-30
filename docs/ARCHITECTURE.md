@@ -186,13 +186,50 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   their next save), pinned by the undo anchor like the stacks. It carries the marker of the
   operation it belongs to (`worker::gate::OperationProbe::marker`): `rebase <branch ref>
   <original tip> <onto>`, `sequence <kind> <original HEAD> <first commit> <count>`, `merge
-  <HEAD> <MERGE_HEAD…>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD>`, `revert <HEAD> <REVERT_HEAD>`,
-  or `git <state> <HEAD>`, each constant for the operation's whole life (the stored rebase and
-  sequence come first because their `CHERRY_PICK_HEAD` changes per step). Before every command
+  <HEAD> <MERGE_HEAD…> @<mtime>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD> @<mtime>`, `revert
+  <HEAD> <REVERT_HEAD> @<mtime>`, or `git <state> <HEAD>`, each constant for the operation's
+  whole life (the stored rebase and sequence come first because their `CHERRY_PICK_HEAD` changes
+  per step). `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
+  can't be read): git writes `MERGE_HEAD`/`CHERRY_PICK_HEAD`/`REVERT_HEAD` once per operation and
+  nothing rewrites them during the pause, so a merge or pick aborted outside the app and started
+  again with the same heads gets a new marker, and both processes stat the same file (#172). On
+  file systems with 1–2 s mtime resolution an abort and identical restart within one tick still
+  collide; a pending entry from a build before this marker format is dropped once. Before every command
   the recorder re-reads `undo.json` and drops a pending entry whose marker isn't the current one
   (`None` included), so an operation finished after an app restart, a closed tab, a crashed
   worker or in the other app (Tauri vs. VSCode) is still one entry, and an operation aborted or
   replaced outside the app never records under the old label.
+- **State lock** (`worker/state_lock.rs`, #172): every write to `undo.json` happens under an
+  advisory lock on `<gitdir>/browsitory/state.lock` (std's `File::try_lock`: `flock` on
+  Linux/macOS, `LockFileEx` on Windows), after a forced reload (`UndoStore::reload`, not the
+  mtime check, which misses a second write in the same tick), and re-checks its decision there,
+  so two processes (the Tauri app and the VSCode sidecar) or two workers never lose an entry.
+  The worker holds the lock from before `settle` until `finish` for every command
+  `undo::locks_state` lists (everything `plan_for` records, `RebaseContinue`, `AbortRebase`,
+  `ContinueSequence`, `AbortSequence`, `AbortMerge`, Undo, Redo), so no other holder ever sees
+  "the operation ended, but its entry isn't recorded yet" and drops it as stale. Other commands
+  (reads, fetch, staging, resolving) never wait: `settle`/`finish` take the lock only when about
+  to write, and skip the write while it's held (a later command repeats it). The guard is
+  dropped before the held replies are released. A locked command that can't get the lock within
+  `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
+  other app) logs once and runs unrecorded, and later locked commands try only once until the
+  lock is taken again, so the worker's queue waits once, not once per click. The commands that
+  destroy work-tree content with no other way back (discard hunk, lines, file or all unstaged,
+  and a hard reset) are refused instead with "Another Browsitory window is changing this
+  repository's undo history. Try again in a moment, so this change can be undone."
+  (`undo::reply_busy`); Undo/Redo instead reply "Another Browsitory window is changing this repository's
+  undo history. Try again in a moment." The lock is an OS lock on a handle, so a process that
+  exits or is killed, or a worker thread that panics, releases it; the file is never deleted
+  (that would let the next opener lock a new inode). Where locks aren't supported (some network
+  file systems) the worker logs once and runs unlocked, as before. Each linked worktree has its
+  own lock, like its own `undo.json`. While `undo.json` was written by a newer version (never
+  overwritten) the in-memory stacks are the session's history and aren't reloaded; after any
+  other failed save the next locked write reloads the file first, so a stale copy never
+  overwrites the other window's entries. On NFS,
+  Linux emulates `flock` with per-process `fcntl` locks, so only separate processes exclude
+  each other there. `undo.json`, `sequence.json` and `rebase.json` are written
+  by `atomic_file::write_atomically` (temp file `<name>.<pid>.<n>.tmp`, unique per write in a
+  process, `sync_all`, rename).
 - **Storage**: `<gitdir>/browsitory/undo.json` per worktree (50 entries); objects pinned by
   `refs/browsitory/undo/main` (main worktree) or `refs/browsitory/undo/wt/<name>` (linked
   worktree), an anchor commit visible in `git log --all`, plus
@@ -285,7 +322,11 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   nothing else in progress, and otherwise just forgets the sequence (`rewound: false`).
 - A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
   blocks picks, merge, rebase, commit/amend, reset, checkout, branch switch, pull, stash
-  apply/pop and reflog restore in the worker (`gate::gate_during_operation`), and is reported
+  apply/pop and reflog restore in the worker (`gate::gate_during_operation`), and, like a
+  rebase, protects its branch (`gate::GateScope`, #171): deleting or renaming the branch named
+  by `originalRef`, or adding a worktree on it, and stash save are refused while it is stored
+  (a renamed branch would make Abort answer `rewound: false`; a stash would carry the paused
+  step's index away). A detached or unknown `originalRef` protects no branch. It is reported
   as `HeadInfo.sequence`. The undo entry is labelled with the number of commits applied. `AbortMerge` aborts the
   whole sequence when one is stored, so a stale frontend can't strand the file.
 - Empty steps are skipped (git stops for `--skip`). Steps, including the one Continue commits,
@@ -296,7 +337,14 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 ## Interactive rebase
 
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
-  or write git's `.git/rebase-merge`. `start_rebase` checks out `onto` and detaches HEAD; each
+  or write git's `.git/rebase-merge`. `start_rebase` first refuses tracked local changes
+  (`RebaseError::LocalChanges`, #170: any staged change, or an unstaged change to a tracked file,
+  including a skip-worktree file whose content (after git's filters) differs from the index,
+  which libgit2's status hides; untracked and ignored files, submodules and a sparse checkout's
+  missing skip-worktree files don't count, as with `git rebase`), because its
+  rollback after a failed first step and Abort force-check-out the whole branch tree; from a clean
+  tracked tree they can only discard what the rebase itself wrote (or edits made during a pause,
+  as `git rebase --abort` does). It then checks out `onto` and detaches HEAD; each
   step is `repo.cherrypick` on the detached HEAD, committed by `land_current_step` (which then
   clears `CHERRY_PICK_HEAD`); squash/fixup groups collapse when the group ends; `finish` moves
   the branch and reattaches HEAD. The branch ref is untouched until `finish`.
@@ -486,10 +534,21 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   without the HFS+ ignorable code points; NFC/NFD is not folded) and compares folded
   link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
   and exact duplicates, over all of an operation's incoming sources together; a file next to a
-  folder is fine. A forced checkout whose target holds a collision HEAD already holds (abort,
-  `reset --hard`, discard) is allowed, so such a repository can be cleaned up. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows builds).
-  `refuse_linked_folders` checks each incoming source after its link scan (so a repository
-  whose HEAD already holds a collision isn't locked), `prepare_forced_checkout` its target
+  folder is fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows
+  builds). Only collisions an operation *brings in* are refused: `known_collisions` (every
+  collision of HEAD's tree, plus `also_known`'s) are exempt with the identical `(link, folder)`
+  spelling and an identical link entry, the same blob id and mode in every incoming source
+  (#167; D9-A tightened toward D9-B: a retargeted link is a new link), so with HEAD holding `D` + `d/x` unrelated merges,
+  cherry-picks, reverts, stash applies, pulls, rebases and a switch to a branch with the same pair
+  work, while a second collision or a differently spelled one is still refused. Rebase Abort and
+  its start rollback (`restore_original_branch`) and a sequence's rewind pass the tree they
+  return to as `also_known` (`*_known` variants, #161): it is a tree the user already had. The
+  exemption is safe because the on-disk scan runs first and doesn't depend on it: on a
+  case-insensitive file system `lstat("d")` answers with the link `D`, and the `tracked_as_link`
+  skip compares exact case, so a write below `d/` through an on-disk `D` is refused
+  (`LinkedFolder`) or the link cleared first (forced checkouts). `tests/case_insensitive_links.rs`
+  has rows for operations on a HEAD that holds the pair.
+  `refuse_linked_folders` checks each incoming source after its link scan, `prepare_forced_checkout` its target
   (path-limited), undo its target work tree before its raw writes, `worktree::create_worktree`
   the branch's tree before anything is created, clone the fresh HEAD tree (cloned with no
   checkout, then checked, then checked out forced with the same progress and cancel; a

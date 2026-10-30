@@ -1871,3 +1871,260 @@ fn abort_restores_the_branch_when_the_step_was_committed_by_hand() {
     );
     assert_eq!(head_id(&repo), state.original_tip);
 }
+
+/// #170: the branch is `base(f.txt, shared.txt) → g(g.txt)`; `onto` is `base → h(h.txt)`.
+/// Returns `(dir, repo, onto, g)`.
+fn local_changes_fixture() -> (tempfile::TempDir, git2::Repository, String, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "f0\n");
+    write_file(dir.path(), "shared.txt", "s0\n");
+    commit_all(&repo, "base");
+    let onto = {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut tree = repo.treebuilder(Some(&base.tree().unwrap())).unwrap();
+        tree.insert("h.txt", repo.blob(b"h\n").unwrap(), 0o100644)
+            .unwrap();
+        let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(None, &sig, &sig, "h", &tree, &[&base])
+            .unwrap()
+            .to_string()
+    };
+    write_file(dir.path(), "g.txt", "g\n");
+    commit_all(&repo, "g");
+    let g = commit_id_at(&repo, 0);
+    (dir, repo, onto, g)
+}
+
+fn assert_nothing_started(repo: &git2::Repository, branch: &str, tip: &str) {
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(repo.head().unwrap().name().unwrap(), branch);
+    assert_eq!(commit_id_at(repo, 0), tip);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn start_refuses_an_unstaged_change_and_changes_nothing() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    write_file(dir.path(), "f.txt", "DIRTY\n");
+    let index_before = repo.index().unwrap().write_tree().unwrap();
+
+    let Err(error) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]) else {
+        panic!("rebase started");
+    };
+    match &error {
+        RebaseError::LocalChanges { paths } => assert_eq!(paths, &["f.txt"]),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        error.to_string(),
+        "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
+    );
+    assert_nothing_started(&repo, &branch, &g);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "DIRTY\n"
+    );
+    assert_eq!(repo.index().unwrap().write_tree().unwrap(), index_before);
+}
+
+#[test]
+fn start_refuses_a_staged_change() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    write_file(dir.path(), "f.txt", "STAGED\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("f.txt")).unwrap();
+    index.write().unwrap();
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(
+        matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["f.txt"]),
+        "{result:?}"
+    );
+    assert_nothing_started(&repo, &branch, &g);
+    let status = repo.status_file(std::path::Path::new("f.txt")).unwrap();
+    assert!(status.contains(git2::Status::INDEX_MODIFIED));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "STAGED\n"
+    );
+}
+
+#[test]
+fn start_refuses_a_deleted_tracked_file() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(
+        matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["shared.txt"]),
+        "{result:?}"
+    );
+    assert_nothing_started(&repo, &branch, &g);
+    assert!(!dir.path().join("shared.txt").exists());
+}
+
+#[test]
+fn start_allows_untracked_files() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    write_file(dir.path(), "notes.txt", "mine\n");
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes.txt")).unwrap(),
+        "mine\n"
+    );
+    assert!(dir.path().join("h.txt").exists());
+}
+
+#[test]
+fn start_ignores_ignored_files() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    // An exclude file, so the ignore rule itself is no tracked change.
+    write_file(&repo.path().join("info"), "exclude", "*.log\n");
+    write_file(dir.path(), "build.log", "noise\n");
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    assert!(dir.path().join("build.log").exists());
+}
+
+#[test]
+fn local_changes_copy_names_the_first_path_and_counts_the_rest() {
+    let message = |paths: &[&str]| {
+        RebaseError::LocalChanges {
+            paths: paths.iter().map(|p| p.to_string()).collect(),
+        }
+        .to_string()
+    };
+    assert_eq!(
+        message(&["a.txt"]),
+        "You have uncommitted changes to a.txt. Commit or stash them before starting a rebase."
+    );
+    assert_eq!(
+        message(&["a.txt", "b.txt"]),
+        "You have uncommitted changes to a.txt and 1 other file. Commit or stash them before \
+         starting a rebase."
+    );
+    assert_eq!(
+        message(&["a.txt", "b.txt", "c.txt"]),
+        "You have uncommitted changes to a.txt and 2 other files. Commit or stash them before \
+         starting a rebase."
+    );
+}
+
+#[test]
+fn start_lists_every_changed_path_sorted() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    write_file(dir.path(), "shared.txt", "DIRTY\n");
+    write_file(dir.path(), "f.txt", "DIRTY\n");
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(
+        matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["f.txt", "shared.txt"]),
+        "{result:?}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_failed_first_step_on_a_clean_tree_rolls_back_to_the_branch() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    let mut config = repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config.set_str("gpg.program", "/bin/false").unwrap();
+
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(result.is_err());
+    assert_nothing_started(&repo, &branch, &g);
+    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(true);
+    assert!(repo.statuses(Some(&mut options)).unwrap().is_empty());
+    assert!(!dir.path().join("h.txt").exists());
+}
+
+/// Marks `path` skip-worktree in the index, as `git update-index --skip-worktree` does.
+fn skip_worktree(repo: &git2::Repository, path: &str) {
+    let mut index = repo.index().unwrap();
+    let mut entry = index.get_path(std::path::Path::new(path), 0).unwrap();
+    entry.flags |= 0x4000; // extended flags follow
+    entry.flags_extended |= git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    index.add(&entry).unwrap();
+    index.write().unwrap();
+}
+
+/// The verifier's repro (#170 follow-up F1): libgit2's status hides skip-worktree entries, and
+/// Abort's forced checkout then overwrote the edit. git keeps it.
+#[test]
+fn start_refuses_an_edited_skip_worktree_file() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "precious\n");
+    let edit = RebasePlanEntry {
+        commit_id: g.clone(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    };
+    match git_core::rebase::start_rebase(&repo, &onto, vec![edit]) {
+        Ok((state, _)) => {
+            git_core::rebase::abort_rebase(&repo, &state).unwrap();
+            panic!(
+                "rebase started; after Abort f.txt = {:?}",
+                std::fs::read_to_string(dir.path().join("f.txt")).unwrap()
+            );
+        }
+        Err(RebaseError::LocalChanges { paths }) => assert_eq!(paths, ["f.txt"]),
+        Err(other) => panic!("{other:?}"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "precious\n"
+    );
+}
+
+#[test]
+fn an_unchanged_or_missing_skip_worktree_file_does_not_block_a_rebase() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    skip_worktree(&repo, "shared.txt");
+    // A sparse checkout leaves skip-worktree files out of the work tree.
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+}
+
+#[test]
+fn a_skip_worktree_file_differing_only_by_line_endings_does_not_block_a_rebase() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "f0\r\n");
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_failed_first_step_never_touches_an_edited_skip_worktree_file() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "precious\n");
+    let mut config = repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config.set_str("gpg.program", "/bin/false").unwrap();
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(
+        matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["f.txt"]),
+        "{result:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "precious\n"
+    );
+}

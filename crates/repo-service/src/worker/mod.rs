@@ -28,6 +28,7 @@ use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
+mod atomic_file;
 mod branch;
 mod compare;
 mod forge;
@@ -42,6 +43,7 @@ mod remote;
 mod search;
 mod sequence_store;
 mod stash;
+mod state_lock;
 mod status;
 mod submodule;
 mod tag;
@@ -723,6 +725,33 @@ impl Worker {
         S: CredentialStore + Send + 'static,
         A: ForgeApi + Send + 'static,
     {
+        Self::spawn_paused(path, credential_store, forge_api, None)
+    }
+
+    /// Test-only: a worker that stops after an armed command, before its undo `finish`, until
+    /// the test lets it go (see `PauseControl`), to make cross-worker races deterministic.
+    #[cfg(test)]
+    pub(crate) fn spawn_with_pause_before_finish(path: PathBuf) -> (Self, PauseControl) {
+        let (hook, control) = PauseHook::new();
+        // The credential store `spawn` uses; these tests never touch it.
+        #[cfg(not(feature = "forge-fixture-override"))]
+        let store = KeyringCredentialStore;
+        #[cfg(feature = "forge-fixture-override")]
+        let store = crate::credentials::InMemoryCredentialStore::default();
+        let worker = Self::spawn_paused(path, store, ReqwestForgeApi::new(), Some(hook)).unwrap();
+        (worker, control)
+    }
+
+    fn spawn_paused<S, A>(
+        path: PathBuf,
+        credential_store: S,
+        forge_api: A,
+        pause: Option<PauseHook>,
+    ) -> Result<Self, String>
+    where
+        S: CredentialStore + Send + 'static,
+        A: ForgeApi + Send + 'static,
+    {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
         let workdir = repo.workdir().map(std::path::Path::to_path_buf);
@@ -773,9 +802,57 @@ impl Worker {
                     }
                 };
             }
+            // Undo bookkeeping is shared with other processes on this repository (#172).
+            let state_lock = state_lock::StateLock::open(&repo);
+            let (mut logged_busy, mut logged_unavailable) = (false, false);
+            // After a command waited `LOCK_WAIT` in vain, later ones try once until the lock is
+            // taken again, so a long holder in the other window (a pull, a hook, a pinentry
+            // dialog) costs one wait, not one per click (the queue, reads included, is behind it).
+            let mut contended = false;
             for mut command in rx {
-                undo_recorder.settle(&repo, marker(&repo, &rebase_memory).as_deref());
-                let plan = undo::plan_for(&command);
+                // A command that can record an entry or end a paused operation holds the lock
+                // from before `settle` until its `finish`, so no other holder ever sees "the
+                // operation ended, but its entry isn't recorded yet". Reads never wait.
+                let mut unrecorded = false;
+                let guard = if undo::locks_state(&command) {
+                    let wait = if contended {
+                        std::time::Duration::ZERO
+                    } else {
+                        state_lock::LOCK_WAIT
+                    };
+                    match state_lock.acquire(wait) {
+                        state_lock::Acquire::Held(guard) => {
+                            contended = false;
+                            Some(guard)
+                        }
+                        state_lock::Acquire::Busy => {
+                            contended = true;
+                            if undo::reply_busy(&mut command) {
+                                continue;
+                            }
+                            if !logged_busy {
+                                logged_busy = true;
+                                eprintln!(
+                                    "browsitory: undo history is locked by another window; \
+                                     running the command without recording it for undo"
+                                );
+                            }
+                            unrecorded = true;
+                            None
+                        }
+                        state_lock::Acquire::Unavailable(error) => {
+                            if !logged_unavailable {
+                                logged_unavailable = true;
+                                eprintln!("browsitory: undo history lock unavailable: {error}");
+                            }
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                undo_recorder.settle(&repo, guard.as_ref(), || marker(&repo, &rebase_memory));
+                let plan = undo::plan_for(&command).filter(|_| !unrecorded);
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
                     command,
@@ -792,9 +869,8 @@ impl Worker {
                 }
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
-                let rebased_branch = probe!().rebased_branch(&repo);
-                if rebased_branch.is_some() || sequence_store.load(&repo).is_some() {
-                    command = gate::gate_during_operation(command, rebased_branch.as_deref());
+                if let Some(scope) = probe!().gate_scope(&repo) {
+                    command = gate::gate_during_operation(command, &scope);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -1300,7 +1376,9 @@ impl Worker {
                         rebase::commits_since(&repo, onto, reply)
                     }
                     Command::StartRebase { onto, plan, reply } => {
-                        rebase::start(&repo, onto, plan, rebase_slot!(), reply)
+                        let result = rebase::start(&repo, &onto, plan, rebase_slot!());
+                        undo::relabel_rebase_start(&mut undo_recorder, &repo, &onto, &result);
+                        let _ = reply.send(result);
                     }
                     Command::RebaseContinue { reply } => {
                         rebase::continue_rebase(&repo, rebase_slot!(), reply)
@@ -1479,18 +1557,29 @@ impl Worker {
                     Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
                     Command::Undo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.undo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                            undo_recorder
+                                .undo(&repo, guard.as_ref(), || marker(&repo, &rebase_memory)),
                         );
                     }
                     Command::Redo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.redo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                            undo_recorder
+                                .redo(&repo, guard.as_ref(), || marker(&repo, &rebase_memory)),
                         );
                     }
                 }
-                if track {
-                    undo_recorder.finish(&repo, marker(&repo, &rebase_memory).as_deref(), aborts);
+                if let Some(pause) = &pause {
+                    pause.pause_here();
                 }
+                if track {
+                    undo_recorder.finish(
+                        &repo,
+                        guard.as_ref(),
+                        || marker(&repo, &rebase_memory),
+                        aborts,
+                    );
+                }
+                drop(guard);
                 held.release();
             }
         });
@@ -1511,6 +1600,80 @@ impl Worker {
             search_generation: Arc::clone(&self.search_generation),
             workdir: self.workdir.clone(),
         }
+    }
+}
+
+/// Test-only pause between a command and its undo `finish` (see
+/// `Worker::spawn_with_pause_before_finish`). Uninhabited outside tests, so the loop's check
+/// compiles away.
+#[cfg(not(test))]
+enum PauseHook {}
+
+#[cfg(not(test))]
+impl PauseHook {
+    fn pause_here(&self) {
+        match *self {}
+    }
+}
+
+#[cfg(test)]
+struct PauseHook {
+    armed: Arc<std::sync::atomic::AtomicBool>,
+    reached: Sender<()>,
+    go: Mutex<mpsc::Receiver<()>>,
+}
+
+#[cfg(test)]
+impl PauseHook {
+    fn new() -> (Self, PauseControl) {
+        let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel();
+        (
+            Self {
+                armed: Arc::clone(&armed),
+                reached: reached_tx,
+                go: Mutex::new(go_rx),
+            },
+            PauseControl {
+                armed,
+                reached: reached_rx,
+                go: go_tx,
+            },
+        )
+    }
+
+    fn pause_here(&self) {
+        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.reached.send(());
+            let _ = self.go.lock().unwrap().recv();
+        }
+    }
+}
+
+/// Drives a `PauseHook` from a test: `arm` before sending the command to pause, then
+/// `wait_reached` (the command ran, its `finish` hasn't) and `go`.
+#[cfg(test)]
+pub(crate) struct PauseControl {
+    armed: Arc<std::sync::atomic::AtomicBool>,
+    reached: mpsc::Receiver<()>,
+    go: Sender<()>,
+}
+
+#[cfg(test)]
+impl PauseControl {
+    pub fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn wait_reached(&self) {
+        self.reached
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the paused command never reached its finish");
+    }
+
+    pub fn go(&self) {
+        self.go.send(()).unwrap();
     }
 }
 
@@ -2612,6 +2775,89 @@ mod tests {
         assert!(!sequence_file(&repo).exists());
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    /// A cherry-pick sequence of `side_commits_with_a_conflict` stopped on its conflict (#171).
+    /// Returns the branch it runs on (short name).
+    fn paused_sequence() -> (TempDir, Repository, Worker, super::WorkerHandle, String) {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            handle.cherry_pick_many(ids).unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        (dir, repo, worker, handle, branch)
+    }
+
+    fn in_progress() -> String {
+        git_core::pick::PickError::OperationInProgress.to_string()
+    }
+
+    #[test]
+    fn renaming_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
+        let (_dir, repo, _worker, handle, branch) = paused_sequence();
+        assert_eq!(
+            handle.rename_branch(branch.clone(), "other".into()),
+            Err(in_progress())
+        );
+        assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
+        assert_eq!(
+            handle.abort_sequence().unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+    }
+
+    #[test]
+    fn deleting_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
+        let (_dir, repo, _worker, handle, branch) = paused_sequence();
+        // Move HEAD off the branch (as `git switch` in a terminal), so libgit2's own refusal to
+        // delete the current branch doesn't hide the gate.
+        repo.cleanup_state().unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        assert_eq!(
+            handle.delete_branch(branch.clone(), true),
+            Err(in_progress())
+        );
+        assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
+    }
+
+    #[test]
+    fn adding_a_worktree_on_the_sequence_branch_is_refused() {
+        let (dir, _repo, _worker, handle, branch) = paused_sequence();
+        let path = dir.path().with_extension("wt");
+        assert_eq!(
+            handle.create_worktree("wt".into(), path.clone(), branch, None),
+            Err(in_progress())
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stash_save_is_refused_while_a_sequence_is_paused() {
+        let (dir, repo, _worker, handle, _branch) = paused_sequence();
+        write_file(dir.path(), "b.txt", "edited\n");
+        assert_eq!(
+            handle.save_stash(git_core::stash::StashOptions::default()),
+            Err(in_progress())
+        );
+        assert!(repo.find_reference("refs/stash").is_err());
+        assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+    }
+
+    #[test]
+    fn other_branches_stay_manageable_during_a_paused_sequence() {
+        let (_dir, repo, _worker, handle, _branch) = paused_sequence();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("spare", &head, false).unwrap();
+        handle
+            .rename_branch("spare".into(), "spare2".into())
+            .unwrap();
+        handle.delete_branch("spare2".into(), true).unwrap();
+        assert!(repo.find_branch("spare2", git2::BranchType::Local).is_err());
     }
 
     #[test]
@@ -5056,6 +5302,50 @@ mod tests {
             .unwrap()
     }
 
+    /// `edit_then_pick`'s repository with `f.txt` modified on disk (#170).
+    fn dirty_before_rebase(
+        dir: &Path,
+        repo: &Repository,
+    ) -> (
+        Worker,
+        super::WorkerHandle,
+        String,
+        Vec<git_core::rebase::RebasePlanEntry>,
+    ) {
+        let (onto, plan, _, _) = edit_then_pick(dir, repo);
+        write_file(dir, "f.txt", "DIRTY\n");
+        let worker = Worker::spawn(dir.to_path_buf()).unwrap();
+        let handle = worker.handle();
+        (worker, handle, onto, plan)
+    }
+
+    #[test]
+    fn a_refused_rebase_start_records_no_undo_entry_and_keeps_the_edit() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
+        let before = handle.get_undo_state().unwrap();
+
+        let error = handle.start_rebase(onto, plan).unwrap_err();
+        assert_eq!(
+            error,
+            "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
+        );
+        assert_eq!(handle.get_undo_state().unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+            "DIRTY\n"
+        );
+    }
+
+    #[test]
+    fn a_refused_rebase_start_leaves_no_rebase_stored() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
+        handle.start_rebase(onto, plan).unwrap_err();
+        assert_eq!(rebase_progress(&handle), None);
+        assert!(!rebase_file(&repo).exists());
+    }
+
     #[test]
     fn a_paused_rebase_survives_a_worker_restart() {
         let (dir, repo) = init_repo();
@@ -5755,5 +6045,350 @@ mod tests {
             Some(tip)
         );
         assert_eq!(std::fs::read_to_string(rebase_file(&repo)).unwrap(), stored);
+    }
+}
+
+/// #172: the worker holds the state lock across commands that can end an operation.
+#[cfg(test)]
+mod state_lock_tests {
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    use git2::Repository;
+    use tempfile::TempDir;
+
+    use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
+    use super::undo::{DISCARD_BUSY, UNDO_BUSY};
+    use super::{UndoOutcome, UndoState, Worker};
+
+    fn init_repo() -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+            config.set_bool("commit.gpgSign", false).unwrap();
+        }
+        (dir, repo)
+    }
+
+    fn write_file(dir: &Path, name: &str, contents: &str) {
+        std::fs::write(dir.join(name), contents).unwrap();
+    }
+
+    fn commit_all(repo: &Repository, message: &str) -> git2::Oid {
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .unwrap()
+    }
+
+    fn hold(repo: &Repository) -> StateGuard {
+        match StateLock::open(repo).acquire(Duration::ZERO) {
+            Acquire::Held(guard) => guard,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn no_undo() -> UndoState {
+        UndoState {
+            undo: None,
+            redo: None,
+        }
+    }
+
+    /// `main` and `feature` both change `a.txt`; HEAD on main.
+    fn conflicting_branches() -> (TempDir, Repository) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "base\n");
+        commit_all(&repo, "base");
+        let base_branch = repo.head().unwrap().name().unwrap().to_string();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &head, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        write_file(dir.path(), "a.txt", "feature\n");
+        commit_all(&repo, "feature change");
+        repo.set_head(&base_branch).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "a.txt", "main\n");
+        commit_all(&repo, "main change");
+        (dir, repo)
+    }
+
+    #[test]
+    fn locks_state_covers_every_recordable_and_operation_ending_command() {
+        use super::Command;
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::StageFile {
+            path: "a".into(),
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::StartRebase {
+            onto: "x".into(),
+            plan: Vec::new(),
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::RebaseContinue {
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::AbortRebase {
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::ContinueSequence {
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::AbortSequence {
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::AbortMerge { reply: tx }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::Undo { reply: tx }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::Redo { reply: tx }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(!super::undo::locks_state(&Command::GetStatus { reply: tx }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(!super::undo::locks_state(&Command::GetUndoState {
+            reply: tx
+        }));
+    }
+
+    #[test]
+    fn a_rebase_continued_while_another_worker_reads_is_still_one_undo_entry() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "base.txt", "base\n");
+        let base = commit_all(&repo, "base");
+        write_file(dir.path(), "a.txt", "a\n");
+        let a = commit_all(&repo, "a");
+        // `onto` is base + h.txt, off the branch.
+        let onto = {
+            let base = repo.find_commit(base).unwrap();
+            let mut tree = repo.treebuilder(Some(&base.tree().unwrap())).unwrap();
+            tree.insert("h.txt", repo.blob(b"h\n").unwrap(), 0o100644)
+                .unwrap();
+            let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            repo.commit(None, &sig, &sig, "h", &tree, &[&base]).unwrap()
+        };
+
+        let (worker_a, pause) = Worker::spawn_with_pause_before_finish(dir.path().to_path_buf());
+        let worker_b = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (handle_a, handle_b) = (worker_a.handle(), worker_b.handle());
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: a.to_string(),
+            action: git_core::rebase::RebaseAction::Edit,
+            combined_message: None,
+        }];
+        assert_eq!(
+            handle_a.start_rebase(onto.to_string(), plan).unwrap(),
+            git_core::rebase::RebaseStepResult::PausedForEdit
+        );
+        assert_eq!(handle_b.get_undo_state().unwrap(), no_undo());
+
+        pause.arm();
+        let continuing = {
+            let handle_a = handle_a.clone();
+            std::thread::spawn(move || handle_a.rebase_continue())
+        };
+        pause.wait_reached();
+        assert!(!repo.path().join("browsitory/rebase.json").exists());
+        // The file watcher in the other window triggers reads in this gap.
+        handle_b.get_status().unwrap();
+        handle_b.get_head_info().unwrap();
+        pause.go();
+        assert_eq!(
+            continuing.join().unwrap().unwrap(),
+            git_core::rebase::RebaseStepResult::Done
+        );
+
+        let label = format!("Rebase onto {}", &onto.to_string()[..7]);
+        assert_eq!(handle_a.get_undo_state().unwrap().undo, Some(label.clone()));
+        assert_eq!(handle_b.get_undo_state().unwrap().undo, Some(label));
+    }
+
+    #[test]
+    fn a_merge_restarted_outside_with_the_same_heads_does_not_reuse_the_old_pending_entry() {
+        let (dir, repo) = conflicting_branches();
+        {
+            let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            let outcome = worker
+                .handle()
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap();
+            assert!(matches!(
+                outcome,
+                git_core::merge::MergeOutcome::Conflicted { .. }
+            ));
+        }
+        // `git merge --abort` in a terminal while the app is closed...
+        repo.cleanup_state().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.reset(head.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+        // ...and the same merge started again there.
+        let feature = repo.find_reference("refs/heads/feature").unwrap();
+        let theirs = repo.reference_to_annotated_commit(&feature).unwrap();
+        repo.merge(&[&theirs], None, None).unwrap();
+        let merge_head = std::fs::File::options()
+            .write(true)
+            .open(repo.path().join("MERGE_HEAD"))
+            .unwrap();
+        merge_head
+            .set_modified(std::time::SystemTime::now() + Duration::from_secs(2))
+            .unwrap();
+        drop(merge_head);
+
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        handle
+            .commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+            .unwrap();
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
+    fn a_locked_command_runs_after_the_wait_when_the_lock_stays_held() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "edited\n");
+
+        let _guard = hold(&repo);
+        let start = Instant::now();
+        handle.stage_file("a.txt".into()).unwrap();
+        assert!(start.elapsed() >= LOCK_WAIT);
+        let status = Repository::open(dir.path())
+            .unwrap()
+            .status_file(Path::new("a.txt"))
+            .unwrap();
+        assert!(status.contains(git2::Status::INDEX_MODIFIED));
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
+    fn only_the_first_locked_command_waits_while_the_lock_stays_held() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "edited\n");
+        write_file(dir.path(), "b.txt", "edited\n");
+
+        let guard = hold(&repo);
+        handle.stage_file("a.txt".into()).unwrap();
+        let start = Instant::now();
+        handle.stage_file("b.txt".into()).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(200));
+        drop(guard);
+        // Once the lock is free again, commands wait for it (and record) as usual.
+        handle.unstage_file("b.txt".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Unstage b.txt".into())
+        );
+    }
+
+    #[test]
+    fn work_tree_destroying_commands_are_refused_while_the_lock_stays_held() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        let first = commit_all(&repo, "a");
+        write_file(dir.path(), "a.txt", "b\n");
+        commit_all(&repo, "b");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "my edit\n");
+        let edited = || std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
+
+        let guard = hold(&repo);
+        let busy = Err(DISCARD_BUSY.to_string());
+        assert_eq!(handle.discard_file("a.txt".into()), busy);
+        assert_eq!(handle.discard_all_unstaged(vec!["a.txt".into()]), busy);
+        assert_eq!(
+            handle.reset_to_commit(first.to_string(), git_core::reset::ResetMode::Hard),
+            busy
+        );
+        assert_eq!(edited(), "my edit\n");
+        // A mixed reset keeps the work tree, so it runs (unrecorded, D6-A).
+        handle
+            .reset_to_commit(first.to_string(), git_core::reset::ResetMode::Mixed)
+            .unwrap();
+        assert_eq!(edited(), "my edit\n");
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        drop(guard);
+        handle.discard_file("a.txt".into()).unwrap();
+        assert_eq!(edited(), "a\n");
+    }
+
+    #[test]
+    fn discard_busy_copy_is_exact() {
+        assert_eq!(
+            DISCARD_BUSY,
+            "Another Browsitory window is changing this repository's undo history. Try again in \
+             a moment, so this change can be undone."
+        );
+    }
+
+    #[test]
+    fn reads_never_wait_for_the_lock() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.get_status().unwrap(); // warm up
+
+        let _guard = hold(&repo);
+        let start = Instant::now();
+        handle.get_status().unwrap();
+        handle.get_undo_state().unwrap();
+        assert!(start.elapsed() < Duration::from_millis(200));
+    }
+
+    #[test]
+    fn undo_replies_busy_while_another_holder_keeps_the_lock() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.create_branch("x".into(), "HEAD".into()).unwrap();
+
+        let guard = hold(&repo);
+        assert_eq!(handle.undo(), Err(UNDO_BUSY.to_string()));
+        assert_eq!(handle.redo(), Err(UNDO_BUSY.to_string()));
+        assert!(repo.find_branch("x", git2::BranchType::Local).is_ok());
+        drop(guard);
+        assert_eq!(
+            handle.undo().unwrap(),
+            UndoOutcome::Done {
+                label: "Create branch x".into()
+            }
+        );
     }
 }

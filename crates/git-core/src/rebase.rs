@@ -35,6 +35,125 @@ pub enum RebaseError {
     BranchMoved { branch: String },
     #[error("{branch} no longer exists. Abort the rebase.")]
     BranchMissing { branch: String },
+    /// Tracked local changes, sorted by path (#170). A rebase's rollback and Abort check out
+    /// the branch with force, so it only starts from a clean tracked tree, as `git rebase` does.
+    #[error("{}", local_changes_message(paths))]
+    LocalChanges { paths: Vec<String> },
+}
+
+/// The refusal copy for [`RebaseError::LocalChanges`] (decision D2-A): the first path, and how
+/// many others there are.
+fn local_changes_message(paths: &[String]) -> String {
+    const ADVICE: &str = "Commit or stash them before starting a rebase.";
+    let first = paths.first().map(String::as_str).unwrap_or("");
+    match paths.len() {
+        0 | 1 => format!("You have uncommitted changes to {first}. {ADVICE}"),
+        2 => format!("You have uncommitted changes to {first} and 1 other file. {ADVICE}"),
+        n => format!(
+            "You have uncommitted changes to {first} and {} other files. {ADVICE}",
+            n - 1
+        ),
+    }
+}
+
+/// Tracked local changes a rebase would discard on rollback or Abort: any staged change, and
+/// any unstaged change to a tracked file (modified, deleted, type change, conflicted), sorted by
+/// path. Untracked and ignored files are not counted (git doesn't either; onto's checkout
+/// refuses an untracked file in its way). Submodule changes are ignored, as `git rebase`
+/// ignores them. A skip-worktree file counts when it exists and its content differs from the
+/// index ([`edited_skip_worktree`]); libgit2's status hides that edit but would report a
+/// sparse checkout's missing file, which git (and a forced checkout, which recreates it) don't
+/// mind.
+fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(false)
+        .include_ignored(false)
+        .exclude_submodules(true)
+        .renames_head_to_index(false);
+    let staged = git2::Status::INDEX_NEW
+        | git2::Status::INDEX_MODIFIED
+        | git2::Status::INDEX_DELETED
+        | git2::Status::INDEX_RENAMED
+        | git2::Status::INDEX_TYPECHANGE
+        | git2::Status::CONFLICTED;
+    let unstaged = git2::Status::WT_MODIFIED
+        | git2::Status::WT_DELETED
+        | git2::Status::WT_TYPECHANGE
+        | git2::Status::WT_RENAMED;
+    let (skip_worktree, mut paths) = edited_skip_worktree(repo)?;
+    paths.extend(
+        repo.statuses(Some(&mut options))?
+            .iter()
+            .filter(|entry| {
+                let path = entry.path_bytes();
+                let tracked = if skip_worktree.contains(path) {
+                    staged
+                } else {
+                    staged | unstaged
+                };
+                entry.status().intersects(tracked)
+            })
+            .map(|entry| String::from_utf8_lossy(entry.path_bytes()).into_owned()),
+    );
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+/// Every skip-worktree path in the index, and those whose file exists with content (after
+/// git's filters, e.g. `core.autocrlf`) other than the index's blob (#170). A file read through
+/// a symlinked folder, or that can't be read, counts as edited.
+fn edited_skip_worktree(
+    repo: &Repository,
+) -> Result<(std::collections::HashSet<Vec<u8>>, Vec<String>), RebaseError> {
+    let mut all = std::collections::HashSet::new();
+    let mut edited = Vec::new();
+    let Some(workdir) = repo.workdir() else {
+        return Ok((all, edited));
+    };
+    let mut index = repo.index()?;
+    index.read(false)?;
+    let skip = git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    let entries: Vec<_> = index
+        .iter()
+        .filter(|entry| entry.flags_extended & skip != 0)
+        .collect();
+    if entries.is_empty() {
+        return Ok((all, edited));
+    }
+    let config = crate::undo::worktree_config(repo)
+        .map_err(|error| git2::Error::from_str(&error.to_string()))?;
+    for entry in entries {
+        all.insert(entry.path.clone());
+        if entry.mode == 0o160000 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let changed =
+            match crate::undo::read_worktree_file(workdir, &path, &config, Some(entry.mode)) {
+                Ok(None) => false,
+                Ok(Some((bytes, mode))) => {
+                    let raw = git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)?;
+                    if raw == entry.id {
+                        false
+                    } else if mode == crate::undo::MODE_LINK {
+                        true
+                    } else {
+                        // Apply git's filters as status would (`core.autocrlf`, attributes); this
+                        // writes a loose object, only when the raw bytes differ.
+                        let mut writer = repo.blob_writer(Some(std::path::Path::new(&path)))?;
+                        std::io::Write::write_all(&mut writer, &bytes)?;
+                        writer.commit()? != entry.id
+                    }
+                }
+                Err(_) => true,
+            };
+        if changed {
+            edited.push(path);
+        }
+    }
+    Ok((all, edited))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +345,13 @@ pub fn start_rebase(
         ));
     }
 
+    // Before anything is written: the rollback below and Abort force-check-out the branch, so
+    // they may only ever discard what the rebase itself wrote (#170).
+    let changes = local_changes(repo)?;
+    if !changes.is_empty() {
+        return Err(RebaseError::LocalChanges { paths: changes });
+    }
+
     let onto_commit = repo.revparse_single(onto)?.peel_to_commit()?;
     let head_ref = repo.head()?;
     let original_branch_ref = head_ref.name()?.to_string();
@@ -263,7 +389,7 @@ pub fn start_rebase(
         Err(err) => {
             // Best-effort: report the *original* failure even if the rollback itself fails,
             // since that's the actionable one.
-            let _ = restore_original_branch(repo, &state.original_branch_ref);
+            let _ = restore_original_branch(repo, &state.original_branch_ref, state.original_tip);
             Err(err)
         }
     }
@@ -816,7 +942,7 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
     // says Paused), so it is aborted like one.
     let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
     if paused_here && branch_unmoved && !other_operation {
-        restore_original_branch(repo, &state.original_branch_ref)?;
+        restore_original_branch(repo, &state.original_branch_ref, state.original_tip)?;
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {
@@ -842,16 +968,24 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
 /// only the detached HEAD moves — so recovery is just reattaching to it and force-checking-out
 /// its tree over whatever the in-progress rebase left in the working directory/index. Shared by
 /// `abort_rebase` and `start_rebase`'s post-detach rollback, which need identical behavior.
-fn restore_original_branch(repo: &Repository, branch_ref: &str) -> Result<(), RebaseError> {
+/// Both run only while the branch is still at `original_tip`, so this restores a tree the user
+/// already had (#161): its case collisions are not "brought in".
+fn restore_original_branch(
+    repo: &Repository,
+    branch_ref: &str,
+    original_tip: Oid,
+) -> Result<(), RebaseError> {
     // Check out first, reattach after: a refused checkout (a folder that can't be written)
     // then leaves HEAD detached where the rebase left it, so Abort can simply be retried.
     let tree = repo.find_reference(branch_ref)?.peel_to_tree()?;
     // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
     // folder; remove such links first, like git (#114).
-    crate::worktree_guard::prepare_forced_checkout::<RebaseError, &str>(
+    let original_tree = repo.find_commit(original_tip)?.tree()?;
+    crate::worktree_guard::prepare_forced_checkout_known::<RebaseError, &str>(
         repo,
         Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
         None,
+        Some(&original_tree),
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();

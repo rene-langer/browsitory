@@ -87,19 +87,17 @@ impl RebaseSlot<'_> {
 
 pub(super) fn start(
     repo: &git2::Repository,
-    onto: String,
+    onto: &str,
     plan: Vec<RebasePlanEntry>,
     mut slot: RebaseSlot<'_>,
-    reply: Sender<Result<RebaseStepResult, String>>,
-) {
-    let result = match git_core::rebase::start_rebase(repo, &onto, plan) {
+) -> Result<RebaseStepResult, String> {
+    match git_core::rebase::start_rebase(repo, onto, plan) {
         // Nothing to keep: the rebase finished in one go.
         Ok((_, RebaseStepResult::Done)) => slot.persist(repo, None, Ok(RebaseStepResult::Done)),
         Ok((state, step)) => slot.persist(repo, Some(&state), Ok(step)),
         // `start_rebase` rolled back: there is no rebase to keep.
         Err(error) => Err(error.to_string()),
-    };
-    let _ = reply.send(result);
+    }
 }
 
 pub(super) fn continue_rebase(

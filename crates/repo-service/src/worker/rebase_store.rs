@@ -8,9 +8,9 @@
 //! Versioning follows `sequence_store`: a later version that only adds fields with a safe
 //! default bumps `FORMAT_VERSION` and keeps reading the older one (`OLDEST_READABLE_VERSION`).
 //! An unknown version is ignored, and the next `StartRebase` overwrites it.
+use super::atomic_file::write_atomically;
 use std::cell::RefCell;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 use git2::{Oid, Repository};
@@ -224,23 +224,7 @@ impl RebaseStore {
             .map_err(|error| error.to_string())?;
         let dir = self.file.parent().expect("rebase file has a parent");
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        // Unique per write: two workers in one process may share a git dir.
-        static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let temp = dir.join(format!(
-            "rebase.json.{}.{}.tmp",
-            std::process::id(),
-            NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let write = || -> std::io::Result<()> {
-            let mut handle = fs::File::create(&temp)?;
-            handle.write_all(&json)?;
-            handle.sync_all()?;
-            fs::rename(&temp, &self.file)
-        };
-        if let Err(error) = write() {
-            let _ = fs::remove_file(&temp);
-            return Err(error.to_string());
-        }
+        write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
         self.last_warning.replace(None);
         Ok(())
     }

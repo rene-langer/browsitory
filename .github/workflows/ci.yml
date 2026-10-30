@@ -74,6 +74,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # Prints the case-insensitive probe's row table (#156, #167): `cargo test` above already
+      # asserts nothing outside the repository changed, but captures the table. Built already,
+      # so this only re-runs one test.
+      - name: Case-insensitive probe table (macOS/Windows)
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo test -p git-core --test case_insensitive_links -- --nocapture
       # The `forge-fixture-override` feature (see crates/tauri-app/Cargo.toml's doc comment)
       # gates security-sensitive code — the forge API-base-URL override and the in-memory
       # credential store swap — that only the `e2e` job below otherwise builds, and that job

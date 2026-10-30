@@ -358,3 +358,340 @@ fn a_target_adding_a_second_collision_is_refused_even_when_head_holds_one() {
     assert_eq!(fx.repo.head().unwrap().target(), Some(fx.evil));
     assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
 }
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// `parent`'s tree plus the file `name` (= `content`), as a commit (no ref moved).
+fn with_file(repo: &Repository, parent: Oid, name: &str, content: &str) -> Oid {
+    let base = repo.find_commit(parent).unwrap().tree().unwrap();
+    let mut tree = repo.treebuilder(Some(&base)).unwrap();
+    tree.insert(name, repo.blob(content.as_bytes()).unwrap(), 0o100644)
+        .unwrap();
+    commit_tree(repo, tree.write().unwrap(), &[parent], name)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// `parent`'s tree plus a second pair, the link `Z -> /x` and the file `z/x`.
+fn with_second_pair(repo: &Repository, parent: Oid) -> Oid {
+    let base = repo.find_commit(parent).unwrap().tree().unwrap();
+    let mut inner = repo.treebuilder(None).unwrap();
+    inner
+        .insert("x", repo.blob(b"PWNED\n").unwrap(), 0o100644)
+        .unwrap();
+    let mut outer = repo.treebuilder(Some(&base)).unwrap();
+    outer.insert("z", inner.write().unwrap(), 0o040000).unwrap();
+    outer
+        .insert("Z", repo.blob(b"/x").unwrap(), 0o120000)
+        .unwrap();
+    commit_tree(repo, outer.write().unwrap(), &[parent], "second pair")
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Points `branch` at `tip` and switches to it with case folding off (Linux writes both `D` and
+/// `d/x`), then turns folding back on: HEAD holds the pair.
+fn head_with_pair_at(fx: &Fixture, branch: &str, tip: Oid) {
+    // Detach first, so moving the current branch doesn't leave the switch a no-op.
+    fx.repo.set_head_detached(head(fx)).unwrap();
+    fx.repo
+        .reference(&format!("refs/heads/{branch}"), tip, true, "")
+        .unwrap();
+    let config = || fx.repo.config().unwrap();
+    config().set_bool("core.ignorecase", false).unwrap();
+    branch::switch_branch(&fx.repo, branch).unwrap();
+    config().set_bool("core.ignorecase", true).unwrap();
+    assert!(fx.dir.path().join("d/x").is_file());
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// HEAD on `evil`, holding the pair.
+fn head_with_pair(fx: &Fixture) -> Oid {
+    head_with_pair_at(fx, "evil", fx.evil);
+    fx.evil
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn read(fx: &Fixture, rel: &str) -> String {
+    std::fs::read_to_string(fx.dir.path().join(rel)).unwrap()
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn head(fx: &Fixture) -> Oid {
+    fx.repo.head().unwrap().target().unwrap()
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// HEAD on `work` = evil + `c.txt`; branch `side` = evil + `b.txt`. Returns `side`.
+fn diverged_on_pair(fx: &Fixture) -> Oid {
+    let side = with_file(&fx.repo, fx.evil, "b.txt", "b\n");
+    fx.repo
+        .reference("refs/heads/side", side, true, "")
+        .unwrap();
+    let work = with_file(&fx.repo, fx.evil, "c.txt", "c\n");
+    head_with_pair_at(fx, "work", work);
+    side
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const NON_FF: MergeOptions = MergeOptions {
+    fast_forward: FastForward::Allow,
+    squash: false,
+};
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_merges_an_unrelated_branch() {
+    let fx = fixture();
+    diverged_on_pair(&fx);
+    let outcome = merge::start_merge(&fx.repo, "side", NON_FF).unwrap();
+    assert_eq!(outcome, merge::MergeOutcome::Merged);
+    assert_eq!(read(&fx, "b.txt"), "b\n");
+    assert_eq!(read(&fx, "d/x"), "PWNED\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_fast_forwards_to_an_unrelated_descendant() {
+    let fx = fixture();
+    head_with_pair(&fx);
+    let side = with_file(&fx.repo, fx.evil, "b.txt", "b\n");
+    fx.repo
+        .reference("refs/heads/side", side, true, "")
+        .unwrap();
+    let outcome = merge::start_merge(&fx.repo, "side", MergeOptions::default()).unwrap();
+    assert_eq!(outcome, merge::MergeOutcome::FastForwarded);
+    assert_eq!(head(&fx), side);
+    assert_eq!(read(&fx, "b.txt"), "b\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_cherry_picks_an_unrelated_commit() {
+    let fx = fixture();
+    let side = diverged_on_pair(&fx);
+    pick::cherry_pick(&fx.repo, &side.to_string(), None).unwrap();
+    assert_eq!(read(&fx, "b.txt"), "b\n");
+    assert_eq!(read(&fx, "c.txt"), "c\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_reverts_an_unrelated_commit() {
+    let fx = fixture();
+    diverged_on_pair(&fx);
+    let work = head(&fx);
+    pick::revert(&fx.repo, &work.to_string(), None).unwrap();
+    assert!(!fx.dir.path().join("c.txt").exists());
+    assert_eq!(read(&fx, "d/x"), "PWNED\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_applies_an_unrelated_stash() {
+    let mut fx = fixture();
+    head_with_pair(&fx);
+    write_file(fx.dir.path(), "a.txt", "edited\n");
+    // libgit2's stash diff fails on Linux with both `D` and `d/` on disk under a simulated
+    // `core.ignorecase` ("merge diffs created with conflicting options"); save without it. The
+    // apply, which is what the guard checks, runs folded.
+    let fold = |repo: &Repository, on| repo.config().unwrap().set_bool("core.ignorecase", on);
+    fold(&fx.repo, false).unwrap();
+    stash::save_stash(&mut fx.repo, &stash::StashOptions::default()).unwrap();
+    fold(&fx.repo, true).unwrap();
+    assert_eq!(read(&fx, "a.txt"), "base\n");
+    stash::apply_stash(&mut fx.repo, 0, None, false).unwrap();
+    assert_eq!(read(&fx, "a.txt"), "edited\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_pulls_fast_forward() {
+    let fx = fixture();
+    head_with_pair(&fx);
+    let side = with_file(&fx.repo, fx.evil, "b.txt", "b\n");
+    fx.repo
+        .reference("refs/remotes/origin/evil", side, true, "")
+        .unwrap();
+    remote::pull_after_fetch(&fx.repo, "origin", "evil").unwrap();
+    assert_eq!(head(&fx), side);
+    assert_eq!(read(&fx, "b.txt"), "b\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_head_with_a_collision_rebases_onto_an_unrelated_commit() {
+    let fx = fixture();
+    let side = diverged_on_pair(&fx);
+    let work = head(&fx);
+    let plan = vec![RebasePlanEntry {
+        commit_id: work.to_string(),
+        action: RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (_, result) = rebase::start_rebase(&fx.repo, &side.to_string(), plan).unwrap();
+    assert_eq!(result, rebase::RebaseStepResult::Done);
+    assert_eq!(fx.repo.head().unwrap().name().ok(), Some("refs/heads/work"));
+    assert_eq!(read(&fx, "b.txt"), "b\n");
+    assert_eq!(read(&fx, "c.txt"), "c\n");
+    assert_eq!(read(&fx, "d/x"), "PWNED\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn switching_between_branches_holding_the_same_collision_is_allowed() {
+    let fx = fixture();
+    head_with_pair(&fx);
+    let evil2 = commit_tree(
+        &fx.repo,
+        with_pair(&fx.repo, fx.evil, "PWNED2\n"),
+        &[fx.evil],
+        "evil2",
+    );
+    fx.repo
+        .reference("refs/heads/evil2", evil2, true, "")
+        .unwrap();
+    branch::switch_branch(&fx.repo, "evil2").unwrap();
+    assert_eq!(read(&fx, "d/x"), "PWNED2\n");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_merge_bringing_a_second_collision_is_refused_even_when_head_holds_one() {
+    let fx = fixture();
+    diverged_on_pair(&fx);
+    let work = head(&fx);
+    let second = with_second_pair(&fx.repo, fx.evil);
+    fx.repo
+        .reference("refs/heads/second", second, true, "")
+        .unwrap();
+    let error = merge::start_merge(&fx.repo, "second", NON_FF).unwrap_err();
+    match error {
+        MergeError::CaseCollision(collision) => assert_eq!(
+            collision,
+            CaseCollision {
+                link: "Z".into(),
+                folder: "z".into()
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(head(&fx), work);
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("Z")).is_err());
+    assert!(!merge::is_merging(&fx.repo));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn a_cherry_pick_bringing_a_second_collision_is_refused_even_when_head_holds_one() {
+    let fx = fixture();
+    diverged_on_pair(&fx);
+    let work = head(&fx);
+    let second = with_second_pair(&fx.repo, fx.evil);
+    let error = pick::cherry_pick(&fx.repo, &second.to_string(), None).unwrap_err();
+    match error {
+        PickError::CaseCollision(collision) => assert_eq!(collision.link, "Z"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(head(&fx), work);
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// `parent`'s tree without the link `D` (the pair is gone).
+fn without_link(repo: &Repository, parent: Oid) -> Oid {
+    let base = repo.find_commit(parent).unwrap().tree().unwrap();
+    let mut tree = repo.treebuilder(Some(&base)).unwrap();
+    tree.remove("D").unwrap();
+    commit_tree(repo, tree.write().unwrap(), &[parent], "rm D")
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn assert_pair_back(fx: &Fixture) {
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(read(fx, "d/x"), "PWNED\n");
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// `main` = evil → `e` (edits `a.txt`), checked out holding the pair; returns `(e, rm)`, where
+/// `rm` = evil without `D`.
+fn rebase_fixture(fx: &Fixture) -> (Oid, Oid) {
+    let e = with_file(&fx.repo, fx.evil, "a.txt", "e\n");
+    head_with_pair_at(fx, "main", e);
+    let rm = without_link(&fx.repo, fx.evil);
+    (e, rm)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn plan_of(id: Oid, action: RebaseAction) -> Vec<RebasePlanEntry> {
+    vec![RebasePlanEntry {
+        commit_id: id.to_string(),
+        action,
+        combined_message: None,
+    }]
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn rebase_abort_restores_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let (e, rm) = rebase_fixture(&fx);
+    let (state, result) =
+        rebase::start_rebase(&fx.repo, &rm.to_string(), plan_of(e, RebaseAction::Edit)).unwrap();
+    assert_eq!(result, rebase::RebaseStepResult::PausedForEdit);
+    assert!(fx.repo.head_detached().unwrap());
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D")).is_err());
+
+    let abort = rebase::abort_rebase(&fx.repo, &state).unwrap();
+    assert!(abort.restored);
+    assert_eq!(fx.repo.head().unwrap().name().ok(), Some("refs/heads/main"));
+    assert_eq!(head(&fx), e);
+    assert_pair_back(&fx);
+}
+
+#[test]
+// Linux only, like the other HEAD-holds-the-pair tests: a case-insensitive file system can't
+// hold both `D` and `d/` (gpg `/bin/false` also needs unix).
+#[cfg(target_os = "linux")]
+fn a_failed_rebase_start_rolls_back_to_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let (e, rm) = rebase_fixture(&fx);
+    let mut config = fx.repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config.set_str("gpg.program", "/bin/false").unwrap();
+    let Err(error) =
+        rebase::start_rebase(&fx.repo, &rm.to_string(), plan_of(e, RebaseAction::Pick))
+    else {
+        panic!("rebase started");
+    };
+    assert!(!matches!(error, RebaseError::CaseCollision(_)), "{error:?}");
+    assert!(!fx.repo.head_detached().unwrap());
+    assert_eq!(fx.repo.head().unwrap().name().ok(), Some("refs/heads/main"));
+    assert_eq!(head(&fx), e);
+    assert_pair_back(&fx);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn sequence_abort_rewinds_to_an_original_tree_holding_a_collision() {
+    let fx = fixture();
+    let local = with_file(&fx.repo, fx.evil, "a.txt", "local\n");
+    head_with_pair_at(&fx, "main", local);
+    let rm = without_link(&fx.repo, fx.evil);
+    let conflicting = with_file(&fx.repo, fx.evil, "a.txt", "theirs\n");
+
+    let run = pick::cherry_pick_many(&fx.repo, &[rm.to_string(), conflicting.to_string()]);
+    assert!(
+        matches!(run.outcome, Ok(pick::SequenceOutcome::Conflicted { .. })),
+        "{:?}",
+        run.outcome
+    );
+    assert!(std::fs::symlink_metadata(fx.dir.path().join("D")).is_err());
+    let state = run.state.unwrap();
+
+    let abort = pick::abort_sequence(&fx.repo, &state).unwrap();
+    assert!(abort.rewound);
+    assert_eq!(head(&fx), local);
+    assert_pair_back(&fx);
+}

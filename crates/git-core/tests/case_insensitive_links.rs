@@ -373,6 +373,72 @@ fn super_repo(fx: &Fixture) -> (TempDir, Repository) {
     (dir, repo)
 }
 
+/// A fresh clone with HEAD on `evil`, checked out by raw libgit2's forced checkout (as an older
+/// git or another tool would leave it), so HEAD holds the pair. `outside` is reset afterwards:
+/// rows measure what the git-core operation that follows writes, not this setup.
+fn head_on_pair(fx: &Fixture, ignore_case: IgnoreCase) -> (TempDir, Repository) {
+    let (dir, repo) = fresh(fx, ignore_case);
+    {
+        let evil = repo.find_commit(fx.evil).unwrap();
+        let _ = repo.checkout_tree(evil.as_object(), Some(CheckoutBuilder::new().force()));
+    }
+    repo.set_head("refs/heads/evil").unwrap();
+    reset_outside(fx.outside.path());
+    (dir, repo)
+}
+
+/// `evil`'s tree with the file `name` added at the top, as a commit on `evil` (no ref moved).
+fn on_evil_with(repo: &Repository, fx: &Fixture, name: &str, content: &str) -> Oid {
+    let evil = repo.find_commit(fx.evil).unwrap();
+    let mut tree = repo.treebuilder(Some(&evil.tree().unwrap())).unwrap();
+    tree.insert(name, repo.blob(content.as_bytes()).unwrap(), MODE_BLOB)
+        .unwrap();
+    commit(repo, tree.write().unwrap(), &[fx.evil], name)
+}
+
+/// `evil` with `<folder>/x` changed, as a commit on `evil`.
+fn on_evil_changing_x(repo: &Repository, fx: &Fixture, order: Order) -> Oid {
+    let evil = repo.find_commit(fx.evil).unwrap();
+    let evil_tree = evil.tree().unwrap();
+    let mut inner = repo.treebuilder(None).unwrap();
+    inner
+        .insert("x", repo.blob(b"CHANGED\n").unwrap(), MODE_BLOB)
+        .unwrap();
+    let mut tree = repo.treebuilder(Some(&evil_tree)).unwrap();
+    tree.insert(order.folder(), inner.write().unwrap(), 0o040000)
+        .unwrap();
+    commit(repo, tree.write().unwrap(), &[fx.evil], "change x")
+}
+
+/// `evil` with the link retargeted (the same outside folder, spelled `<outside>/.`, so a write
+/// through it still shows) and a new file `<folder>/evil`, as a commit on `evil` (#167 F2).
+fn on_evil_retargeting_the_link(repo: &Repository, fx: &Fixture, order: Order) -> Oid {
+    let evil = repo.find_commit(fx.evil).unwrap();
+    let evil_tree = evil.tree().unwrap();
+    let folder = evil_tree
+        .get_path(Path::new(order.folder()))
+        .unwrap()
+        .to_object(repo)
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    let mut inner = repo.treebuilder(Some(&folder)).unwrap();
+    inner
+        .insert("evil", repo.blob(b"EVIL\n").unwrap(), MODE_BLOB)
+        .unwrap();
+    let target = format!("{}/.", slash_path(fx.outside.path()));
+    let mut tree = repo.treebuilder(Some(&evil_tree)).unwrap();
+    tree.insert(order.folder(), inner.write().unwrap(), 0o040000)
+        .unwrap();
+    tree.insert(
+        order.link(),
+        repo.blob(target.as_bytes()).unwrap(),
+        MODE_LINK,
+    )
+    .unwrap();
+    commit(repo, tree.write().unwrap(), &[fx.evil], "retarget")
+}
+
 fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
     let fx = fixture(order);
     let outside = fx.outside.path().to_path_buf();
@@ -573,6 +639,59 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
             .unwrap();
         let result = remote::pull_after_fetch(&repo, "origin", "main");
         record("pull_after_fetch ff", show(result), dir.path());
+    }
+
+    // --- git-core, with HEAD already holding the pair (#167) ---
+    let no_ff = MergeOptions {
+        fast_forward: FastForward::Never,
+        squash: false,
+    };
+    {
+        let (dir, repo) = head_on_pair(&fx, ignore_case);
+        let side = on_evil_with(&repo, &fx, "b.txt", "b\n");
+        repo.reference("refs/heads/side", side, true, "").unwrap();
+        let result = merge::start_merge(&repo, "side", no_ff);
+        record(
+            "HEAD=pair: start_merge --no-ff unrelated",
+            show(result),
+            dir.path(),
+        );
+    }
+    {
+        let (dir, repo) = head_on_pair(&fx, ignore_case);
+        let side = on_evil_with(&repo, &fx, "b.txt", "b\n");
+        let result = pick::cherry_pick(&repo, &side.to_string(), None);
+        record("HEAD=pair: cherry_pick unrelated", show(result), dir.path());
+    }
+    {
+        let (dir, mut repo) = head_on_pair(&fx, ignore_case);
+        let edited = on_evil_with(&repo, &fx, "a.txt", "edited\n");
+        let tree = repo.find_commit(edited).unwrap().tree_id();
+        fake_stash(&repo, fx.evil, tree);
+        let result = stash::apply_stash(&mut repo, 0, None, false);
+        record("HEAD=pair: apply_stash unrelated", show(result), dir.path());
+    }
+    {
+        let (dir, repo) = head_on_pair(&fx, ignore_case);
+        let side = on_evil_changing_x(&repo, &fx, order);
+        repo.reference("refs/heads/side", side, true, "").unwrap();
+        let result = merge::start_merge(&repo, "side", no_ff);
+        record(
+            "HEAD=pair: start_merge --no-ff changing x",
+            show(result),
+            dir.path(),
+        );
+    }
+    {
+        let (dir, repo) = head_on_pair(&fx, ignore_case);
+        let side = on_evil_retargeting_the_link(&repo, &fx, order);
+        repo.reference("refs/heads/side", side, true, "").unwrap();
+        let result = merge::start_merge(&repo, "side", no_ff);
+        record(
+            "HEAD=pair: start_merge --no-ff retargeting the link",
+            show(result),
+            dir.path(),
+        );
     }
 }
 

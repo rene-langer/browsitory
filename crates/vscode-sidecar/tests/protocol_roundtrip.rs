@@ -2864,3 +2864,71 @@ fn abort_rebase_reports_whether_head_went_back_to_the_branch() {
     );
     assert_eq!(aborted["result"], serde_json::json!({ "restored": true }));
 }
+
+/// #172: the Tauri app and the VSCode extension share one repository's undo history. A merge
+/// started in one sidecar process and finished in another is one entry, seen by both.
+#[test]
+fn a_merge_finished_in_a_second_sidecar_is_one_undo_entry() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    {
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &head, false).unwrap();
+    }
+    repo.set_head("refs/heads/side").unwrap();
+    write_file(dir.path(), "a.txt", "side\n");
+    commit_all(&repo, "side edit");
+    repo.set_head(&format!("refs/heads/{base}")).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    write_file(dir.path(), "a.txt", "main\n");
+    commit_all(&repo, "main edit");
+    let main_tip = repo.head().unwrap().target().unwrap();
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let path = serde_json::json!({ "repoPath": repo_path });
+
+    let mut first = Sidecar::spawn_with_config_dir(&config_dir);
+    let mut second = Sidecar::spawn_with_config_dir(&config_dir);
+    first.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    second.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+
+    let started = first.call(
+        2,
+        "start_merge",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "branchName": "side",
+            "options": {"fastForward": "Allow", "squash": false}
+        }),
+    );
+    assert_eq!(started["result"]["kind"], "Conflicted", "{started}");
+
+    let resolved = second.call(
+        2,
+        "resolve_whole_file",
+        serde_json::json!({ "repoPath": repo_path, "path": "a.txt", "side": "Ours" }),
+    );
+    assert!(resolved.get("error").is_none(), "{resolved}");
+    let committed = second.call(
+        3,
+        "commit",
+        serde_json::json!({ "repoPath": repo_path, "message": "Merge side" }),
+    );
+    assert!(committed.get("error").is_none(), "{committed}");
+
+    for (sidecar, id) in [(&mut first, 10), (&mut second, 10)] {
+        let state = sidecar.call(id, "get_undo_state", path.clone());
+        assert_eq!(state["result"]["undo"], "Merge side", "{state}");
+    }
+    let undone = first.call(11, "undo_last", path.clone());
+    assert_eq!(
+        undone["result"],
+        serde_json::json!({"kind": "Done", "label": "Merge side"})
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(repo.head().unwrap().target().unwrap(), main_tip);
+}
