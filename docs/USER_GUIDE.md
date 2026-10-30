@@ -197,10 +197,11 @@ Browsitory runs your repository's client-side git hooks the way git does:
 
 | Hook | Runs when you… |
 |---|---|
-| `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend |
+| `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend, or **Continue** a paused multi-commit cherry-pick or revert |
+| `pre-merge-commit`, `prepare-commit-msg`, `commit-msg` | commit a merge that had no conflicts (instead of `pre-commit`; no `post-commit`) |
 | `pre-push` | push a branch, force push, push tags, **Push to…**, or delete a remote branch |
 | `post-checkout` | switch branches or check out a commit |
-| `post-merge` | merge a branch (also a squash merge) or pull with a fast-forward |
+| `post-merge` | after a merge commit, a fast-forward or a squash, or a pull with a fast-forward |
 
 Hooks come from `core.hooksPath` (a relative path is relative to the repository root) or
 `.git/hooks`. As in git, this includes a `core.hooksPath` set in the repository's own config;
@@ -213,7 +214,7 @@ through the hook scripts they install. Files a `pre-commit` hook stages (formatt
 lint-staged) are part of the commit. `pre-push` runs after Browsitory has contacted the remote
 and before anything is sent, so it sees the remote's current commits, as in git.
 
-A failing `pre-commit`, `commit-msg` or `pre-push` stops the commit or push. A dialog shows the
+A failing `pre-commit`, `pre-merge-commit`, `commit-msg` or `pre-push` stops the commit or push. A dialog shows the
 hook's output; **Commit without hooks**, **Amend without hooks** or **Push without hooks**
 retries with those hooks skipped (`--no-verify`). A failing `prepare-commit-msg` cannot be
 skipped, so its dialog only has **Close**. Close the dialog and **Show hook output…** in the
@@ -221,17 +222,17 @@ error banner brings it back. Your commit message stays in the box until a commit
 Failures of `post-commit`, `post-checkout` and `post-merge` are ignored, as in git.
 
 To skip hooks up front, tick **Skip hooks** under the commit message (shown only when a
-`pre-commit` or `commit-msg` hook is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
+`pre-commit` or `commit-msg` hook, or while a merge waits to be committed a `pre-merge-commit`
+hook, is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
 next commit or amend only.
 
 While a commit hook runs, "Running pre-commit hook…" shows under the commit message with
 **Cancel**; a running `pre-push` shows in the transfer panel, whose Cancel stops it. Browsitory
 stops any hook after 10 minutes. Other actions on the repository wait while a hook runs.
 
-Hooks cannot ask you anything: their input is empty (or, for `pre-push`, the list of refs).
-If you started Browsitory from a terminal, a hook that tries to read from that terminal
-(`/dev/tty`) is paused by the system and sits there until you press Cancel or the 10 minutes
-run out. If a hook leaves a background process running that keeps its output open, Browsitory
+Hooks cannot ask you anything: their input is empty (or, for `pre-push`, the list of refs), and
+they run without a terminal, even when you started Browsitory from one. A hook that tries to
+read from the terminal (`/dev/tty`) fails, and its error shows in the dialog. If a hook leaves a background process running that keeps its output open, Browsitory
 waits up to 2 more seconds for output after the hook exits, then carries on.
 
 Like signing, apps started from the macOS Dock may not see your shell's `PATH`. If a hook cannot
@@ -240,11 +241,17 @@ find a tool, use absolute paths in the hook or extend `PATH` inside it.
 On Windows, hooks run with the `sh.exe` that comes with Git for Windows (found next to `git.exe`
 or on `PATH`). Without it, a `pre-commit`, `commit-msg` or `pre-push` hook fails with a message
 saying so (use the "without hooks" retry to go ahead), and other hooks are skipped. Cancel and
-the time limit stop the hook's shell, but not programs it started.
+the time limit stop the hook and the programs it started.
 
 Rebase, cherry-pick, revert, undo/redo, stash, worktree creation and clone run no hooks.
-Finishing a paused merge, cherry-pick or revert with Commit runs the commit hooks; **Continue**
-on a multi-commit cherry-pick or revert does not.
+Finishing a paused merge, cherry-pick or revert with Commit runs the commit hooks. The commit
+that concludes a merge Browsitory staged without conflicts runs what `git merge` runs:
+`pre-merge-commit` instead of `pre-commit`, no `post-commit`, and `post-merge` once the commit
+exists (if Browsitory was restarted in between, it runs the ordinary commit hooks, as
+`git merge --no-commit` followed by `git commit` does). **Continue** on a paused multi-commit
+cherry-pick or revert runs the commit hooks for the step it commits (the one you resolved); the
+steps Browsitory applies by itself run none. If one fails, the step stays paused and the dialog
+offers **Continue without hooks**; a running hook shows on the panel with **Cancel**.
 
 ## Browsing history and diffs
 
@@ -605,8 +612,8 @@ unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for ex
 reset or branch switch in a terminal), Abort only ends the sequence and leaves HEAD and every
 branch alone, and says so.
 Continue refuses in that case. A whole sequence is one **Undo** step; an aborted one leaves
-nothing to undo. Like a single cherry-pick, the steps of a sequence (including the one
-**Continue** commits) run no commit hooks.
+nothing to undo. The step **Continue** commits runs the commit hooks (see [Hooks](#hooks));
+the steps applied by themselves run none, like a single cherry-pick.
 
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
 and to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
