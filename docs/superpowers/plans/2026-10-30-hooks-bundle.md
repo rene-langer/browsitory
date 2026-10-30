@@ -149,7 +149,39 @@ Reconciled with the code at 5ce5a38d on 2026-10-30:
 
 ## Pre-flight notes
 
-_(fill in: baseline counts, toolchain, decisions as confirmed by the user)_
+- **Baseline** (5ce5a38d + spec/plan, 2026-10-30): `cargo test -p git-core -p repo-service -p
+  tauri-app -p vscode-sidecar` 1414 passed, 0 failed, 5 ignored; frontend 1589 tests in 113
+  files. `main` had not moved. The pre-push hook was already linked.
+- **Toolchain:** rustc 1.97.1, git 2.53.0, Linux. The `x86_64-pc-windows-gnu` std is installed
+  but there is no mingw C compiler, so `libgit2-sys` can't build for Windows. Windows code was
+  type-checked with clippy through a probe crate under `target/winprobe` that compiles
+  `process.rs` + `process/job_windows.rs` alone (deleted afterwards); CI is the real check.
+- **Decisions:** all as recommended. The user confirmed D1-A, D3-A, D5-A, D6-A; D2-A, D4-A,
+  D7-A, D8-A were taken as recommended.
+- **Deviations (code wins over the plan):**
+  - A2: `cancel_kills_a_hooks_background_grandchild_on_windows` cancels after 500 ms rather than
+    with `|| true`: an immediate cancel can kill `sh.exe` before it has started the background
+    job, which would pass without a job object. The three Windows tests ran (green) only on
+    `windows-latest` CI; they were written before the implementation but could not be shown red
+    there (no scratch PR).
+  - B3: `CommitBox` had no merge-state prop. `hooks.merging?: boolean` was added, set by
+    `DiffPane` from `headInfo.operation === "Merge"`.
+  - C1: `SequenceOutcome::HookFailed` makes the Tauri and sidecar DTO `match`es non-exhaustive,
+    so both DTO variants and the Tauri DTO test moved from C2 into C1 to keep every commit
+    building. The `CommitError` → `PickError` mapping is a `From` impl.
+  - C2: the sidecar had no dispatch-level `hookProgress` test to mirror. `continue_sequence` is
+    generic over the writer (like `spawn_hook_relay`) and the new test drives a real worker into
+    a buffer. `undo.rs`'s `assert_only_held!` macro builds `{ reply }` only, so
+    `ContinueSequence`'s held-reply check is written out by hand.
+  - C3: the shared status line is a new `HookStatus` component (`CommitBox` and
+    `RebaseProgressPanel`). `App.continueSequence` stays argument-free because it is wired to
+    buttons' `onClick` (the click event would otherwise be read as a truthy `noVerify`); the
+    dialog's retry calls `runContinueSequence(true)` so its toast is the sequence toast.
+    `retrySuccessLabel` takes every retry kind except `continueSequence` (enforced by its type).
+  - D1: the saturation tests spawn from the test thread instead of inside `block_on`; the
+    stand-in was a test-local inline `off_runtime`/`RepoWorker`, replaced by the real ones.
+    `clone_repo` maps `off_runtime`'s error to its existing `CloneErrorDto { kind: "Io" }`.
+  - Z1: the `post-merge` timing fix has its own CHANGELOG bullet.
 
 ---
 
