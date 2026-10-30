@@ -76,6 +76,7 @@ impl StateLock {
         }
     }
 
+    #[cfg(test)]
     pub fn try_acquire(&self) -> Acquire {
         self.acquire(Duration::ZERO)
     }

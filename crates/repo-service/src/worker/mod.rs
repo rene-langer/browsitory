@@ -776,7 +776,7 @@ impl Worker {
                 };
             }
             for mut command in rx {
-                undo_recorder.settle(&repo, marker(&repo, &rebase_memory).as_deref());
+                undo_recorder.settle(&repo, None, || marker(&repo, &rebase_memory));
                 let plan = undo::plan_for(&command);
                 let track = plan.is_some() || undo_recorder.has_pending();
                 let aborts = matches!(
@@ -1482,17 +1482,17 @@ impl Worker {
                     Command::GetUndoState { reply } => undo::get_state(&mut undo_recorder, reply),
                     Command::Undo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.undo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                            undo_recorder.undo(&repo, None, || marker(&repo, &rebase_memory)),
                         );
                     }
                     Command::Redo { reply } => {
                         let _ = reply.send(
-                            undo_recorder.redo(&repo, marker(&repo, &rebase_memory).as_deref()),
+                            undo_recorder.redo(&repo, None, || marker(&repo, &rebase_memory)),
                         );
                     }
                 }
                 if track {
-                    undo_recorder.finish(&repo, marker(&repo, &rebase_memory).as_deref(), aborts);
+                    undo_recorder.finish(&repo, None, || marker(&repo, &rebase_memory), aborts);
                 }
                 held.release();
             }

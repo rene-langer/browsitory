@@ -160,6 +160,12 @@ impl UndoStore {
         (store, stacks)
     }
 
+    /// Reads `undo.json` again whatever its mtime says: under the state lock, before a write
+    /// (another process may have written within one mtime tick).
+    pub fn reload(&mut self, stacks: &mut UndoStacks) {
+        *stacks = self.load();
+    }
+
     pub fn reload_if_changed(&mut self, stacks: &mut UndoStacks) {
         if modified(&self.file) != self.mtime {
             *stacks = self.load();
@@ -444,6 +450,37 @@ mod tests {
         second.save(&repo, &second_stacks).unwrap();
         first.reload_if_changed(&mut first_stacks);
         assert_eq!(first_stacks.undo.len(), 1);
+    }
+
+    #[test]
+    fn reload_reads_a_same_mtime_rewrite() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut writer, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(entry(&repo, "first"));
+        writer.save(&repo, &stacks).unwrap();
+        let file = repo.path().join("browsitory/undo.json");
+        let first_mtime = std::fs::metadata(&file).unwrap().modified().unwrap();
+
+        let (mut reader, mut seen) = UndoStore::open(&repo);
+        assert_eq!(seen.undo.len(), 1);
+        stacks.undo.push(entry(&repo, "second"));
+        writer.save(&repo, &stacks).unwrap();
+        // A second write within one mtime tick (1-2 s on HFS+, FAT, SMB).
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(first_mtime)
+            .unwrap();
+
+        reader.reload_if_changed(&mut seen);
+        assert_eq!(
+            seen.undo.len(),
+            1,
+            "same mtime: reload_if_changed can't tell"
+        );
+        reader.reload(&mut seen);
+        assert_eq!(seen.undo.len(), 2);
     }
 
     #[test]

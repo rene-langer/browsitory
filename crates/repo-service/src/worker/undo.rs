@@ -1,15 +1,21 @@
 //! Undo stack: which worker commands are recorded, under which label, and the recorder that
 //! snapshots around them. See `docs/superpowers/specs/2026-10-18-parity-batch3b-design.md`.
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use git2::Repository;
 use git_core::reset::ResetMode;
 use git_core::undo::{capture, restore, RepoSnapshot, SnapshotScope, UndoError};
 
+use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
 use super::undo_store::{PendingEntry, UndoEntry, UndoStacks, UndoStore, UNDO_LIMIT};
 use super::{Command, WorkerHandle};
 
 pub(super) const MAX_LABEL_CHARS: usize = 80;
+
+/// Undo/Redo's reply while another holder keeps the state lock past `LOCK_WAIT` (D7-A).
+pub(super) const UNDO_BUSY: &str =
+    "Another Browsitory window is changing this repository's undo history. Try again in a moment.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UndoPlan {
@@ -225,10 +231,21 @@ pub enum UndoOutcome {
 /// lives in `undo.json` with the marker of the operation it belongs to
 /// (`OperationProbe::marker`), so an operation finished after an app restart, or in another
 /// process sharing the repository, is still one entry, and only that operation can record it.
+///
+/// Every write to `undo.json` happens under the repository's [`StateLock`], after a forced
+/// reload, and re-checks its decision there (#172). Methods take the caller's guard when it holds
+/// the lock (the worker holds it across commands that can end an operation); without one they
+/// take it themselves only when about to write, and skip the write while another holder keeps it
+/// (a later command repeats it).
 pub(super) struct UndoRecorder {
     store: UndoStore,
     stacks: UndoStacks,
     active: Option<(UndoPlan, RepoSnapshot)>,
+    /// A new label for the paused operation's entry, applied when it is recorded.
+    pending_label: Option<String>,
+    lock: StateLock,
+    logged_busy: bool,
+    logged_unavailable: bool,
 }
 
 impl UndoRecorder {
@@ -238,16 +255,57 @@ impl UndoRecorder {
             store,
             stacks,
             active: None,
+            pending_label: None,
+            lock: StateLock::open(repo),
+            logged_busy: false,
+            logged_unavailable: false,
         }
     }
 
+    /// Makes the next write exclusive: with the caller's guard, or the lock taken within `wait`
+    /// (returned, so the caller keeps it for the write), then a forced reload. `None` (logged
+    /// once) while another holder keeps the lock; `Some(None)` too when locks don't work here,
+    /// which carries on unlocked as before the lock existed.
+    fn exclusive(
+        &mut self,
+        guard: Option<&StateGuard>,
+        wait: Duration,
+    ) -> Option<Option<StateGuard>> {
+        let own = if guard.is_some() {
+            None
+        } else {
+            match self.lock.acquire(wait) {
+                Acquire::Held(guard) => Some(guard),
+                Acquire::Busy => {
+                    if !self.logged_busy {
+                        self.logged_busy = true;
+                        eprintln!(
+                            "browsitory: undo history is locked by another window; not changing \
+                             it now"
+                        );
+                    }
+                    return None;
+                }
+                Acquire::Unavailable(error) => {
+                    if !self.logged_unavailable {
+                        self.logged_unavailable = true;
+                        eprintln!("browsitory: undo history lock unavailable: {error}");
+                    }
+                    None
+                }
+            }
+        };
+        self.store.reload(&mut self.stacks);
+        Some(own)
+    }
+
     /// Renames the entry being recorded (the running command's, or the paused operation's).
-    /// A renamed pending entry is saved by the `finish` that follows the command.
+    /// A renamed pending entry gets its new label when the `finish` that follows records it.
     pub fn relabel(&mut self, label: String) {
         if let Some((plan, _)) = self.active.as_mut() {
             plan.label = label;
-        } else if let Some(pending) = self.stacks.pending.as_mut() {
-            pending.label = label;
+        } else {
+            self.pending_label = Some(label);
         }
     }
 
@@ -255,19 +313,39 @@ impl UndoRecorder {
         self.stacks.pending.is_some()
     }
 
+    fn stale(&self, marker: Option<&str>) -> bool {
+        self.stacks
+            .pending
+            .as_ref()
+            .is_some_and(|pending| Some(pending.operation.as_str()) != marker)
+    }
+
     /// Runs before every command with the marker of the operation in progress (`None`: none).
     /// A pending entry whose operation is no longer the one in progress ended outside the
     /// worker (e.g. `git merge --abort` in a terminal, maybe while the app was closed, maybe
     /// followed by another operation): whether it was finished or abandoned is unknowable, so
-    /// it's dropped rather than recorded with whatever comes next.
-    pub fn settle(&mut self, repo: &Repository, marker: Option<&str>) {
-        self.store.reload_if_changed(&mut self.stacks);
-        let stale = self
-            .stacks
-            .pending
-            .as_ref()
-            .is_some_and(|pending| Some(pending.operation.as_str()) != marker);
-        if stale {
+    /// it's dropped rather than recorded with whatever comes next. The drop is decided again
+    /// under the lock: while another holder keeps it, that holder may be about to record the
+    /// entry (its command ended the operation), so it is left alone.
+    pub fn settle(
+        &mut self,
+        repo: &Repository,
+        guard: Option<&StateGuard>,
+        marker: impl Fn() -> Option<String>,
+    ) {
+        if guard.is_some() {
+            // `begin` runs next and decides from what's stored.
+            self.store.reload(&mut self.stacks);
+        } else {
+            self.store.reload_if_changed(&mut self.stacks);
+        }
+        if !self.stale(marker().as_deref()) {
+            return;
+        }
+        let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
+            return;
+        };
+        if self.stale(marker().as_deref()) {
             self.stacks.pending = None;
             self.persist(repo);
         }
@@ -295,13 +373,24 @@ impl UndoRecorder {
     /// makes its entry pending (saved). `aborted` is true when the command was an abort (merge,
     /// rebase or sequence): a pending operation it ends is dropped rather than recorded — the
     /// user backed out of it.
-    pub fn finish(&mut self, repo: &Repository, marker: Option<&str>, aborted: bool) {
+    pub fn finish(
+        &mut self,
+        repo: &Repository,
+        guard: Option<&StateGuard>,
+        marker: impl Fn() -> Option<String>,
+        aborted: bool,
+    ) {
+        let relabel = self.pending_label.take();
         if let Some((plan, before)) = self.active.take() {
-            if let Some(operation) = marker {
+            let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
+                return;
+            };
+            if let Some(operation) = marker() {
+                // Added to the freshly loaded stacks, so another writer's entries survive.
                 self.stacks.pending = Some(PendingEntry {
                     label: plan.label,
                     before,
-                    operation: operation.to_string(),
+                    operation,
                 });
                 self.persist(repo);
                 return;
@@ -309,28 +398,33 @@ impl UndoRecorder {
             self.record(repo, plan.label, plan.scope, before, false);
             return;
         }
-        if marker.is_some() {
+        if marker().is_some() {
             return;
         }
         // Another process sharing `undo.json` may have recorded (or dropped) it already.
         self.store.reload_if_changed(&mut self.stacks);
+        if self.stacks.pending.is_none() {
+            return;
+        }
+        let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
+            return;
+        };
+        if marker().is_some() {
+            return;
+        }
         if let Some(pending) = self.stacks.pending.take() {
             if aborted {
                 self.persist(repo);
             } else {
-                self.record(
-                    repo,
-                    pending.label,
-                    SnapshotScope::Full,
-                    pending.before,
-                    true,
-                );
+                let label = relabel.unwrap_or(pending.label);
+                self.record(repo, label, SnapshotScope::Full, pending.before, true);
             }
         }
     }
 
     /// Pushes `label` (before → now) onto the undo stack. `ends_pending` when it records the
     /// paused operation's entry, which is then gone from `undo.json` too, recorded or not.
+    /// The caller holds the lock (or locks are unavailable) and has just reloaded.
     fn record(
         &mut self,
         repo: &Repository,
@@ -339,7 +433,6 @@ impl UndoRecorder {
         before: RepoSnapshot,
         ends_pending: bool,
     ) {
-        self.store.reload_if_changed(&mut self.stacks);
         if ends_pending {
             self.stacks.pending = None;
         }
@@ -379,22 +472,37 @@ impl UndoRecorder {
         }
     }
 
-    pub fn undo(&mut self, repo: &Repository, marker: Option<&str>) -> Result<UndoOutcome, String> {
-        self.step(repo, marker.is_some(), Direction::Undo)
+    /// Restores the last entry's "before". Under the caller's guard, or the lock taken within
+    /// `LOCK_WAIT`; `UNDO_BUSY` (nothing restored) while another holder keeps it.
+    pub fn undo(
+        &mut self,
+        repo: &Repository,
+        guard: Option<&StateGuard>,
+        marker: impl Fn() -> Option<String>,
+    ) -> Result<UndoOutcome, String> {
+        self.step(repo, guard, marker, Direction::Undo)
     }
 
-    pub fn redo(&mut self, repo: &Repository, marker: Option<&str>) -> Result<UndoOutcome, String> {
-        self.step(repo, marker.is_some(), Direction::Redo)
+    pub fn redo(
+        &mut self,
+        repo: &Repository,
+        guard: Option<&StateGuard>,
+        marker: impl Fn() -> Option<String>,
+    ) -> Result<UndoOutcome, String> {
+        self.step(repo, guard, marker, Direction::Redo)
     }
 
     fn step(
         &mut self,
         repo: &Repository,
-        in_progress: bool,
+        guard: Option<&StateGuard>,
+        marker: impl Fn() -> Option<String>,
         direction: Direction,
     ) -> Result<UndoOutcome, String> {
-        self.store.reload_if_changed(&mut self.stacks);
-        if in_progress || self.stacks.pending.is_some() {
+        let Some(_exclusive) = self.exclusive(guard, LOCK_WAIT) else {
+            return Err(UNDO_BUSY.to_string());
+        };
+        if marker().is_some() || self.stacks.pending.is_some() {
             return Ok(UndoOutcome::OperationInProgress);
         }
         let (source, verb) = match direction {
@@ -591,14 +699,139 @@ mod tests {
         };
         // A merge stops on conflicts...
         recorder.begin(&repo, plan("Merge feature"), None);
-        recorder.finish(&repo, Some("merge a b"), false);
+        recorder.finish(&repo, None, || Some("merge a b".into()), false);
         assert!(recorder.has_pending());
         // ...and is aborted in a terminal. The next command sees nothing in progress.
-        recorder.settle(&repo, None);
+        recorder.settle(&repo, None, || None);
         recorder.begin(&repo, plan("Add b.txt"), None);
         std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
-        recorder.finish(&repo, None, false);
+        recorder.finish(&repo, None, || None, false);
         assert_eq!(recorder.state().undo, Some("Add b.txt".into()));
+    }
+
+    fn plan(label: &str) -> UndoPlan {
+        UndoPlan {
+            label: label.into(),
+            scope: SnapshotScope::Full,
+        }
+    }
+
+    fn hold(repo: &Repository) -> super::super::state_lock::StateGuard {
+        match super::super::state_lock::StateLock::open(repo).try_acquire() {
+            super::super::state_lock::Acquire::Held(guard) => guard,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Two recorders on one repository stand for two processes (#172).
+    fn two_recorders() -> (tempfile::TempDir, Repository, UndoRecorder, UndoRecorder) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let a = UndoRecorder::open(&repo);
+        let b = UndoRecorder::open(&repo);
+        (dir, repo, a, b)
+    }
+
+    /// Runs one recordable "command" in `recorder` that writes `name`.
+    fn record_write(recorder: &mut UndoRecorder, repo: &Repository, name: &str) {
+        recorder.settle(repo, None, || None);
+        recorder.begin(repo, plan(name), None);
+        std::fs::write(repo.workdir().unwrap().join(name), name).unwrap();
+        recorder.finish(repo, None, || None, false);
+    }
+
+    fn stored_pending(repo: &Repository) -> Option<String> {
+        UndoStore::open(repo).1.pending.map(|pending| pending.label)
+    }
+
+    #[test]
+    fn settle_keeps_a_pending_entry_while_another_holder_has_the_lock() {
+        let (dir, repo, mut a, mut b) = two_recorders();
+        a.begin(&repo, plan("Merge X"), None);
+        a.finish(&repo, None, || Some("merge X".into()), false);
+        assert_eq!(stored_pending(&repo), Some("Merge X".into()));
+
+        let guard = hold(&repo);
+        // The operation looks ended to B (A cleared its state but hasn't recorded yet).
+        b.settle(&repo, None, || None);
+        drop(guard);
+        assert_eq!(stored_pending(&repo), Some("Merge X".into()));
+
+        std::fs::write(dir.path().join("merged.txt"), "m").unwrap();
+        a.finish(&repo, None, || None, false);
+        assert_eq!(a.state().undo, Some("Merge X".into()));
+        assert_eq!(b.state().undo, Some("Merge X".into()));
+        assert_eq!(stored_pending(&repo), None);
+    }
+
+    #[test]
+    fn settle_drops_a_stale_pending_entry_when_the_lock_is_free() {
+        let (_dir, repo, mut a, mut b) = two_recorders();
+        a.begin(&repo, plan("Merge X"), None);
+        a.finish(&repo, None, || Some("merge X".into()), false);
+        b.settle(&repo, None, || None);
+        assert_eq!(stored_pending(&repo), None);
+    }
+
+    #[test]
+    fn finish_reloads_before_adding_a_pending_entry() {
+        let (_dir, repo, mut a, mut b) = two_recorders();
+        record_write(&mut b, &repo, "B1");
+        // A loaded before B saved, and starts a merge that pauses.
+        a.begin(&repo, plan("Merge X"), None);
+        a.finish(&repo, None, || Some("merge X".into()), false);
+        let (_, stored) = UndoStore::open(&repo);
+        assert_eq!(
+            stored
+                .undo
+                .iter()
+                .map(|e| e.label.as_str())
+                .collect::<Vec<_>>(),
+            ["B1"]
+        );
+        assert_eq!(stored.pending.map(|p| p.label), Some("Merge X".into()));
+    }
+
+    #[test]
+    fn recording_in_turn_keeps_both_entries() {
+        let (_dir, repo, mut a, mut b) = two_recorders();
+        record_write(&mut a, &repo, "A1");
+        record_write(&mut b, &repo, "B1");
+        record_write(&mut a, &repo, "A2");
+        for recorder in [&mut a, &mut b] {
+            recorder.store.reload(&mut recorder.stacks);
+            assert_eq!(
+                recorder
+                    .stacks
+                    .undo
+                    .iter()
+                    .map(|e| e.label.as_str())
+                    .collect::<Vec<_>>(),
+                ["A1", "B1", "A2"]
+            );
+        }
+    }
+
+    #[test]
+    fn undo_reports_busy_while_the_lock_stays_held() {
+        let (dir, repo, mut a, _b) = two_recorders();
+        record_write(&mut a, &repo, "A1");
+        let _guard = hold(&repo);
+        let start = std::time::Instant::now();
+        assert_eq!(a.undo(&repo, None, || None), Err(UNDO_BUSY.to_string()));
+        assert!(start.elapsed() >= super::super::state_lock::LOCK_WAIT);
+        assert_eq!(a.redo(&repo, None, || None), Err(UNDO_BUSY.to_string()));
+        assert!(dir.path().join("A1").exists());
+        assert_eq!(a.state().undo, Some("A1".into()));
+    }
+
+    #[test]
+    fn undo_busy_copy_is_exact() {
+        assert_eq!(
+            UNDO_BUSY,
+            "Another Browsitory window is changing this repository's undo history. Try again \
+             in a moment."
+        );
     }
 
     #[test]
@@ -627,13 +860,13 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
         index.add_path(std::path::Path::new("a.txt")).unwrap();
         index.write().unwrap();
-        recorder.finish(&repo, None, false);
+        recorder.finish(&repo, None, || None, false);
         let staged = recorder.stacks.undo.last().unwrap();
         assert!(staged.before.refs.is_empty() && staged.after.refs.is_empty());
 
         recorder.begin(&repo, plan("Create branch x"), None);
         repo.branch("x", &head, false).unwrap();
-        recorder.finish(&repo, None, false);
+        recorder.finish(&repo, None, || None, false);
         let created = recorder.stacks.undo.last().unwrap();
         assert!(created.before.refs.is_empty());
         assert_eq!(
@@ -648,7 +881,7 @@ mod tests {
 
         let mut reopened = UndoRecorder::open(&repo);
         assert_eq!(
-            reopened.undo(&repo, None),
+            reopened.undo(&repo, None, || None),
             Ok(UndoOutcome::Done {
                 label: "Create branch x".into()
             })
@@ -1043,7 +1276,7 @@ mod tests {
         recorder.begin(&repo, plan_for(&command).unwrap(), None);
         std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
         relabel_rebase_start(&mut recorder, &repo, ONTO, &Err("Signing failed".into()));
-        recorder.finish(&repo, None, false);
+        recorder.finish(&repo, None, || None, false);
         assert_eq!(
             recorder.state().undo,
             Some("Rebase onto 707e824 failed (rolled back)".into())
@@ -1057,7 +1290,7 @@ mod tests {
             ONTO,
             &Ok(git_core::rebase::RebaseStepResult::Done),
         );
-        recorder.finish(&repo, None, false);
+        recorder.finish(&repo, None, || None, false);
         assert_eq!(recorder.state().undo, Some("Rebase onto 707e824".into()));
     }
 
