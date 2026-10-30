@@ -792,9 +792,8 @@ impl Worker {
                 }
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
-                let rebased_branch = probe!().rebased_branch(&repo);
-                if rebased_branch.is_some() || sequence_store.load(&repo).is_some() {
-                    command = gate::gate_during_operation(command, rebased_branch.as_deref());
+                if let Some(scope) = probe!().gate_scope(&repo) {
+                    command = gate::gate_during_operation(command, &scope);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -2614,6 +2613,89 @@ mod tests {
         assert!(!sequence_file(&repo).exists());
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    /// A cherry-pick sequence of `side_commits_with_a_conflict` stopped on its conflict (#171).
+    /// Returns the branch it runs on (short name).
+    fn paused_sequence() -> (TempDir, Repository, Worker, super::WorkerHandle, String) {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            handle.cherry_pick_many(ids).unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        (dir, repo, worker, handle, branch)
+    }
+
+    fn in_progress() -> String {
+        git_core::pick::PickError::OperationInProgress.to_string()
+    }
+
+    #[test]
+    fn renaming_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
+        let (_dir, repo, _worker, handle, branch) = paused_sequence();
+        assert_eq!(
+            handle.rename_branch(branch.clone(), "other".into()),
+            Err(in_progress())
+        );
+        assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
+        assert_eq!(
+            handle.abort_sequence().unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+    }
+
+    #[test]
+    fn deleting_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
+        let (_dir, repo, _worker, handle, branch) = paused_sequence();
+        // Move HEAD off the branch (as `git switch` in a terminal), so libgit2's own refusal to
+        // delete the current branch doesn't hide the gate.
+        repo.cleanup_state().unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        assert_eq!(
+            handle.delete_branch(branch.clone(), true),
+            Err(in_progress())
+        );
+        assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
+    }
+
+    #[test]
+    fn adding_a_worktree_on_the_sequence_branch_is_refused() {
+        let (dir, _repo, _worker, handle, branch) = paused_sequence();
+        let path = dir.path().with_extension("wt");
+        assert_eq!(
+            handle.create_worktree("wt".into(), path.clone(), branch, None),
+            Err(in_progress())
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stash_save_is_refused_while_a_sequence_is_paused() {
+        let (dir, repo, _worker, handle, _branch) = paused_sequence();
+        write_file(dir.path(), "b.txt", "edited\n");
+        assert_eq!(
+            handle.save_stash(git_core::stash::StashOptions::default()),
+            Err(in_progress())
+        );
+        assert!(repo.find_reference("refs/stash").is_err());
+        assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+    }
+
+    #[test]
+    fn other_branches_stay_manageable_during_a_paused_sequence() {
+        let (_dir, repo, _worker, handle, _branch) = paused_sequence();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("spare", &head, false).unwrap();
+        handle
+            .rename_branch("spare".into(), "spare2".into())
+            .unwrap();
+        handle.delete_branch("spare2".into(), true).unwrap();
+        assert!(repo.find_branch("spare2", git2::BranchType::Local).is_err());
     }
 
     #[test]
