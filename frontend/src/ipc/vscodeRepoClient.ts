@@ -441,7 +441,8 @@ export const vscodeRepoClient: RepoClient = {
   cherryPickMany: (repoPath: string, commitIds: string[]) =>
     call<SequenceOutcome>("cherry_pick_many", { repoPath, commitIds }),
   revertMany: (repoPath: string, commitIds: string[]) => call<SequenceOutcome>("revert_many", { repoPath, commitIds }),
-  continueSequence: (repoPath: string) => call<SequenceOutcome>("continue_sequence", { repoPath }),
+  continueSequence: (repoPath: string, noVerify?: boolean) =>
+    call<SequenceOutcome>("continue_sequence", { repoPath, noVerify: noVerify ?? false }),
   abortSequence: (repoPath: string) => call<SequenceAbort>("abort_sequence", { repoPath }),
   resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
     call<void>("resolve_whole_file", { repoPath, path, side }),

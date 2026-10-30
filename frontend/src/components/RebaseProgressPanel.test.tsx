@@ -103,4 +103,25 @@ describe("RebaseProgressPanel", () => {
     expect(onAbort).toHaveBeenCalled();
     expect(screen.queryByText("Rebase in progress")).toBeNull();
   });
+
+  it("shows the running hook with a Cancel button that calls onCancel", () => {
+    const onCancel = vi.fn();
+    render(
+      <RebaseProgressPanel
+        currentStep={2}
+        totalSteps={3}
+        disabled={false}
+        onContinue={() => {}}
+        onAbort={() => {}}
+        title="Cherry-pick in progress"
+        continueLabel="Continue cherry-pick"
+        abortLabel="Abort cherry-pick"
+        hooks={{ running: { operationId: "continue-1", hook: "pre-commit" }, onCancel }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Running pre-commit hook…");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
+  });
 });

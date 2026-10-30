@@ -1250,6 +1250,9 @@ function UncommittedDiffPane({
             title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
             continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
             abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
+            hooks={
+              commitHooks === undefined ? undefined : { running: commitHooks.running, onCancel: commitHooks.onCancel }
+            }
           />
         ) : rebaseProgress !== null ? (
           // An interrupted rebase (changed outside Browsitory) can only be aborted.

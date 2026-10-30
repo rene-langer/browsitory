@@ -282,7 +282,7 @@ export interface UseAppStateResult {
   revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
   cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
-  continueSequence(): Promise<SequenceOutcome | null>;
+  continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
   abortSequence(): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
@@ -661,6 +661,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         // pre-amend draft back into the CommitBox.
         return amendCommit(retry.message, true, retry.options);
       }
+      if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
       else if (push.operation === "ForcePushBranch") await forcePushCurrentBranch(push.remoteName, true);
@@ -670,7 +671,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
       return true;
     },
-    [commit, amendCommit, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch],
+    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch],
   );
 
   const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);

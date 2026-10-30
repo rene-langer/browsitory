@@ -195,7 +195,7 @@ function RepoWorkspace({
   // closing the dialog. Falls back to the failed message when the box is empty.
   const retryWithCurrentMessage = useCallback(
     async (retry: HookRetry) => {
-      if (retry.kind === "push") return retryWithoutHooks(retry);
+      if (retry.kind === "push" || retry.kind === "continueSequence") return retryWithoutHooks(retry);
       // In amend mode the box shows HEAD's message and the commit draft is stashed: a commit
       // retry takes the stashed draft, an amend retry only the amend-mode text.
       const draft = getCommitDraft(repoPath);
@@ -430,10 +430,21 @@ function RepoWorkspace({
   // sequence file never outlives the operation (the worker's AbortMerge is the backstop).
   const sequenceKind = appState.state.headInfo.sequence?.kind ?? null;
   const { continueSequence: continueStoredSequence, abortSequence: abortStoredSequence, abortMerge } = appState;
-  const continueSequence = useCallback(() => {
-    if (sequenceKind === null) return;
-    void runPickAction(continueStoredSequence, (outcome) => sequenceToast(sequenceKind, outcome));
-  }, [continueStoredSequence, runPickAction, sequenceKind]);
+  // `noVerify`: the hook dialog's "Continue without hooks". A failing hook resolves `null` (the
+  // dialog and banner show it), so no toast.
+  const runContinueSequence = useCallback(
+    (noVerify: boolean) => {
+      if (sequenceKind === null) return;
+      void runPickAction(
+        () => continueStoredSequence(noVerify),
+        (outcome) => sequenceToast(sequenceKind, outcome),
+      );
+    },
+    [continueStoredSequence, runPickAction, sequenceKind],
+  );
+  // Takes no argument on purpose: it is wired to buttons, whose click event must never be read
+  // as `noVerify`.
+  const continueSequence = useCallback(() => runContinueSequence(false), [runContinueSequence]);
   const abortSequence = useCallback(() => {
     if (sequenceKind === null) return;
     void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
@@ -568,7 +579,9 @@ function RepoWorkspace({
           failure={appState.state.hookFailure}
           onRetry={() => {
             const retry = appState.state.hookFailure!.retry;
-            void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
+            // A Continue's toast comes from its outcome, like a plain Continue's.
+            if (retry.kind === "continueSequence") runContinueSequence(true);
+            else void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
           }}
           onClose={appState.closeHookFailure}
         />

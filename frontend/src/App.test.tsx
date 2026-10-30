@@ -654,6 +654,55 @@ describe("App", () => {
     await waitFor(() => expect(box).toHaveValue(""));
   });
 
+  it("a failing hook on Continue opens the hook dialog and Continue without hooks finishes the sequence", async () => {
+    const continueSequence = vi
+      .fn<RepoClient["continueSequence"]>()
+      .mockResolvedValueOnce({
+        kind: "HookFailed",
+        hook: "pre-commit",
+        output: "lint failed\n",
+        progress: { kind: "CherryPick", currentStep: 2, totalSteps: 3, currentCommit: "c2" },
+      })
+      .mockResolvedValueOnce({ kind: "Completed", applied: 3, skipped: [] });
+    const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 3, currentCommit: "c2" };
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getMergeMessage: async () => "f two",
+      getHeadInfo: async () => ({
+        headId: "abc",
+        detachedAt: null,
+        headPushed: false,
+        operation: "CherryPick",
+        squashMessage: null,
+        commitHooks: ["pre-commit"],
+        sequence,
+        rebase: null,
+      }),
+      continueSequence,
+    });
+    render(<App client={client} />);
+
+    const continueButton = await screen.findByRole("button", { name: "Continue cherry-pick" });
+    await waitFor(() => expect(continueButton).toBeEnabled());
+    fireEvent.click(continueButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    expect(within(dialog).getByLabelText("Hook output")).toHaveTextContent("lint failed");
+    expect(continueSequence).toHaveBeenCalledWith("/repos/a", false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue without hooks" }));
+
+    await waitFor(() => expect(continueSequence).toHaveBeenLastCalledWith("/repos/a", true));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+    expect(await screen.findByText("Cherry-picked 3 commits")).toBeInTheDocument();
+  });
+
   it("commits without hooks with the co-authors the box holds, then clears them", async () => {
     const commit = vi
       .fn<RepoClient["commit"]>()
@@ -1091,7 +1140,7 @@ describe("App", () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
       fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
-      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a"));
+      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a", false));
       expect(await screen.findByText("Cherry-picked 2 commits")).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByRole("status", { name: "Operation status" })).toBeNull());
     });

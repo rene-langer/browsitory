@@ -183,7 +183,9 @@ export interface SequenceProgress {
 /** `skipped`: commits whose changes were already on the branch (their step came out empty). */
 export type SequenceOutcome =
   | { kind: "Completed"; applied: number; skipped: string[] }
-  | { kind: "Conflicted"; files: string[]; progress: SequenceProgress };
+  | { kind: "Conflicted"; files: string[]; progress: SequenceProgress }
+  /** Continue's commit hook `hook` failed: nothing was committed and the step is still paused. */
+  | { kind: "HookFailed"; hook: string; output: string; progress: SequenceProgress };
 /** `rewound: false`: HEAD had moved since the sequence stopped, so it was left where it is. */
 export interface SequenceAbort {
   rewound: boolean;
@@ -662,8 +664,8 @@ export interface RepoClient {
   deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string, noVerify: boolean): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
   /**
-   * Asks the backend to abort the in-flight transfer or hook run `operationId` (commit/amend ids
-   * arrive on `subscribeHookProgress`). Resolves as soon as the
+   * Asks the backend to abort the in-flight transfer or hook run `operationId` (commit/amend/
+   * Continue ids arrive on `subscribeHookProgress`). Resolves as soon as the
    * request is recorded, not when the transfer stops: the cancellation itself arrives as that
    * operation's terminal `subscribeTransferProgress` event with `errorKind: "Cancelled"`.
    * Unknown or already-finished ids are a no-op.
@@ -719,7 +721,12 @@ export interface RepoClient {
   cherryPickMany(repoPath: string, commitIdsOldestFirst: string[]): Promise<SequenceOutcome>;
   /** Like `cherryPickMany`, but reverts, newest-first (as `git revert A..B`). */
   revertMany(repoPath: string, commitIdsOldestFirst: string[]): Promise<SequenceOutcome>;
-  continueSequence(repoPath: string): Promise<SequenceOutcome>;
+  /**
+   * Continues a paused sequence. The step it commits runs the commit hooks unless `noVerify`
+   * (default false); a failing one resolves `HookFailed`. Hook progress arrives on
+   * `subscribeHookProgress`.
+   */
+  continueSequence(repoPath: string, noVerify?: boolean): Promise<SequenceOutcome>;
   abortSequence(repoPath: string): Promise<SequenceAbort>;
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(repoPath: string, commitId: string): Promise<void>;

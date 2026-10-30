@@ -16,7 +16,11 @@ export interface HistoryActions {
   /** Ids oldest-first (graph order reversed); a conflict pauses the sequence. */
   cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
-  continueSequence(): Promise<SequenceOutcome | null>;
+  /**
+   * The step it commits runs the commit hooks unless `noVerify`. A failing hook opens the hook
+   * dialog ("Continue without hooks") and resolves `null`, like a failed commit.
+   */
+  continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
   abortSequence(): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
@@ -66,8 +70,28 @@ export function useHistoryActions(
     [client, withOutcome, repoPath],
   );
   const continueSequence = useCallback(
-    () => withOutcome(() => client.continueSequence(repoPath)),
-    [client, withOutcome, repoPath],
+    async (noVerify = false) => {
+      const outcome = await withOutcome(async () => {
+        const outcome = await client.continueSequence(repoPath, noVerify);
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: {
+              hook: outcome.hook,
+              output: outcome.output,
+              retry: { kind: "continueSequence" },
+              dialogOpen: true,
+            },
+          }));
+          throw new Error(hookFailedMessage(outcome.hook));
+        }
+        setState((prev) => ({ ...prev, hookFailure: null }));
+        return outcome;
+      });
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return outcome;
+    },
+    [client, withOutcome, repoPath, setState],
   );
   const abortSequence = useCallback(
     () => withOutcome(() => client.abortSequence(repoPath)),
