@@ -101,11 +101,21 @@ describe("Browsitory VSCode extension git hooks", () => {
       await webview.clickByText("button", "Stage all");
       await webview.fill('textarea[aria-label="Commit message"]', summary);
       await webview.clickByText("button", "Commit");
-      await webview.waitForText("p", "Running pre-commit hook", 15000);
+      await webview.waitForText('p[role="status"]', "Running pre-commit hook", 15000);
       const cancelledAt = Date.now();
-      // `cancel_transfer` over the sidecar.
-      await webview.clickByText("button", "Cancel");
-      await webview.waitForText("*", "The pre-commit hook was cancelled.", 20000);
+      // `cancel_transfer` over the sidecar, through the running hook's own Cancel button (other
+      // panels have "Cancel" buttons too).
+      await webview.click('p[role="status"] button');
+      // The hook sleeps 60 s: its status line going away within 20 s means Cancel stopped it.
+      // (The "was cancelled" banner is not asserted: a background refresh, such as the
+      // extension's file watcher firing, clears the error banner, so it may be gone already.)
+      const deadline = Date.now() + 20000;
+      while ((await webview.bodyText()).includes("Running pre-commit hook")) {
+        if (Date.now() > deadline) {
+          throw new Error(`the hook kept running after Cancel\npage text:\n${await webview.bodyText()}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
       if (Date.now() - cancelledAt > 20000) throw new Error("Cancel did not stop the hook in time");
       if (lastSummary() === summary) throw new Error("commit landed despite Cancel");
     } finally {

@@ -182,6 +182,15 @@ Reconciled with the code at 5ce5a38d on 2026-10-30:
     stand-in was a test-local inline `off_runtime`/`RepoWorker`, replaced by the real ones.
     `clone_repo` maps `off_runtime`'s error to its existing `CloneErrorDto { kind: "Io" }`.
   - Z1: the `post-merge` timing fix has its own CHANGELOG bullet.
+  - E1: the Cancel flow does not assert the "The pre-commit hook was cancelled." banner. A
+    successful `refresh()` clears `state.error`, and in VSCode a file-watcher refresh can fire
+    right after the cancelled commit, so the banner may already be gone (it failed that way on
+    CI and locally). The spec asserts the running-hook line goes away within 20 s (the hook
+    sleeps 60 s) and that nothing was committed. It clicks the status line's own button, since
+    other panels have "Cancel" buttons too.
+  - Review fixes: a refused `StartMerge` keeps the clean-merge memory; the worker's
+    `GetHeadInfo` lists only the pre-hook the merge commit will run; a `pre-commit` that
+    empties the continued step skips it; `persist`'s save-failure message names a failed hook.
 
 ---
 

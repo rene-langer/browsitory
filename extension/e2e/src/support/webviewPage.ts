@@ -156,6 +156,8 @@ export interface WebviewSession {
   clickBySelector(selector: string, index?: number): Promise<void>;
   contextMenuByText(tag: string, text: string): Promise<void>;
   waitForText(tag: string, text: string, timeoutMs?: number): Promise<void>;
+  /** The page's visible text, for failure messages. */
+  bodyText(): Promise<string>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
   close(): Promise<void>;
 }
@@ -287,6 +289,11 @@ class CdpWebviewSession implements WebviewSession {
       await sleep(POLL_INTERVAL_MS);
     }
     throw new Error(`no <${tag}> containing "${text}" found within ${timeoutMs}ms`);
+  }
+
+  /** The page's visible text, for failure messages. */
+  async bodyText(): Promise<string> {
+    return this.evaluate<string>("document.body ? document.body.innerText : ''");
   }
 
   async close(): Promise<void> {
