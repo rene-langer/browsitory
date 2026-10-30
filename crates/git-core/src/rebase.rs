@@ -35,6 +35,58 @@ pub enum RebaseError {
     BranchMoved { branch: String },
     #[error("{branch} no longer exists. Abort the rebase.")]
     BranchMissing { branch: String },
+    /// Tracked local changes, sorted by path (#170). A rebase's rollback and Abort check out
+    /// the branch with force, so it only starts from a clean tracked tree, as `git rebase` does.
+    #[error("{}", local_changes_message(paths))]
+    LocalChanges { paths: Vec<String> },
+}
+
+/// The refusal copy for [`RebaseError::LocalChanges`] (decision D2-A): the first path, and how
+/// many others there are.
+fn local_changes_message(paths: &[String]) -> String {
+    const ADVICE: &str = "Commit or stash them before starting a rebase.";
+    let first = paths.first().map(String::as_str).unwrap_or("");
+    match paths.len() {
+        0 | 1 => format!("You have uncommitted changes to {first}. {ADVICE}"),
+        2 => format!("You have uncommitted changes to {first} and 1 other file. {ADVICE}"),
+        n => format!(
+            "You have uncommitted changes to {first} and {} other files. {ADVICE}",
+            n - 1
+        ),
+    }
+}
+
+/// Tracked local changes a rebase would discard on rollback or Abort: any staged change, and
+/// any unstaged change to a tracked file (modified, deleted, type change, conflicted), sorted by
+/// path. Untracked and ignored files are not counted (git doesn't either; onto's checkout
+/// refuses an untracked file in its way). Submodule changes are ignored, as `git rebase`
+/// ignores them.
+fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(false)
+        .include_ignored(false)
+        .exclude_submodules(true)
+        .renames_head_to_index(false);
+    let tracked = git2::Status::INDEX_NEW
+        | git2::Status::INDEX_MODIFIED
+        | git2::Status::INDEX_DELETED
+        | git2::Status::INDEX_RENAMED
+        | git2::Status::INDEX_TYPECHANGE
+        | git2::Status::WT_MODIFIED
+        | git2::Status::WT_DELETED
+        | git2::Status::WT_TYPECHANGE
+        | git2::Status::WT_RENAMED
+        | git2::Status::CONFLICTED;
+    let mut paths: Vec<String> = repo
+        .statuses(Some(&mut options))?
+        .iter()
+        .filter(|entry| entry.status().intersects(tracked))
+        .map(|entry| String::from_utf8_lossy(entry.path_bytes()).into_owned())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +276,13 @@ pub fn start_rebase(
             "cannot start a rebase while HEAD is already detached — check out a branch first"
                 .to_string(),
         ));
+    }
+
+    // Before anything is written: the rollback below and Abort force-check-out the branch, so
+    // they may only ever discard what the rebase itself wrote (#170).
+    let changes = local_changes(repo)?;
+    if !changes.is_empty() {
+        return Err(RebaseError::LocalChanges { paths: changes });
     }
 
     let onto_commit = repo.revparse_single(onto)?.peel_to_commit()?;
