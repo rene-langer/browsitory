@@ -2045,3 +2045,86 @@ fn a_failed_first_step_on_a_clean_tree_rolls_back_to_the_branch() {
     assert!(repo.statuses(Some(&mut options)).unwrap().is_empty());
     assert!(!dir.path().join("h.txt").exists());
 }
+
+/// Marks `path` skip-worktree in the index, as `git update-index --skip-worktree` does.
+fn skip_worktree(repo: &git2::Repository, path: &str) {
+    let mut index = repo.index().unwrap();
+    let mut entry = index.get_path(std::path::Path::new(path), 0).unwrap();
+    entry.flags |= 0x4000; // extended flags follow
+    entry.flags_extended |= git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    index.add(&entry).unwrap();
+    index.write().unwrap();
+}
+
+/// The verifier's repro (#170 follow-up F1): libgit2's status hides skip-worktree entries, and
+/// Abort's forced checkout then overwrote the edit. git keeps it.
+#[test]
+fn start_refuses_an_edited_skip_worktree_file() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "precious\n");
+    let edit = RebasePlanEntry {
+        commit_id: g.clone(),
+        action: RebaseAction::Edit,
+        combined_message: None,
+    };
+    match git_core::rebase::start_rebase(&repo, &onto, vec![edit]) {
+        Ok((state, _)) => {
+            git_core::rebase::abort_rebase(&repo, &state).unwrap();
+            panic!(
+                "rebase started; after Abort f.txt = {:?}",
+                std::fs::read_to_string(dir.path().join("f.txt")).unwrap()
+            );
+        }
+        Err(RebaseError::LocalChanges { paths }) => assert_eq!(paths, ["f.txt"]),
+        Err(other) => panic!("{other:?}"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "precious\n"
+    );
+}
+
+#[test]
+fn an_unchanged_or_missing_skip_worktree_file_does_not_block_a_rebase() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    skip_worktree(&repo, "shared.txt");
+    // A sparse checkout leaves skip-worktree files out of the work tree.
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+}
+
+#[test]
+fn a_skip_worktree_file_differing_only_by_line_endings_does_not_block_a_rebase() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "f0\r\n");
+    let (_, result) = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_failed_first_step_never_touches_an_edited_skip_worktree_file() {
+    let (dir, repo, onto, g) = local_changes_fixture();
+    skip_worktree(&repo, "f.txt");
+    write_file(dir.path(), "f.txt", "precious\n");
+    let mut config = repo.config().unwrap();
+    config.set_bool("commit.gpgSign", true).unwrap();
+    config.set_str("gpg.program", "/bin/false").unwrap();
+    let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
+    assert!(
+        matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["f.txt"]),
+        "{result:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "precious\n"
+    );
+}

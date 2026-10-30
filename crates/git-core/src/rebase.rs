@@ -60,7 +60,10 @@ fn local_changes_message(paths: &[String]) -> String {
 /// any unstaged change to a tracked file (modified, deleted, type change, conflicted), sorted by
 /// path. Untracked and ignored files are not counted (git doesn't either; onto's checkout
 /// refuses an untracked file in its way). Submodule changes are ignored, as `git rebase`
-/// ignores them.
+/// ignores them. A skip-worktree file counts when it exists and its content differs from the
+/// index ([`edited_skip_worktree`]); libgit2's status hides that edit but would report a
+/// sparse checkout's missing file, which git (and a forced checkout, which recreates it) don't
+/// mind.
 fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
     let mut options = git2::StatusOptions::new();
     options
@@ -68,25 +71,89 @@ fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
         .include_ignored(false)
         .exclude_submodules(true)
         .renames_head_to_index(false);
-    let tracked = git2::Status::INDEX_NEW
+    let staged = git2::Status::INDEX_NEW
         | git2::Status::INDEX_MODIFIED
         | git2::Status::INDEX_DELETED
         | git2::Status::INDEX_RENAMED
         | git2::Status::INDEX_TYPECHANGE
-        | git2::Status::WT_MODIFIED
+        | git2::Status::CONFLICTED;
+    let unstaged = git2::Status::WT_MODIFIED
         | git2::Status::WT_DELETED
         | git2::Status::WT_TYPECHANGE
-        | git2::Status::WT_RENAMED
-        | git2::Status::CONFLICTED;
-    let mut paths: Vec<String> = repo
-        .statuses(Some(&mut options))?
-        .iter()
-        .filter(|entry| entry.status().intersects(tracked))
-        .map(|entry| String::from_utf8_lossy(entry.path_bytes()).into_owned())
-        .collect();
+        | git2::Status::WT_RENAMED;
+    let (skip_worktree, mut paths) = edited_skip_worktree(repo)?;
+    paths.extend(
+        repo.statuses(Some(&mut options))?
+            .iter()
+            .filter(|entry| {
+                let path = entry.path_bytes();
+                let tracked = if skip_worktree.contains(path) {
+                    staged
+                } else {
+                    staged | unstaged
+                };
+                entry.status().intersects(tracked)
+            })
+            .map(|entry| String::from_utf8_lossy(entry.path_bytes()).into_owned()),
+    );
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+/// Every skip-worktree path in the index, and those whose file exists with content (after
+/// git's filters, e.g. `core.autocrlf`) other than the index's blob (#170). A file read through
+/// a symlinked folder, or that can't be read, counts as edited.
+fn edited_skip_worktree(
+    repo: &Repository,
+) -> Result<(std::collections::HashSet<Vec<u8>>, Vec<String>), RebaseError> {
+    let mut all = std::collections::HashSet::new();
+    let mut edited = Vec::new();
+    let Some(workdir) = repo.workdir() else {
+        return Ok((all, edited));
+    };
+    let mut index = repo.index()?;
+    index.read(false)?;
+    let skip = git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    let entries: Vec<_> = index
+        .iter()
+        .filter(|entry| entry.flags_extended & skip != 0)
+        .collect();
+    if entries.is_empty() {
+        return Ok((all, edited));
+    }
+    let config = crate::undo::worktree_config(repo)
+        .map_err(|error| git2::Error::from_str(&error.to_string()))?;
+    for entry in entries {
+        all.insert(entry.path.clone());
+        if entry.mode == 0o160000 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let changed =
+            match crate::undo::read_worktree_file(workdir, &path, &config, Some(entry.mode)) {
+                Ok(None) => false,
+                Ok(Some((bytes, mode))) => {
+                    let raw = git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)?;
+                    if raw == entry.id {
+                        false
+                    } else if mode == crate::undo::MODE_LINK {
+                        true
+                    } else {
+                        // Apply git's filters as status would (`core.autocrlf`, attributes); this
+                        // writes a loose object, only when the raw bytes differ.
+                        let mut writer = repo.blob_writer(Some(std::path::Path::new(&path)))?;
+                        std::io::Write::write_all(&mut writer, &bytes)?;
+                        writer.commit()? != entry.id
+                    }
+                }
+                Err(_) => true,
+            };
+        if changed {
+            edited.push(path);
+        }
+    }
+    Ok((all, edited))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
