@@ -3,9 +3,9 @@
 //! atomically (temp file + `sync_all` + `rename`, like `undo.json`). A file that is unreadable,
 //! malformed, of another version, or that doesn't describe commits of this repository is
 //! ignored (logged once), never fatal: a corrupt file must not wedge the repository.
+use super::atomic_file::write_atomically;
 use std::cell::RefCell;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 use git2::{Oid, Repository};
@@ -153,17 +153,7 @@ impl SequenceStore {
             .map_err(|error| error.to_string())?;
         let dir = self.file.parent().expect("sequence file has a parent");
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        let temp = dir.join(format!("sequence.json.{}.tmp", std::process::id()));
-        let write = || -> std::io::Result<()> {
-            let mut handle = fs::File::create(&temp)?;
-            handle.write_all(&json)?;
-            handle.sync_all()?;
-            fs::rename(&temp, &self.file)
-        };
-        if let Err(error) = write() {
-            let _ = fs::remove_file(&temp);
-            return Err(error.to_string());
-        }
+        write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
         self.last_warning.replace(None);
         Ok(())
     }

@@ -28,6 +28,7 @@ use crate::pull_requests::{
     CreatePullRequest, ForgeApi, PullRequest, PullRequestList, PullRequestService, ReqwestForgeApi,
 };
 
+mod atomic_file;
 mod branch;
 mod compare;
 mod forge;

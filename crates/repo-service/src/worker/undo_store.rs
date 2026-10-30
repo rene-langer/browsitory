@@ -1,8 +1,8 @@
 //! Persists the undo/redo stacks to `<gitdir>/browsitory/undo.json` and keeps every object they
 //! reference reachable from `refs/browsitory/undo/<worktree-key>` so `git gc` can't prune them.
+use super::atomic_file::write_atomically;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -189,17 +189,7 @@ impl UndoStore {
 
         let dir = self.file.parent().expect("undo file has a parent");
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        let temp = dir.join(format!("undo.json.{}.tmp", std::process::id()));
-        let write = || -> std::io::Result<()> {
-            let mut handle = fs::File::create(&temp)?;
-            handle.write_all(&json)?;
-            handle.sync_all()?;
-            fs::rename(&temp, &self.file)
-        };
-        if let Err(error) = write() {
-            let _ = fs::remove_file(&temp);
-            return Err(error.to_string());
-        }
+        write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
         self.mtime = modified(&self.file);
 
         let empty = stacks.undo.is_empty() && stacks.redo.is_empty() && stacks.pending.is_none();
