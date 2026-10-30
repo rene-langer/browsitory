@@ -88,6 +88,8 @@ export function CommitBox({
   /** Commit hooks: the "Skip hooks" toggle (only when installed) and the running hook's status. */
   hooks?: {
     installed: boolean;
+    /** A merge is staged: its commit may run `pre-merge-commit` instead of `pre-commit`. */
+    merging?: boolean;
     skip: boolean;
     onToggleSkip: (on: boolean) => void;
     running: { operationId: string; hook: string } | null;
@@ -363,7 +365,7 @@ export function CommitBox({
       {hooks?.installed === true && (
         <label
           className={styles.amendToggle}
-          title="Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)"
+          title={`Skip the ${hooks.merging === true ? "pre-merge-commit" : "pre-commit"} and commit-msg hooks for the next commit (--no-verify)`}
         >
           <input type="checkbox" checked={hooks.skip} onChange={(event) => hooks.onToggleSkip(event.target.checked)} />
           Skip hooks

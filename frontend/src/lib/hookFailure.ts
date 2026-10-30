@@ -25,7 +25,7 @@ export interface HookFailure {
 }
 
 /** What `--no-verify` skips; mirrors `git_core::hooks::SKIPPABLE_HOOKS`. */
-export const SKIPPABLE_HOOKS: ReadonlySet<string> = new Set(["pre-commit", "commit-msg", "pre-push"]);
+export const SKIPPABLE_HOOKS: ReadonlySet<string> = new Set(["pre-commit", "pre-merge-commit", "commit-msg", "pre-push"]);
 
 export function hookFailedMessage(hook: string): string {
   return `The ${hook} hook failed.`;

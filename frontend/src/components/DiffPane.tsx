@@ -1284,7 +1284,11 @@ function UncommittedDiffPane({
             hooks={
               commitHooks === undefined
                 ? undefined
-                : { installed: headInfo.commitHooks.length > 0, ...commitHooks }
+                : {
+                    installed: headInfo.commitHooks.length > 0,
+                    merging: headInfo.operation === "Merge",
+                    ...commitHooks,
+                  }
             }
             clearMessage={clearCommitMessage}
             onClearMessageHandled={onCommitMessageCleared}
