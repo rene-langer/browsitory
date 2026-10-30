@@ -805,15 +805,28 @@ impl Worker {
             // Undo bookkeeping is shared with other processes on this repository (#172).
             let state_lock = state_lock::StateLock::open(&repo);
             let (mut logged_busy, mut logged_unavailable) = (false, false);
+            // After a command waited `LOCK_WAIT` in vain, later ones try once until the lock is
+            // taken again, so a long holder in the other window (a pull, a hook, a pinentry
+            // dialog) costs one wait, not one per click (the queue, reads included, is behind it).
+            let mut contended = false;
             for mut command in rx {
                 // A command that can record an entry or end a paused operation holds the lock
                 // from before `settle` until its `finish`, so no other holder ever sees "the
                 // operation ended, but its entry isn't recorded yet". Reads never wait.
                 let mut unrecorded = false;
                 let guard = if undo::locks_state(&command) {
-                    match state_lock.acquire(state_lock::LOCK_WAIT) {
-                        state_lock::Acquire::Held(guard) => Some(guard),
+                    let wait = if contended {
+                        std::time::Duration::ZERO
+                    } else {
+                        state_lock::LOCK_WAIT
+                    };
+                    match state_lock.acquire(wait) {
+                        state_lock::Acquire::Held(guard) => {
+                            contended = false;
+                            Some(guard)
+                        }
                         state_lock::Acquire::Busy => {
+                            contended = true;
                             if undo::reply_busy(&mut command) {
                                 continue;
                             }
@@ -6273,6 +6286,31 @@ mod state_lock_tests {
             .unwrap();
         assert!(status.contains(git2::Status::INDEX_MODIFIED));
         assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
+    fn only_the_first_locked_command_waits_while_the_lock_stays_held() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "edited\n");
+        write_file(dir.path(), "b.txt", "edited\n");
+
+        let guard = hold(&repo);
+        handle.stage_file("a.txt".into()).unwrap();
+        let start = Instant::now();
+        handle.stage_file("b.txt".into()).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(200));
+        drop(guard);
+        // Once the lock is free again, commands wait for it (and record) as usual.
+        handle.unstage_file("b.txt".into()).unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Unstage b.txt".into())
+        );
     }
 
     #[test]

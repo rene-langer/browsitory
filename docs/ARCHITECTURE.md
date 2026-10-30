@@ -211,13 +211,17 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   (reads, fetch, staging, resolving) never wait: `settle`/`finish` take the lock only when about
   to write, and skip the write while it's held (a later command repeats it). The guard is
   dropped before the held replies are released. A locked command that can't get the lock within
-  `LOCK_WAIT` (10 s; a hung holder such as a pinentry dialog in the other app) logs once and runs
-  unrecorded; Undo/Redo instead reply "Another Browsitory window is changing this repository's
+  `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
+  other app) logs once and runs unrecorded, and later locked commands try only once until the
+  lock is taken again, so the worker's queue waits once, not once per click; Undo/Redo instead reply "Another Browsitory window is changing this repository's
   undo history. Try again in a moment." The lock is an OS lock on a handle, so a process that
   exits or is killed, or a worker thread that panics, releases it; the file is never deleted
   (that would let the next opener lock a new inode). Where locks aren't supported (some network
   file systems) the worker logs once and runs unlocked, as before. Each linked worktree has its
-  own lock, like its own `undo.json`. `undo.json`, `sequence.json` and `rebase.json` are written
+  own lock, like its own `undo.json`. After a failed save (e.g. `undo.json` written by a newer
+  version) the in-memory stacks stay authoritative for the session and aren't reloaded. On NFS,
+  Linux emulates `flock` with per-process `fcntl` locks, so only separate processes exclude
+  each other there. `undo.json`, `sequence.json` and `rebase.json` are written
   by `atomic_file::write_atomically` (temp file `<name>.<pid>.<n>.tmp`, unique per write in a
   process, `sync_all`, rename).
 - **Storage**: `<gitdir>/browsitory/undo.json` per worktree (50 entries); objects pinned by

@@ -167,6 +167,13 @@ Where the code won over the plan, or the plan was extended:
   code; they carry `#[cfg_attr(not(target_os = "linux"), allow(dead_code))]`. The `audit` job
   failed on main too (RUSTSEC-2026-0418, libz-sys 1.1.29, published 2026-10-28); a separate
   commit bumps the lockfile to libz-sys 1.1.31 (same license, no new dependency).
+- **Review fixes** (independent review of `main...HEAD`):
+  - the forced reloads no longer replace the in-memory stacks after a failed save (`unsaved`),
+    which kept undo working for the session on main (`a_failed_save_keeps_the_session_history`);
+  - `settle` clears a relabel left over from a command that didn't `finish`, so it can't rename
+    another window's pending entry (`a_relabel_with_nothing_pending_never_labels_a_later_entry`);
+  - after one `LOCK_WAIT` timeout, later locked commands try once until the lock is taken again
+    (`only_the_first_locked_command_waits_while_the_lock_stays_held`).
 
 ---
 

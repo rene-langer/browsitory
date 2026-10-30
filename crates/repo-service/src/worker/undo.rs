@@ -275,6 +275,9 @@ pub(super) struct UndoRecorder {
     lock: StateLock,
     logged_busy: bool,
     logged_unavailable: bool,
+    /// The last save failed (e.g. `undo.json` was written by a newer version): the in-memory
+    /// stacks are authoritative for the session, so they aren't replaced by a reload.
+    unsaved: bool,
 }
 
 impl UndoRecorder {
@@ -288,6 +291,7 @@ impl UndoRecorder {
             lock: StateLock::open(repo),
             logged_busy: false,
             logged_unavailable: false,
+            unsaved: false,
         }
     }
 
@@ -324,8 +328,15 @@ impl UndoRecorder {
                 }
             }
         };
-        self.store.reload(&mut self.stacks);
+        self.reload();
         Some(own)
+    }
+
+    /// A forced reload, unless the last save failed (see `unsaved`).
+    fn reload(&mut self) {
+        if !self.unsaved {
+            self.store.reload(&mut self.stacks);
+        }
     }
 
     /// Renames the entry being recorded (the running command's, or the paused operation's).
@@ -362,9 +373,12 @@ impl UndoRecorder {
         guard: Option<&StateGuard>,
         marker: impl Fn() -> Option<String>,
     ) {
+        // A relabel is meant for the `finish` of the command that made it; one left over from a
+        // command that didn't track (nothing was pending) must not rename a later entry.
+        self.pending_label = None;
         if guard.is_some() {
             // `begin` runs next and decides from what's stored.
-            self.store.reload(&mut self.stacks);
+            self.reload();
         } else {
             self.store.reload_if_changed(&mut self.stacks);
         }
@@ -572,8 +586,12 @@ impl UndoRecorder {
     /// A failed save (e.g. the history file was written by a newer version) never fails the
     /// user's command: the in-memory stacks stay authoritative for this session.
     fn persist(&mut self, repo: &Repository) {
-        if let Err(error) = self.store.save(repo, &self.stacks) {
-            eprintln!("browsitory: could not save undo history: {error}");
+        match self.store.save(repo, &self.stacks) {
+            Ok(()) => self.unsaved = false,
+            Err(error) => {
+                self.unsaved = true;
+                eprintln!("browsitory: could not save undo history: {error}");
+            }
         }
     }
 }
@@ -852,6 +870,44 @@ mod tests {
         assert_eq!(a.redo(&repo, None, || None), Err(UNDO_BUSY.to_string()));
         assert!(dir.path().join("A1").exists());
         assert_eq!(a.state().undo, Some("A1".into()));
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_session_history() {
+        // Written by a newer version: never overwritten, so every save fails. The in-memory
+        // stacks stay authoritative for the session, also under the lock's forced reloads.
+        let (dir, repo, _, _) = two_recorders();
+        std::fs::create_dir_all(repo.path().join("browsitory")).unwrap();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            r#"{"version":99,"undo":[],"redo":[]}"#,
+        )
+        .unwrap();
+        let mut a = UndoRecorder::open(&repo);
+        record_write(&mut a, &repo, "A1");
+        assert_eq!(a.state().undo, Some("A1".into()));
+        assert_eq!(
+            a.undo(&repo, None, || None),
+            Ok(UndoOutcome::Done { label: "A1".into() })
+        );
+        assert!(!dir.path().join("A1").exists());
+    }
+
+    #[test]
+    fn a_relabel_with_nothing_pending_never_labels_a_later_entry() {
+        let (dir, repo, mut a, mut b) = two_recorders();
+        // In A, a sequence completed unrecorded: it relabels, and no `finish` follows.
+        a.settle(&repo, None, || None);
+        a.relabel("Cherry-pick 3 commits".into());
+        // In B, a merge pauses.
+        b.settle(&repo, None, || None);
+        b.begin(&repo, plan("Merge X"), None);
+        b.finish(&repo, None, || Some("merge X".into()), false);
+        // A commits it.
+        a.settle(&repo, None, || Some("merge X".into()));
+        std::fs::write(dir.path().join("m"), "m").unwrap();
+        a.finish(&repo, None, || None, false);
+        assert_eq!(a.state().undo, Some("Merge X".into()));
     }
 
     #[test]
