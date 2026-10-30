@@ -101,7 +101,12 @@ impl RebaseInfo {
 /// stored sequence or rebase is filled in by `repo-service`.
 pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
     use git2::RepositoryState;
-    let commit_hooks = crate::hooks::installed_hooks(repo, &crate::hooks::SKIPPABLE_COMMIT_HOOKS);
+    let mut names = crate::hooks::SKIPPABLE_COMMIT_HOOKS.to_vec();
+    if repo.state() == RepositoryState::Merge {
+        // The commit concluding a clean merge runs it (`commit::CommitHookSet::CleanMerge`).
+        names.push("pre-merge-commit");
+    }
+    let commit_hooks = crate::hooks::installed_hooks(repo, &names);
     let operation = match repo.state() {
         RepositoryState::Merge => Some(OperationKind::Merge),
         RepositoryState::CherryPick | RepositoryState::CherryPickSequence => {
