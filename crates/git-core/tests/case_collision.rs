@@ -359,6 +359,7 @@ fn a_target_adding_a_second_collision_is_refused_even_when_head_holds_one() {
     assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// `parent`'s tree plus the file `name` (= `content`), as a commit (no ref moved).
 fn with_file(repo: &Repository, parent: Oid, name: &str, content: &str) -> Oid {
     let base = repo.find_commit(parent).unwrap().tree().unwrap();
@@ -368,6 +369,7 @@ fn with_file(repo: &Repository, parent: Oid, name: &str, content: &str) -> Oid {
     commit_tree(repo, tree.write().unwrap(), &[parent], name)
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// `parent`'s tree plus a second pair, the link `Z -> /x` and the file `z/x`.
 fn with_second_pair(repo: &Repository, parent: Oid) -> Oid {
     let base = repo.find_commit(parent).unwrap().tree().unwrap();
@@ -383,6 +385,7 @@ fn with_second_pair(repo: &Repository, parent: Oid) -> Oid {
     commit_tree(repo, outer.write().unwrap(), &[parent], "second pair")
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// Points `branch` at `tip` and switches to it with case folding off (Linux writes both `D` and
 /// `d/x`), then turns folding back on: HEAD holds the pair.
 fn head_with_pair_at(fx: &Fixture, branch: &str, tip: Oid) {
@@ -398,20 +401,24 @@ fn head_with_pair_at(fx: &Fixture, branch: &str, tip: Oid) {
     assert!(fx.dir.path().join("d/x").is_file());
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// HEAD on `evil`, holding the pair.
 fn head_with_pair(fx: &Fixture) -> Oid {
     head_with_pair_at(fx, "evil", fx.evil);
     fx.evil
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn read(fx: &Fixture, rel: &str) -> String {
     std::fs::read_to_string(fx.dir.path().join(rel)).unwrap()
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn head(fx: &Fixture) -> Oid {
     fx.repo.head().unwrap().target().unwrap()
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// HEAD on `work` = evil + `c.txt`; branch `side` = evil + `b.txt`. Returns `side`.
 fn diverged_on_pair(fx: &Fixture) -> Oid {
     let side = with_file(&fx.repo, fx.evil, "b.txt", "b\n");
@@ -423,6 +430,7 @@ fn diverged_on_pair(fx: &Fixture) -> Oid {
     side
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const NON_FF: MergeOptions = MergeOptions {
     fast_forward: FastForward::Allow,
     squash: false,
@@ -587,6 +595,7 @@ fn a_cherry_pick_bringing_a_second_collision_is_refused_even_when_head_holds_one
     assert!(std::fs::symlink_metadata(fx.dir.path().join("z")).is_err());
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// `parent`'s tree without the link `D` (the pair is gone).
 fn without_link(repo: &Repository, parent: Oid) -> Oid {
     let base = repo.find_commit(parent).unwrap().tree().unwrap();
@@ -595,6 +604,7 @@ fn without_link(repo: &Repository, parent: Oid) -> Oid {
     commit_tree(repo, tree.write().unwrap(), &[parent], "rm D")
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn assert_pair_back(fx: &Fixture) {
     assert!(std::fs::symlink_metadata(fx.dir.path().join("D"))
         .unwrap()
@@ -603,6 +613,7 @@ fn assert_pair_back(fx: &Fixture) {
     assert_eq!(read(fx, "d/x"), "PWNED\n");
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 /// `main` = evil → `e` (edits `a.txt`), checked out holding the pair; returns `(e, rm)`, where
 /// `rm` = evil without `D`.
 fn rebase_fixture(fx: &Fixture) -> (Oid, Oid) {
@@ -612,6 +623,7 @@ fn rebase_fixture(fx: &Fixture) -> (Oid, Oid) {
     (e, rm)
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn plan_of(id: Oid, action: RebaseAction) -> Vec<RebasePlanEntry> {
     vec![RebasePlanEntry {
         commit_id: id.to_string(),
