@@ -27,8 +27,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   version is not undoable as one step after upgrading (#172).
 - With HEAD already holding a link and a folder whose names differ only in case, unrelated
   merges, cherry-picks, reverts, stash applies, pulls, rebases and switches to a branch with the
-  same pair now work; only a new collision, or the same one with its link changed, is refused
-  (#167).
+  same pair now work on case-sensitive file systems; only a new collision, or the same one with
+  its link changed, is refused. On macOS and Windows, where the link replaces the folder on disk,
+  the on-disk link check still refuses them (#167).
 - Rebase abort and cherry-pick/revert sequence abort are no longer refused when the tree they
   return to holds such a case collision (#161).
 
