@@ -410,6 +410,35 @@ fn on_evil_changing_x(repo: &Repository, fx: &Fixture, order: Order) -> Oid {
     commit(repo, tree.write().unwrap(), &[fx.evil], "change x")
 }
 
+/// `evil` with the link retargeted (the same outside folder, spelled `<outside>/.`, so a write
+/// through it still shows) and a new file `<folder>/evil`, as a commit on `evil` (#167 F2).
+fn on_evil_retargeting_the_link(repo: &Repository, fx: &Fixture, order: Order) -> Oid {
+    let evil = repo.find_commit(fx.evil).unwrap();
+    let evil_tree = evil.tree().unwrap();
+    let folder = evil_tree
+        .get_path(Path::new(order.folder()))
+        .unwrap()
+        .to_object(repo)
+        .unwrap()
+        .peel_to_tree()
+        .unwrap();
+    let mut inner = repo.treebuilder(Some(&folder)).unwrap();
+    inner
+        .insert("evil", repo.blob(b"EVIL\n").unwrap(), MODE_BLOB)
+        .unwrap();
+    let target = format!("{}/.", slash_path(fx.outside.path()));
+    let mut tree = repo.treebuilder(Some(&evil_tree)).unwrap();
+    tree.insert(order.folder(), inner.write().unwrap(), 0o040000)
+        .unwrap();
+    tree.insert(
+        order.link(),
+        repo.blob(target.as_bytes()).unwrap(),
+        MODE_LINK,
+    )
+    .unwrap();
+    commit(repo, tree.write().unwrap(), &[fx.evil], "retarget")
+}
+
 fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
     let fx = fixture(order);
     let outside = fx.outside.path().to_path_buf();
@@ -649,6 +678,17 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
         let result = merge::start_merge(&repo, "side", no_ff);
         record(
             "HEAD=pair: start_merge --no-ff changing x",
+            show(result),
+            dir.path(),
+        );
+    }
+    {
+        let (dir, repo) = head_on_pair(&fx, ignore_case);
+        let side = on_evil_retargeting_the_link(&repo, &fx, order);
+        repo.reference("refs/heads/side", side, true, "").unwrap();
+        let result = merge::start_merge(&repo, "side", no_ff);
+        record(
+            "HEAD=pair: start_merge --no-ff retargeting the link",
             show(result),
             dir.path(),
         );

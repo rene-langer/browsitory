@@ -565,23 +565,66 @@ fn collisions_in<P: AsRef<[u8]>>(
     Ok(collisions_across(entries, all))
 }
 
+/// A collision the user already has, with its link entry (blob id and mode) as known.
+struct KnownCollision {
+    collision: CaseCollision,
+    link: (git2::Oid, u32),
+}
+
 /// The collisions an operation may write again because the user already has them: those of
 /// HEAD's tree, plus those of `also_known` (a tree the operation restores, such as an abort's
-/// original tree, #161). Exact `(link, folder)` spelling (decision D9-A): the on-disk link scan
+/// original tree, #161), each with its link entry. One is exempt only with the exact
+/// `(link, folder)` spelling *and* the same link entry ([`brought_in`]); the on-disk link scan
 /// that runs first stays the guard against writing through a link (#167).
 fn known_collisions<P: AsRef<[u8]>>(
     repo: &git2::Repository,
     paths: Option<&[P]>,
     also_known: Option<&git2::Tree>,
-) -> Result<Vec<CaseCollision>, git2::Error> {
+) -> Result<Vec<KnownCollision>, git2::Error> {
+    let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let mut known = Vec::new();
-    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
-        known.extend(find_case_collisions(&GuardSource::Tree(&head), paths)?);
-    }
-    if let Some(tree) = also_known {
-        known.extend(find_case_collisions(&GuardSource::Tree(tree), paths)?);
+    for tree in head.iter().chain(also_known) {
+        for collision in find_case_collisions(&GuardSource::Tree(tree), paths)? {
+            if let Some(link) = entry_in(&GuardSource::Tree(tree), &collision.link) {
+                known.push(KnownCollision { collision, link });
+            }
+        }
     }
     Ok(known)
+}
+
+/// `path`'s entry (blob id, mode) in `source`, if it has one.
+fn entry_in(source: &GuardSource, path: &str) -> Option<(git2::Oid, u32)> {
+    match source {
+        GuardSource::Tree(tree) => tree
+            .get_path(Path::new(path))
+            .ok()
+            .map(|entry| (entry.id(), entry.filemode() as u32)),
+        GuardSource::Index(index) => index
+            .get_path(Path::new(path), 0)
+            .map(|entry| (entry.id, entry.mode)),
+    }
+}
+
+/// The first of `collisions` (from `sources`) that isn't known: not the same spelling, or a
+/// link that some source holds with another blob or mode than the known one (a retargeted link
+/// is a new link, D9-B).
+fn brought_in(
+    collisions: Vec<CaseCollision>,
+    sources: &[GuardSource],
+    known: &[KnownCollision],
+) -> Option<CaseCollision> {
+    collisions.into_iter().find(|collision| {
+        let links: Vec<_> = sources
+            .iter()
+            .filter_map(|source| entry_in(source, &collision.link))
+            .collect();
+        !known.iter().any(|known| {
+            known.collision == *collision
+                && !links.is_empty()
+                && links.iter().all(|link| *link == known.link)
+        })
+    })
 }
 
 /// `rel` as git spells it: components joined with `/` on every platform.
@@ -661,7 +704,7 @@ where
         let brought = find_case_collisions(target, paths)?;
         if !brought.is_empty() {
             let known = known_collisions(repo, paths, also_known)?;
-            if let Some(collision) = brought.into_iter().find(|c| !known.contains(c)) {
+            if let Some(collision) = brought_in(brought, std::slice::from_ref(target), &known) {
                 return Err(collision.into());
             }
         }
@@ -792,7 +835,7 @@ where
         let incoming = find_case_collisions_in(&sources, ALL)?;
         if !incoming.is_empty() {
             let known = known_collisions(repo, ALL, also_known)?;
-            if let Some(collision) = incoming.into_iter().find(|c| !known.contains(c)) {
+            if let Some(collision) = brought_in(incoming, &sources, &known) {
                 return Err(collision.into());
             }
         }
@@ -1389,6 +1432,66 @@ mod tests {
             result.unwrap_err().to_string(),
             collision("Db", "DB").unwrap().to_string()
         );
+    }
+
+    /// The verifier's probe (#167 follow-up F2): HEAD holds `Db -> ../outA` + `dB/x`; a branch
+    /// retargets the link and adds `dB/evil`. Same spelling, but not the same link.
+    #[test]
+    fn a_known_collision_whose_link_changes_is_brought_in() {
+        let (_dir, repo) = repo();
+        let pair = tree_of(&repo, &[("Db", LINK, "../outA"), ("dB/x", FILE, "x")]);
+        commit_tree_on_head(&repo, &pair);
+        let retargeted = tree_of(
+            &repo,
+            &[
+                ("Db", LINK, "../outB"),
+                ("dB/evil", FILE, "evil"),
+                ("dB/x", FILE, "x"),
+            ],
+        );
+        let merged: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders(&repo, &[Incoming::Merge(GuardSource::Tree(&retargeted))]);
+        assert_eq!(
+            merged.unwrap_err().to_string(),
+            collision("Db", "dB").unwrap().to_string()
+        );
+        let switched: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders(&repo, &[Incoming::Checkout(&retargeted)]);
+        assert!(switched.is_err());
+        let reset: Result<(), crate::reset::ResetError> =
+            prepare_forced_checkout(&repo, Some(&GuardSource::Tree(&retargeted)), ALL);
+        assert!(reset.is_err());
+        // The same link with more below its folder stays exempt (the disk scan guards the
+        // folder).
+        let same = tree_of(
+            &repo,
+            &[
+                ("Db", LINK, "../outA"),
+                ("dB/evil", FILE, "e"),
+                ("dB/x", FILE, "x"),
+            ],
+        );
+        let unchanged: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders(&repo, &[Incoming::Merge(GuardSource::Tree(&same))]);
+        assert!(unchanged.is_ok(), "{unchanged:?}");
+    }
+
+    #[test]
+    fn an_also_known_collision_must_keep_its_link_too() {
+        let (_dir, repo) = repo();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        let known = tree_of(&repo, &[("D", LINK, "/a"), ("d/x", FILE, "x")]);
+        let target = tree_of(&repo, &[("D", LINK, "/b"), ("d/x", FILE, "x")]);
+        let result: Result<(), crate::reset::ResetError> = prepare_forced_checkout_known(
+            &repo,
+            Some(&GuardSource::Tree(&target)),
+            ALL,
+            Some(&known),
+        );
+        assert!(result.is_err());
     }
 
     #[test]
