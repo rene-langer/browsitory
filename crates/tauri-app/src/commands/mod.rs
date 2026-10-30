@@ -1987,7 +1987,9 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use repo_service::worker::Worker;
+    #[cfg(unix)]
     use std::path::Path;
     use std::sync::mpsc;
 
