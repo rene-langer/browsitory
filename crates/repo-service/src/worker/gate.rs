@@ -170,6 +170,17 @@ impl OperationProbe<'_> {
                 .and_then(|reference| reference.target())
                 .map_or_else(String::new, |oid| oid.to_string())
         };
+        // git writes these files once per operation and deletes them when it ends, so their
+        // mtime tells an operation aborted outside and started again with the same heads apart
+        // from the first one (#172), while staying constant through the pause (staging and
+        // resolving don't touch them). Both processes stat the same file, so they agree.
+        let written = |name: &str| {
+            std::fs::metadata(repo.path().join(name))
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or_else(String::new, |since| format!(" @{}", since.as_nanos()))
+        };
         match repo.state() {
             RepositoryState::Clean => None,
             RepositoryState::Merge => {
@@ -178,16 +189,20 @@ impl OperationProbe<'_> {
                     .split_whitespace()
                     .collect::<Vec<_>>()
                     .join(",");
-                Some(format!("merge {} {heads}", head()))
+                Some(format!("merge {} {heads}{}", head(), written("MERGE_HEAD")))
             }
             RepositoryState::CherryPick | RepositoryState::CherryPickSequence => Some(format!(
-                "cherry-pick {} {}",
+                "cherry-pick {} {}{}",
                 head(),
-                target("CHERRY_PICK_HEAD")
+                target("CHERRY_PICK_HEAD"),
+                written("CHERRY_PICK_HEAD")
             )),
-            RepositoryState::Revert | RepositoryState::RevertSequence => {
-                Some(format!("revert {} {}", head(), target("REVERT_HEAD")))
-            }
+            RepositoryState::Revert | RepositoryState::RevertSequence => Some(format!(
+                "revert {} {}{}",
+                head(),
+                target("REVERT_HEAD"),
+                written("REVERT_HEAD")
+            )),
             other => Some(format!("git {other:?} {}", head())),
         }
     }
@@ -285,7 +300,10 @@ mod tests {
         std::fs::write(repo.path().join("MERGE_HEAD"), format!("{a}\n")).unwrap();
         let head = repo.head().unwrap().target().unwrap();
         let merge = marker(&repo, &rebase_store, &sequence_store).unwrap();
-        assert_eq!(merge, format!("merge {head} {a}"));
+        assert_eq!(
+            merge,
+            format!("merge {head} {a} @{}", mtime_ns(&repo, "MERGE_HEAD"))
+        );
         std::fs::write(repo.workdir().unwrap().join("c.txt"), "c\n").unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("c.txt")).unwrap();
@@ -396,6 +414,64 @@ mod tests {
         let (rebase, sequence) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
         let memory = RebaseMemory::default();
         assert_eq!(probe(&rebase, &memory, &sequence).gate_scope(&repo), None);
+    }
+
+    fn mtime_ns(repo: &Repository, file: &str) -> u128 {
+        std::fs::metadata(repo.path().join(file))
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    }
+
+    fn set_mtime(repo: &Repository, file: &str, mtime: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(repo.path().join(file))
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_rewritten_merge_head_changes_the_marker() {
+        // `git merge --abort` and the same merge again: same heads, a new MERGE_HEAD.
+        let (_dir, repo) = init();
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "a");
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+        let now = std::time::SystemTime::now();
+        std::fs::write(repo.path().join("MERGE_HEAD"), format!("{a}\n")).unwrap();
+        set_mtime(&repo, "MERGE_HEAD", now);
+        let first = marker(&repo, &rebase_store, &sequence_store).unwrap();
+        std::fs::write(repo.path().join("MERGE_HEAD"), format!("{a}\n")).unwrap();
+        set_mtime(&repo, "MERGE_HEAD", now + std::time::Duration::from_secs(2));
+        let second = marker(&repo, &rebase_store, &sequence_store).unwrap();
+        assert_ne!(first, second);
+        assert!(first.starts_with("merge ") && second.starts_with("merge "));
+    }
+
+    #[test]
+    fn pick_and_revert_markers_carry_their_state_files_mtime() {
+        let (_dir, repo) = init();
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "a");
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+        for (file, verb) in [
+            ("CHERRY_PICK_HEAD", "cherry-pick"),
+            ("REVERT_HEAD", "revert"),
+        ] {
+            std::fs::write(repo.path().join(file), format!("{a}\n")).unwrap();
+            let found = marker(&repo, &rebase_store, &sequence_store).unwrap();
+            assert_eq!(
+                found,
+                format!("{verb} {a} {a} @{}", mtime_ns(&repo, file)),
+                "{file}"
+            );
+            std::fs::remove_file(repo.path().join(file)).unwrap();
+        }
     }
 
     #[test]

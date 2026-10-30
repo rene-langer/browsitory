@@ -110,6 +110,35 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
     Some(UndoPlan { label, scope })
 }
 
+/// Commands that hold the state lock (#172) from before `settle` until their `finish`: every
+/// recordable one (which covers everything that starts an operation, and `Commit`/`AmendCommit`,
+/// which end a merge or pick), the ones that end a paused operation, and Undo/Redo.
+pub(super) fn locks_state(command: &Command) -> bool {
+    plan_for(command).is_some()
+        || matches!(
+            command,
+            Command::RebaseContinue { .. }
+                | Command::AbortRebase { .. }
+                | Command::ContinueSequence { .. }
+                | Command::AbortSequence { .. }
+                | Command::AbortMerge { .. }
+                | Command::Undo { .. }
+                | Command::Redo { .. }
+        )
+}
+
+/// Replies `UNDO_BUSY` to Undo/Redo, which must not run without the lock (D7-A). `false` for
+/// every other command, which runs unrecorded instead (D6-A).
+pub(super) fn reply_busy(command: &mut Command) -> bool {
+    match command {
+        Command::Undo { reply } | Command::Redo { reply } => {
+            let _ = reply.send(Err(UNDO_BUSY.to_string()));
+            true
+        }
+        _ => false,
+    }
+}
+
 /// A finished sequence's undo entry names the commits it actually applied (skipped ones
 /// changed nothing), not the number selected.
 pub(super) fn relabel_sequence(
