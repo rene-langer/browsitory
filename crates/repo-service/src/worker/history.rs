@@ -9,14 +9,25 @@ const NO_SEQUENCE: &str = "No cherry-pick or revert is in progress.";
 
 /// `HeadInfo` with the stored sequence's progress and the stored rebase filled in (git-core has
 /// no persistence). A rebase whose health can't be read counts as diverged: Abort is then the
-/// safe way out.
+/// safe way out. `clean_merge`: the staged merge is the clean one this worker remembers, so its
+/// commit runs `pre-merge-commit` rather than `pre-commit`; `commit_hooks` then lists only the
+/// pre-hook that commit will really run.
 pub(super) fn head_info(
     repo: &git2::Repository,
     probe: &super::gate::OperationProbe<'_>,
+    clean_merge: bool,
     reply: Sender<Result<HeadInfo, String>>,
 ) {
     let result = git_core::repo::head_info(repo)
         .map(|mut info| {
+            if repo.state() == git2::RepositoryState::Merge {
+                let skipped = if clean_merge {
+                    "pre-commit"
+                } else {
+                    "pre-merge-commit"
+                };
+                info.commit_hooks.retain(|hook| hook != skipped);
+            }
             info.sequence = probe.sequence.load(repo).map(|state| state.progress());
             info.rebase = probe.rebase(repo).map(|state| {
                 let health =
@@ -49,6 +60,9 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
     match run.outcome {
         // Nothing to continue: the sequence is over, a leftover file only offers Abort.
         Ok(outcome) if !keep => Ok(outcome),
+        Ok(SequenceOutcome::HookFailed { hook, .. }) => Err(format!(
+            "The {hook} hook failed, and the cherry-pick or revert's progress could not be saved ({store_error}). Commit the paused step, or abort it."
+        )),
         Ok(_) => Err(format!(
             "The cherry-pick or revert stopped on a conflict, but its progress could not be saved ({store_error}). Resolve the conflict and commit, or abort it."
         )),

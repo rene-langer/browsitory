@@ -1105,3 +1105,33 @@ fn a_revert_sequence_continue_runs_the_commit_hooks() {
         "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \n"
     );
 }
+
+/// A `pre-commit` that puts the step back to HEAD's tree empties it: skipped, like an empty
+/// resolution, rather than committed empty.
+#[cfg(unix)]
+#[test]
+fn a_pre_commit_that_empties_the_step_skips_it() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, repo, ids, state) = resolved();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "pre-commit",
+        "git checkout HEAD -- shared.txt",
+    );
+    common::log_hooks(&repo, &["post-commit"]);
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 2,
+            skipped: vec![ids[1].clone()]
+        }
+    );
+    assert_eq!(summaries(&repo, 3), ["side three", "side one", "ours edit"]);
+    assert_eq!(common::read_log(&repo), "");
+}

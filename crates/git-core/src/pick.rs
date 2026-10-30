@@ -657,6 +657,14 @@ fn finish_paused(
     };
     if hooked.reload_index {
         index.read(true)?;
+        // A `pre-commit` that put the step back to HEAD's tree emptied it: skip it like an empty
+        // resolution rather than commit nothing.
+        if index.write_tree()? == head.tree_id() {
+            repo.cleanup_state()?;
+            state.skipped.push(current);
+            state.next += 1;
+            return Ok(Paused::Done);
+        }
     }
     let tree = repo.find_tree(index.write_tree()?)?;
     crate::commit::create_commit_reporting(

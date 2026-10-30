@@ -1263,10 +1263,15 @@ impl Worker {
                         reply,
                     } => {
                         let result = merge::start(&repo, branch_name, options, reply);
-                        clean_merge = match result {
-                            Ok(MergeOutcome::Merged) => merge::CleanMerge::capture(&mut repo),
-                            _ => None,
-                        };
+                        match result {
+                            Ok(MergeOutcome::Merged) => {
+                                clean_merge = merge::CleanMerge::capture(&mut repo)
+                            }
+                            Ok(_) => clean_merge = None,
+                            // Refused (e.g. "already merging"): nothing changed, so a staged
+                            // clean merge is still the one remembered.
+                            Err(_) => {}
+                        }
                     }
                     Command::GetMergeDefaults { reply } => merge::defaults(&repo, reply),
                     Command::GetConflictHunks { path, reply } => {
@@ -1286,7 +1291,10 @@ impl Worker {
                             merge::abort(&repo, reply)
                         }
                     }
-                    Command::GetHeadInfo { reply } => history::head_info(&repo, &probe!(), reply),
+                    Command::GetHeadInfo { reply } => {
+                        let clean = clean_merge.as_ref().is_some_and(|m| m.matches(&mut repo));
+                        history::head_info(&repo, &probe!(), clean, reply)
+                    }
                     Command::AmendCommit {
                         message,
                         no_verify,
@@ -2282,6 +2290,56 @@ mod tests {
         assert!(
             matches!(&events[0], HookEvent::Started { hook, .. } if hook == "pre-merge-commit"),
             "{events:?}"
+        );
+    }
+
+    /// "Skip hooks" offers what the commit will run: `pre-merge-commit` for the clean merge this
+    /// worker staged, `pre-commit` for any other staged merge (here: after a restart).
+    #[cfg(unix)]
+    #[test]
+    fn head_info_lists_the_pre_hook_the_merge_commit_will_run() {
+        let (dir, repo) = diverged_repo(false);
+        install_hook(&repo, "pre-commit", "exit 0");
+        install_hook(&repo, "pre-merge-commit", "exit 0");
+        {
+            let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            let handle = first.handle();
+            assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+            assert_eq!(
+                handle.get_head_info().unwrap().commit_hooks,
+                vec!["pre-merge-commit".to_string()]
+            );
+        }
+        let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        assert_eq!(
+            second.handle().get_head_info().unwrap().commit_hooks,
+            vec!["pre-commit".to_string()]
+        );
+    }
+
+    /// A Merge request refused while the clean merge is staged ("already merging") must not
+    /// make the worker forget it.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_second_merge_keeps_the_clean_merge_remembered() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "pre-commit");
+        log_hook(&repo, "pre-merge-commit");
+        log_hook(&repo, "post-merge");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        assert!(handle
+            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .is_err());
+
+        assert!(matches!(
+            commit_message(&handle, false),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "pre-merge-commit \npost-merge 0\n"
         );
     }
 
