@@ -101,8 +101,72 @@ Reconciled with the code at 6044d7bc on 2026-10-30:
 
 ## Pre-flight notes
 
-(Filled in by the implementer: baseline counts, and every place where the code won over the
-plan.)
+Baseline at 170fd967 (2026-10-30): `cargo test -p git-core -p repo-service` passed 1220, failed
+0, ignored 4. The pre-push hook was already linked. Toolchain: `rust-toolchain.toml` pins
+`stable` (local 1.97.1), CI uses `dtolnay/rust-toolchain@stable`, and no crate declares a
+`rust-version`, so std's `File::lock` (1.89) needs no MSRV change (D5-A).
+
+Decisions: D1-A, D2-A, D3-A, D6-A, D9-A (confirmed by the user); D4-A, D5-A, D7-A, D8-A, D10-A
+(recommended, taken).
+
+Where the code won over the plan, or the plan was extended:
+
+- **A1/A2:** the `*_known` variants (`refuse_linked_folders_known`,
+  `prepare_forced_checkout_known`) landed in A1 together with `known_collisions`, since A1's
+  `refuse_linked_folders` change is the same code; A2 only wires the aborts to them. A2's unit
+  test `also_known_exempts_only_its_own_collisions` therefore never failed on its own; the A2
+  integration tests did (`CaseCollision`). `first_collision_across` is now test-only.
+- **A1 tests:** `head_with_pair_at` detaches HEAD before moving the branch, because
+  `switch_branch` to the branch already checked out is a no-op. The non-ff merge test asserts
+  `MergeOutcome::Merged` and the merged file (a non-ff merge leaves the merge for the user to
+  commit, so there is no two-parent commit yet). The stash test saves the stash with
+  `core.ignorecase=false`: libgit2's stash diff fails on Linux with both `D` and `d/` on disk
+  under a simulated `ignorecase` ("attempt to merge diffs created with conflicting options").
+  The apply, which is what the guard checks, runs folded. Added a unit test
+  `a_collision_head_already_holds_is_not_brought_in` next to the spelling one.
+- **A2 test fixture:** the sequence test has a local commit on `main` so the second pick
+  conflicts; it asserts HEAD == that original commit rather than `evil`.
+- **A3:** rows start from a raw forced checkout of `evil` (`head_on_pair`), then reset the
+  outside folder, so they measure only the git-core operation. The "changes `d/x`" row merges
+  with `--no-ff`.
+- **B1:** no existing test started a rebase on a dirty tracked tree (`cargo test --workspace`
+  stayed green after the refusal), so no test needed fixing. Added
+  `start_lists_every_changed_path_sorted`. The ignored-file test uses `.git/info/exclude`, so the
+  ignore rule itself isn't a tracked change.
+- **Undo labels (two bugs from "Unrelated findings"), new commit after B2:**
+  - `Rebase onto <onto>` shortens `onto` to 7 characters when it is a full 40/64-hex id (the
+    frontend's "Rebase onto here" sends one) and keeps a ref name as it is.
+  - A failed `StartRebase` that still changed the repository keeps its entry (it is what makes
+    the loss recoverable) under "Rebase onto <id> failed (rolled back)", or "Rebase onto <id>
+    failed" when HEAD is still detached afterwards (the rollback itself failed). This needed
+    `worker::rebase::start` to return its result so the worker can relabel before replying.
+    With #170 a failed start from a clean tree usually changes nothing and records no entry.
+- **B3:** each spec file gets a fresh fixture clone (`beforeSession` → `resetFixtureRepo`), so
+  the shared-repo risk is per file only. Both `rebase.spec.ts` and
+  `restart-resilience.spec.ts` get a `before` guard (`git status --porcelain
+  --untracked-files=no --ignore-submodules`). The new case restores the file in a `finally`.
+  The alert is matched by XPath (`//p[@role='alert'][contains(., …)]`).
+- **C1:** the gate unit tests save sequences of real commits (`SequenceStore::load` validates
+  that the commits exist).
+- **D3:** `exclusive()` returns the guard it took (or none when the caller's guard or an
+  unsupported lock applies) and always force-reloads. `relabel` of a pending entry is kept in
+  `pending_label` and applied when `finish` records it, because the forced reload before the
+  write would otherwise drop it (the sequence "Cherry-pick N commits" label). `record` no longer
+  reloads itself; its callers have just reloaded under the lock. `try_acquire` is test-only.
+- **D4:** a `locks_state` command that gets `Busy` after `LOCK_WAIT` runs with its undo plan
+  dropped (`unrecorded`), so it isn't recorded (D6-A); Undo/Redo reply `UNDO_BUSY` without
+  running (`undo::reply_busy`). The pause hook is `Worker::spawn_with_pause_before_finish`, an
+  uninhabited `PauseHook` outside tests. The worker tests live in a separate
+  `worker::state_lock_tests` module. The race test's `onto` is a commit off the branch: with
+  `onto` = the step's own parent, the rebased commit can be byte-identical within one second and
+  nothing is recorded. The race test was checked red with the loop's lock disabled. Added
+  `pick_and_revert_markers_carry_their_state_files_mtime` in `gate.rs`.
+- **D5:** the two-sidecar test passes without D3/D4 as well (it runs sequentially; no window
+  for the race). It stays as a smoke test of the cross-process path.
+- **CI:** clippy on macOS/Windows flagged the Linux-only `case_collision.rs` helpers as dead
+  code; they carry `#[cfg_attr(not(target_os = "linux"), allow(dead_code))]`. The `audit` job
+  failed on main too (RUSTSEC-2026-0418, libz-sys 1.1.29, published 2026-10-28); a separate
+  commit bumps the lockfile to libz-sys 1.1.31 (same license, no new dependency).
 
 ---
 

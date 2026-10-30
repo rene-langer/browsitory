@@ -8,7 +8,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Rebase/undo safety
 
-- (in progress)
+- Fixed: starting a rebase over uncommitted changes could discard them (when the first step
+  failed, and on Abort). A rebase now refuses to start while tracked files have staged or
+  unstaged changes, as git does; untracked files are fine (#170).
+- The undo entry of a rebase names the commit it was rebased onto by its short id, and a rebase
+  start that failed but still changed something is listed as "Rebase onto … failed (rolled
+  back)" (#170).
+- While a cherry-pick/revert sequence is paused, deleting, renaming or adding a worktree on its
+  branch and saving a stash are refused, as during a rebase (#171).
+- Fixed: with the desktop app and the VSCode extension open on one repository, finishing a
+  paused operation in one could lose its undo entry, and two saves could drop an entry. Undo
+  history changes now take a lock in .git/browsitory (#172).
+- Fixed: a merge, cherry-pick or revert aborted outside Browsitory and started again with the
+  same commits reused the first one's undo snapshot. A paused merge or pick from the previous
+  version is not undoable as one step after upgrading (#172).
+- With HEAD already holding a link and a folder whose names differ only in case, unrelated
+  merges, cherry-picks, reverts, stash applies, pulls, rebases and switches to a branch with the
+  same pair now work; only a new collision is refused (#167).
+- Rebase abort and cherry-pick/revert sequence abort are no longer refused when the tree they
+  return to holds such a case collision (#161).
 
 ### Restart resilience
 

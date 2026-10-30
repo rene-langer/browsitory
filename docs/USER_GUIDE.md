@@ -490,7 +490,9 @@ rebase.
 
 Starting a rebase (from a branch or a specific commit) opens the rebase
 planner as an overlay, where you can reorder/pick/squash/drop commits
-before running it. Conflicts, once they happen, are resolved inline in the
+before running it. Commit or stash your changes first: like `git rebase`, a rebase won't start
+while tracked files have staged or unstaged changes ("You have uncommitted changes to …").
+Untracked files are fine. Conflicts, once they happen, are resolved inline in the
 diff pane; a paused rebase shows its progress and lets you continue or
 abort.
 
@@ -589,7 +591,8 @@ resolved step and goes on. If you resolve a step so that nothing is left to comm
 another reason (say an untracked file is in the way) also shows **Continue**, which retries the
 step. The paused sequence is kept on disk, so it is still there after you close and reopen the
 app. While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
-branch switching, pull and stash apply/pop are unavailable.
+branch switching, pull and stash apply/pop are unavailable, and so are saving a stash and
+deleting, renaming or adding a worktree on the branch the sequence runs on.
 
 If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
 **Continue** recognises it when it is exactly that step: one commit on top of where the sequence
