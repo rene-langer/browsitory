@@ -401,6 +401,7 @@ fn first_collision<P: AsRef<[u8]>>(
 /// an exactly equal link and folder collide too (only a crafted tree holds both); across
 /// sources they are one path changing kind (a link replaced by a folder), so only names that
 /// differ in spelling collide there.
+#[cfg(test)]
 fn first_collision_across<P: AsRef<[u8]>>(
     entries: impl IntoIterator<Item = (P, u32, usize)>,
 ) -> Option<CaseCollision> {
@@ -525,6 +526,23 @@ pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
     sources: &[GuardSource],
     paths: Option<&[P]>,
 ) -> Result<Option<CaseCollision>, git2::Error> {
+    Ok(collisions_in(sources, paths, false)?.into_iter().next())
+}
+
+/// Every case collision across `sources` (as [`find_case_collision_in`], but all of them, in
+/// entry order).
+fn find_case_collisions_in<P: AsRef<[u8]>>(
+    sources: &[GuardSource],
+    paths: Option<&[P]>,
+) -> Result<Vec<CaseCollision>, git2::Error> {
+    collisions_in(sources, paths, true)
+}
+
+fn collisions_in<P: AsRef<[u8]>>(
+    sources: &[GuardSource],
+    paths: Option<&[P]>,
+    all: bool,
+) -> Result<Vec<CaseCollision>, git2::Error> {
     let mut entries = Vec::new();
     for (i, source) in sources.iter().enumerate() {
         let owned;
@@ -544,7 +562,26 @@ pub(crate) fn find_case_collision_in<P: AsRef<[u8]>>(
                 .map(|entry| (entry.path, entry.mode, i)),
         );
     }
-    Ok(first_collision_across(entries))
+    Ok(collisions_across(entries, all))
+}
+
+/// The collisions an operation may write again because the user already has them: those of
+/// HEAD's tree, plus those of `also_known` (a tree the operation restores, such as an abort's
+/// original tree, #161). Exact `(link, folder)` spelling (decision D9-A): the on-disk link scan
+/// that runs first stays the guard against writing through a link (#167).
+fn known_collisions<P: AsRef<[u8]>>(
+    repo: &git2::Repository,
+    paths: Option<&[P]>,
+    also_known: Option<&git2::Tree>,
+) -> Result<Vec<CaseCollision>, git2::Error> {
+    let mut known = Vec::new();
+    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
+        known.extend(find_case_collisions(&GuardSource::Tree(&head), paths)?);
+    }
+    if let Some(tree) = also_known {
+        known.extend(find_case_collisions(&GuardSource::Tree(tree), paths)?);
+    }
+    Ok(known)
 }
 
 /// `rel` as git spells it: components joined with `/` on every platform.
@@ -599,21 +636,32 @@ where
     E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
+    prepare_forced_checkout_known(repo, target, paths, None)
+}
+
+/// [`prepare_forced_checkout`] that also lets the target bring back the collisions of
+/// `also_known`: a tree the user already had, which an abort restores (#161).
+pub(crate) fn prepare_forced_checkout_known<E, P>(
+    repo: &git2::Repository,
+    target: Option<&GuardSource>,
+    paths: Option<&[P]>,
+    also_known: Option<&git2::Tree>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
+    P: AsRef<[u8]>,
+{
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
-    // Every collision of the target must already be in HEAD, not just the first one found.
+    // Every collision of the target must already be known, not just the first one found.
     if let (Some(target), true) = (target, folds_case(repo)) {
         let brought = find_case_collisions(target, paths)?;
         if !brought.is_empty() {
-            let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
-            let in_head = match &head {
-                Some(tree) => find_case_collisions(&GuardSource::Tree(tree), paths)?,
-                None => Vec::new(),
-            };
-            if let Some(collision) = brought.into_iter().find(|c| !in_head.contains(c)) {
+            let known = known_collisions(repo, paths, also_known)?;
+            if let Some(collision) = brought.into_iter().find(|c| !known.contains(c)) {
                 return Err(collision.into());
             }
         }
@@ -675,6 +723,19 @@ pub(crate) fn refuse_linked_folders<E>(
 where
     E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
 {
+    refuse_linked_folders_known(repo, incoming, None)
+}
+
+/// [`refuse_linked_folders`] that also lets `incoming` bring back the collisions of
+/// `also_known`: a tree the user already had, which an abort restores (#161).
+pub(crate) fn refuse_linked_folders_known<E>(
+    repo: &git2::Repository,
+    incoming: &[Incoming],
+    also_known: Option<&git2::Tree>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
+{
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
@@ -715,8 +776,10 @@ where
         return Err(LinkedFolder(git_path(&dir)).into());
     }
     // Then case collisions (#156), after the more specific link on disk. Only what the operation
-    // brings in: a HEAD that already holds a collision doesn't lock the repository, but nothing
-    // brings one in (again).
+    // brings in: a collision HEAD (or `also_known`) already holds with the identical spelling
+    // is exempt (#167), so a HEAD that holds one doesn't lock the repository; any other one is
+    // refused. The link scan above stays the guard for the exempt ones: on a case-insensitive
+    // file system the folder's name resolves to the on-disk link, which it refuses.
     if folds_case(repo) {
         let sources: Vec<GuardSource> = incoming
             .iter()
@@ -726,8 +789,12 @@ where
                 Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
             })
             .collect();
-        if let Some(collision) = find_case_collision_in(&sources, ALL)? {
-            return Err(collision.into());
+        let incoming = find_case_collisions_in(&sources, ALL)?;
+        if !incoming.is_empty() {
+            let known = known_collisions(repo, ALL, also_known)?;
+            if let Some(collision) = incoming.into_iter().find(|c| !known.contains(c)) {
+                return Err(collision.into());
+            }
         }
     }
     Ok(())
@@ -1256,6 +1323,72 @@ mod tests {
         let same = tree_of(&repo, &[("d", LINK, "/x")]);
         let sources = [GuardSource::Tree(&same), GuardSource::Tree(&folders)];
         assert_eq!(find_case_collision_in(&sources, ALL).unwrap(), None);
+    }
+
+    #[test]
+    fn find_case_collisions_in_returns_every_collision_across_sources() {
+        let (_dir, repo) = repo();
+        let first = tree_of(
+            &repo,
+            &[("D", LINK, "/x"), ("K", LINK, "/x"), ("d/x", FILE, "x")],
+        );
+        let second = tree_of(
+            &repo,
+            &[("Z", LINK, "/x"), ("k/x", FILE, "x"), ("z/x", FILE, "x")],
+        );
+        let sources = [GuardSource::Tree(&first), GuardSource::Tree(&second)];
+        assert_eq!(
+            find_case_collisions_in(&sources, ALL).unwrap(),
+            [
+                collision("D", "d").unwrap(),
+                collision("K", "k").unwrap(),
+                collision("Z", "z").unwrap(),
+            ]
+        );
+    }
+
+    /// Commits `tree` on HEAD without touching the work tree, and folds case.
+    fn commit_tree_on_head(repo: &Repository, tree: &git2::Tree) {
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "pair", tree, &[&parent])
+            .unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_collision_head_already_holds_is_not_brought_in() {
+        let (_dir, repo) = repo();
+        let pair = tree_of(&repo, &[("Db", LINK, "/x"), ("dB/x", FILE, "x")]);
+        commit_tree_on_head(&repo, &pair);
+        let incoming = tree_of(
+            &repo,
+            &[
+                ("Db", LINK, "/x"),
+                ("dB/x", FILE, "x"),
+                ("b.txt", FILE, "b"),
+            ],
+        );
+        let result: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders(&repo, &[Incoming::Merge(GuardSource::Tree(&incoming))]);
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn a_collision_spelled_differently_from_heads_is_not_known() {
+        let (_dir, repo) = repo();
+        let pair = tree_of(&repo, &[("Db", LINK, "/x"), ("dB/x", FILE, "x")]);
+        commit_tree_on_head(&repo, &pair);
+        let incoming = tree_of(&repo, &[("Db", LINK, "/x"), ("DB/x", FILE, "x")]);
+        let result: Result<(), crate::merge::MergeError> =
+            refuse_linked_folders(&repo, &[Incoming::Merge(GuardSource::Tree(&incoming))]);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            collision("Db", "DB").unwrap().to_string()
+        );
     }
 
     #[test]

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Rebase/undo safety
+
+- (in progress)
+
 ### Restart resilience
 
 - A paused rebase (conflict, edit stop or error) now survives an app restart, a VSCode window
