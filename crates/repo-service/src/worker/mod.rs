@@ -1300,7 +1300,9 @@ impl Worker {
                         rebase::commits_since(&repo, onto, reply)
                     }
                     Command::StartRebase { onto, plan, reply } => {
-                        rebase::start(&repo, onto, plan, rebase_slot!(), reply)
+                        let result = rebase::start(&repo, &onto, plan, rebase_slot!());
+                        undo::relabel_rebase_start(&mut undo_recorder, &repo, &onto, &result);
+                        let _ = reply.send(result);
                     }
                     Command::RebaseContinue { reply } => {
                         rebase::continue_rebase(&repo, rebase_slot!(), reply)

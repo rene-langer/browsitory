@@ -91,7 +91,7 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
                 .unwrap_or(branch_name);
             (fit(format!("{verb} {name}")), Full)
         }
-        Command::StartRebase { onto, .. } => (fit(format!("Rebase onto {onto}")), Full),
+        Command::StartRebase { onto, .. } => (rebase_label(onto), Full),
         Command::PullCurrentUpstream { .. } => ("Pull".to_string(), Full),
         Command::RestoreReflogEntry {
             reference, new_id, ..
@@ -117,6 +117,44 @@ pub(super) fn relabel_sequence(
             git_core::pick::SequenceKind::Revert => "Revert",
         };
         recorder.relabel(count_label(verb, *applied));
+    }
+}
+
+/// "Rebase onto <onto>", with a commit id shortened like every other label's (the frontend's
+/// "Rebase onto here" passes the full id) and a ref name kept as it is.
+fn rebase_label(onto: &str) -> String {
+    let is_full_id = matches!(onto.len(), 40 | 64) && onto.bytes().all(|b| b.is_ascii_hexdigit());
+    if is_full_id {
+        format!("Rebase onto {}", short(onto))
+    } else {
+        fit(format!("Rebase onto {onto}"))
+    }
+}
+
+/// The label of a failed rebase start that still changed the repository. `git_core::rebase`
+/// rolls a failed start back to the branch; an entry is only left when the rollback didn't
+/// restore everything (or failed: `rolled_back` is false while HEAD is still detached). Its
+/// Undo restores the state before the start, so the entry is kept, but must not read like a
+/// rebase that happened.
+fn failed_rebase_label(onto: &str, rolled_back: bool) -> String {
+    let base = rebase_label(onto);
+    if rolled_back {
+        fit(format!("{base} failed (rolled back)"))
+    } else {
+        fit(format!("{base} failed"))
+    }
+}
+
+/// Renames the entry of a `StartRebase` that failed (see [`failed_rebase_label`]).
+pub(super) fn relabel_rebase_start(
+    recorder: &mut UndoRecorder,
+    repo: &Repository,
+    onto: &str,
+    result: &Result<git_core::rebase::RebaseStepResult, String>,
+) {
+    if result.is_err() {
+        let rolled_back = !repo.head_detached().unwrap_or(true);
+        recorder.relabel(failed_rebase_label(onto, rolled_back));
     }
 }
 
@@ -958,6 +996,69 @@ mod tests {
             .map(|(l, _)| l),
             Some("Check out äöüäöüä".into())
         );
+    }
+
+    const ONTO: &str = "707e824e1af1b266aaa5c4faf7517e586b174183";
+
+    fn rebase_label(onto: &str) -> Option<String> {
+        let (tx, _rx) = channel();
+        label(Command::StartRebase {
+            onto: onto.into(),
+            plan: Vec::new(),
+            reply: tx,
+        })
+        .map(|(l, _)| l)
+    }
+
+    #[test]
+    fn rebase_labels_shorten_a_commit_id_and_keep_a_ref_name() {
+        assert_eq!(rebase_label(ONTO), Some("Rebase onto 707e824".into()));
+        assert_eq!(rebase_label("main"), Some("Rebase onto main".into()));
+        assert_eq!(
+            rebase_label("origin/feature"),
+            Some("Rebase onto origin/feature".into())
+        );
+    }
+
+    #[test]
+    fn a_failed_rebase_start_is_labelled_as_failed() {
+        assert_eq!(
+            failed_rebase_label(ONTO, true),
+            "Rebase onto 707e824 failed (rolled back)"
+        );
+        assert_eq!(
+            failed_rebase_label(ONTO, false),
+            "Rebase onto 707e824 failed"
+        );
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let mut recorder = UndoRecorder::open(&repo);
+        let (tx, _rx) = channel();
+        let command = Command::StartRebase {
+            onto: ONTO.into(),
+            plan: Vec::new(),
+            reply: tx,
+        };
+        recorder.begin(&repo, plan_for(&command).unwrap(), None);
+        std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
+        relabel_rebase_start(&mut recorder, &repo, ONTO, &Err("Signing failed".into()));
+        recorder.finish(&repo, None, false);
+        assert_eq!(
+            recorder.state().undo,
+            Some("Rebase onto 707e824 failed (rolled back)".into())
+        );
+
+        recorder.begin(&repo, plan_for(&command).unwrap(), None);
+        std::fs::write(dir.path().join("c.txt"), "c\n").unwrap();
+        relabel_rebase_start(
+            &mut recorder,
+            &repo,
+            ONTO,
+            &Ok(git_core::rebase::RebaseStepResult::Done),
+        );
+        recorder.finish(&repo, None, false);
+        assert_eq!(recorder.state().undo, Some("Rebase onto 707e824".into()));
     }
 
     #[test]
