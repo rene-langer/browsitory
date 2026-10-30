@@ -161,7 +161,7 @@ pub fn dispatch(
         "revert_commit" => revert_commit(params, repos),
         "cherry_pick_many" => cherry_pick_many(params, repos),
         "revert_many" => revert_many(params, repos),
-        "continue_sequence" => continue_sequence(params, repos),
+        "continue_sequence" => continue_sequence(params, repos, stdout),
         "abort_sequence" => abort_sequence(params, repos),
         "reset_to_commit" => reset_to_commit(params, repos),
         "checkout_commit" => checkout_commit(params, repos),
@@ -1536,7 +1536,7 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
     }
 }
 
-/// Payload of the `hookProgress` notification (commit/amend hooks).
+/// Payload of the `hookProgress` notification (commit/amend/Continue hooks).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HookProgressDto {
@@ -2920,10 +2920,27 @@ fn revert_many(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn continue_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContinueSequenceParams {
+    repo_path: String,
+    /// "Continue without hooks" (#133); absent means run them.
+    #[serde(default)]
+    no_verify: bool,
+}
+
+/// The step Continue commits runs the commit hooks, relayed as `hookProgress` (#133).
+fn continue_sequence<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
+    let params: ContinueSequenceParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.continue_sequence()?;
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(out));
+    let outcome =
+        worker_handle(repos, &params.repo_path)?.continue_sequence(params.no_verify, event_tx)?;
     serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
@@ -3986,5 +4003,119 @@ mod tests {
             .unwrap(),
             serde_json::json!({"kind": "Diverged", "upstreamRef": "refs/remotes/origin/main"})
         );
+    }
+
+    /// base: a.txt="base\n"; `feature` adds b.txt, changes a.txt, adds c.txt; the checked-out
+    /// branch changed a.txt too, so a three-commit cherry-pick pauses on step 2.
+    #[cfg(unix)]
+    fn paused_pick_repo() -> (tempfile::TempDir, Vec<String>) {
+        use git2::{IndexAddOption, Repository};
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+            config.set_bool("commit.gpgSign", false).unwrap();
+            let hooks = repo.path().join("hooks");
+            config
+                .set_str("core.hooksPath", hooks.to_str().unwrap())
+                .unwrap();
+        }
+        let commit_all = |message: &str| {
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+                .unwrap()
+                .to_string()
+        };
+        std::fs::write(dir.path().join("a.txt"), "base\n").unwrap();
+        commit_all("base");
+        let base_branch = repo.head().unwrap().name().unwrap().to_string();
+        {
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &head, false).unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        let mut ids = Vec::new();
+        for (path, contents, message) in [
+            ("b.txt", "b\n", "f one"),
+            ("a.txt", "feature\n", "f two"),
+            ("c.txt", "c\n", "f three"),
+        ] {
+            std::fs::write(dir.path().join(path), contents).unwrap();
+            ids.push(commit_all(message));
+        }
+        repo.set_head(&base_branch).unwrap();
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true),
+        ))
+        .unwrap();
+        std::fs::write(dir.path().join("a.txt"), "main\n").unwrap();
+        commit_all("main change");
+        (dir, ids)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn continue_sequence_accepts_no_verify_and_relays_hook_progress() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, ids) = paused_pick_repo();
+        let path = dir.path().to_str().unwrap().to_string();
+        let repos: Repos = Arc::new(Mutex::new(HashMap::new()));
+        repos.lock().unwrap().insert(
+            path.clone(),
+            Worker::spawn(dir.path().to_path_buf()).unwrap(),
+        );
+        let handle = worker_handle(&repos, &path).unwrap();
+        handle.cherry_pick_many(ids).unwrap();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        let hooks = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("commit-msg");
+        std::fs::write(&hook, "#!/bin/sh\necho no change id; exit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let failed =
+            continue_sequence(serde_json::json!({ "repoPath": path }), &repos, &buffer).unwrap();
+
+        assert_eq!(failed["kind"], "HookFailed");
+        assert_eq!(failed["hook"], "commit-msg");
+        assert_eq!(failed["output"], "no change id\n");
+        assert_eq!(failed["progress"]["currentStep"], 2);
+        // The relay thread may still be writing the last line.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while lines_of(&buffer).len() < 2 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let lines = lines_of(&buffer);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines.iter().all(|line| line["method"] == "hookProgress"));
+        assert_eq!(lines[0]["params"]["hook"], "commit-msg");
+        assert!(lines[0]["params"]["operationId"]
+            .as_str()
+            .unwrap()
+            .starts_with("continue-"));
+
+        let completed = continue_sequence(
+            serde_json::json!({ "repoPath": path, "noVerify": true }),
+            &repos,
+            &buffer,
+        )
+        .unwrap();
+        assert_eq!(completed["kind"], "Completed");
+        assert_eq!(completed["applied"], 3);
     }
 }

@@ -72,17 +72,37 @@ pub(super) fn pick_many(
     persist(sequence_store, run)
 }
 
-/// The stored sequence's kind (`None` when there is none) and the continue result.
+/// The stored sequence's kind (`None` when there is none) and the continue result. The step it
+/// commits runs the commit hooks, reported on `events` and cancellable through `op` (#133); a
+/// failing hook keeps the stored sequence as it was.
 pub(super) fn continue_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
+    no_verify: bool,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
 ) -> (Option<SequenceKind>, Result<SequenceOutcome, String>) {
     let Some(state) = sequence_store.load(repo) else {
+        op.clear();
         return (None, Err(NO_SEQUENCE.to_string()));
     };
     let kind = state.kind;
-    let run =
-        git_core::pick::continue_sequence(repo, state, git_core::hooks::HookOptions::default());
+    let cancel = op.cancel_check();
+    let mut reporter = super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+    };
+    let run = git_core::pick::continue_sequence(
+        repo,
+        state,
+        git_core::hooks::HookOptions {
+            no_verify,
+            cancel: Some(&cancel),
+            reporter: Some(&mut reporter),
+            ..Default::default()
+        },
+    );
+    op.clear();
     (Some(kind), persist(sequence_store, run))
 }
 
@@ -274,8 +294,20 @@ impl WorkerHandle {
     pub fn revert_many(&self, commit_ids: Vec<String>) -> Result<SequenceOutcome, String> {
         round_trip(self, |reply| Command::RevertMany { commit_ids, reply })
     }
-    pub fn continue_sequence(&self) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::ContinueSequence { reply })
+    /// Continues the stored sequence. The step it commits runs the commit hooks (skipped with
+    /// `no_verify`), reported on `events` under a `continue-<n>` id that `cancel_transfer`
+    /// stops (#133).
+    pub fn continue_sequence(
+        &self,
+        no_verify: bool,
+        events: Sender<super::HookEvent>,
+    ) -> Result<SequenceOutcome, String> {
+        round_trip(self, |reply| Command::ContinueSequence {
+            no_verify,
+            operation_id: super::remote::next_operation_id("continue"),
+            events,
+            reply,
+        })
     }
     pub fn abort_sequence(&self) -> Result<SequenceAbort, String> {
         round_trip(self, |reply| Command::AbortSequence { reply })

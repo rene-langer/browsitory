@@ -556,7 +556,13 @@ pub(crate) enum Command {
         commit_ids: Vec<String>,
         reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
     },
+    /// Commits the resolved step through the commit hooks (#133): `no_verify` skips the
+    /// skippable ones, `operation_id` (`continue-<n>`) is what `cancel_transfer` stops, and
+    /// `events` reports each hook.
     ContinueSequence {
+        no_verify: bool,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
     },
     AbortSequence {
@@ -1324,8 +1330,22 @@ impl Worker {
                         undo::relabel_sequence(&mut undo_recorder, kind, &result);
                         let _ = reply.send(result);
                     }
-                    Command::ContinueSequence { reply } => {
-                        let (kind, result) = history::continue_sequence(&repo, &sequence_store);
+                    Command::ContinueSequence {
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => {
+                        let (kind, result) = history::continue_sequence(
+                            &repo,
+                            &sequence_store,
+                            no_verify,
+                            remote::TransferOp {
+                                id: operation_id,
+                                cancelled: &cancelled,
+                            },
+                            events,
+                        );
                         if let Some(kind) = kind {
                             undo::relabel_sequence(&mut undo_recorder, kind, &result);
                         }
@@ -2869,7 +2889,7 @@ mod tests {
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
-        let outcome = handle.continue_sequence().unwrap();
+        let outcome = handle.continue_sequence(false, mpsc::channel().0).unwrap();
         assert_eq!(
             outcome,
             git_core::pick::SequenceOutcome::Completed {
@@ -2885,6 +2905,118 @@ mod tests {
         );
         assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn continue_sequence_reports_hook_progress_and_a_failure_keeps_the_stored_sequence() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids).unwrap();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        install_hook(&repo, "commit-msg", "echo no change id; exit 1");
+        let undo_before = handle.get_undo_state().unwrap().undo;
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let outcome = handle.continue_sequence(false, events_tx).unwrap();
+
+        let git_core::pick::SequenceOutcome::HookFailed {
+            hook,
+            output,
+            progress,
+        } = outcome
+        else {
+            panic!("expected HookFailed, got {outcome:?}")
+        };
+        assert_eq!(
+            (hook.as_str(), output.as_str()),
+            ("commit-msg", "no change id\n")
+        );
+        assert_eq!(progress.current_step, 2);
+        let events: Vec<HookEvent> = events_rx.iter().collect();
+        assert!(
+            matches!(&events[..], [
+                HookEvent::Started { operation_id: a, hook: h1 },
+                HookEvent::Finished { operation_id: b, hook: h2 },
+            ] if a == b && a.starts_with("continue-") && h1 == "commit-msg" && h2 == "commit-msg"),
+            "{events:?}"
+        );
+        let stored = handle.get_head_info().unwrap().sequence.unwrap();
+        assert_eq!(stored.current_step, 2);
+        assert!(sequence_file(&repo).exists());
+        assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_transfer_stops_a_continue_hook() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.cherry_pick_many(ids).unwrap();
+        handle
+            .resolve_conflict("a.txt".into(), "resolved\n".into())
+            .unwrap();
+        install_hook(&repo, "pre-commit", "sleep 30");
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            if let Ok(HookEvent::Started { operation_id, .. }) = events_rx.recv() {
+                canceller.cancel_transfer(&operation_id);
+            }
+        });
+        let started = std::time::Instant::now();
+
+        let result = handle.continue_sequence(false, events_tx);
+
+        cancel_thread.join().unwrap();
+        assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
+        assert!(started.elapsed() < Duration::from_secs(25));
+        assert_eq!(
+            handle
+                .get_head_info()
+                .unwrap()
+                .sequence
+                .unwrap()
+                .current_step,
+            2
+        );
+    }
+
+    /// #169: a sequence whose Continue hook failed survives a restart, and Continue without hooks
+    /// then finishes it.
+    #[cfg(unix)]
+    #[test]
+    fn continue_without_hooks_after_a_restart_finishes_the_sequence() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        install_hook(&repo, "pre-commit", "exit 1");
+        {
+            let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
+            let handle = first.handle();
+            handle.cherry_pick_many(ids).unwrap();
+            handle
+                .resolve_conflict("a.txt".into(), "resolved\n".into())
+                .unwrap();
+            assert!(matches!(
+                handle.continue_sequence(false, mpsc::channel().0).unwrap(),
+                git_core::pick::SequenceOutcome::HookFailed { .. }
+            ));
+        }
+        let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        let outcome = second
+            .handle()
+            .continue_sequence(true, mpsc::channel().0)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::pick::SequenceOutcome::Completed { applied: 3, .. }
+        ));
+        assert!(!sequence_file(&repo).exists());
     }
 
     #[test]
@@ -2927,7 +3059,7 @@ mod tests {
         handle
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
-        assert!(handle.continue_sequence().is_ok());
+        assert!(handle.continue_sequence(false, mpsc::channel().0).is_ok());
     }
 
     #[test]
@@ -2942,7 +3074,7 @@ mod tests {
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
         assert_eq!(
-            handle.continue_sequence().unwrap(),
+            handle.continue_sequence(false, mpsc::channel().0).unwrap(),
             git_core::pick::SequenceOutcome::Completed {
                 applied: 2,
                 skipped: vec![ids[0].clone()],
@@ -2981,7 +3113,12 @@ mod tests {
             }
         );
         let none = "No cherry-pick or revert is in progress.";
-        assert_eq!(handle.continue_sequence().unwrap_err(), none);
+        assert_eq!(
+            handle
+                .continue_sequence(false, mpsc::channel().0)
+                .unwrap_err(),
+            none
+        );
         assert_eq!(handle.abort_sequence().unwrap_err(), none);
     }
 
@@ -3097,7 +3234,7 @@ mod tests {
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
         assert_eq!(
-            handle.continue_sequence().unwrap(),
+            handle.continue_sequence(false, mpsc::channel().0).unwrap(),
             git_core::pick::SequenceOutcome::Completed {
                 applied: 3,
                 skipped: vec![]
@@ -3122,14 +3259,14 @@ mod tests {
         handle
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
-        assert!(handle.continue_sequence().is_err());
+        assert!(handle.continue_sequence(false, mpsc::channel().0).is_err());
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
         let progress = handle.get_head_info().unwrap().sequence.unwrap();
         assert_eq!(progress.current_step, 3);
         assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
         std::fs::remove_file(dir.path().join("c.txt")).unwrap();
         assert!(matches!(
-            handle.continue_sequence().unwrap(),
+            handle.continue_sequence(false, mpsc::channel().0).unwrap(),
             git_core::pick::SequenceOutcome::Completed { applied: 3, .. }
         ));
         assert_eq!(
@@ -5944,7 +6081,7 @@ mod tests {
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
         assert!(matches!(
-            handle.continue_sequence().unwrap(),
+            handle.continue_sequence(false, mpsc::channel().0).unwrap(),
             git_core::pick::SequenceOutcome::Completed { .. }
         ));
 
@@ -6373,6 +6510,9 @@ mod state_lock_tests {
         }));
         let (tx, _rx) = mpsc::channel();
         assert!(super::undo::locks_state(&Command::ContinueSequence {
+            no_verify: false,
+            operation_id: "continue-1".into(),
+            events: mpsc::channel().0,
             reply: tx
         }));
         let (tx, _rx) = mpsc::channel();

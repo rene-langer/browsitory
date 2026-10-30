@@ -101,13 +101,20 @@ pub async fn revert_many(
     ))
 }
 
+/// The step Continue commits runs the commit hooks (`no_verify`, absent: false), reported as
+/// `hook-progress` events (#133).
 #[tauri::command]
 pub async fn continue_sequence(
     repo_path: String,
+    no_verify: Option<bool>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(SequenceOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.continue_sequence()?,
+        worker_handle(&state, &repo_path)?
+            .continue_sequence(no_verify.unwrap_or(false), event_tx)?,
     ))
 }
 

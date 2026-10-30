@@ -706,7 +706,7 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
         Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => held.hold(reply),
         Command::CherryPickMany { reply, .. }
         | Command::RevertMany { reply, .. }
-        | Command::ContinueSequence { reply } => held.hold(reply),
+        | Command::ContinueSequence { reply, .. } => held.hold(reply),
         Command::AbortSequence { reply } => held.hold(reply),
         _ => {}
     }
@@ -1328,8 +1328,25 @@ mod tests {
         assert_only_held!(AbortMerge);
         assert_only_held!(AbortRebase);
         assert_only_held!(RebaseContinue);
-        assert_only_held!(ContinueSequence);
         assert_only_held!(AbortSequence);
+        // ContinueSequence carries more than a reply.
+        let (reply, rx) = channel();
+        let mut command = Command::ContinueSequence {
+            no_verify: false,
+            operation_id: "continue-1".into(),
+            events: channel().0,
+            reply,
+        };
+        assert!(plan_for(&command).is_none());
+        let mut held = HeldReplies::default();
+        hold_reply(&mut command, &mut held);
+        drop(command);
+        assert_eq!(
+            rx.try_recv().map(|_| ()),
+            Err(std::sync::mpsc::TryRecvError::Empty),
+            "ContinueSequence reply was not held"
+        );
+        held.release();
     }
 
     #[test]
