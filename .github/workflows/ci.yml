@@ -74,6 +74,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # #188: tests that use a throwaway gpg keyring must stop the gpg-agent gpg starts for it;
+      # a leaked agent holds an inotify instance until the per-user limit runs out. Windows
+      # skips the gpg tests entirely.
+      - name: No leaked gpg-agent (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: scripts/check-gpg-agent-leaks.sh
       # Prints the case-insensitive probe's row table (#156, #167): `cargo test` above already
       # asserts nothing outside the repository changed, but captures the table. Built already,
       # so this only re-runs one test.

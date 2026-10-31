@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Test hygiene
+
+- Fixed (tests): the gpg signing tests left a gpg-agent and a /tmp/bgpg* directory behind on
+  every run, which over time used up the per-user inotify limit; they now stop the agent and
+  delete the directory, also when a test fails. CI fails if a test run leaks one (#188).
+
 ### UX polish
 
 - Errors now stay on screen until you dismiss them or start another change (stage, commit, checkout, …); refreshing no longer clears them. Same in the desktop app and the VSCode extension (#177).
