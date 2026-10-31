@@ -129,16 +129,9 @@ fn prunes_stale_worktree_metadata_idempotently() {
     assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
 }
 
-#[test]
-fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
-    let (dir, repo) = init_repo();
-    write_file(dir.path(), "file.txt", "initial");
-    commit_all(&repo, "initial commit");
-    repo.config()
-        .unwrap()
-        .set_bool("core.ignorecase", true)
-        .unwrap();
-    // HEAD's tree plus the link `D` and the file `d/x`, built without a file-system link.
+/// Adds the branch `evil`: HEAD's tree plus the link `D` and the file `d/x`, built without a
+/// file-system link.
+fn add_evil_branch(repo: &git2::Repository) {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     let mut inner = repo.treebuilder(None).unwrap();
     inner
@@ -156,6 +149,18 @@ fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
         .unwrap();
     repo.branch("evil", &repo.find_commit(evil).unwrap(), false)
         .unwrap();
+}
+
+#[test]
+fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    commit_all(&repo, "initial commit");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    add_evil_branch(&repo);
     let linked = dir.path().join("evil-tree");
 
     let error = create_worktree(&repo, "evil-tree", &linked, "evil", None).unwrap_err();
@@ -174,4 +179,56 @@ fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
     .unwrap_err();
     assert!(matches!(error, WorktreeError::CaseCollision(_)));
     assert!(repo.find_branch("new", git2::BranchType::Local).is_err());
+}
+
+/// #162: the repository's config says case matters (it was probed where the repository lives),
+/// but the worktree's destination folds case (a USB stick, a casefold folder).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_collision_is_refused_when_the_destination_folds_case() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    commit_all(&repo, "initial commit");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", false)
+        .unwrap();
+    add_evil_branch(&repo);
+    let linked = dir.path().join("evil-tree");
+
+    let error = git_core::worktree::create_worktree_checking(
+        &repo,
+        "evil-tree",
+        &linked,
+        "evil",
+        None,
+        true,
+    )
+    .unwrap_err();
+    assert!(matches!(error, WorktreeError::CaseCollision(_)), "{error}");
+    assert!(!linked.exists());
+    assert!(!repo.path().join("worktrees").join("evil-tree").exists());
+
+    // A destination that keeps case apart takes the tree as before.
+    git_core::worktree::create_worktree_checking(&repo, "evil-tree", &linked, "evil", None, false)
+        .unwrap();
+    assert!(linked.join("d").join("x").is_file());
+}
+
+/// Through the real probe: a Linux temp dir keeps case apart, so the repository's setting
+/// decides, as before #162.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_case_sensitive_destination_keeps_the_repository_setting() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    commit_all(&repo, "initial commit");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", false)
+        .unwrap();
+    add_evil_branch(&repo);
+    let linked = dir.path().join("evil-tree");
+    create_worktree(&repo, "evil-tree", &linked, "evil", None).unwrap();
+    assert!(linked.join("d").join("x").is_file());
 }

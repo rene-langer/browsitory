@@ -814,9 +814,10 @@ impl Worker {
             // Undo bookkeeping is shared with other processes on this repository (#172).
             let state_lock = state_lock::StateLock::open(&repo);
             let (mut logged_busy, mut logged_unavailable) = (false, false);
-            // After a command waited `LOCK_WAIT` in vain, later ones try once until the lock is
-            // taken again, so a long holder in the other window (a pull, a hook, a pinentry
-            // dialog) costs one wait, not one per click (the queue, reads included, is behind it).
+            // After a command waited `LOCK_WAIT` in vain, later ones wait only `CONTENDED_WAIT`
+            // until the lock is taken again, so a long holder in the other window (a pull, a
+            // hook, a pinentry dialog) costs one long wait, not one per click (the queue, reads
+            // included, is behind it), while a brief hold is still waited out (#175).
             let mut contended = false;
             for mut command in rx {
                 // A command that can record an entry or end a paused operation holds the lock
@@ -825,7 +826,7 @@ impl Worker {
                 let mut unrecorded = false;
                 let guard = if undo::locks_state(&command) {
                     let wait = if contended {
-                        std::time::Duration::ZERO
+                        state_lock::CONTENDED_WAIT
                     } else {
                         state_lock::LOCK_WAIT
                     };
@@ -3039,7 +3040,7 @@ mod tests {
     /// base: a.txt="base\n". feature: "f one" (+b.txt), "f two" (a.txt="feature\n"),
     /// "f three" (+c.txt). The base branch (checked out): a.txt="main\n". Returns the feature
     /// ids oldest-first.
-    fn side_commits_with_a_conflict() -> (TempDir, Repository, Vec<String>) {
+    pub(super) fn side_commits_with_a_conflict() -> (TempDir, Repository, Vec<String>) {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "a.txt", "base\n");
         commit_all(&repo, "base");
@@ -6632,7 +6633,7 @@ mod state_lock_tests {
     use git2::Repository;
     use tempfile::TempDir;
 
-    use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
+    use super::state_lock::{Acquire, StateGuard, StateLock, CONTENDED_WAIT, LOCK_WAIT};
     use super::undo::{DISCARD_BUSY, UNDO_BUSY};
     use super::{UndoOutcome, UndoState, Worker};
 
@@ -6741,11 +6742,80 @@ mod state_lock_tests {
         let (tx, _rx) = mpsc::channel();
         assert!(super::undo::locks_state(&Command::Redo { reply: tx }));
         let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::SaveStash {
+            options: git_core::stash::StashOptions::default(),
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::CreateWorktree {
+            name: "wt".into(),
+            path: "wt".into(),
+            branch: "x".into(),
+            start_point: None,
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
         assert!(!super::undo::locks_state(&Command::GetStatus { reply: tx }));
         let (tx, _rx) = mpsc::channel();
         assert!(!super::undo::locks_state(&Command::GetUndoState {
             reply: tx
         }));
+    }
+
+    /// Starts a cherry-pick sequence of `side_commits_with_a_conflict` through git-core, as the
+    /// other window's worker would, and stores it. Returns the branch it runs on.
+    fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let store = super::sequence_store::SequenceStore::open(repo);
+        assert!(matches!(
+            super::history::pick_many(repo, &store, git_core::pick::SequenceKind::CherryPick, ids)
+                .unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        branch
+    }
+
+    fn in_progress() -> String {
+        git_core::pick::PickError::OperationInProgress.to_string()
+    }
+
+    #[test]
+    fn stash_save_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
+        let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let guard = hold(&repo);
+        let saving = {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.save_stash(Default::default()))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        start_sequence_outside(&repo, ids);
+        write_file(dir.path(), "b.txt", "edited\n");
+        drop(guard);
+        assert_eq!(saving.join().unwrap(), Err(in_progress()));
+        assert!(repo.find_reference("refs/stash").is_err());
+    }
+
+    #[test]
+    fn worktree_add_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
+        let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let path = dir.path().with_extension("wt");
+
+        let guard = hold(&repo);
+        let adding = {
+            let (handle, path) = (handle.clone(), path.clone());
+            std::thread::spawn(move || handle.create_worktree("wt".into(), path, branch, None))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        start_sequence_outside(&repo, ids);
+        drop(guard);
+        assert_eq!(adding.join().unwrap(), Err(in_progress()));
+        assert!(!path.exists());
     }
 
     #[test]
@@ -6845,6 +6915,58 @@ mod state_lock_tests {
     }
 
     #[test]
+    fn a_merge_committed_outside_while_the_other_window_held_the_lock_is_not_recorded() {
+        let (dir, repo) = conflicting_branches();
+        let (worker, pause) = Worker::spawn_with_pause_before_finish(dir.path().to_path_buf());
+        let handle = worker.handle();
+        assert!(matches!(
+            handle
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap(),
+            git_core::merge::MergeOutcome::Conflicted { .. }
+        ));
+        // `git commit` in a terminal ends the merge.
+        write_file(dir.path(), "a.txt", "resolved\n");
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("a.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            let theirs = repo
+                .find_reference("refs/heads/feature")
+                .unwrap()
+                .peel_to_commit()
+                .unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Merge feature",
+                &tree,
+                &[&head, &theirs],
+            )
+            .unwrap();
+            repo.cleanup_state().unwrap();
+        }
+
+        // The other window holds the lock while this one's file watcher reads the status: its
+        // `settle` can't drop the stale entry, and the lock is free again by its `finish`.
+        let guard = hold(&repo);
+        pause.arm();
+        let reading = {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.get_status())
+        };
+        pause.wait_reached();
+        drop(guard);
+        pause.go();
+        reading.join().unwrap().unwrap();
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
     fn a_locked_command_runs_after_the_wait_when_the_lock_stays_held() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "a.txt", "a\n");
@@ -6880,13 +7002,40 @@ mod state_lock_tests {
         handle.stage_file("a.txt".into()).unwrap();
         let start = Instant::now();
         handle.stage_file("b.txt".into()).unwrap();
-        assert!(start.elapsed() < Duration::from_millis(200));
+        let elapsed = start.elapsed();
+        assert!(elapsed >= CONTENDED_WAIT, "{elapsed:?}");
+        assert!(elapsed < LOCK_WAIT, "{elapsed:?}");
         drop(guard);
         // Once the lock is free again, commands wait for it (and record) as usual.
         handle.unstage_file("b.txt".into()).unwrap();
         assert_eq!(
             handle.get_undo_state().unwrap().undo,
             Some("Unstage b.txt".into())
+        );
+    }
+
+    #[test]
+    fn after_a_timeout_a_locked_command_waits_briefly_for_the_lock() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "edited\n");
+        write_file(dir.path(), "b.txt", "edited\n");
+
+        let guard = hold(&repo);
+        handle.stage_file("a.txt".into()).unwrap(); // times out after LOCK_WAIT
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            drop(guard);
+        });
+        handle.stage_file("b.txt".into()).unwrap();
+        releaser.join().unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Stage b.txt".into())
         );
     }
 
@@ -6961,19 +7110,8 @@ mod state_lock_tests {
         assert_eq!(handle.redo(), Err(UNDO_BUSY.to_string()));
         assert!(repo.find_branch("x", git2::BranchType::Local).is_ok());
         drop(guard);
-        // Retried briefly: a child process that a parallel test forks can hold a copy of the
-        // lock's descriptor until its `exec`, keeping the `flock` for that instant.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let outcome = loop {
-            match handle.undo() {
-                Err(busy) if busy == UNDO_BUSY && Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                other => break other,
-            }
-        };
         assert_eq!(
-            outcome.unwrap(),
+            handle.undo().unwrap(),
             UndoOutcome::Done {
                 label: "Create branch x".into()
             }

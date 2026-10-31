@@ -235,6 +235,7 @@ const RUNNABLE_EXTENSIONS: &[&str] = &[
     "inetloc",
     "webloc",
     "desktop",
+    "kdelnk",
     "sh",
     "bash",
     "zsh",
@@ -330,14 +331,27 @@ fn has_magic(head: &[u8]) -> bool {
 /// the file as runnable.
 const DESKTOP_SNIFF_LIMIT: u64 = 64 * 1024;
 
-/// Whether the first line that is not blank or a `#` comment (after a UTF-8 BOM) is a desktop
-/// launcher's group header: `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]`.
-/// `None` when `head` ends before such a line and isn't the whole file (`complete`): the rest
+/// Whether `head` is a freedesktop launcher (`application/x-desktop`), by the rules of the
+/// programs that run one (#165):
+///
+/// - shared-mime-info's magics `# Config File` / `# KDE Config File` at offset 0 (after a UTF-8
+///   BOM): a launcher;
+/// - otherwise GLib's key-file structure: blank and `#` comment lines are skipped, the first other
+///   line must be a group header (`[…]`), and a desktop group (`[Desktop Entry]`,
+///   `[KDE Desktop Entry]`, `[Desktop Action …]`) at any position makes it a launcher (GLib looks
+///   the group up by name). Other group headers and `key=value` lines keep the scan going; any
+///   other line means it isn't a key file, so not a launcher.
+///
+/// `None` when `head` ends before that is decided and isn't the whole file (`complete`): the rest
 /// must be read to decide. Whitespace includes the vertical tab, as GLib's key-file parser.
 fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
     let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
+    if head.starts_with(b"# Config File") || head.starts_with(b"# KDE Config File") {
+        return Some(true);
+    }
     let blank = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c');
     let mut lines = head.split(|b| *b == b'\n').peekable();
+    let mut in_group = false;
     while let Some(line) = lines.next() {
         // The last piece of a partial head may be a cut-off line.
         if !complete && lines.peek().is_none() {
@@ -352,11 +366,19 @@ fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
         if line.is_empty() || line.starts_with(b"#") {
             continue;
         }
-        return Some(
-            line == b"[Desktop Entry]"
+        if line.starts_with(b"[") && line.ends_with(b"]") {
+            if line == b"[Desktop Entry]"
                 || line == b"[KDE Desktop Entry]"
-                || (line.starts_with(b"[Desktop Action ") && line.ends_with(b"]")),
-        );
+                || line.starts_with(b"[Desktop Action ")
+            {
+                return Some(true);
+            }
+            in_group = true;
+            continue;
+        }
+        if !in_group || !line.contains(&b'=') {
+            return Some(false);
+        }
     }
     if complete {
         Some(false)
@@ -534,17 +556,26 @@ fn file_may_run(file: &Path, os: Os) -> bool {
 }
 
 /// Up to `limit` first bytes of the regular file `path`, and whether that is the whole file.
+/// `None` for anything else, a symlink included on Unix (`file_may_run` checks its target).
+///
+/// The file is opened first and its type checked on the handle (#165): on Unix with
+/// `O_NONBLOCK` (a FIFO opens without waiting for a writer, and isn't read) and `O_NOFOLLOW`.
+/// Checking the path's type and then opening it would let a FIFO swapped in between block.
 fn read_head(path: &Path, limit: u64) -> Option<(Vec<u8>, bool)> {
     use std::io::Read;
-    if !std::fs::metadata(path).ok()?.is_file() {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
         return None;
     }
     let mut head = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(limit + 1)
-        .read_to_end(&mut head)
-        .ok()?;
+    file.take(limit + 1).read_to_end(&mut head).ok()?;
     let complete = head.len() as u64 <= limit;
     head.truncate(limit as usize);
     Some((head, complete))
@@ -894,6 +925,46 @@ mod tests {
         );
     }
 
+    /// #165: the key-file rule (D8-A) and shared-mime-info's other `application/x-desktop`
+    /// magics and globs.
+    #[test]
+    fn desktop_entries_are_found_in_any_group_and_by_the_config_file_magics() {
+        assert!(looks_runnable(
+            b"[Settings]\nA=b\n\n[Desktop Entry]\nExec=x\n"
+        ));
+        assert!(looks_runnable(
+            b"# c\n[a]\nk = v\n# c\n[Desktop Action x]\n"
+        ));
+        assert!(looks_runnable(b"# Config File\nfoo\n"));
+        assert!(looks_runnable(b"# KDE Config File\n"));
+        assert!(looks_runnable(b"\xef\xbb\xbf# Config File\n"));
+        for os in [Os::Linux, Os::MacOs, Os::Windows] {
+            assert!(may_execute(Path::new("x.kdelnk"), os, false), "{os:?}");
+        }
+        // Not a key file, or no desktop group: not a launcher.
+        assert!(!looks_runnable(b"[metadata]\nname = x\n"));
+        assert!(!looks_runnable(
+            b"[Settings]\nplain text\n[Desktop Entry]\n"
+        ));
+        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+        assert!(!looks_runnable(b"plain\n[Desktop Entry]\n"));
+        assert!(!looks_runnable(b"  # Config File\n"));
+        assert_eq!(is_desktop_entry(b"[a]\nk=v\n", false), None);
+        assert_eq!(is_desktop_entry(b"[a]\ntext\n", false), Some(false));
+    }
+
+    #[test]
+    fn a_long_key_file_without_a_desktop_group_counts_as_runnable() {
+        // D8-A's limit: undecided at `DESKTOP_SNIFF_LIMIT`.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("settings");
+        std::fs::write(&path, "[a]\n".to_string() + &"k=v\n".repeat(70 * 1024 / 4)).unwrap();
+        assert!(file_may_run(&path, Os::Linux));
+        let short = dir.path().join("short");
+        std::fs::write(&short, "[a]\n".to_string() + &"k=v\n".repeat(10)).unwrap();
+        assert!(!file_may_run(&short, Os::Linux));
+    }
+
     #[test]
     fn the_desktop_sniff_reads_past_long_comment_headers() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -913,6 +984,38 @@ mod tests {
         assert!(!file_may_run(&notes, Os::Linux));
         let long_text = write("long", comments(2048) + "plain text\n");
         assert!(!file_may_run(&long_text, Os::Linux));
+    }
+
+    /// #165: the head is read through the opened handle, so a FIFO is never read (and a file
+    /// swapped for one after a type check can't hang the worker).
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_not_read_and_does_not_block() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fifo = dir.path().join("x");
+        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path = fifo.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_head(&path, 1024).is_some());
+        });
+        let read = rx.recv_timeout(std::time::Duration::from_secs(5));
+        if read.is_err() {
+            let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+        }
+        assert_eq!(read, Ok(false));
+        assert!(!file_may_run(&fifo, Os::Linux));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_a_launcher_is_still_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("launcher"), "[Desktop Entry]\nExec=x\n").unwrap();
+        std::os::unix::fs::symlink("launcher", dir.path().join("l")).unwrap();
+        assert!(file_may_run(&dir.path().join("l"), Os::Linux));
     }
 
     #[test]

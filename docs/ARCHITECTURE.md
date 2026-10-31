@@ -207,11 +207,14 @@ sidecar runs each request on its own thread and is unaffected.
   nothing rewrites them during the pause, so a merge or pick aborted outside the app and started
   again with the same heads gets a new marker, and both processes stat the same file (#172). On
   file systems with 1–2 s mtime resolution an abort and identical restart within one tick still
-  collide; a pending entry from a build before this marker format is dropped once. Before every command
-  the recorder re-reads `undo.json` and drops a pending entry whose marker isn't the current one
-  (`None` included), so an operation finished after an app restart, a closed tab, a crashed
-  worker or in the other app (Tauri vs. VSCode) is still one entry, and an operation aborted or
-  replaced outside the app never records under the old label.
+  collide. (No released build stored a pending entry: 0.3.0 kept it in memory, so there is no
+  entry in an older marker format to migrate.) Before every command the recorder re-reads
+  `undo.json` and drops a pending entry whose marker isn't the current one (`None` included), so
+  an operation finished after an app restart, a closed tab, a crashed worker or in the other app
+  (Tauri vs. VSCode) is still one entry, and an operation aborted or replaced outside the app
+  never records under the old label. When that drop can't take the lock (the other app holds
+  it), the recorder remembers the stale entry, and the `finish` after the command drops it if it
+  is still pending instead of recording it as finished by that command (#175).
 - **State lock** (`worker/state_lock.rs`, #172): every write to `undo.json` happens under an
   advisory lock on `<gitdir>/browsitory/state.lock` (std's `File::try_lock`: `flock` on
   Linux/macOS, `LockFileEx` on Windows), after a forced reload (`UndoStore::reload`, not the
@@ -220,20 +223,30 @@ sidecar runs each request on its own thread and is unaffected.
   The worker holds the lock from before `settle` until `finish` for every command
   `undo::locks_state` lists (everything `plan_for` records, `RebaseContinue`, `AbortRebase`,
   `ContinueSequence`, `AbortSequence`, `AbortMerge`, Undo, Redo), so no other holder ever sees
-  "the operation ended, but its entry isn't recorded yet" and drops it as stale. Other commands
+  "the operation ended, but its entry isn't recorded yet" and drops it as stale. Stash save and
+  worktree add (#174) take it too, though they record nothing: the gate refuses them while a
+  rebase or sequence is stored, and under the lock that check and the change can't interleave
+  with the other app starting one. Other commands
   (reads, fetch, staging, resolving) never wait: `settle`/`finish` take the lock only when about
   to write, and skip the write while it's held (a later command repeats it). The guard is
   dropped before the held replies are released. A locked command that can't get the lock within
   `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
-  other app) logs once and runs unrecorded, and later locked commands try only once until the
-  lock is taken again, so the worker's queue waits once, not once per click. The commands that
+  other app) logs once and runs unrecorded, and later locked commands wait only `CONTENDED_WAIT`
+  (1 s) until the lock is taken again, so the worker's queue waits long once, not once per click,
+  while a brief hold (the other app staging a file) is still waited out (#175). The commands that
   destroy work-tree content with no other way back (discard hunk, lines, file or all unstaged,
   and a hard reset) are refused instead with "Another Browsitory window is changing this
   repository's undo history. Try again in a moment, so this change can be undone."
   (`undo::reply_busy`); Undo/Redo instead reply "Another Browsitory window is changing this repository's
   undo history. Try again in a moment." The lock is an OS lock on a handle, so a process that
   exits or is killed, or a worker thread that panics, releases it; the file is never deleted
-  (that would let the next opener lock a new inode). Where locks aren't supported (some network
+  (that would let the next opener lock a new inode). The guard unlocks explicitly on drop
+  (#175): a child that any thread forks (a hook, a signer, git) holds a copy of every descriptor
+  until it execs, and a `flock` lock is released only by an explicit unlock or the last close, so
+  closing our descriptor alone could leave the lock held for that instant. (Open-file-description
+  locks would not help: they are inherited across `fork` the same way.) The lock is held across
+  a commit's signing and a pull's transfer by design: the other app waits (or, after
+  `LOCK_WAIT`, runs unrecorded) rather than interleave with them. Where locks aren't supported (some network
   file systems) the worker logs once and runs unlocked, as before. Each linked worktree has its
   own lock, like its own `undo.json`. While `undo.json` was written by a newer version (never
   overwritten) the in-memory stacks are the session's history and aren't reloaded; after any
@@ -597,12 +610,20 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checkout and, under `core.ignorecase`, removes what is in the way, so it silently drops `d/x`
   rather than write through `D` (spec `2026-10-28-security-followups-design.md` §1.1–1.3 has the
   macOS/Windows probe). `worktree_guard::find_case_collision` refuses such a source anyway: a
-  pure pass over the index entries that folds names (each character upper- then lowercased,
-  without the HFS+ ignorable code points; NFC/NFD is not folded) and compares folded
+  pure pass over the index entries that folds names (NFD-normalized, as APFS/HFS+ compare
+  names, so `é` as one or two code points is one name; without the HFS+ ignorable code points;
+  each character lower-, upper- then lowercased, so `ẞ`, `ß` and `ss` meet; NFD again, so the
+  fold is a fixed point for every scalar value, #166; NTFS doesn't normalize, so there it only
+  refuses more) and compares folded
   link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
   and exact duplicates, over all of an operation's incoming sources together; a file next to a
   folder is fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows
-  builds). Only collisions an operation *brings in* are refused: `known_collisions` (every
+  builds). Worktree add also applies it when the destination folds case (#162): a worktree
+  shares the main repository's config, whose `core.ignorecase` libgit2 probed where the main
+  repository lives, so `worktree_guard::dir_folds_case` creates a hidden
+  `.browsitory-case-probe-*` temp file in the nearest existing folder of the destination, looks
+  it up with its ASCII case flipped and removes it (a failed probe leaves the config to
+  decide). Only collisions an operation *brings in* are refused: `known_collisions` (every
   collision of HEAD's tree, plus `also_known`'s) are exempt with the identical `(link, folder)`
   spelling and an identical link entry, the same blob id and mode in every incoming source
   (#167; D9-A tightened toward D9-B: a retargeted link is a new link), so with HEAD holding `D` + `d/x` unrelated merges,
@@ -723,7 +744,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   applied (documented for users in USER_GUIDE).
 - Runnable-file refusal checks one extension list on every OS (Wine runs Windows installers and
   shortcuts from `xdg-open`/`open`) plus content sniffing (`#!`, ELF, PE, Mach-O, OLE except
-  old Office documents, `[Desktop Entry]`).
+  old Office documents, and freedesktop launchers: shared-mime-info's `# Config File` /
+  `# KDE Config File` magics, or a key file (first non-comment line a group header, then only
+  group headers and `key=value` lines) with a `[Desktop Entry]`, `[KDE Desktop Entry]` or
+  `[Desktop Action …]` group at any position, as GLib finds it; a key file still undecided after
+  64 KiB counts as runnable; #165). `.desktop` and `.kdelnk` are runnable by name. The head is
+  read through the opened handle (`O_NONBLOCK | O_NOFOLLOW` on Unix, the type checked on the
+  handle), so a FIFO swapped in after a check can't block; Mark resolved reads its marker check
+  through `worktree_guard::open_beneath` and refuses a FIFO, socket or device in the conflicted
+  path, which libgit2 would block reading while staging.
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 

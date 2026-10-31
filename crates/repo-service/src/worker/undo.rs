@@ -118,7 +118,10 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
 
 /// Commands that hold the state lock (#172) from before `settle` until their `finish`: every
 /// recordable one (which covers everything that starts an operation, and `Commit`/`AmendCommit`,
-/// which end a merge or pick), the ones that end a paused operation, and Undo/Redo.
+/// which end a merge or pick), the ones that end a paused operation, Undo/Redo, and the gated
+/// commands that start no operation: stash save and worktree add (#174). They record nothing,
+/// but under the lock their gate check and the change itself can't interleave with the other
+/// window starting a rebase or a cherry-pick/revert sequence.
 pub(super) fn locks_state(command: &Command) -> bool {
     plan_for(command).is_some()
         || matches!(
@@ -130,6 +133,8 @@ pub(super) fn locks_state(command: &Command) -> bool {
                 | Command::AbortMerge { .. }
                 | Command::Undo { .. }
                 | Command::Redo { .. }
+                | Command::SaveStash { .. }
+                | Command::CreateWorktree { .. }
         )
 }
 
@@ -295,6 +300,10 @@ pub(super) struct UndoRecorder {
     active: Option<(UndoPlan, RepoSnapshot)>,
     /// A new label for the paused operation's entry, applied when it is recorded.
     pending_label: Option<String>,
+    /// The `operation` of a pending entry that `settle` found stale before this command but
+    /// couldn't drop (another holder kept the lock), so `finish` drops it rather than recording
+    /// it (#175).
+    stale_unsettled: Option<String>,
     lock: StateLock,
     logged_busy: bool,
     logged_unavailable: bool,
@@ -308,6 +317,7 @@ impl UndoRecorder {
             stacks,
             active: None,
             pending_label: None,
+            stale_unsettled: None,
             lock: StateLock::open(repo),
             logged_busy: false,
             logged_unavailable: false,
@@ -387,7 +397,9 @@ impl UndoRecorder {
     /// followed by another operation): whether it was finished or abandoned is unknowable, so
     /// it's dropped rather than recorded with whatever comes next. The drop is decided again
     /// under the lock: while another holder keeps it, that holder may be about to record the
-    /// entry (its command ended the operation), so it is left alone.
+    /// entry (its command ended the operation), so it is left alone, and remembered: the
+    /// operation had ended before this command ran, so the `finish` after it drops the entry
+    /// (if still pending) instead of recording it as this command's (#175).
     pub fn settle(
         &mut self,
         repo: &Repository,
@@ -397,6 +409,7 @@ impl UndoRecorder {
         // A relabel is meant for the `finish` of the command that made it; one left over from a
         // command that didn't track (nothing was pending) must not rename a later entry.
         self.pending_label = None;
+        self.stale_unsettled = None;
         if guard.is_some() {
             // `begin` runs next and decides from what's stored.
             self.reload();
@@ -407,6 +420,11 @@ impl UndoRecorder {
             return;
         }
         let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
+            self.stale_unsettled = self
+                .stacks
+                .pending
+                .as_ref()
+                .map(|pending| pending.operation.clone());
             return;
         };
         if self.stale(marker().as_deref()) {
@@ -436,7 +454,8 @@ impl UndoRecorder {
     /// the marker of the operation now in progress. A command that leaves an operation paused
     /// makes its entry pending (saved). `aborted` is true when the command was an abort (merge,
     /// rebase or sequence): a pending operation it ends is dropped rather than recorded — the
-    /// user backed out of it.
+    /// user backed out of it. So is one that `settle` already found ended before this command
+    /// (`stale_unsettled`): it ended outside, and its outcome is unknowable.
     pub fn finish(
         &mut self,
         repo: &Repository,
@@ -445,6 +464,7 @@ impl UndoRecorder {
         aborted: bool,
     ) {
         let relabel = self.pending_label.take();
+        let stale_unsettled = self.stale_unsettled.take();
         if let Some((plan, before)) = self.active.take() {
             let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
                 return;
@@ -477,7 +497,7 @@ impl UndoRecorder {
             return;
         }
         if let Some(pending) = self.stacks.pending.take() {
-            if aborted {
+            if aborted || stale_unsettled.as_ref() == Some(&pending.operation) {
                 self.persist(repo);
             } else {
                 let label = relabel.unwrap_or(pending.label);

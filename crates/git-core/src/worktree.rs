@@ -81,6 +81,25 @@ pub fn create_worktree(
     branch: &str,
     start_point: Option<&str>,
 ) -> Result<(), WorktreeError> {
+    // The worktree may live on another file system than the repository (#162). A failed probe
+    // leaves the repository's setting to decide, as before.
+    let destination_folds = crate::worktree_guard::nearest_existing(path)
+        .map(|dir| crate::worktree_guard::dir_folds_case(dir).unwrap_or(false))
+        .unwrap_or(false);
+    create_worktree_checking(repo, name, path, branch, start_point, destination_folds)
+}
+
+/// [`create_worktree`] with the destination's case folding given (`destination_folds`) instead
+/// of probed, so tests can stand in for a case-insensitive drive.
+#[doc(hidden)]
+pub fn create_worktree_checking(
+    repo: &Repository,
+    name: &str,
+    path: &Path,
+    branch: &str,
+    start_point: Option<&str>,
+    destination_folds: bool,
+) -> Result<(), WorktreeError> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => return Err(WorktreeError::PathExists),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -99,10 +118,11 @@ pub fn create_worktree(
         Err(error) => return Err(error.into()),
     };
     // git2 has no checkout options for worktree add, so the tree is checked up front (#156),
-    // before anything (a new branch included) is created.
+    // before anything (a new branch included) is created: when the repository's config says
+    // case matters, or the destination's file system folds case (#162).
     let tree = commit.tree()?;
-    crate::worktree_guard::refuse_case_collision::<WorktreeError, &str>(
-        repo,
+    crate::worktree_guard::refuse_case_collision_if::<WorktreeError, &str>(
+        destination_folds || crate::worktree_guard::folds_case(repo),
         &crate::worktree_guard::GuardSource::Tree(&tree),
         None,
     )?;
