@@ -38,6 +38,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
@@ -321,7 +322,7 @@ export interface UseAppStateResult {
 }
 
 export function useAppState(client: RepoClient, repoPath: string): UseAppStateResult {
-  const [state, setState] = useState<AppState>({
+  const [state, setRawState] = useState<AppState>({
     repoPath,
     selectedRow: "uncommitted",
     status: [],
@@ -378,7 +379,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const graphLimit = useRef(GRAPH_PAGE_SIZE);
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
+  const reflogError = useOwnError();
 
+  // The message the last failed `refresh()` set, so a later successful one clears that error and
+  // only that one: a refresh never clears another action's error (#177).
+  const refreshError = useOwnError();
+  const forgeError = useOwnError();
+  // Every update goes through this, so a read's remembered error never outlives it on screen.
+  const setState = useMemo(
+    () => forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]),
+    [refreshError, reflogError, forgeError],
+  );
   const refresh = useCallback(async () => {
     try {
       const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
@@ -416,6 +427,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const reflog = selectedReference === null
         ? []
         : await client.getReflog(repoPath, selectedReference);
+      const own = refreshError.take();
       setState((prev) => ({
         ...prev,
         status,
@@ -443,7 +455,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           : null,
         forgeRepositories,
         undoState,
-        error: null,
+        error: errorAfterOwnSuccess(prev.error, own),
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     } catch (err) {
@@ -455,13 +467,15 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // Still advances `refreshGeneration`: a mutation that landed before this refresh failed has
       // changed the working tree all the same, so open diffs shouldn't keep trusting what they
       // last fetched.
+      const message = credentialFailureMessage(err);
+      refreshError.set(message);
       setState((prev) => ({
         ...prev,
-        error: credentialFailureMessage(err),
+        error: message,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     }
-  }, [client, repoPath]);
+  }, [client, repoPath, refreshError, setState]);
 
   // Cheap focus-time re-check: another process (CLI, the other frontend) may have changed what
   // undo would do. Errors are ignored — the next full refresh reports them.
@@ -472,7 +486,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     } catch {
       // ignored, see above
     }
-  }, [client, repoPath]);
+  }, [client, repoPath, setState]);
 
   const loadMoreHistory = useCallback(async () => {
     graphLimit.current += GRAPH_PAGE_SIZE;
@@ -545,6 +559,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setState,
     selectedReflogReference,
     reflogRequestGeneration,
+    reflogError,
   );
 
   const {
@@ -671,16 +686,16 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
       return true;
     },
-    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch],
+    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, setState],
   );
 
   const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
 
   const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
-    useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+    useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
   const dismissError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null, hookFailure: null }));
-  }, []);
+  }, [setState]);
 
   return {
     state,

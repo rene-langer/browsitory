@@ -116,6 +116,28 @@ describe("CommitBox", () => {
     expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
   });
 
+  // #178: a clean merge's post-merge runs on the commit's operation, like post-commit.
+  it("shows a running post-merge hook with Cancel", () => {
+    const onCancel = vi.fn();
+    render(
+      <CommitBox
+        onCommit={async () => true}
+        disabled={false}
+        onAbortMerge={() => {}}
+        hooks={{
+          installed: true,
+          skip: false,
+          onToggleSkip: () => {},
+          running: { operationId: "commit-1", hook: "post-merge" },
+          onCancel,
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Running post-merge hook…");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
   it("shows a waiting signing program with the same cancel button", () => {
     const onCancel = vi.fn();
     render(

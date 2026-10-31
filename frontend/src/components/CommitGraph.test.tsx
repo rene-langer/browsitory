@@ -1202,6 +1202,33 @@ describe("CommitGraph — history actions", () => {
     expect(onRevert).toHaveBeenCalledTimes(1);
   });
 
+  it("returns focus to the commit list after a dialog opened from the menu closes, wherever focus was before", async () => {
+    const { openMenu } = setup();
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    try {
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      for (const [summary, item, dialogName] of [
+        ["B", "Reset main to here…", "Reset branch"],
+        ["M", "Cherry-pick…", "Choose parent"],
+      ] as const) {
+        outside.focus();
+        const outsideFocus = vi.spyOn(outside, "focus");
+        openMenu(summary);
+        fireEvent.click(screen.getByRole("menuitem", { name: item }));
+        // Focus goes straight to the list, never back through the element focused before.
+        expect(outsideFocus).not.toHaveBeenCalled();
+        outsideFocus.mockRestore();
+        const dialog = screen.getByRole("dialog", { name: new RegExp(dialogName) });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(list).toHaveFocus());
+      }
+    } finally {
+      outside.remove();
+    }
+  });
+
   it("disables Cherry-pick… on a merge commit at HEAD", () => {
     const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "M" } });
     openMenu("M");

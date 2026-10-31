@@ -470,3 +470,205 @@ fn ignore_swap_race_never_writes_outside() {
     eprintln!("outside target = {:?}", outside_text.lines().count());
     assert_eq!(outside_text, "OUTSIDE\n");
 }
+
+/// HEAD has `d/f`; the folder `d` was replaced by a regular (untracked) file `d` (#154).
+fn folder_replaced_by_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f", "f\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::fs::write(dir.path().join("d"), "now a file\n").unwrap();
+    (dir, repo)
+}
+
+fn index_paths(repo: &git2::Repository) -> Vec<String> {
+    repo.index()
+        .unwrap()
+        .iter()
+        .map(|e| String::from_utf8(e.path).unwrap())
+        .collect()
+}
+
+#[test]
+fn discarding_a_file_whose_folder_is_now_a_file_names_the_file_in_the_way() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    let err = discard_file(&repo, "d/f").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd/f': 'd' is now a file, not a folder. Discard or move 'd' first."
+    );
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+    assert_eq!(index_paths(&repo), vec!["d/f".to_string()]);
+}
+
+#[test]
+fn discard_all_with_the_file_and_the_folder_restores_the_folder() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    discard_all_unstaged(&repo, &["d/f".into(), "d".into()]).unwrap();
+
+    assert_eq!(read(dir.path(), "d/f"), "f\n");
+}
+
+#[test]
+fn discard_all_with_only_the_folders_file_names_the_reason() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    let err = discard_all_unstaged(&repo, &["d/f".into()]).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 1 file: d/f. 'd' is now a file, not a folder."
+    );
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+}
+
+#[test]
+fn discarding_a_stale_untracked_path_below_such_a_file_is_a_no_op() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    discard_file(&repo, "d/u").unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn discarding_a_file_whose_folder_is_now_a_link_still_says_beyond_a_symbolic_link() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f", "f\n");
+    common::commit_all(&repo, "base");
+    let outside = common::outside_dir();
+    common::replace_with_link(dir.path(), "d", outside.path());
+
+    let err = discard_file(&repo, "d/f").unwrap_err();
+
+    assert!(
+        matches!(err, StageError::BeyondSymlink(ref p) if p == "d/f"),
+        "{err:?}"
+    );
+    common::assert_outside_untouched(outside.path());
+}
+
+/// #154 case A through Discard all: a file `d` that is now a folder with untracked `d/u`.
+#[test]
+fn discard_all_with_a_folder_that_replaced_a_file_restores_the_file() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+
+    discard_all_unstaged(&repo, &["d".into(), "d/u".into()]).unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "file\n");
+}
+
+/// #154 m2: a tracked file `d` that is now a folder holding something Undo's snapshot leaves out
+/// (an ignored file, a nested repository) is not discarded: that would delete it for good.
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_an_ignored_file_is_refused() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "*.log\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+    common::write_file(dir.path(), "d/x.log", "ignored\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd': it is now a folder holding 'd/x.log', which Undo can't bring back. Move it first."
+    );
+    assert_eq!(read(dir.path(), "d/x.log"), "ignored\n");
+    assert_eq!(read(dir.path(), "d/u"), "untracked\n");
+
+    let err = discard_all_unstaged(&repo, &["d".into()]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 1 file: d. 'd' is now a folder holding 'd/x.log', which Undo can't bring back."
+    );
+}
+
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_a_nested_repository_is_refused() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    std::fs::create_dir(dir.path().join("d")).unwrap();
+    git2::Repository::init(dir.path().join("d/nested")).unwrap();
+    common::write_file(dir.path(), "d/nested/n.txt", "n\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd': it is now a folder holding 'd/nested/', which Undo can't bring back. Move it first."
+    );
+    assert!(dir.path().join("d/nested/.git").exists());
+}
+
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_only_untracked_files_restores_it() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+
+    discard_file(&repo, "d").unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "file\n");
+}
+
+/// Discard all over the real status list (`d`, `d/u`) refuses the folder before touching its
+/// untracked files, so nothing is half done.
+#[test]
+fn discard_all_refusing_a_folder_leaves_its_untracked_files_alone() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "*.log\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+    common::write_file(dir.path(), "d/x.log", "ignored\n");
+    let paths: Vec<String> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .filter(|e| !e.staged)
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(paths, ["d", "d/u"]);
+
+    let err = discard_all_unstaged(&repo, &paths).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 2 files: d, d/u. 'd' is now a folder holding 'd/x.log', which Undo can't bring back."
+    );
+    assert_eq!(read(dir.path(), "d/u"), "untracked\n");
+    assert_eq!(read(dir.path(), "d/x.log"), "ignored\n");
+}
+
+/// An ignored folder is named as the folder, not its first file.
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_an_ignored_folder_names_the_folder() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "node_modules/\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/node_modules/p/f.js", "x\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert!(
+        err.to_string().contains("holding 'd/node_modules/'"),
+        "{err}"
+    );
+}

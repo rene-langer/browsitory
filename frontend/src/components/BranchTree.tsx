@@ -440,7 +440,7 @@ export function BranchTree({
             <button
               type="button"
               className={styles.iconButton}
-              aria-label={`Actions for ${branchName}`}
+              aria-label={`Actions for ${remoteName}/${branchName}`}
               aria-haspopup="menu"
               aria-expanded={
                 rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName

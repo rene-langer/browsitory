@@ -1,6 +1,7 @@
 import { useCallback, type RefObject } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
+import { errorAfterOwnSuccess, type OwnError } from "./ownError";
 import type { RunMutation } from "./useMutationRunner";
 
 export interface ReflogActions {
@@ -20,6 +21,9 @@ export function useReflogActions(
   setState: (updater: (prev: AppState) => AppState) => void,
   selectedReflogReference: RefObject<string | null>,
   reflogRequestGeneration: RefObject<number>,
+  // The error a failed reflog read set: a later successful read clears that one only, never
+  // another action's (#177).
+  ownError: OwnError,
 ): ReflogActions {
   const selectReflogReference = useCallback(
     async (reference: string) => {
@@ -33,22 +37,24 @@ export function useReflogActions(
         ) {
           return;
         }
+        const own = ownError.take();
         setState((prev) => ({
           ...prev,
           selectedReflogReference: reference,
           reflog,
-          error: null,
+          error: errorAfterOwnSuccess(prev.error, own),
         }));
       } catch (err) {
         if (
           requestGeneration === reflogRequestGeneration.current &&
           selectedReflogReference.current === reference
         ) {
+          ownError.set(String(err));
           setState((prev) => ({ ...prev, error: String(err) }));
         }
       }
     },
-    [client, repoPath, setState, selectedReflogReference, reflogRequestGeneration],
+    [client, repoPath, setState, selectedReflogReference, reflogRequestGeneration, ownError],
   );
 
   const restoreReflogEntry = useCallback(

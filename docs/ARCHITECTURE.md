@@ -471,7 +471,13 @@ sidecar runs each request on its own thread and is unaffected.
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
   `delete_remote_branch`) funnels through `push_refs`, so all of them run `pre-push`.
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
-  so undo restores, rebase and other git-core internals never trigger hooks.
+  so undo restores, rebase and other git-core internals never trigger hooks. A clean merge's
+  commit runs `post-merge 0` on the commit's own operation, before the cancel id is released and
+  before the reply (`worker::hooks::run_post_hook_reported`, #178): it reports
+  `Started`/`Finished` like `post-commit`, `cancelTransfer(commit-<n>)` stops it, and its result
+  (cancel included) never changes the `Committed` outcome; `no_verify` doesn't skip it. The
+  other post hooks (`post-merge` after a fast-forward, squash or pull, and `post-checkout`) still
+  use `run_post_hook`: unreported, not cancellable, bounded by the 10-minute timeout.
 - Clean merges (#124, D1-A/D2-A): Browsitory never creates the merge commit in `start_merge`; a
   clean non-fast-forward merge (`MergeOutcome::Merged`) is staged and committed from the commit
   box. The worker remembers such a merge in memory (`worker/merge.rs` `CleanMerge`: HEAD and the
@@ -621,6 +627,29 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   the outside name sees the new content). A hardlink is indistinguishable from a regular file by
   path; it needs the user (or a local process) to have created it on the same filesystem, and
   git behaves the same way.
+- Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
+  `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
+  the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line
+  staging. In the other direction (a real folder where HEAD or the index has a file or link,
+  not a submodule) `stage_file` of the folder's name stages that file's deletion, so Stage all
+  works in any order. `unstage_file` resets the pair as a unit: `pair_root` finds the outermost
+  proper ancestor that is a non-folder in the index (a staged link or file that replaced the
+  folder) or in HEAD (a folder that replaced a committed link or file), or else the path itself
+  when it is a non-folder on one side and a folder on the other. The pair's index entries are
+  removed first (libgit2 can't reset a root whose entries sit across the swap), then
+  `reset_default` with the root restores HEAD's. Staged renames into the unit unstage with it;
+  a rename source inside another staged pair is left out (its deletion belongs to that pair).
+- A file in a folder's place (#154): `worktree_guard::file_in_place_of_folder` finds a proper
+  ancestor that is now a regular file (links are left to the symlink checks).
+  `discard_file` of a tracked path then refuses with `StageError::FolderIsNowAFile` (libgit2
+  can't recreate the folder, and git would delete the file the user didn't pick);
+  `discard_all_unstaged` handles untracked paths first, so confirming both the file and the
+  folder's files succeeds. Discarding a tracked file that is now a folder refuses with
+  `StageError::FolderHoldsUnrestorable` when the folder holds something the undo snapshot
+  (`undo::build_worktree_tree`) leaves out: an ignored file or folder, or a nested repository.
+  `discard_all_unstaged` checks this before discarding anything and leaves that folder's
+  untracked files alone too. The path-limited stash refuses with
+  `StashError::FolderIsNowAFile` before anything is recorded.
 
 ## Image preview
 
@@ -717,6 +746,16 @@ The VSCode bridge additionally synthesizes `-32001` JSON-RPC errors for requests
 sidecar loss. Its separate `transportStatus` notification rejects any still-pending webview
 promises and presents the diagnostic globally; it does not extend the transport-neutral
 `RepoClient` interface.
+
+In the frontend, a failed action's message lives in `AppState.error` (the banner) until it is
+dismissed or the next change starts (#177). Every `useMutationRunner` variant clears it in the
+same update that sets `pending`, and transfers and pulls clear it when they start. Reads never
+clear another action's error: `refresh()`, selecting a reflog reference and listing pull
+requests each clear only the message their own earlier failure set (`state/ownError.ts`).
+Without that rule, a mutation's trailing `refresh()` that overlapped a later, failing command
+(Stage all, then Commit and Cancel on the serial worker) wiped the later command's error.
+`dismissError` also clears the force-push offer and the hook failure; starting a mutation clears
+only `error`.
 
 ## Testing strategy
 

@@ -526,19 +526,32 @@ fn unstaging_a_staged_rename_unstages_both_paths() {
 
 #[test]
 #[cfg(unix)]
-fn staging_a_file_below_a_symlinked_folder_is_refused_like_git() {
+fn staging_a_file_below_a_symlinked_folder_stages_its_deletion() {
     let out = common::outside_dir();
     let (dir, repo) = init_repo();
     write_file(dir.path(), "d/f", "inner\n");
     common::commit_all(&repo, "base");
     common::replace_with_link(dir.path(), "d", out.path());
 
-    let error = stage_file(&repo, "d/f").unwrap_err();
+    stage_file(&repo, "d/f").unwrap();
 
-    assert_eq!(error.to_string(), "'d/f' is beyond a symbolic link.");
+    // git sees no file at `d/f` (it is beyond the link): staging it stages its deletion, and
+    // nothing is read through the link (#157).
     let index = repo.index().unwrap();
-    let entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
-    assert_eq!(entry.id, repo.blob(b"inner\n").unwrap());
+    assert!(index.get_path(std::path::Path::new("d/f"), 0).is_none());
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
+    let summary: Vec<_> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.path, entry.staged, entry.kind))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("d".to_string(), false, StatusKind::New),
+            ("d/f".to_string(), true, StatusKind::Deleted),
+        ]
+    );
     common::assert_outside_untouched(out.path());
 }
 
@@ -562,4 +575,43 @@ fn staging_a_dangling_symlink_stages_the_link() {
 fn staging_rejects_a_path_outside_the_repository() {
     let (_dir, repo) = init_repo();
     assert!(stage_file(&repo, "../x").is_err());
+}
+
+/// A conflicted file `d` the user replaced by a folder: staging `d` resolves the conflict as its
+/// deletion (as `git add -A d`), instead of silently doing nothing.
+#[test]
+fn staging_a_conflicted_file_now_a_folder_resolves_it_as_deleted() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "base\n");
+    common::commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d"), 0).unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    for stage in 1..=3u16 {
+        index
+            .add(&git2::IndexEntry {
+                ctime: entry.ctime,
+                mtime: entry.mtime,
+                dev: entry.dev,
+                ino: entry.ino,
+                mode: entry.mode,
+                uid: entry.uid,
+                gid: entry.gid,
+                file_size: entry.file_size,
+                id: entry.id,
+                flags: (entry.flags & !0x3000) | (stage << 12),
+                flags_extended: entry.flags_extended,
+                path: entry.path.clone(),
+            })
+            .unwrap();
+    }
+    index.write().unwrap();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/u", "u\n");
+
+    stage_file(&repo, "d").unwrap();
+
+    let index = repo.index().unwrap();
+    assert!(!index.has_conflicts());
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
 }

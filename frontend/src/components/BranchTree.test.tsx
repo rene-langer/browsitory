@@ -575,11 +575,18 @@ describe("BranchTree — remotes", () => {
   it("a remote-tracking branch row exposes an explicit '…' actions button that opens its context menu", async () => {
     renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    const actionsButton = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
+    const actionsButton = await screen.findByRole("button", { name: "Actions for origin/feat/foo" });
     expect(actionsButton).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(actionsButton);
     expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
+  });
+
+  it("names a remote branch's actions button with its remote, distinct from a local branch of the same name", async () => {
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    expect(await screen.findByRole("button", { name: "Actions for origin/feat/foo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actions for feat/foo" })).toBeInTheDocument();
   });
 
   it("Checkout switches to an existing same-named local branch instead of creating a new one", async () => {
@@ -1033,7 +1040,7 @@ describe("BranchTree — keys from inner controls", () => {
       onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]),
     });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    const actions = await within(screen.getByRole("button", { name: /^origin/ }).closest("li")!).findByRole("button", { name: "Actions for feat/foo" });
+    const actions = await screen.findByRole("button", { name: "Actions for origin/feat/foo" });
     fireEvent.keyDown(actions, { key: "Enter" });
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });

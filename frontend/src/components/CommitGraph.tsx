@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, HeadInfo, RemoteInfo, ResetMode, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
@@ -154,6 +154,14 @@ export function CommitGraph({
   };
 
   const listRef = useRef<HTMLUListElement>(null);
+  // The same element as state, for the menus' `returnFocusTo` (a ref can't be read in render):
+  // focus goes from a chosen item straight to the list, never back through whatever was focused
+  // before the menu opened (#146).
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const attachList = useCallback((element: HTMLUListElement | null) => {
+    listRef.current = element;
+    setListElement(element);
+  }, []);
 
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
@@ -412,7 +420,7 @@ export function CommitGraph({
   return (
     <>
     <ul
-      ref={listRef}
+      ref={attachList}
       className={styles.list}
       onKeyDown={handleKeyDown}
       tabIndex={0}
@@ -480,6 +488,7 @@ export function CommitGraph({
       {contextMenu !== null && (
         <ContextMenu
           key={contextMenu.commitId}
+          returnFocusTo={listElement}
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => {
@@ -496,6 +505,7 @@ export function CommitGraph({
       {tagMenu !== null && (
         <ContextMenu
           key={`${tagMenu.commitId}:${tagMenu.tag}`}
+          returnFocusTo={listElement}
           x={tagMenu.x}
           y={tagMenu.y}
           onClose={() => {

@@ -1096,3 +1096,28 @@ fn stash_all_refuses_when_a_directory_was_replaced_by_a_symlink() {
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
     assert!(common::is_link(dir.path(), "d"));
 }
+
+/// HEAD has `d/f`; the folder `d` was replaced by a regular (untracked) file `d` (#154).
+fn folder_replaced_by_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d/f", "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::fs::write(dir.path().join("d"), "now a file\n").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn stashing_a_file_whose_folder_is_now_a_file_is_refused_before_saving() {
+    let (dir, mut repo) = folder_replaced_by_file();
+
+    let err = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["d/f".into()]))
+        .unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Can't stash 'd/f': 'd' is now a file, not a folder. Move or delete 'd' first."
+    );
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+}

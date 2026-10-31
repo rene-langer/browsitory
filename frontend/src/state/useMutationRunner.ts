@@ -45,10 +45,11 @@ export function credentialFailureMessage(error: unknown): string {
   return message;
 }
 
-// Builds the three `runMutation*` variants that every domain action hook composed inside
-// `useAppState` uses to wrap its mutations. All three share the same pending/refresh/error
-// bookkeeping against the top-level `AppState`; they differ only in what they resolve to (see
-// each type above).
+// Builds the `runMutation*` variants that every domain action hook composed inside
+// `useAppState` uses to wrap its mutations. All share the same pending/refresh/error bookkeeping
+// against the top-level `AppState`; they differ only in what they resolve to (see each type
+// above). Every variant clears `error` when it *starts* (#177): an error stays on screen until it
+// is dismissed or the next change starts, and the trailing `refresh()` no longer clears it.
 export function useMutationRunner(
   refresh: () => Promise<void>,
   setState: (updater: (prev: AppState) => AppState) => void,
@@ -56,7 +57,7 @@ export function useMutationRunner(
   const runMutation = useCallback<RunMutation>(
     async (mutate) => {
       try {
-        setState((prev) => ({ ...prev, pending: true }));
+        setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
@@ -70,7 +71,7 @@ export function useMutationRunner(
   const runMutationWithOutcome = useCallback<RunMutationWithOutcome>(
     async (mutate) => {
       try {
-        setState((prev) => ({ ...prev, pending: true }));
+        setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
@@ -91,7 +92,7 @@ export function useMutationRunner(
   const runMutationWithMessage = useCallback<RunMutationWithMessage>(
     async (mutate) => {
       try {
-        setState((prev) => ({ ...prev, pending: true }));
+        setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
@@ -117,7 +118,7 @@ export function useMutationRunner(
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true };
+        return { ...optimisticUpdate(prev), pending: true, error: null };
       });
       try {
         await mutate();
@@ -135,7 +136,7 @@ export function useMutationRunner(
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true };
+        return { ...optimisticUpdate(prev), pending: true, error: null };
       });
       try {
         await mutate();
@@ -156,7 +157,7 @@ export function useMutationRunner(
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true };
+        return { ...optimisticUpdate(prev), pending: true, error: null };
       });
       try {
         await mutate();
