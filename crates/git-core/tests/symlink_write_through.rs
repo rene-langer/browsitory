@@ -1359,10 +1359,11 @@ fn submodule_update_below_a_linked_folder_is_refused() {
     outside_gained_nothing(&f);
 }
 
-// --- Staging below a symlinked folder (review round 2) -------------------------------------
+// --- Staging below a symlinked folder (review round 2; #157) ------------------------------
 //
-// git refuses ("beyond a symbolic link"); staging must neither read the outside file nor stage
-// a deletion the user never made.
+// Staging must never read the outside file. A whole file below the link is staged as deleted
+// (git sees no file there, #157 D3-A); hunks and lines can't be staged from it and are refused
+// ("beyond a symbolic link").
 
 fn d_f_still_staged(f: &Fx) {
     let index = f.repo.index().unwrap();
@@ -1371,15 +1372,14 @@ fn d_f_still_staged(f: &Fx) {
 }
 
 #[test]
-fn stage_file_ancestor_is_refused() {
+fn stage_file_ancestor_stages_the_deletion_without_reading_through() {
     let f = fx();
     f.link_ancestor();
-    let result = git_core::stage::stage_file(&f.repo, "d/f");
-    assert!(
-        matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f"),
-        "{result:?}"
-    );
-    d_f_still_staged(&f);
+    git_core::stage::stage_file(&f.repo, "d/f").unwrap();
+    let index = f.repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/f"), 0).is_none());
+    // The outside folder holds its own `f`; nothing of it reached the index.
+    assert!(index.iter().all(|entry| !entry.path.starts_with(b"d")));
     f.untouched();
 }
 
@@ -1439,6 +1439,79 @@ fn stage_all_with_a_linked_folder_stages_the_link_in_place_of_the_folder() {
             ("d/f", true, StatusKind::Deleted)
         ]
     );
+    f.untouched();
+}
+
+/// #157 (D3-A): staging `d/f` below the link stages its deletion, so Stage all works in any
+/// order.
+#[test]
+fn stage_all_in_reverse_status_order_still_ends_with_the_link_staged() {
+    let f = fx();
+    f.link_ancestor();
+    for path in ["d/f", "d"] {
+        git_core::stage::stage_file(&f.repo, path).unwrap();
+    }
+    let index = f.repo.index().unwrap();
+    assert_eq!(
+        index.get_path(std::path::Path::new("d"), 0).unwrap().mode,
+        0o120000
+    );
+    assert!(index.iter().all(|entry| !entry.path.starts_with(b"d/")));
+    f.untouched();
+}
+
+#[test]
+fn staging_one_file_below_the_link_leaves_its_siblings_alone() {
+    let f = fx();
+    f.commit(&[("d/g", "g\n")], "g");
+    f.link_ancestor();
+
+    git_core::stage::stage_file(&f.repo, "d/f").unwrap();
+
+    let index = f.repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/f"), 0).is_none());
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
+    assert_eq!(
+        index.get_path(std::path::Path::new("d/g"), 0).unwrap().id,
+        f.repo.blob(b"g\n").unwrap()
+    );
+    f.untouched();
+}
+
+#[test]
+fn staging_a_conflicted_file_below_a_link_is_still_refused() {
+    let f = fx();
+    let mut index = f.repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
+    index.remove_path(std::path::Path::new("d/f")).unwrap();
+    for stage in 1..=3u16 {
+        let conflict = git2::IndexEntry {
+            ctime: entry.ctime,
+            mtime: entry.mtime,
+            dev: entry.dev,
+            ino: entry.ino,
+            mode: entry.mode,
+            uid: entry.uid,
+            gid: entry.gid,
+            file_size: entry.file_size,
+            id: entry.id,
+            flags: (entry.flags & !0x3000) | (stage << 12),
+            flags_extended: entry.flags_extended,
+            path: entry.path.clone(),
+        };
+        index.add(&conflict).unwrap();
+    }
+    index.write().unwrap();
+    f.link_ancestor();
+
+    let result = git_core::stage::stage_file(&f.repo, "d/f");
+
+    assert!(
+        matches!(result, Err(StageError::BeyondSymlink(ref p)) if p == "d/f"),
+        "{result:?}"
+    );
+    let index = f.repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/f"), 2).is_some());
     f.untouched();
 }
 

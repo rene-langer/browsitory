@@ -65,22 +65,26 @@ impl From<LinePatchError> for StageError {
     }
 }
 
-/// Stages the file as it is in the work tree, or its deletion when it is gone. A path below a
-/// symlinked folder is refused like git ("beyond a symbolic link"): staging it would read the
-/// link's target, possibly outside the repository; once the link itself is staged (it replaces
-/// the folder's entries, like `git add -A`) such a path has nothing left to stage. A symlink is
-/// staged as a link even when it dangles.
+/// Stages the file as it is in the work tree, or its deletion when it is gone. Below a symlinked
+/// folder git sees no file at `path` (it is beyond the link), so the path is staged as deleted
+/// and nothing is read through the link (#157); its siblings and the link itself stay as they
+/// were, and staging the link later still replaces the folder's remaining entries (like `git add
+/// -A`). A conflicted path there is refused ("beyond a symbolic link"). A symlink is staged as a
+/// link even when it dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let mut index = repo.index()?;
     if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
-        // Staging the link that replaced the folder (as "Stage all" does first) already took
-        // the path out of the index; nothing is left to stage, and nothing is read.
-        if index.get_path(rel, 0).is_none() && !has_conflict_entries(&index, path) {
-            return Ok(());
+        if has_conflict_entries(&index, path) {
+            return Err(StageError::BeyondSymlink(path.to_string()));
         }
-        return Err(StageError::BeyondSymlink(path.to_string()));
+        // Not in the index (staging the link already took it out): nothing left to stage.
+        if index.get_path(rel, 0).is_some() {
+            index.remove_path(rel)?;
+            index.write()?;
+        }
+        return Ok(());
     }
     let full = workdir.join(rel);
     if let Ok(meta) = full.symlink_metadata() {

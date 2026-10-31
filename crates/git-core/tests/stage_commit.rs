@@ -526,19 +526,32 @@ fn unstaging_a_staged_rename_unstages_both_paths() {
 
 #[test]
 #[cfg(unix)]
-fn staging_a_file_below_a_symlinked_folder_is_refused_like_git() {
+fn staging_a_file_below_a_symlinked_folder_stages_its_deletion() {
     let out = common::outside_dir();
     let (dir, repo) = init_repo();
     write_file(dir.path(), "d/f", "inner\n");
     common::commit_all(&repo, "base");
     common::replace_with_link(dir.path(), "d", out.path());
 
-    let error = stage_file(&repo, "d/f").unwrap_err();
+    stage_file(&repo, "d/f").unwrap();
 
-    assert_eq!(error.to_string(), "'d/f' is beyond a symbolic link.");
+    // git sees no file at `d/f` (it is beyond the link): staging it stages its deletion, and
+    // nothing is read through the link (#157).
     let index = repo.index().unwrap();
-    let entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
-    assert_eq!(entry.id, repo.blob(b"inner\n").unwrap());
+    assert!(index.get_path(std::path::Path::new("d/f"), 0).is_none());
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
+    let summary: Vec<_> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.path, entry.staged, entry.kind))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("d".to_string(), false, StatusKind::New),
+            ("d/f".to_string(), true, StatusKind::Deleted),
+        ]
+    );
     common::assert_outside_untouched(out.path());
 }
 
