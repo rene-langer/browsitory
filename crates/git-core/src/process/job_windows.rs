@@ -10,10 +10,11 @@
 //!   the job. A background process that a hook leaves behind after exiting normally keeps
 //!   running, as on Unix, where a normal exit doesn't kill the process group. The handle is
 //!   closed when the run ends, and the job object goes away with its last process.
-//! - **Residual race:** a process the hook starts between `CreateProcess` and
-//!   `AssignProcessToJobObject` escapes the job. `sh.exe` (the MSYS2 runtime) takes far longer
-//!   than that window to initialise before it can start anything. Closing the window would need
-//!   `CREATE_SUSPENDED` plus resuming the primary thread, whose handle std doesn't expose.
+//! - **No escape before the job (#180):** a hook starts with `CREATE_SUSPENDED`, is assigned to
+//!   its job, and only then resumed ([`resume`], a Toolhelp32 walk over its threads, since std
+//!   doesn't expose the primary thread's handle). So nothing it starts can run outside the job.
+//!   If it can't be resumed it is killed at once rather than left suspended until the time
+//!   limit; if the job can't be created or assigned it is still resumed (see the last point).
 //! - **Signing programs are not put in a job** (`run_captured_split`): gpg may auto-start
 //!   `gpg-agent` during the call, and a job kill on a signing timeout would take the agent down.
 //! - If creating or assigning the job fails, the run falls back to killing the direct child.
@@ -78,12 +79,76 @@ impl Drop for Job {
 }
 
 /// `CreateProcess` flag: the primary thread starts suspended.
-#[cfg_attr(not(test), allow(dead_code))] // Used by hooks once #180 is fixed.
 pub(super) const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
-/// Resumes every thread of a process started with [`CREATE_SUSPENDED`].
-pub(super) fn resume(_child: &Child) -> std::io::Result<()> {
-    Ok(()) // Not yet implemented (#180): this commit only adds the tests.
+const TH32CS_SNAPTHREAD: u32 = 0x0000_0004;
+const THREAD_SUSPEND_RESUME: u32 = 0x0002;
+
+/// `THREADENTRY32`.
+#[repr(C)]
+#[derive(Default)]
+struct ThreadEntry32 {
+    size: u32,
+    usage: u32,
+    thread_id: u32,
+    owner_process_id: u32,
+    base_priority: i32,
+    delta_priority: i32,
+    flags: u32,
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
+    fn Thread32First(snapshot: *mut c_void, entry: *mut ThreadEntry32) -> i32;
+    fn Thread32Next(snapshot: *mut c_void, entry: *mut ThreadEntry32) -> i32;
+    fn OpenThread(access: u32, inherit: i32, thread_id: u32) -> *mut c_void;
+    fn ResumeThread(thread: *mut c_void) -> u32;
+}
+
+/// Resumes every thread of a process started with [`CREATE_SUSPENDED`] (std closes the primary
+/// thread's handle, so the threads are found with a Toolhelp32 snapshot). An error when any
+/// thread can't be resumed, or none was found: the caller must not leave the process suspended.
+pub(super) fn resume(child: &Child) -> std::io::Result<()> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    // SAFETY: plain call; the result is checked before use.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot.is_null() || snapshot == (-1isize) as *mut c_void {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
+    let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+    let pid = child.id();
+    let mut resumed = 0;
+    let mut entry = ThreadEntry32 {
+        size: std::mem::size_of::<ThreadEntry32>() as u32,
+        ..ThreadEntry32::default()
+    };
+    // SAFETY: the snapshot handle is open; `entry` is a writable `THREADENTRY32` whose `size`
+    // field is set, as both calls require.
+    let mut more = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } != 0;
+    while more {
+        if entry.owner_process_id == pid {
+            // SAFETY: plain call; the result is checked before use.
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.thread_id) };
+            if thread.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
+            let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+            // SAFETY: the thread handle is open and has THREAD_SUSPEND_RESUME access.
+            if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+                return Err(std::io::Error::last_os_error());
+            }
+            resumed += 1;
+        }
+        // SAFETY: as for `Thread32First`.
+        more = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
+    }
+    if resumed == 0 {
+        return Err(std::io::Error::other("the hook's thread was not found"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -108,6 +173,11 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         false
+    }
+
+    #[test]
+    fn thread_entry_has_the_documented_layout() {
+        assert_eq!(std::mem::size_of::<ThreadEntry32>(), 28);
     }
 
     #[test]

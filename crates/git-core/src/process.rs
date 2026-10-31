@@ -224,15 +224,21 @@ fn detach(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 
-/// Starts a hook in a new job object (#122). Not yet suspended (#180): this commit only adds
-/// the tests.
+/// Windows `CreateProcess` flag: no console window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Starts a hook suspended and puts it in a new job object (#122), so it can't start anything
+/// outside the job (#180). The caller resumes it ([`job_windows::resume`]). Replaces `detach`'s
+/// creation flags (`CREATE_NO_WINDOW` is kept).
 #[cfg(windows)]
 fn spawn_suspended_in_job(command: &mut Command) -> std::io::Result<(Child, Option<Job>)> {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW | job_windows::CREATE_SUSPENDED);
     let child = spawn_retrying(command)?;
     let job = Job::assign(&child);
     Ok((child, job))
@@ -800,7 +806,6 @@ pub fn spawn(spec: &SpawnSpec) -> Result<Child, LaunchError> {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut flags = CREATE_NEW_PROCESS_GROUP;
         if spec.new_console {
             flags |= CREATE_NEW_CONSOLE;
