@@ -343,22 +343,37 @@ fn hfs_ignorable(c: char) -> bool {
     )
 }
 
-/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 upper- then
-/// lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
-/// case folding and NTFS's upcase table; `ß` meeting `ss` over-matches, which only refuses
-/// more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
-/// normalization is not folded (a documented residual, decision D4).
+/// `name` (git's bytes) as a case-insensitive file system compares it. Valid UTF-8 is
+/// NFD-normalized (APFS and HFS+ compare names after normalization, so `é` as U+00E9 and as
+/// `e` + U+0301 are one name; #166), stripped of the HFS+ ignorable code points, lower-, upper-
+/// then lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
+/// case folding and NTFS's upcase table; `ẞ` lowercases to `ß`, which the round trip takes on to
+/// `ss`), and NFD-normalized again (case mapping can produce composed forms), so the fold is a
+/// fixed point. NTFS doesn't normalize and HFS+ uses an older decomposition, and `ß` meeting
+/// `ss` over-matches too: the fold errs towards finding more collisions, which only refuses
+/// more. Anything else is lowercased as ASCII.
 pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
+    // Most names are ASCII, where the Unicode fold is plain ASCII lowercasing.
+    if name.is_ascii() {
+        return name.to_ascii_lowercase();
+    }
     match std::str::from_utf8(name) {
-        Ok(text) => text
-            .chars()
-            .filter(|c| !hfs_ignorable(*c))
-            .flat_map(char::to_uppercase)
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
-            .into_bytes(),
+        Ok(text) => fold_text(text),
         Err(_) => name.to_ascii_lowercase(),
     }
+}
+
+/// [`fold_name`]'s Unicode path.
+fn fold_text(text: &str) -> Vec<u8> {
+    use unicode_normalization::UnicodeNormalization;
+    text.nfd()
+        .filter(|c| !hfs_ignorable(*c))
+        .flat_map(char::to_lowercase)
+        .flat_map(char::to_uppercase)
+        .flat_map(char::to_lowercase)
+        .nfd()
+        .collect::<String>()
+        .into_bytes()
 }
 
 /// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
@@ -369,6 +384,48 @@ pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
             .config()
             .and_then(|config| config.get_bool("core.ignorecase"))
             .unwrap_or(false)
+}
+
+/// Whether the file system holding `dir` (an existing folder) folds case (#162): creates a
+/// hidden temp file there and looks it up with its ASCII case flipped. The file is removed
+/// again. A worktree shares its main repository's config, whose `core.ignorecase` was probed
+/// where the main repository lives; a worktree on a USB stick or in a casefold folder needs its
+/// own answer.
+pub(crate) fn dir_folds_case(dir: &Path) -> io::Result<bool> {
+    let probe = tempfile::Builder::new()
+        .prefix(".browsitory-case-probe-")
+        .tempfile_in(dir)?;
+    let name = probe
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::other("the case probe has no UTF-8 name"))?;
+    let flipped: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect();
+    Ok(std::fs::symlink_metadata(dir.join(flipped)).is_ok())
+}
+
+/// The nearest ancestor of `path` (itself included) that is an existing folder; a relative
+/// path's ancestors end at `.`. Folders created below it are on the same file system (and, in an
+/// ext4 casefold folder, inherit its flag).
+pub(crate) fn nearest_existing(path: &Path) -> Option<&Path> {
+    path.ancestors()
+        .map(|ancestor| {
+            if ancestor.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                ancestor
+            }
+        })
+        .find(|ancestor| ancestor.is_dir())
 }
 
 /// When a fresh checkout (clone, submodule) checks for case collisions. Tests can't preset a
@@ -654,7 +711,20 @@ where
     E: From<git2::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
-    if !folds_case(repo) {
+    refuse_case_collision_if(folds_case(repo), source, paths)
+}
+
+/// [`refuse_case_collision`] with the caller's answer to whether case matters (`applies`).
+pub(crate) fn refuse_case_collision_if<E, P>(
+    applies: bool,
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CaseCollision>,
+    P: AsRef<[u8]>,
+{
+    if !applies {
         return Ok(());
     }
     match find_case_collision(source, paths)? {
@@ -1337,6 +1407,112 @@ mod tests {
         );
         assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "strasse".as_bytes());
         assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_linux_temp_dir_does_not_fold_case() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(!dir_folds_case(dir.path()).unwrap());
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn the_temp_dir_folds_case() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(dir_folds_case(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn the_probe_leaves_nothing_behind() {
+        let dir = tempfile::TempDir::new().unwrap();
+        dir_folds_case(dir.path()).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn the_probe_uses_the_nearest_existing_ancestor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("a").join("b").join("c");
+        assert_eq!(nearest_existing(&missing), Some(dir.path()));
+        assert_eq!(nearest_existing(dir.path()), Some(dir.path()));
+        assert_eq!(
+            nearest_existing(Path::new("no-such-dir/x")),
+            Some(Path::new("."))
+        );
+    }
+
+    #[test]
+    fn the_ascii_fast_path_matches_the_unicode_fold() {
+        for byte in 0u8..=0x7f {
+            let text = (byte as char).to_string();
+            assert_eq!(fold_name(&[byte]), fold_text(&text), "byte {byte:#04x}");
+        }
+        let all: String = (0u8..=0x7f).map(char::from).collect();
+        assert_eq!(fold_name(all.as_bytes()), fold_text(&all));
+    }
+
+    #[test]
+    fn nfc_and_nfd_spellings_fold_together() {
+        assert_eq!(
+            fold_name("\u{e9}".as_bytes()),
+            fold_name("e\u{301}".as_bytes())
+        );
+        assert_eq!(
+            fold_name("\u{c9}".as_bytes()),
+            fold_name("e\u{301}".as_bytes())
+        );
+        // A precomposed Hangul syllable and its jamo.
+        assert_eq!(
+            fold_name("\u{ac00}".as_bytes()),
+            fold_name("\u{1100}\u{1161}".as_bytes())
+        );
+        for (link, folder) in [("\u{e9}", "e\u{301}"), ("e\u{301}", "\u{e9}")] {
+            let found = first_collision([
+                (link.as_bytes().to_vec(), MODE_LINK),
+                (format!("{folder}/x").into_bytes(), 0o100644),
+            ]);
+            assert_eq!(found, collision(link, folder), "{link:?} / {folder:?}");
+        }
+        // Different letters stay apart.
+        assert_ne!(
+            fold_name("\u{e9}".as_bytes()),
+            fold_name("\u{e8}".as_bytes())
+        );
+    }
+
+    #[test]
+    fn sharp_s_capital_and_small_fold_together() {
+        assert_eq!(fold_name("ẞ".as_bytes()), fold_name("ß".as_bytes()));
+        assert_eq!(fold_name("ß".as_bytes()), fold_name(b"ss"));
+        let found = first_collision([
+            ("ẞ".as_bytes().to_vec(), MODE_LINK),
+            ("ß/x".as_bytes().to_vec(), 0o100644),
+        ]);
+        assert_eq!(found, collision("ẞ", "ß"));
+    }
+
+    #[test]
+    fn folding_is_idempotent_for_every_scalar_value() {
+        let fold = |text: &str| String::from_utf8(fold_name(text.as_bytes())).unwrap();
+        let mut failures = Vec::new();
+        for c in '\0'..=char::MAX {
+            let once = fold(c.encode_utf8(&mut [0; 4]));
+            let upper: String = c.to_uppercase().collect();
+            if fold(&once) != once || fold(&upper) != once {
+                failures.push(c);
+            }
+        }
+        let first: Vec<String> = failures
+            .iter()
+            .take(20)
+            .map(|c| format!("U+{:04X}", u32::from(*c)))
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} failures: {first:?}",
+            failures.len()
+        );
     }
 
     #[test]

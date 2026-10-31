@@ -81,11 +81,39 @@ pub fn create_worktree(
     branch: &str,
     start_point: Option<&str>,
 ) -> Result<(), WorktreeError> {
+    create_worktree_with(
+        repo,
+        name,
+        path,
+        branch,
+        start_point,
+        crate::worktree_guard::dir_folds_case,
+    )
+}
+
+/// [`create_worktree`] with the probe of the destination's case folding given (`probe`, called
+/// with the nearest existing folder of `path`), so tests can stand in for a case-insensitive
+/// drive.
+#[doc(hidden)]
+pub fn create_worktree_with(
+    repo: &Repository,
+    name: &str,
+    path: &Path,
+    branch: &str,
+    start_point: Option<&str>,
+    probe: impl FnOnce(&Path) -> std::io::Result<bool>,
+) -> Result<(), WorktreeError> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => return Err(WorktreeError::PathExists),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(WorktreeError::Git),
     }
+    // The worktree may live on another file system than the repository (#162): probed only
+    // when the repository's setting doesn't already say case folds. A failed probe leaves the
+    // repository's setting to decide, as before.
+    let case_matters = crate::worktree_guard::folds_case(repo)
+        || crate::worktree_guard::nearest_existing(path)
+            .is_some_and(|dir| probe(dir).unwrap_or(false));
 
     let (existing, commit) = match repo.find_branch(branch, BranchType::Local) {
         Ok(branch) => {
@@ -99,10 +127,11 @@ pub fn create_worktree(
         Err(error) => return Err(error.into()),
     };
     // git2 has no checkout options for worktree add, so the tree is checked up front (#156),
-    // before anything (a new branch included) is created.
+    // before anything (a new branch included) is created: when the repository's config says
+    // case matters, or the destination's file system folds case (#162).
     let tree = commit.tree()?;
-    crate::worktree_guard::refuse_case_collision::<WorktreeError, &str>(
-        repo,
+    crate::worktree_guard::refuse_case_collision_if::<WorktreeError, &str>(
+        case_matters,
         &crate::worktree_guard::GuardSource::Tree(&tree),
         None,
     )?;

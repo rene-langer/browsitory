@@ -84,7 +84,7 @@ Release. The workflow stamps the version into `crates/tauri-app/tauri.conf.json`
 
 ## License policy
 
-Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0), with one deliberate exception
+Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0, Unicode-3.0), with one deliberate exception
 (`git2`/libgit2 — see `docs/LICENSE_COMPLIANCE.md`). Before adding a dependency: verify its
 license (`cargo info <crate>` / `npm info <package> license`) and add a row to
 `docs/LICENSE_COMPLIANCE.md` in the same commit.

@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Lock and security follow-ups
+
+- Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,
+  discards and Reset hard could briefly refuse with "Another Browsitory window is changing this
+  repository's undo history" just after the other window finished, and other actions could run
+  without an undo entry, when the other window was starting a hook or git at that moment (#175).
+- After the other window kept the undo history busy for the full 10 seconds once, later actions
+  wait up to a second for it instead of giving up at once (#175).
+- Fixed: a merge, cherry-pick or revert committed or aborted outside Browsitory while the other
+  window was busy could still be listed as an undo step (#175).
+- Saving a stash and adding a worktree wait for the other window's undo-history lock, so they
+  can't slip past a rebase or cherry-pick sequence it is starting (#174).
+- Adding a worktree on a drive or folder that ignores case (a USB stick, a casefold folder on
+  Linux) now refuses a symbolic link and a folder whose names differ only in case, even when the
+  repository itself is on a case-sensitive drive (#162).
+- A symbolic link and a folder whose names are equal apart from how an accent is encoded (é as
+  one or two code points), or apart from ẞ/ß/ss, are now recognised as the same name, as on
+  macOS (#166).
+- Open in editor (no editor configured) also refuses .kdelnk files, files that the desktop
+  recognises as launchers by their first bytes ("[Desktop Entry]" within the first 33 bytes, or
+  a start of "[Desktop Action", "[KDE Desktop Entry]", "# Config File" or "# KDE Config File"),
+  and settings files with a [Desktop Entry] group after other groups, as the desktop may run
+  them. A file replaced by a named pipe at that moment no longer hangs it, and Mark resolved
+  refuses a named pipe ("'<file>' is a FIFO, socket or device, not a regular file; replace it
+  before marking it resolved.") instead of hanging (#165).
+
 ### Windows hardening
 
 - Fixed (Windows): a hook that starts a program right away could leave it running after Cancel or the time limit; hooks now start only once they are in their job (#180).
@@ -54,8 +80,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   more than about 10 seconds, Undo, Redo, discards and a hard reset ask you to try again rather
   than run without an undo entry; other operations run but can't be undone.
 - Fixed: a merge, cherry-pick or revert aborted outside Browsitory and started again with the
-  same commits reused the first one's undo snapshot. A paused merge or pick from the previous
-  version is not undoable as one step after upgrading (#172).
+  same commits reused the first one's undo snapshot (#172).
 - With HEAD already holding a link and a folder whose names differ only in case, unrelated
   merges, cherry-picks, reverts, stash applies, pulls, rebases and switches to a branch with the
   same pair now work on case-sensitive file systems; only a new collision, or the same one with

@@ -472,7 +472,10 @@ and a folder whose names differ only in case (`D` and `d/x`) can't be checked ou
 switching to it, merging, pulling, cherry-picking, rebasing, applying a stash, resetting,
 undo/redo, cloning, adding a worktree or updating a submodule refuses ("'D' is a symbolic link
 and 'd' a folder whose names differ only in case…"). Rename one of them in the repository (on
-Linux, or with git). On Linux this only applies when `core.ignorecase` is set.
+Linux, or with git). On Linux this only applies when `core.ignorecase` is set, or, when adding a
+worktree, when the worktree's drive or folder ignores case (a USB stick, a case-insensitive
+folder). `ẞ`, `ß` and `ss` count as the same name, and so do names that differ only in how an
+accent is encoded (`é` as one or two code points).
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
@@ -664,7 +667,8 @@ With the desktop app and the VSCode extension open on the same repository, they 
 history. If the other window keeps it busy for more than about 10 seconds (a pull, a commit
 hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Browsitory window
 is changing this repository's undo history. Try again in a moment…" and change nothing; other
-operations still run, but can't be undone.
+operations still run, but can't be undone. After that, while the other window stays busy, each
+action waits about a second for it instead of 10.
 
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
 buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.

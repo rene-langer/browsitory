@@ -271,6 +271,47 @@ fn mark_resolved_reports_markers_and_keeps_the_conflict() {
     assert!(repo.index().unwrap().has_conflicts());
 }
 
+/// #165: the marker check reads through the opened handle, so a FIFO (swapped in at any moment)
+/// is never opened for reading and can't hang the worker.
+#[cfg(unix)]
+#[test]
+fn mark_resolved_does_not_block_on_a_fifo() {
+    let (dir, repo) = make_conflicted_repo();
+    let fifo = dir.path().join("shared.txt");
+    std::fs::remove_file(&fifo).unwrap();
+    let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    // SAFETY: a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+    let path = dir.path().to_path_buf();
+    drop(repo);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let repo = git2::Repository::open(&path).unwrap();
+        let result = git_core::merge::mark_resolved(&repo, "shared.txt", false);
+        let _ = tx.send(matches!(
+            result,
+            Err(git_core::merge::MergeError::NotAFile(ref path)) if path == "shared.txt"
+        ));
+    });
+    let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
+    if finished.is_err() {
+        // Unblock the stuck reader so the test process can exit.
+        let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+    }
+    assert_eq!(
+        finished,
+        Ok(true),
+        "mark_resolved blocked on or staged a FIFO"
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert!(repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        git_core::merge::MergeError::NotAFile("shared.txt".into()).to_string(),
+        "'shared.txt' is a FIFO, socket or device, not a regular file; replace it before \
+         marking it resolved."
+    );
+}
+
 #[test]
 fn mark_resolved_with_force_stages_despite_markers() {
     let (_dir, repo) = make_conflicted_repo();
