@@ -453,14 +453,15 @@ sidecar runs each request on its own thread and is unaffected.
   that opens `/dev/tty` fails at once with `ENXIO` instead of being stopped by `SIGTTIN` when the
   app was started from a shell. After exit the pipe gets a 2 s drain grace in case an escaped
   grandchild holds it open (the hook's result is not held up longer than that). Windows runs
-  hooks through Git for Windows' `sh.exe`, assigned right after the spawn to an unnamed job
-  object (`process/job_windows.rs`, hand-written kernel32 FFI, #122); timeout/cancel
-  `TerminateJobObject` and then kill the child, so programs the hook started die too. There is
-  no `KILL_ON_JOB_CLOSE` (D6-A): a hook that exits normally keeps its background processes, as
-  on Unix. Residual: a process started between `CreateProcess` and `AssignProcessToJobObject`
-  escapes (closing that needs `CREATE_SUSPENDED` and the primary thread handle, which std
-  doesn't expose); `sh.exe` takes far longer than that to start anything. If creating or
-  assigning the job fails, only the child is killed.
+  hooks through Git for Windows' `sh.exe`, started with `CREATE_SUSPENDED`, assigned to an
+  unnamed job object and only then resumed (`process/job_windows.rs`, hand-written kernel32
+  FFI, #122, #180), so nothing the hook starts can escape the job. std closes the primary
+  thread's handle, so `resume` finds the process's threads with a Toolhelp32 snapshot
+  (`OpenThread` + `ResumeThread`); a hook that can't be resumed is killed at once instead of
+  waiting out the time limit. Timeout/cancel `TerminateJobObject` and then kill the child, so
+  programs the hook started die too. There is no `KILL_ON_JOB_CLOSE` (D6-A): a hook that exits
+  normally keeps its background processes, as on Unix. If creating or assigning the job fails,
+  the hook still runs and only the child is killed.
 - Gate hooks live in `git-core`: `commit`/`amend_head` (`pre-commit` → reload the index only if
   it ran → `prepare-commit-msg` → `commit-msg` via `<git dir>/COMMIT_EDITMSG` → commit →
   `post-commit`), `commit_with(.., CommitHookSet::CleanMerge, ..)` (#124: while a merge is
@@ -549,11 +550,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder can still be turned into a junction in place, and the flag only guards a path's last
   component, every component and leaf opened by path must sit in the held parent
   (`GetFinalPathNameByHandleW` of both); leaves are deleted through their own handle
-  (`FileDispositionInfo`), new files are created with `create_new` and deleted again through
-  their handle if misplaced. Residual: creating a missing folder (`CreateDirectoryW`) goes by
-  path, so in that instant an empty folder could appear in a junction's target (nothing is
-  written into it). Hand-declared `kernel32` imports, no new dependency. A `Step` seam in both
-  walkers makes the races deterministic in tests.
+  (`FileDispositionInfoEx` with POSIX semantics, so the name is gone once our handle closes
+  even while a scanner or indexer keeps the file open, #168; it falls back to
+  `FileDispositionInfo` where the file system refuses, as std's `remove_dir_all` does), new
+  files are created with `create_new` and deleted again through their handle if misplaced. A
+  missing folder is created relative to the held parent's handle (`NtCreateFile` with
+  `RootDirectory`, #163), so a parent turned into a junction in that instant is never followed;
+  tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write,
+  a read and a folder creation (#164). Hand-declared `kernel32` and `ntdll` imports, no new
+  dependency. A `Step` seam in both walkers makes the races deterministic in tests.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
