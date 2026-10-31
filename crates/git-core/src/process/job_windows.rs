@@ -52,6 +52,12 @@ impl Job {
         Some(job)
     }
 
+    /// The raw job handle, for tests that ask Windows about the job.
+    #[cfg(test)]
+    pub(super) fn handle(&self) -> *mut c_void {
+        self.0
+    }
+
     /// Terminates every process in the job (the hook and everything it started).
     pub(super) fn terminate(&self) {
         // SAFETY: `self.0` is a valid job handle until drop. A failure is ignored: the caller
@@ -68,5 +74,61 @@ impl Drop for Job {
         unsafe {
             CloseHandle(self.0);
         }
+    }
+}
+
+/// `CreateProcess` flag: the primary thread starts suspended.
+#[cfg_attr(not(test), allow(dead_code))] // Used by hooks once #180 is fixed.
+pub(super) const CREATE_SUSPENDED: u32 = 0x0000_0004;
+
+/// Resumes every thread of a process started with [`CREATE_SUSPENDED`].
+pub(super) fn resume(_child: &Child) -> std::io::Result<()> {
+    Ok(()) // Not yet implemented (#180): this commit only adds the tests.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// Waits up to `limit` for `child` to exit; kills it (so the test never hangs) when it
+    /// doesn't.
+    fn exited_within(child: &mut Child, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        false
+    }
+
+    #[test]
+    fn a_suspended_program_runs_only_after_resume() {
+        let mut child = Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "a suspended program ran"
+        );
+        resume(&child).unwrap();
+        assert!(
+            exited_within(&mut child, Duration::from_secs(20)),
+            "the program never ran after resume"
+        );
     }
 }

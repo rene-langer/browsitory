@@ -708,6 +708,211 @@ mod tests {
         );
     }
 
+    /// Keeps `path` open the way an antivirus scanner or the search indexer does: reading, and
+    /// sharing read, write and delete.
+    fn hold_open_like_a_scanner(path: &Path) -> File {
+        OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(path)
+            .unwrap()
+    }
+
+    #[test]
+    fn replace_succeeds_while_another_handle_keeps_the_old_file_open() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        let _scanner = hold_open_like_a_scanner(&dir.path().join("d/f"));
+        replace(
+            dir.path(),
+            Path::new("d/f"),
+            Content::File {
+                bytes: b"new",
+                executable: false,
+            },
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn remove_and_prune_removes_a_folder_whose_file_another_handle_keeps_open() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        let _scanner = hold_open_like_a_scanner(&dir.path().join("d/f"));
+        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            std::fs::symlink_metadata(dir.path().join("d")).is_err(),
+            "the emptied folder is still there"
+        );
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn DeviceIoControl(
+            device: *mut c_void,
+            code: u32,
+            in_buffer: *const c_void,
+            in_size: u32,
+            out_buffer: *mut c_void,
+            out_size: u32,
+            returned: *mut u32,
+            overlapped: *mut c_void,
+        ) -> i32;
+    }
+
+    /// Turns the existing empty folder `dir` into a junction to `target` in place
+    /// (`FSCTL_SET_REPARSE_POINT`, as `mklink /J` does after creating the folder). Unlike
+    /// deleting and recreating it, this needs no `DELETE` access, so it works on a folder the
+    /// walk holds (#164).
+    fn junction_in_place(dir: &Path, target: &Path) -> io::Result<()> {
+        use std::os::windows::ffi::OsStrExt;
+        const FILE_WRITE_DATA: u32 = 0x0002;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+        const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+
+        // `canonicalize` gives `\\?\C:\…`; the substitute name is the NT form `\??\C:\…`.
+        let canonical = std::fs::canonicalize(target)?;
+        let canonical: Vec<u16> = canonical.as_os_str().encode_wide().collect();
+        let print: Vec<u16> = canonical[4..].to_vec();
+        let mut substitute: Vec<u16> = r"\??\".encode_utf16().collect();
+        substitute.extend_from_slice(&print);
+
+        let units = |v: &[u16]| u16::try_from(v.len() * 2).unwrap();
+        // Mount-point layout: tag, data length, reserved, then substitute offset/length and
+        // print offset/length (bytes, relative to the path buffer), then both names, each
+        // NUL-terminated.
+        let mut path_buffer = substitute.clone();
+        path_buffer.push(0);
+        path_buffer.extend_from_slice(&print);
+        path_buffer.push(0);
+        let data_length = 8 + units(&path_buffer);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+        buf.extend_from_slice(&data_length.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&units(&substitute).to_le_bytes());
+        buf.extend_from_slice(&(units(&substitute) + 2).to_le_bytes());
+        buf.extend_from_slice(&units(&print).to_le_bytes());
+        for unit in path_buffer {
+            buf.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let handle = OpenOptions::new()
+            .access_mode(FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(dir)?;
+        let mut returned = 0u32;
+        // SAFETY: the handle belongs to `handle`, which outlives the call; `buf` is a readable
+        // `REPARSE_DATA_BUFFER` of exactly the size passed; no output buffer and no overlapped
+        // I/O (null, 0), and `returned` is a writable u32.
+        let ok = unsafe {
+            DeviceIoControl(
+                handle.as_raw_handle(),
+                FSCTL_SET_REPARSE_POINT,
+                buf.as_ptr().cast(),
+                u32::try_from(buf.len()).unwrap(),
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// A step callback that turns the held, empty `root\d` into a junction to `outside` as soon
+    /// as the walk has opened it, recording whether that worked.
+    fn junction_d_when_opened<'a>(
+        root: &'a Path,
+        outside: &'a Path,
+        converted: &'a mut Option<io::Result<()>>,
+    ) -> impl FnMut(Step<'_>) + 'a {
+        move |step| {
+            if step == Step::Opened(OsStr::new("d")) && converted.is_none() {
+                *converted = Some(junction_in_place(&root.join("d"), outside));
+            }
+        }
+    }
+
+    #[test]
+    fn a_held_folder_turned_into_a_junction_is_not_written_through() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let mut converted = None;
+        let written = write(
+            dir.path(),
+            Path::new("d/f"),
+            b"x",
+            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
+        );
+        converted
+            .expect("the walk never opened d")
+            .expect("turning the held folder into a junction");
+        assert!(written.is_err(), "the write went through: {written:?}");
+        assert!(!outside.path().join("f").exists(), "written outside");
+    }
+
+    #[test]
+    fn a_held_folder_turned_into_a_junction_is_not_read_through() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("f"), "OUTSIDE").unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let mut converted = None;
+        let read = read(
+            dir.path(),
+            Path::new("d/f"),
+            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
+        );
+        converted
+            .expect("the walk never opened d")
+            .expect("turning the held folder into a junction");
+        assert!(
+            !matches!(read, Ok(Some(Leaf::File { ref bytes, .. })) if bytes == b"OUTSIDE"),
+            "read through the junction"
+        );
+    }
+
+    #[test]
+    fn no_folder_is_created_in_a_junction_target_during_the_walk() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let mut converted = None;
+        let written = write(
+            dir.path(),
+            Path::new("d/e/f"),
+            b"x",
+            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
+        );
+        converted
+            .expect("the walk never opened d")
+            .expect("turning the held folder into a junction");
+        assert!(written.is_err(), "the write went through: {written:?}");
+        let left: Vec<_> = std::fs::read_dir(outside.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(
+            left.is_empty(),
+            "created in the junction's target: {left:?}"
+        );
+    }
+
     #[test]
     fn file_id_info_has_the_documented_layout() {
         assert_eq!(std::mem::size_of::<AttributeTagInfo>(), 8);

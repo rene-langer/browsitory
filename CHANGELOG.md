@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Windows hardening
+
+- Tests (Windows): a file another program keeps open, a folder turned into a junction during a write, and a hook started suspended in its job (#163, #164, #168, #180).
+
 ### Test hygiene
 
 - Fixed (tests): the gpg signing tests left a gpg-agent and a /tmp/bgpg* directory behind on
