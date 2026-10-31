@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Lock and security follow-ups
+
+- Fixed: a released undo-history lock could stay held while a hook or git was starting (#175).
+
 ### Windows hardening
 
 - Fixed (Windows): a hook that starts a program right away could leave it running after Cancel or the time limit; hooks now start only once they are in their job (#180).

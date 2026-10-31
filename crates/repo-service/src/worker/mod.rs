@@ -6961,19 +6961,8 @@ mod state_lock_tests {
         assert_eq!(handle.redo(), Err(UNDO_BUSY.to_string()));
         assert!(repo.find_branch("x", git2::BranchType::Local).is_ok());
         drop(guard);
-        // Retried briefly: a child process that a parallel test forks can hold a copy of the
-        // lock's descriptor until its `exec`, keeping the `flock` for that instant.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let outcome = loop {
-            match handle.undo() {
-                Err(busy) if busy == UNDO_BUSY && Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                other => break other,
-            }
-        };
         assert_eq!(
-            outcome.unwrap(),
+            handle.undo().unwrap(),
             UndoOutcome::Done {
                 label: "Create branch x".into()
             }

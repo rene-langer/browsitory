@@ -9,6 +9,15 @@
 //! worker thread that panics, releases it, so there is no staleness to handle. The file is never
 //! deleted: deleting a locked file would let the next opener lock a new inode while the old
 //! holder still believes it has exclusion.
+//!
+//! The guard unlocks explicitly when dropped (#175), instead of relying on closing the file. A
+//! child process that any thread of this process forks holds a copy of every descriptor until it
+//! execs (std opens with `O_CLOEXEC`, which only takes effect at `exec`), and a `flock` lock
+//! belongs to the open file description, so closing our descriptor would leave the lock held
+//! through that copy. `flock(2)`: "the lock is released either by an explicit LOCK_UN operation on
+//! any of these duplicate file descriptors, or when all such file descriptors have been closed."
+//! Open-file-description locks (`F_OFD_SETLK`) would not help: they are inherited across `fork`
+//! the same way. On Windows the handle isn't inheritable; the unlock is there for symmetry.
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -28,7 +37,15 @@ pub(super) struct StateLock {
 /// Exclusion until dropped.
 #[derive(Debug)]
 pub(super) struct StateGuard {
-    _file: File,
+    file: File,
+}
+
+impl Drop for StateGuard {
+    /// Releases the lock for every copy of the descriptor, including one a forked child still
+    /// holds before its `exec` (see the module docs).
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 #[derive(Debug)]
@@ -63,7 +80,7 @@ impl StateLock {
         let mut pause = Duration::from_millis(10);
         loop {
             match file.try_lock() {
-                Ok(()) => return Acquire::Held(StateGuard { _file: file }),
+                Ok(()) => return Acquire::Held(StateGuard { file }),
                 Err(TryLockError::WouldBlock) => {}
                 Err(TryLockError::Error(error)) => return Acquire::Unavailable(error),
             }
@@ -153,6 +170,46 @@ mod tests {
     }
 
     #[test]
+    fn a_copied_descriptor_does_not_keep_a_released_lock() {
+        let (_dir, repo) = repo();
+        let (a, b) = (StateLock::open(&repo), StateLock::open(&repo));
+        let guard = held(a.try_acquire());
+        // Stands in for the copy a child process holds between its `fork` and its `exec`.
+        let copy = guard.file.try_clone().unwrap();
+        drop(guard);
+        held(b.try_acquire());
+        drop(copy);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_forked_while_the_lock_was_held_does_not_keep_it() {
+        use std::os::unix::process::CommandExt;
+        let (_dir, repo) = repo();
+        let (a, b) = (StateLock::open(&repo), StateLock::open(&repo));
+        let guard = held(a.try_acquire());
+        let forker = std::thread::spawn(|| {
+            let mut command = std::process::Command::new("sh");
+            command.arg("-c").arg(":");
+            // SAFETY: `nanosleep` is async-signal-safe; the closure allocates nothing.
+            unsafe {
+                command.pre_exec(|| {
+                    std::thread::sleep(Duration::from_secs(1));
+                    Ok(())
+                });
+            }
+            // `spawn` returns once the child has exec'd (or failed to), so the child holds a
+            // copy of the lock's descriptor for about a second.
+            command.spawn().unwrap().wait().unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        drop(guard);
+        let acquired = b.try_acquire();
+        forker.join().unwrap();
+        held(acquired);
+    }
+
+    #[test]
     fn a_panicking_holder_thread_releases_the_lock() {
         let (_dir, repo) = repo();
         let path = repo.path().to_path_buf();
@@ -161,10 +218,7 @@ mod tests {
             panic!("holder panics while holding the lock");
         });
         assert!(holder.join().is_err());
-        // A short wait, not `try_acquire`: a child process that a parallel test forks can hold a
-        // copy of the lock's descriptor until its `exec`, keeping the `flock` for that instant.
-        // A lock the panic never released would still be busy after the wait.
-        held(StateLock::open(&repo).acquire(Duration::from_secs(2)));
+        held(StateLock::open(&repo).try_acquire());
     }
 
     /// Not a test on its own: the child process of `a_killed_holder_process_releases_the_lock`.
