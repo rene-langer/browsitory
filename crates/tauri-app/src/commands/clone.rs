@@ -7,7 +7,7 @@ use repo_service::clone::{DefaultCloneService, HttpsCredentialInput, ServiceClon
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use super::emit_transfer_events;
+use super::{emit_transfer_events, off_runtime};
 
 #[derive(Default)]
 pub struct CloneState(pub Arc<DefaultCloneService>);
@@ -109,16 +109,14 @@ pub async fn clone_repo(
         username: input.username,
         token: input.token,
     });
-    tauri::async_runtime::spawn_blocking(move || {
-        service.clone_repo(&operation_id, options, https, event_tx)
-    })
-    .await
-    .map_err(|error| CloneErrorDto {
-        kind: "Io".into(),
-        message: error.to_string(),
-    })?
-    .map(CloneOutcomeDto::from)
-    .map_err(CloneErrorDto::from)
+    off_runtime(move || service.clone_repo(&operation_id, options, https, event_tx))
+        .await
+        .map_err(|message| CloneErrorDto {
+            kind: "Io".into(),
+            message,
+        })?
+        .map(CloneOutcomeDto::from)
+        .map_err(CloneErrorDto::from)
 }
 
 #[tauri::command]

@@ -226,10 +226,10 @@ pub fn recent_authors(
     Ok(authors)
 }
 
-struct HookedMessage {
-    message: String,
+pub(crate) struct HookedMessage {
+    pub(crate) message: String,
     /// A pre-commit ran, so the on-disk index may differ from the cached one.
-    reload_index: bool,
+    pub(crate) reload_index: bool,
 }
 
 /// Runs one gate hook; `Ok(true)` when it actually ran (and succeeded).
@@ -265,12 +265,14 @@ fn installed(repo: &git2::Repository, name: &str) -> Result<bool, CommitError> {
     ))
 }
 
-/// `pre-commit` -> `prepare-commit-msg` -> `commit-msg`, as `git commit -m` runs them. The
+/// `pre_hook` (`pre-commit`, or `pre-merge-commit` for a clean merge's commit) ->
+/// `prepare-commit-msg` -> `commit-msg`, as `git commit -m` (or `git merge`) runs them. The
 /// message goes through `<git dir>/COMMIT_EDITMSG` only when a message hook will run, and is
 /// re-read afterwards so hook edits apply.
-fn run_commit_hooks(
+pub(crate) fn run_commit_hooks(
     repo: &git2::Repository,
     message: &str,
+    pre_hook: &str,
     source: &str,
     options: &mut HookOptions<'_>,
 ) -> Result<HookedMessage, CommitError> {
@@ -282,7 +284,7 @@ fn run_commit_hooks(
     let mut reload_index = false;
     if !options.no_verify {
         let pre_commit = HookInvocation {
-            name: "pre-commit",
+            name: pre_hook,
             args: &[],
             stdin: None,
             env: &env,
@@ -335,7 +337,7 @@ fn run_commit_hooks(
 }
 
 /// Failure is ignored: the commit already exists. The reporter (the worker) logs it.
-fn run_post_commit(repo: &git2::Repository, options: &mut HookOptions<'_>) {
+pub(crate) fn run_post_commit(repo: &git2::Repository, options: &mut HookOptions<'_>) {
     let index_path = repo.path().join("index");
     let env: [(&str, &OsStr); 2] = [
         ("GIT_INDEX_FILE", index_path.as_os_str()),
@@ -387,8 +389,44 @@ fn message_source(repo: &git2::Repository, is_merging: bool) -> &'static str {
 pub fn commit(
     repo: &mut git2::Repository,
     message: &str,
-    mut hooks: HookOptions<'_>,
+    hooks: HookOptions<'_>,
 ) -> Result<String, CommitError> {
+    commit_with(repo, message, CommitHookSet::Commit, hooks).map(|committed| committed.commit_id)
+}
+
+/// Which hooks a commit runs: `git commit`'s, or `git merge`'s when it concludes a clean merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommitHookSet {
+    /// `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`.
+    #[default]
+    Commit,
+    /// For the commit concluding a merge that Browsitory started and that stopped without
+    /// conflicts (#124): what `git merge` runs when it creates the commit, `pre-merge-commit`
+    /// (in place of `pre-commit`, also skipped by `no_verify`), `prepare-commit-msg … merge` and
+    /// `commit-msg`, and **no** `post-commit`. The caller (the worker) runs `post-merge 0` after
+    /// it when `Committed::merge_hooks` says these hooks ran. Outside a merge (`repo.state() != Merge`) this is `Commit`.
+    CleanMerge,
+}
+
+/// What `commit_with` committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Committed {
+    pub commit_id: String,
+    /// `git merge`'s hooks ran (`CleanMerge` while a merge was in progress), so the caller owes
+    /// `post-merge 0`. False when `CleanMerge` fell back to `git commit`'s hooks, for example
+    /// because the merge was aborted after the caller chose the set.
+    pub merge_hooks: bool,
+}
+
+/// `commit` with a choice of hook set (see `CommitHookSet`). Whether the merge hooks really
+/// ran is decided here, from the repository's state at commit time, and reported in
+/// `Committed::merge_hooks`.
+pub fn commit_with(
+    repo: &mut git2::Repository,
+    message: &str,
+    set: CommitHookSet,
+    mut hooks: HookOptions<'_>,
+) -> Result<Committed, CommitError> {
     // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
     // `Drop` impl, which under NLL's drop-check extends its immutable borrow of `repo` to the
@@ -416,8 +454,15 @@ pub fn commit(
         None
     };
 
+    // `git merge`'s hooks only for a clean merge's commit; otherwise `git commit`'s.
+    let merge_hooks = set == CommitHookSet::CleanMerge && is_merging;
+    let pre_hook = if merge_hooks {
+        "pre-merge-commit"
+    } else {
+        "pre-commit"
+    };
     let source = message_source(repo, is_merging);
-    let hooked = run_commit_hooks(repo, message, source, &mut hooks)?;
+    let hooked = run_commit_hooks(repo, message, pre_hook, source, &mut hooks)?;
 
     let oid = {
         let mut index = repo.index()?;
@@ -468,8 +513,13 @@ pub fn commit(
     // A squash merge's message has been used (or replaced) by this commit.
     crate::merge::clear_squash_message(repo)?;
 
-    run_post_commit(repo, &mut hooks);
-    Ok(oid.to_string())
+    if !merge_hooks {
+        run_post_commit(repo, &mut hooks);
+    }
+    Ok(Committed {
+        commit_id: oid.to_string(),
+        merge_hooks,
+    })
 }
 
 /// `signing::create_commit_with`, bounded by the commit's cancel check. While a signing program
@@ -477,7 +527,7 @@ pub fn commit(
 /// `NotInstalled` so nothing logs it): the commit box shows "Waiting for the signing program…"
 /// with the hooks' Cancel button (#110).
 #[allow(clippy::too_many_arguments)]
-fn create_commit_reporting(
+pub(crate) fn create_commit_reporting(
     repo: &git2::Repository,
     hooks: &mut HookOptions<'_>,
     head_update: crate::signing::HeadUpdate<'_>,
@@ -543,7 +593,7 @@ pub fn amend_head(
         }
         Err(error) => return Err(error.into()),
     };
-    let hooked = run_commit_hooks(repo, message, "message", &mut hooks)?;
+    let hooked = run_commit_hooks(repo, message, "pre-commit", "message", &mut hooks)?;
     let mut index = repo.index()?;
     if hooked.reload_index {
         index.read(true)?;

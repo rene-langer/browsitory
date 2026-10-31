@@ -1,5 +1,5 @@
 use super::{
-    emit_hook_events, trailers_from, worker_handle, AppState, CommitOutcomeDto, HeadInfoDto,
+    emit_hook_events, repo_worker, trailers_from, AppState, CommitOutcomeDto, HeadInfoDto,
     PickOutcomeDto, ResetModeDto, SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto,
     TrailerDto,
 };
@@ -11,7 +11,9 @@ pub async fn get_head_info(
     state: State<'_, AppState>,
 ) -> Result<HeadInfoDto, String> {
     Ok(HeadInfoDto::from(
-        worker_handle(&state, &repo_path)?.get_head_info()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.get_head_info())
+            .await?,
     ))
 }
 
@@ -30,13 +32,17 @@ pub async fn amend_commit(
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.amend_commit(
-            message,
-            no_verify,
-            author.map(Into::into),
-            trailers_from(trailers),
-            event_tx,
-        )?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| {
+                w.amend_commit(
+                    message,
+                    no_verify,
+                    author.map(Into::into),
+                    trailers_from(trailers),
+                    event_tx,
+                )
+            })
+            .await?,
     ))
 }
 
@@ -46,8 +52,9 @@ pub async fn list_recent_authors(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<SignatureInputDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .list_recent_authors()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_recent_authors())
+        .await?
         .into_iter()
         .map(Into::into)
         .collect())
@@ -61,7 +68,9 @@ pub async fn cherry_pick(
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
     Ok(PickOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.cherry_pick(commit_id, mainline)?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.cherry_pick(commit_id, mainline))
+            .await?,
     ))
 }
 
@@ -73,7 +82,9 @@ pub async fn revert_commit(
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
     Ok(PickOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.revert_commit(commit_id, mainline)?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.revert_commit(commit_id, mainline))
+            .await?,
     ))
 }
 
@@ -85,7 +96,9 @@ pub async fn cherry_pick_many(
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
     Ok(SequenceOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.cherry_pick_many(commit_ids)?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.cherry_pick_many(commit_ids))
+            .await?,
     ))
 }
 
@@ -97,17 +110,27 @@ pub async fn revert_many(
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
     Ok(SequenceOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.revert_many(commit_ids)?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.revert_many(commit_ids))
+            .await?,
     ))
 }
 
+/// The step Continue commits runs the commit hooks (`no_verify`, absent: false), reported as
+/// `hook-progress` events (#133).
 #[tauri::command]
 pub async fn continue_sequence(
     repo_path: String,
+    no_verify: Option<bool>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(SequenceOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.continue_sequence()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.continue_sequence(no_verify.unwrap_or(false), event_tx))
+            .await?,
     ))
 }
 
@@ -117,7 +140,9 @@ pub async fn abort_sequence(
     state: State<'_, AppState>,
 ) -> Result<SequenceAbortDto, String> {
     Ok(SequenceAbortDto::from(
-        worker_handle(&state, &repo_path)?.abort_sequence()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.abort_sequence())
+            .await?,
     ))
 }
 
@@ -128,7 +153,9 @@ pub async fn reset_to_commit(
     mode: ResetModeDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.reset_to_commit(commit_id, mode.into())
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.reset_to_commit(commit_id, mode.into()))
+        .await
 }
 
 #[tauri::command]
@@ -137,5 +164,7 @@ pub async fn checkout_commit(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.checkout_commit(commit_id)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.checkout_commit(commit_id))
+        .await
 }

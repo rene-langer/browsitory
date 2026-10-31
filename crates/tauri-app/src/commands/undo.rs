@@ -1,4 +1,4 @@
-use super::{worker_handle, AppState, UndoOutcomeDto, UndoStateDto};
+use super::{repo_worker, AppState, UndoOutcomeDto, UndoStateDto};
 use tauri::State;
 
 #[tauri::command]
@@ -7,7 +7,9 @@ pub async fn get_undo_state(
     state: State<'_, AppState>,
 ) -> Result<UndoStateDto, String> {
     Ok(UndoStateDto::from(
-        worker_handle(&state, &repo_path)?.get_undo_state()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.get_undo_state())
+            .await?,
     ))
 }
 
@@ -17,7 +19,9 @@ pub async fn undo_last(
     state: State<'_, AppState>,
 ) -> Result<UndoOutcomeDto, String> {
     Ok(UndoOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.undo()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.undo())
+            .await?,
     ))
 }
 
@@ -27,6 +31,8 @@ pub async fn redo_last(
     state: State<'_, AppState>,
 ) -> Result<UndoOutcomeDto, String> {
     Ok(UndoOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.redo()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.redo())
+            .await?,
     ))
 }

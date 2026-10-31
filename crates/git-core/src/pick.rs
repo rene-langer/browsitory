@@ -37,6 +37,26 @@ pub enum PickError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// A hook (or the signing program) on the step Continue commits was cancelled or couldn't
+    /// be run.
+    #[error("{0}")]
+    Hook(#[from] crate::hooks::HookError),
+    /// Committing the step Continue finishes failed otherwise (the message file, an empty
+    /// message after the hooks).
+    #[error("{0}")]
+    Commit(crate::commit::CommitError),
+}
+
+impl From<crate::commit::CommitError> for PickError {
+    fn from(error: crate::commit::CommitError) -> Self {
+        use crate::commit::CommitError;
+        match error {
+            CommitError::Hook(error) => PickError::Hook(error),
+            CommitError::Sign(error) => PickError::Sign(error),
+            CommitError::Write(error) => PickError::Git(error),
+            other => PickError::Commit(other),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -83,6 +103,23 @@ pub enum SequenceOutcome {
         files: Vec<String>,
         progress: SequenceProgress,
     },
+    /// Continue's commit hook `hook` failed (#133). Nothing was committed: the step is still
+    /// paused (git's `CHERRY_PICK_HEAD`/`REVERT_HEAD` and the resolved index are untouched) and
+    /// the returned state is unchanged, so Continue (with or without hooks) and Abort work as
+    /// before.
+    HookFailed {
+        hook: String,
+        output: String,
+        progress: SequenceProgress,
+    },
+}
+
+/// How finishing git's paused step went.
+enum Paused {
+    /// Committed (or skipped as empty); `state.next` moved past it.
+    Done,
+    /// A commit hook failed; nothing changed.
+    HookFailed { hook: String, output: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,7 +403,8 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
 /// with the original author and message; a step whose result is empty is skipped. A conflict
 /// stops the sequence (git state `CherryPick`, like a single pick) and returns its state for
 /// `continue_sequence`/`abort_sequence`. Merge commits are refused up front. Like
-/// `cherry_pick`, steps run no commit hooks.
+/// `cherry_pick`, the steps applied here run no commit hooks; only the step `continue_sequence`
+/// commits after a stop does (D3-A).
 pub fn cherry_pick_many(repo: &Repository, ids_oldest_first: &[String]) -> SequenceRun {
     start(repo, ids_oldest_first, SequenceKind::CherryPick)
 }
@@ -494,9 +532,20 @@ fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
 /// the resolution left nothing to commit); when it stopped on an error, that step is retried.
 /// A step the user committed some other way (HEAD is one commit past the stop) counts as done.
 /// Anything else that moved HEAD is `HeadMoved`, and an unrelated paused operation is
-/// `OperationInProgress`; both keep the state so the sequence can still be aborted. Commits
-/// made here run no hooks, like every sequence step.
-pub fn continue_sequence(repo: &Repository, mut state: SequenceState) -> SequenceRun {
+/// `OperationInProgress`; both keep the state so the sequence can still be aborted.
+///
+/// Hooks (D3-A, #133): the step Continue commits (the resolved, paused one) runs
+/// `git cherry-pick --continue`'s commit hooks through `hooks`: `pre-commit`,
+/// `prepare-commit-msg <file> merge`, `commit-msg`, then the commit (signing reported and
+/// cancellable as for a commit), then `post-commit`. A failing hook is
+/// `SequenceOutcome::HookFailed` and a cancelled one `PickError::Hook`, both with the state
+/// unchanged. An empty resolution is skipped without hooks, and the steps Browsitory applies by
+/// itself (before or after) run none.
+pub fn continue_sequence(
+    repo: &Repository,
+    mut state: SequenceState,
+    mut hooks: crate::hooks::HookOptions<'_>,
+) -> SequenceRun {
     if state.next >= state.commits.len() {
         return SequenceRun::stopped(
             git2::Error::from_str("the stored sequence has no step left"),
@@ -510,12 +559,20 @@ pub fn continue_sequence(repo: &Repository, mut state: SequenceState) -> Sequenc
         RepositoryState::CherryPick
         | RepositoryState::CherryPickSequence
         | RepositoryState::Revert
-        | RepositoryState::RevertSequence => finish_paused(repo, &mut state),
-        RepositoryState::Clean => resume_clean(repo, &mut state),
+        | RepositoryState::RevertSequence => finish_paused(repo, &mut state, &mut hooks),
+        RepositoryState::Clean => resume_clean(repo, &mut state).map(|()| Paused::Done),
         _ => Err(PickError::OperationInProgress),
     };
     match resumed {
-        Ok(()) => run(repo, state),
+        Ok(Paused::Done) => run(repo, state),
+        Ok(Paused::HookFailed { hook, output }) => SequenceRun {
+            outcome: Ok(SequenceOutcome::HookFailed {
+                hook,
+                output,
+                progress: state.progress(),
+            }),
+            state: Some(state),
+        },
         Err(error) => SequenceRun::stopped(error, state),
     }
 }
@@ -545,7 +602,11 @@ fn is_own_paused_step(repo: &Repository, state: &SequenceState) -> bool {
             == state.commits.get(state.next).cloned()
 }
 
-fn finish_paused(repo: &Repository, state: &mut SequenceState) -> Result<(), PickError> {
+fn finish_paused(
+    repo: &Repository,
+    state: &mut SequenceState,
+    hooks: &mut crate::hooks::HookOptions<'_>,
+) -> Result<Paused, PickError> {
     if !is_own_paused_step(repo, state) {
         return Err(PickError::OperationInProgress);
     }
@@ -559,14 +620,14 @@ fn finish_paused(repo: &Repository, state: &mut SequenceState) -> Result<(), Pic
     }
     let current = state.commits[state.next].clone();
     let tree_id = index.write_tree()?;
+    // Before any hook: an empty resolution is skipped, as git's `--continue` would refuse it.
     if tree_id == head.tree_id() {
         repo.cleanup_state()?;
         state.skipped.push(current);
         state.next += 1;
-        return Ok(());
+        return Ok(Paused::Done);
     }
     let target = repo.find_commit(Oid::from_str(&current)?)?;
-    let tree = repo.find_tree(tree_id)?;
     let committer = repo.signature()?;
     // libgit2's MERGE_MSG lists the conflicts as `#` comment lines; strip them like git's
     // default commit cleanup does.
@@ -585,21 +646,44 @@ fn finish_paused(repo: &Repository, state: &mut SequenceState) -> Result<(), Pic
             message.unwrap_or_else(|| revert_message(&target, None)),
         ),
     };
-    crate::signing::create_commit(
+    // `git cherry-pick --continue`'s hooks; a failure leaves everything as it was.
+    let hooked = match crate::commit::run_commit_hooks(repo, &message, "pre-commit", "merge", hooks)
+    {
+        Ok(hooked) => hooked,
+        Err(crate::commit::CommitError::HookFailed { hook, output }) => {
+            return Ok(Paused::HookFailed { hook, output })
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if hooked.reload_index {
+        index.read(true)?;
+        // A `pre-commit` that put the step back to HEAD's tree emptied it: skip it like an empty
+        // resolution rather than commit nothing.
+        if index.write_tree()? == head.tree_id() {
+            repo.cleanup_state()?;
+            state.skipped.push(current);
+            state.next += 1;
+            return Ok(Paused::Done);
+        }
+    }
+    let tree = repo.find_tree(index.write_tree()?)?;
+    crate::commit::create_commit_reporting(
         repo,
-        Some(crate::signing::HeadUpdate {
+        hooks,
+        crate::signing::HeadUpdate {
             expected: Some(head.id()),
             reflog_operation: "commit",
-        }),
+        },
         &author,
         &committer,
-        &message,
+        &hooked.message,
         &tree,
         &[&head],
     )?;
     repo.cleanup_state()?;
+    crate::commit::run_post_commit(repo, hooks);
     state.next += 1;
-    Ok(())
+    Ok(Paused::Done)
 }
 
 fn resume_clean(repo: &Repository, state: &mut SequenceState) -> Result<(), PickError> {

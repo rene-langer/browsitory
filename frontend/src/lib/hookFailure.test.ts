@@ -22,6 +22,24 @@ describe("hookFailure", () => {
     expect(retryLabel({ ...base, hook: "prepare-commit-msg", retry: { kind: "commit", message: "m", trailers: [] } })).toBeNull();
   });
 
+  it("offers Commit without hooks for a failed pre-merge-commit", () => {
+    expect(
+      retryLabel({ output: "", dialogOpen: true, hook: "pre-merge-commit", retry: { kind: "commit", message: "m", trailers: [] } }),
+    ).toBe("Commit without hooks");
+  });
+
+  it("offers Continue without hooks after a failed hook on Continue", () => {
+    expect(retryLabel({ output: "", dialogOpen: true, hook: "commit-msg", retry: { kind: "continueSequence" } })).toBe(
+      "Continue without hooks",
+    );
+  });
+
+  it("offers no retry for a failed prepare-commit-msg on Continue", () => {
+    expect(
+      retryLabel({ output: "", dialogOpen: true, hook: "prepare-commit-msg", retry: { kind: "continueSequence" } }),
+    ).toBeNull();
+  });
+
   it("names the success toast after the original action", () => {
     expect(retrySuccessLabel({ kind: "commit", message: "m", trailers: [] })).toBe("Committed");
     expect(retrySuccessLabel({ kind: "push", push: { operation: "ForcePushBranch", remoteName: "o" } })).toBe("Force pushed");

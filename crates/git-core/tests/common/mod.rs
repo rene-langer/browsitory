@@ -226,3 +226,30 @@ pub fn is_link(workdir: &Path, rel: &str) -> bool {
 pub fn read(workdir: &Path, rel: &str) -> String {
     std::fs::read_to_string(workdir.join(rel)).unwrap()
 }
+
+/// Installs, for each of `names`, a hook that appends `<name> <args>` to `<git dir>/hook-log`
+/// (outside the work tree, so the log never shows as a change).
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn log_hooks(repo: &Repository, names: &[&str]) {
+    let hooks = repo.path().join("hooks");
+    let log = repo.path().join("hook-log");
+    for name in names {
+        install_hook(
+            &hooks,
+            name,
+            &format!("echo \"{name} $*\" >> '{}'", log.display()),
+        );
+    }
+}
+
+/// The hook log of `log_hooks`, with the commit message file's path replaced by `<msg>`; empty
+/// when no hook ran.
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn read_log(repo: &Repository) -> String {
+    let message_file = repo.path().join("COMMIT_EDITMSG");
+    std::fs::read_to_string(repo.path().join("hook-log"))
+        .unwrap_or_default()
+        .replace(&message_file.display().to_string(), "<msg>")
+}

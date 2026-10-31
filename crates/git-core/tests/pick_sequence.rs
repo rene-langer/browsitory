@@ -2,6 +2,7 @@
 mod common;
 
 use git2::{Oid, Repository, RepositoryState};
+use git_core::hooks::HookOptions;
 use git_core::merge::{resolve_whole_file, ConflictSide};
 use git_core::pick::{
     abort_sequence, cherry_pick, cherry_pick_many, continue_sequence, revert_many, PickError,
@@ -267,7 +268,7 @@ fn continue_after_resolving_lands_the_rest_with_original_authors() {
     let (dir, repo, ids, state) = paused(true);
     common::write_file(dir.path(), "shared.txt", "resolved\n");
     stage(&repo, "shared.txt");
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -305,7 +306,7 @@ fn continue_after_resolving_lands_the_rest_with_original_authors() {
 #[test]
 fn continue_with_conflicts_left_is_refused_and_keeps_the_state() {
     let (_dir, repo, _ids, state) = paused(true);
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::UnresolvedConflicts)));
     assert_eq!(run.state, Some(state));
     assert_eq!(repo.state(), RepositoryState::CherryPick);
@@ -319,7 +320,7 @@ fn continue_with_conflicts_left_is_refused_and_keeps_the_state() {
 fn whole_file_ours_empties_the_step_and_it_is_skipped() {
     let (_dir, repo, ids, state) = paused(false);
     resolve_whole_file(&repo, "shared.txt", ConflictSide::Ours).unwrap();
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -354,7 +355,7 @@ fn a_revert_sequence_paused_on_a_conflict_continues_with_gits_message() {
     assert_eq!(repo.state(), RepositoryState::Revert);
     common::write_file(dir.path(), "a.txt", "resolved\n");
     stage(&repo, "a.txt");
-    let run = continue_sequence(&repo, run.state.unwrap());
+    let run = continue_sequence(&repo, run.state.unwrap(), HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -377,7 +378,7 @@ fn continue_retries_a_step_that_failed_without_a_conflict() {
     common::write_file(dir.path(), "three.txt", "mine\n");
     let state = cherry_pick_many(&repo, &ids).state.unwrap();
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -393,7 +394,7 @@ fn continue_after_the_step_was_aborted_outside_retries_it() {
     // sequence: Continue re-runs that step, which conflicts again.
     let (_dir, repo, ids, state) = paused(true);
     git_core::merge::abort_merge(&repo).unwrap();
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     let Ok(SequenceOutcome::Conflicted { progress, .. }) = run.outcome else {
         panic!("expected the step to conflict again")
     };
@@ -409,7 +410,7 @@ fn continue_refuses_staged_changes_before_retrying_a_step() {
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
     common::write_file(dir.path(), "notes.txt", "staged\n");
     stage(&repo, "notes.txt");
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::DirtyIndex)));
     assert_eq!(run.state, Some(state));
 }
@@ -425,7 +426,7 @@ fn continue_counts_a_step_the_user_committed_elsewhere() {
         git_core::hooks::HookOptions::default(),
     )
     .unwrap();
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -460,7 +461,7 @@ fn continue_refuses_a_different_paused_pick() {
         cherry_pick(&repo, &other, None).unwrap(),
         git_core::pick::PickOutcome::Conflicted { .. }
     ));
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::OperationInProgress)));
     assert_eq!(run.state, Some(state.clone()));
 
@@ -528,7 +529,7 @@ fn abort_after_head_moved_does_not_rewind_and_continue_refuses() {
     }
     let moved_to = head(&repo);
 
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::HeadMoved)));
     assert_eq!(run.state, Some(state.clone()));
     assert_eq!(
@@ -609,7 +610,7 @@ fn an_unrelated_commit_after_a_terminal_abort_is_not_taken_for_the_step() {
     git_core::merge::abort_merge(&repo).unwrap(); // `git cherry-pick --abort`
     common::write_file(dir.path(), "unrelated.txt", "x\n");
     commit_as_someone_else(&repo, "unrelated");
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(
         matches!(run.outcome, Err(PickError::HeadMoved)),
         "{:?}",
@@ -627,7 +628,7 @@ fn after_an_error_stop_any_new_commit_is_head_moved() {
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
     common::write_file(dir.path(), "notes.txt", "user work\n");
     commit_as_someone_else(&repo, "user work");
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::HeadMoved)));
 }
 
@@ -659,7 +660,7 @@ fn a_revert_step_committed_by_hand_is_recognised_by_its_message() {
         git_core::hooks::HookOptions::default(),
     )
     .unwrap();
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::HeadMoved)));
 
     // Same stop, finished with git's message instead.
@@ -679,7 +680,7 @@ fn a_revert_step_committed_by_hand_is_recognised_by_its_message() {
         git_core::hooks::HookOptions::default(),
     )
     .unwrap();
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -697,7 +698,7 @@ fn continue_reads_an_index_staged_by_another_process() {
     let other = Repository::open(dir.path()).unwrap();
     common::write_file(dir.path(), "shared.txt", "resolved\n");
     stage(&other, "shared.txt");
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -744,7 +745,7 @@ fn abort_cleans_up_a_conflict_whose_pick_head_was_deleted() {
     assert_eq!(repo.state(), RepositoryState::Clean);
     assert!(repo.index().unwrap().has_conflicts());
 
-    let run = continue_sequence(&repo, state.clone());
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::UnresolvedConflicts)));
 
     let abort = abort_sequence(&repo, &state).unwrap();
@@ -854,8 +855,283 @@ fn continue_does_not_count_another_commit_with_the_same_author() {
         .unwrap();
     repo.cleanup_state().unwrap();
 
-    let run = continue_sequence(&repo, state);
+    let run = continue_sequence(&repo, state, HookOptions::default());
 
     assert!(run.outcome.is_err(), "{:?}", run.outcome);
     assert!(run.state.is_some());
+}
+
+// ---- commit hooks on Continue (#133) ---------------------------------------------------------
+
+#[cfg(unix)]
+const COMMIT_HOOKS: [&str; 4] = [
+    "pre-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+];
+
+/// `paused(false)` with the conflict resolved and staged.
+#[cfg(unix)]
+fn resolved() -> (tempfile::TempDir, Repository, Vec<String>, SequenceState) {
+    let (dir, repo, ids, state) = paused(false);
+    common::write_file(dir.path(), "shared.txt", "resolved\n");
+    stage(&repo, "shared.txt");
+    (dir, repo, ids, state)
+}
+
+#[cfg(unix)]
+fn message_of(repo: &Repository, steps_back: usize) -> String {
+    let mut commit = repo.head().unwrap().peel_to_commit().unwrap();
+    for _ in 0..steps_back {
+        commit = commit.parent(0).unwrap();
+    }
+    commit.message().unwrap().to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn continue_runs_the_commit_hooks_once_on_the_resolved_step() {
+    let (_dir, repo, _ids, state) = resolved();
+    common::log_hooks(&repo, &COMMIT_HOOKS);
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 3,
+            skipped: vec![]
+        }
+    );
+    assert_eq!(
+        common::read_log(&repo),
+        "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_commit_msg_hook_rewrites_the_continued_steps_message() {
+    let (_dir, repo, _ids, state) = resolved();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "commit-msg",
+        r#"printf '\nChange-Id: I123\n' >> "$1""#,
+    );
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(summaries(&repo, 3), ["side three", "side two", "side one"]);
+    assert!(!message_of(&repo, 0).contains("Change-Id"));
+    assert!(message_of(&repo, 1).trim_end().ends_with("Change-Id: I123"));
+    assert!(!message_of(&repo, 2).contains("Change-Id"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_commit_msg_keeps_the_step_paused_and_the_state_unchanged() {
+    let (_dir, repo, _ids, state) = resolved();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "commit-msg",
+        "echo no change id; exit 1",
+    );
+    let before = state.clone();
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    let SequenceOutcome::HookFailed {
+        hook,
+        output,
+        progress,
+    } = run.outcome.unwrap()
+    else {
+        panic!("expected HookFailed")
+    };
+    assert_eq!(hook, "commit-msg");
+    assert_eq!(output, "no change id\n");
+    assert_eq!(progress.current_step, 2);
+    assert_eq!(run.state.as_ref(), Some(&before));
+    assert_eq!(repo.state(), RepositoryState::CherryPick);
+    assert_eq!(head(&repo), before.expected_head);
+    assert!(!repo.index().unwrap().has_conflicts());
+
+    let run = continue_sequence(
+        &repo,
+        run.state.unwrap(),
+        HookOptions {
+            no_verify: true,
+            ..Default::default()
+        },
+    );
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+}
+
+#[cfg(unix)]
+#[test]
+fn continue_with_no_verify_skips_pre_commit_and_commit_msg() {
+    let (_dir, repo, _ids, state) = resolved();
+    let hooks = repo.path().join("hooks");
+    common::install_hook(&hooks, "pre-commit", "exit 1");
+    common::install_hook(&hooks, "commit-msg", "exit 1");
+    common::log_hooks(&repo, &["prepare-commit-msg", "post-commit"]);
+
+    let run = continue_sequence(
+        &repo,
+        state,
+        HookOptions {
+            no_verify: true,
+            ..Default::default()
+        },
+    );
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(
+        common::read_log(&repo),
+        "prepare-commit-msg <msg> merge\npost-commit \n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pre_commit_that_stages_a_file_is_part_of_the_continued_step() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, repo, _ids, state) = resolved();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "pre-commit",
+        "echo extra > extra.txt && git add extra.txt",
+    );
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    let step_two = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .parent(0)
+        .unwrap();
+    assert_eq!(step_two.summary().unwrap(), Some("side two"));
+    assert!(step_two.tree().unwrap().get_name("extra.txt").is_some());
+    let step_one = step_two.parent(0).unwrap();
+    assert!(step_one.tree().unwrap().get_name("extra.txt").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn cancelling_a_continue_hook_keeps_the_sequence_paused() {
+    let (_dir, repo, _ids, state) = resolved();
+    common::install_hook(&repo.path().join("hooks"), "pre-commit", "sleep 30");
+    let before = state.clone();
+    let started = std::time::Instant::now();
+
+    let run = continue_sequence(
+        &repo,
+        state,
+        HookOptions {
+            cancel: Some(&|| true),
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        matches!(
+            run.outcome,
+            Err(PickError::Hook(git_core::hooks::HookError::Cancelled { ref hook })) if hook == "pre-commit"
+        ),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(run.state, Some(before));
+    assert_eq!(repo.state(), RepositoryState::CherryPick);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_empty_resolution_is_skipped_without_running_hooks() {
+    let (_dir, repo, ids, state) = paused(false);
+    resolve_whole_file(&repo, "shared.txt", ConflictSide::Ours).unwrap();
+    common::install_hook(&repo.path().join("hooks"), "pre-commit", "exit 1");
+    common::log_hooks(&repo, &["prepare-commit-msg", "commit-msg", "post-commit"]);
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 2,
+            skipped: vec![ids[1].clone()]
+        }
+    );
+    assert_eq!(common::read_log(&repo), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_revert_sequence_continue_runs_the_commit_hooks() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "one\n");
+    common::commit_all(&repo, "one");
+    common::write_file(dir.path(), "a.txt", "two\n");
+    common::commit_all(&repo, "two");
+    let two = head(&repo);
+    common::write_file(dir.path(), "b.txt", "b\n");
+    common::commit_all(&repo, "add b");
+    let add_b = head(&repo);
+    common::write_file(dir.path(), "a.txt", "three\n");
+    common::commit_all(&repo, "three");
+    let run = revert_many(&repo, &[two, add_b]);
+    assert!(matches!(
+        run.outcome,
+        Ok(SequenceOutcome::Conflicted { .. })
+    ));
+    common::write_file(dir.path(), "a.txt", "resolved\n");
+    stage(&repo, "a.txt");
+    common::log_hooks(&repo, &COMMIT_HOOKS);
+
+    let run = continue_sequence(&repo, run.state.unwrap(), HookOptions::default());
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(
+        common::read_log(&repo),
+        "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \n"
+    );
+}
+
+/// A `pre-commit` that puts the step back to HEAD's tree empties it: skipped, like an empty
+/// resolution, rather than committed empty.
+#[cfg(unix)]
+#[test]
+fn a_pre_commit_that_empties_the_step_skips_it() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, repo, ids, state) = resolved();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "pre-commit",
+        "git checkout HEAD -- shared.txt",
+    );
+    common::log_hooks(&repo, &["post-commit"]);
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 2,
+            skipped: vec![ids[1].clone()]
+        }
+    );
+    assert_eq!(summaries(&repo, 3), ["side three", "side one", "ours edit"]);
+    assert_eq!(common::read_log(&repo), "");
 }

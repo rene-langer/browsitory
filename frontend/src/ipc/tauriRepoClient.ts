@@ -361,7 +361,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<SequenceOutcome>("cherry_pick_many", { repoPath, commitIds }),
   revertMany: (repoPath: string, commitIds: string[]) =>
     loggedInvoke<SequenceOutcome>("revert_many", { repoPath, commitIds }),
-  continueSequence: (repoPath: string) => loggedInvoke<SequenceOutcome>("continue_sequence", { repoPath }),
+  continueSequence: (repoPath: string, noVerify?: boolean) =>
+    loggedInvoke<SequenceOutcome>("continue_sequence", { repoPath, noVerify: noVerify ?? false }),
   abortSequence: (repoPath: string) => loggedInvoke<SequenceAbort>("abort_sequence", { repoPath }),
   resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
     loggedInvoke<void>("resolve_whole_file", { repoPath, path, side }),

@@ -291,15 +291,21 @@ pub(super) fn commit_reply(
     }
 }
 
+/// Commits and replies; returns whether a commit landed. With `CommitHookSet::CleanMerge` (the
+/// loop remembers this exact merge as clean, see `merge::CleanMerge`) it runs `git merge`'s
+/// hooks and, once the commit landed, `post-merge 0`; both only if the merge is still in
+/// progress when the commit starts.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn commit(
     repo: &mut git2::Repository,
     message: String,
     no_verify: bool,
     trailers: Vec<git_core::commit::Trailer>,
+    set: git_core::commit::CommitHookSet,
     op: super::remote::TransferOp<'_>,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
-) {
+) -> bool {
     let cancel = op.cancel_check();
     let mut reporter = super::hooks::ChannelHookReporter {
         events,
@@ -307,9 +313,10 @@ pub(super) fn commit(
     };
     // Before the hooks, so `prepare-commit-msg`/`commit-msg` see them (`git commit --trailer`).
     let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {
-        git_core::commit::commit(
+        git_core::commit::commit_with(
             repo,
             &message,
+            set,
             git_core::hooks::HookOptions {
                 no_verify,
                 cancel: Some(&cancel),
@@ -319,7 +326,14 @@ pub(super) fn commit(
         )
     });
     op.clear();
-    let _ = reply.send(commit_reply(result));
+    let committed = result.is_ok();
+    // Only when `git merge`'s hooks really ran: the merge may have been aborted (another
+    // window, a terminal) between the loop choosing `set` and the commit.
+    if result.as_ref().is_ok_and(|committed| committed.merge_hooks) {
+        super::hooks::run_post_hook(repo, "post-merge", &["0"]);
+    }
+    let _ = reply.send(commit_reply(result.map(|committed| committed.commit_id)));
+    committed
 }
 
 impl WorkerHandle {

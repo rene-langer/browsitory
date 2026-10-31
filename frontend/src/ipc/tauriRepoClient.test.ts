@@ -448,7 +448,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
     await tauriRepoClient.revertMany("/r", ["a"]);
     expect(invoke).toHaveBeenLastCalledWith("revert_many", { repoPath: "/r", commitIds: ["a"] });
     await tauriRepoClient.continueSequence("/r");
-    expect(invoke).toHaveBeenLastCalledWith("continue_sequence", { repoPath: "/r" });
+    expect(invoke).toHaveBeenLastCalledWith("continue_sequence", { repoPath: "/r", noVerify: false });
+    await tauriRepoClient.continueSequence("/r", true);
+    expect(invoke).toHaveBeenLastCalledWith("continue_sequence", { repoPath: "/r", noVerify: true });
     vi.mocked(invoke).mockResolvedValue({ rewound: true });
     await expect(tauriRepoClient.abortSequence("/r")).resolves.toEqual({ rewound: true });
     expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r" });

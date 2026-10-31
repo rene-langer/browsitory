@@ -2,15 +2,16 @@ use std::path::PathBuf;
 
 use tauri::State;
 
-use super::{worker_handle, AppState, WorktreeInfoDto};
+use super::{repo_worker, AppState, WorktreeInfoDto};
 
 #[tauri::command]
 pub async fn list_worktrees(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<WorktreeInfoDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .list_worktrees()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_worktrees())
+        .await?
         .into_iter()
         .map(WorktreeInfoDto::from)
         .collect())
@@ -25,12 +26,9 @@ pub async fn create_worktree(
     start_point: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.create_worktree(
-        name,
-        PathBuf::from(path),
-        branch,
-        start_point,
-    )
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.create_worktree(name, PathBuf::from(path), branch, start_point))
+        .await
 }
 
 #[tauri::command]
@@ -39,10 +37,14 @@ pub async fn remove_worktree(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.remove_worktree(name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.remove_worktree(name))
+        .await
 }
 
 #[tauri::command]
 pub async fn prune_worktrees(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.prune_worktrees()
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.prune_worktrees())
+        .await
 }

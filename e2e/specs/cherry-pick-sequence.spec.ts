@@ -88,6 +88,11 @@ describe("Browsitory cherry-pick sequence", () => {
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, "seq-shared.txt"), "utf8")).toBe("ours\n");
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "seq-two.txt"))).toBe(true);
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json"))).toBe(false);
-    await $('[aria-label="Operation status"]').waitForExist({ timeout: 10000, reverse: true });
+    // Polled in the page rather than through an element handle: the strip is removed while
+    // the app refreshes, and a handle to it can go stale mid-wait (a tauri-driver flake).
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelector('[aria-label="Operation status"]') === null),
+      { timeout: 10000, timeoutMsg: "the operation status strip did not go away" },
+    );
   });
 });

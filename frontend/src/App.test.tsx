@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { CommitOutcome, RepoClient } from "./ipc/RepoClient";
+import type { CommitOutcome, RepoClient, SequenceOutcome } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
@@ -654,6 +654,62 @@ describe("App", () => {
     await waitFor(() => expect(box).toHaveValue(""));
   });
 
+  it("a failing hook on Continue opens the hook dialog and Continue without hooks finishes the sequence", async () => {
+    const continueSequence = vi
+      .fn<RepoClient["continueSequence"]>()
+      .mockResolvedValueOnce({
+        kind: "HookFailed",
+        hook: "pre-commit",
+        output: "lint failed\n",
+        progress: { kind: "CherryPick", currentStep: 2, totalSteps: 3, currentCommit: "c2" },
+      })
+      .mockImplementationOnce(() => retried);
+    let finishRetry: (outcome: SequenceOutcome) => void = () => {};
+    const retried = new Promise<SequenceOutcome>((resolve) => {
+      finishRetry = resolve;
+    });
+    const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 3, currentCommit: "c2" };
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getMergeMessage: async () => "f two",
+      getHeadInfo: async () => ({
+        headId: "abc",
+        detachedAt: null,
+        headPushed: false,
+        operation: "CherryPick",
+        squashMessage: null,
+        commitHooks: ["pre-commit"],
+        sequence,
+        rebase: null,
+      }),
+      continueSequence,
+    });
+    render(<App client={client} />);
+
+    const continueButton = await screen.findByRole("button", { name: "Continue cherry-pick" });
+    await waitFor(() => expect(continueButton).toBeEnabled());
+    fireEvent.click(continueButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
+    expect(within(dialog).getByLabelText("Hook output")).toHaveTextContent("lint failed");
+    expect(continueSequence).toHaveBeenCalledWith("/repos/a", false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue without hooks" }));
+
+    await waitFor(() => expect(continueSequence).toHaveBeenLastCalledWith("/repos/a", true));
+    // Closed while the retry still runs, so it can't be clicked twice and doesn't hide the
+    // panel's running-hook line.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
+    finishRetry({ kind: "Completed", applied: 3, skipped: [] });
+    expect(await screen.findByText("Cherry-picked 3 commits")).toBeInTheDocument();
+  });
+
   it("commits without hooks with the co-authors the box holds, then clears them", async () => {
     const commit = vi
       .fn<RepoClient["commit"]>()
@@ -1091,7 +1147,7 @@ describe("App", () => {
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
       fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
-      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a"));
+      await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a", false));
       expect(await screen.findByText("Cherry-picked 2 commits")).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByRole("status", { name: "Operation status" })).toBeNull());
     });

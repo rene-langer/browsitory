@@ -7,8 +7,8 @@ use git_core::launch::{self, EditorTarget};
 use tauri::State;
 
 use super::{
-    worker_handle, AppState, DiffSourceDto, ExternalToolSettingsDto, FileSidesDto, GitToolsDto,
-    MergeToolOutcomeDto,
+    off_runtime, repo_worker, AppState, DiffSourceDto, ExternalToolSettingsDto, FileSidesDto,
+    GitToolsDto, MergeToolOutcomeDto,
 };
 
 fn tool_settings() -> Result<config::ExternalToolSettings, String> {
@@ -24,7 +24,9 @@ pub async fn open_in_editor(
     line: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let workdir = worker_handle(&state, &repo_path)?.workdir()?;
+    let workdir = repo_worker(&state, &repo_path)?
+        .call(move |w| w.workdir())
+        .await?;
     let editor = tool_settings()?.editor;
     match launch::prepare_editor(&workdir, &path, line, editor.as_deref())
         .map_err(|e| e.to_string())?
@@ -46,14 +48,18 @@ pub async fn reveal_in_file_manager(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let workdir = worker_handle(&state, &repo_path)?.workdir()?;
+    let workdir = repo_worker(&state, &repo_path)?
+        .call(move |w| w.workdir())
+        .await?;
     let target = launch::reveal_target(&workdir, path.as_deref()).map_err(|e| e.to_string())?;
     tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let workdir = worker_handle(&state, &repo_path)?.workdir()?;
+    let workdir = repo_worker(&state, &repo_path)?
+        .call(move |w| w.workdir())
+        .await?;
     let terminal = tool_settings()?.terminal;
     let invocation =
         launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(|e| e.to_string())?;
@@ -69,7 +75,9 @@ pub async fn get_file_sides(
     state: State<'_, AppState>,
 ) -> Result<FileSidesDto, String> {
     Ok(FileSidesDto::from(
-        worker_handle(&state, &repo_path)?.get_file_sides(path, source.into())?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.get_file_sides(path, source.into()))
+            .await?,
     ))
 }
 
@@ -82,12 +90,13 @@ pub async fn open_diff_tool(
     source: DiffSourceDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let prepared = worker_handle(&state, &repo_path)?.prepare_diff_tool(path, source.into())?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let prepared = repo_worker(&state, &repo_path)?
+        .call(move |w| w.prepare_diff_tool(path, source.into()))
+        .await?;
+    off_runtime(move || {
         git_core::tools::launch_diff_tool(prepared, git_core::tools::DIFF_TOOL_GRACE)
     })
-    .await
-    .map_err(|e| e.to_string())?
+    .await?
     .map_err(|e| e.to_string())
 }
 
@@ -99,12 +108,12 @@ pub async fn open_merge_tool(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<MergeToolOutcomeDto, String> {
-    let prepared = worker_handle(&state, &repo_path)?.prepare_merge_tool(path)?;
-    let outcome =
-        tauri::async_runtime::spawn_blocking(move || git_core::tools::run_merge_tool(prepared))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
+    let prepared = repo_worker(&state, &repo_path)?
+        .call(move |w| w.prepare_merge_tool(path))
+        .await?;
+    let outcome = off_runtime(move || git_core::tools::run_merge_tool(prepared))
+        .await?
+        .map_err(|e| e.to_string())?;
     Ok(outcome.into())
 }
 
@@ -124,5 +133,8 @@ pub async fn get_git_tools(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<GitToolsDto, String> {
-    Ok(worker_handle(&state, &repo_path)?.get_git_tools()?.into())
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_git_tools())
+        .await?
+        .into())
 }

@@ -171,6 +171,19 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 `async fn`. Note that an `async fn` command taking a borrowed argument (e.g.
 `state: State<'_, AppState>`) must return a `Result`, which is why they all do.
 
+**No worker round trip runs on an async runtime thread (#125).** An `async fn` alone only moves
+the wait onto one of Tokio's few runtime threads (one per core): a commit whose hook waits, plus
+the refreshes queued behind it on the same serial worker, could occupy all of them and stall
+every other command, for every repository, including the `cancel_transfer` meant to stop the
+hook. So commands reach a worker only through `repo_worker(&state, &path)?.call(move |w| …)`
+(`RepoWorker` in `commands/mod.rs`), which runs the round trip on Tokio's blocking pool
+(`off_runtime` → `spawn_blocking`); there is no other way to get a `WorkerHandle`, so a new
+command can't block the runtime by accident. `cancel_transfer`/`cancel_search` use
+`RepoWorker::signal()`, which writes into state shared with the worker and never waits on its
+queue. Clone and the diff/merge tool waits use `off_runtime` too. `scan_repos_in_root` stays
+plain async: it involves no worker and is microseconds of work (see its comment). The VSCode
+sidecar runs each request on its own thread and is unaffected.
+
 ## Undo stack
 
 - **Snapshots** (`git-core::undo`): HEAD, `refs/heads/*` + `refs/tags/*`, the index as a tree,
@@ -258,17 +271,20 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
 - Signers are external programs run exactly as git runs them: `gpg --status-fd=2 -bsau <key>`
   and `ssh-keygen -Y sign -n git -f <key>` (`-U` for a literal key), with the buffer on stdin,
   no TTY, and no console window on Windows. They run through `process::run_captured_split`
-  (stdout and stderr kept apart, the program in its own process group so a kill takes its
-  children too) and block the repo's worker thread while pinentry waits, at most
+  (stdout and stderr kept apart, the program in a new session and process group so a kill
+  takes its children too) and block the repo's worker thread while pinentry waits, at most
   `SIGN_TIMEOUT` (120 s) → `SignError::TimedOut`. A signature over 1 MiB is an error, never
   truncated. Commit and amend pass the operation's cancel check (`SignOptions`) and report a
   `"signing"` pseudo-hook to the hook reporter, so the commit box shows "Waiting for the signing
   program…" with the hooks' Cancel (`SignError::Cancelled`); cherry-pick, revert and rebase
   commits get the timeout only. Verification is bounded by `VERIFY_TIMEOUT` (30 s), after which
   the signature shows the error status.
-  - Running in a process group means a signer launched from a terminal that prompts on
-    `/dev/tty` (ssh-keygen with an encrypted key and no agent) is stopped by `SIGTTIN` until the
-    timeout or Cancel; pinentry (gpg-agent) is a separate process and unaffected.
+  - Signers start in a new session (`setsid`, #126), so they have no controlling terminal even
+    when Browsitory was started from one: a signer that would prompt on `/dev/tty` (ssh-keygen
+    with an encrypted key and no agent) fails at once (or falls back to `SSH_ASKPASS`), as on a
+    desktop launch; pinentry (gpg-agent) is a separate process and unaffected. Signers are not
+    put in a Windows job object (a job kill on a timeout would also end a `gpg-agent` that gpg
+    auto-started).
 - `verify_commit` picks the format from the signature armor, not from config:
   - gpg: `--status-fd` lines map to `SignatureStatus`.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
@@ -329,10 +345,18 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   step's index away). A detached or unknown `originalRef` protects no branch. It is reported
   as `HeadInfo.sequence`. The undo entry is labelled with the number of commits applied. `AbortMerge` aborts the
   whole sequence when one is stored, so a stale frontend can't strand the file.
-- Empty steps are skipped (git stops for `--skip`). Steps, including the one Continue commits,
-  run no hooks, matching Browsitory's single cherry-pick/revert. Real git runs
-  `prepare-commit-msg`/`post-commit` on a clean pick and the full commit hooks on
-  `--continue`.
+- Empty steps are skipped (git stops for `--skip`), without hooks; so is a step that the
+  continued step's `pre-commit` put back to HEAD's tree. The step Continue commits
+  (the resolved, paused one) runs `git cherry-pick --continue`'s commit hooks through the commit
+  path's helpers (`commit::run_commit_hooks` with `pre-commit` and source `merge`, then
+  `create_commit_reporting` with the signing pseudo-hook and cancel, then `post-commit`), #133.
+  A failing hook is `SequenceOutcome::HookFailed { hook, output, progress }` with the state
+  returned unchanged and git's paused state (`CHERRY_PICK_HEAD`/`REVERT_HEAD`, the resolved
+  index) untouched, so `sequence.json` still describes the paused step and Continue (with
+  `no_verify` from "Continue without hooks") or Abort work as before; a cancelled hook is
+  `PickError::Hook`, also with the state kept. The worker holds the #173 state lock across the
+  hooks, as for any Continue. Steps applied cleanly (start, after Continue) run no hooks
+  (D3-A); real git runs `prepare-commit-msg`/`post-commit` on them.
 
 ## Interactive rebase
 
@@ -421,29 +445,56 @@ command in `commands/mod.rs` that touches the worker or the dialog plugin is the
   `GIT_PREFIX` removed from the environment (git sets none of them for hooks; a pinned `GIT_DIR`
   breaks hooks that `cd` into a subdirectory; commit hooks get `GIT_INDEX_FILE` back): stdout and stderr share one `std::io::pipe` (true `2>&1` order), the last
   64 KiB are kept (ANSI escapes and `\r` redraws stripped), the child is polled every 20 ms for
-  exit, cancel and a 10-minute deadline, and it is always reaped. On Unix it leads its own
-  process group and timeout/cancel run `kill -s KILL -- -<pgid>`, so its children die too; after
-  exit the pipe gets a 2 s drain grace in case an escaped grandchild holds it open (the hook's
-  result is not held up longer than that). Because the hook leads a *background* process group,
-  a hook that reads the controlling terminal (app started from a shell, hook opens `/dev/tty`)
-  gets `SIGTTIN` and stays stopped until Cancel or the timeout; starting it in a new session
-  (`setsid`) would make that fail fast but needs `pre_exec` + `libc`, which this batch avoids.
-  Windows runs
-  hooks through Git for Windows' `sh.exe` and only kills that process.
+  exit, cancel and a 10-minute deadline, and it is always reaped. On Unix it starts a new
+  session (`pre_exec` → `setsid`, #126; not combined with `process_group(0)`, which std applies
+  first and which makes `setsid` fail with `EPERM`): it leads its own process group, and
+  timeout/cancel `killpg(pid, SIGKILL)` that group (the pid can't have been reused, the child
+  isn't reaped yet), so its children die too. It also has no controlling terminal, so a hook
+  that opens `/dev/tty` fails at once with `ENXIO` instead of being stopped by `SIGTTIN` when the
+  app was started from a shell. After exit the pipe gets a 2 s drain grace in case an escaped
+  grandchild holds it open (the hook's result is not held up longer than that). Windows runs
+  hooks through Git for Windows' `sh.exe`, assigned right after the spawn to an unnamed job
+  object (`process/job_windows.rs`, hand-written kernel32 FFI, #122); timeout/cancel
+  `TerminateJobObject` and then kill the child, so programs the hook started die too. There is
+  no `KILL_ON_JOB_CLOSE` (D6-A): a hook that exits normally keeps its background processes, as
+  on Unix. Residual: a process started between `CreateProcess` and `AssignProcessToJobObject`
+  escapes (closing that needs `CREATE_SUSPENDED` and the primary thread handle, which std
+  doesn't expose); `sh.exe` takes far longer than that to start anything. If creating or
+  assigning the job fails, only the child is killed.
 - Gate hooks live in `git-core`: `commit`/`amend_head` (`pre-commit` → reload the index only if
   it ran → `prepare-commit-msg` → `commit-msg` via `<git dir>/COMMIT_EDITMSG` → commit →
-  `post-commit`) and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
+  `post-commit`), `commit_with(.., CommitHookSet::CleanMerge, ..)` (#124: while a merge is
+  staged, `pre-merge-commit` in place of `pre-commit` and no `post-commit`, as `git merge` runs
+  them; the message file stays `COMMIT_EDITMSG`, not `MERGE_MSG`), `continue_sequence` (see
+  "Cherry-pick sequences") and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
   after the ref advertisement and the lease check, before any pack data). Every push
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
   `delete_remote_branch`) funnels through `push_refs`, so all of them run `pre-push`.
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
   so undo restores, rebase and other git-core internals never trigger hooks.
+- Clean merges (#124, D1-A/D2-A): Browsitory never creates the merge commit in `start_merge`; a
+  clean non-fast-forward merge (`MergeOutcome::Merged`) is staged and committed from the commit
+  box. The worker remembers such a merge in memory (`worker/merge.rs` `CleanMerge`: HEAD and the
+  `MERGE_HEAD` commits) and, while the repository still shows exactly that merge, commits it with
+  `CommitHookSet::CleanMerge` and runs `post-merge 0` after the commit (not when the merge is
+  staged), and only when `commit_with` reports `Committed::merge_hooks` (the merge was still in
+  progress at commit time, not aborted by another window or a terminal in between). The memory is cleared by any other `StartMerge` result, by `AbortMerge` and by a
+  successful commit; a failed or cancelled commit keeps it, so "Commit without hooks" is
+  `git merge --no-verify`. After a restart, or for a merge started by the other window or
+  outside Browsitory, there is none and the commit runs `git commit`'s hooks, which is what git
+  does for `merge --no-commit` + `commit`. A merge that had conflicts always runs the commit
+  hooks, as in git. The same fallback applies when Undo takes back a clean merge's commit (the
+  merge is staged again, but the memory was cleared by the commit). The worker's
+  `GetHeadInfo` lists only the pre-hook the commit will run in `commitHooks` (`pre-merge-commit`
+  while the remembered merge matches, else `pre-commit`), so **Skip hooks** and its tooltip
+  name the right hook.
 - A hook failure crosses IPC as data: `CommitOutcome::HookFailed` for commit/amend, and
   `TransferErrorKind::HookFailed` + `hookOutput` for pushes. Hook output is the only process
   output forwarded over IPC; remote sideband text still is not.
-- Progress: `HookReporter` → `HookEvent` → `hook-progress` / `hookProgress` for commit/amend;
-  `TransferPhase::RunningHook` for pushes. Commit/amend get `commit-<n>`/`amend-<n>` ids in
-  `CancelRegistry`, so `cancelTransfer` stops a running hook. Hooks block the repo worker like
+- Progress: `HookReporter` → `HookEvent` → `hook-progress` / `hookProgress` for commit, amend
+  and sequence Continue; `TransferPhase::RunningHook` for pushes. Commit/amend/Continue get
+  `commit-<n>`/`amend-<n>`/`continue-<n>` ids in `CancelRegistry`, so `cancelTransfer` stops a
+  running hook. Hooks block the repo worker like
   signing does.
 - Commit trailers (`Co-authored-by` from the commit box) are appended by the worker with
   `git_core::commit::append_trailers` *before* `commit`/`amend_head`, so `prepare-commit-msg` and
@@ -621,7 +672,7 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - The repo worker only prepares a tool launch: it resolves config and writes the
   `LOCAL`/`REMOTE`/`BASE` files into a fresh `browsitory-tool-*` directory in the temp dir
   (random name, 0700, files created `O_EXCL` with sanitized names). The Tauri command spawns the
-  tool and, for the merge tool, waits on `spawn_blocking`, so a tool window that stays open for
+  tool and, for the merge tool, waits on `off_runtime` (the blocking pool), so a tool window that stays open for
   hours never blocks the repo's command queue. Stale directories are swept after 24 hours.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
   calls the sidecar's internal `read_file_version`. No temp files are needed there. Before

@@ -858,6 +858,23 @@ describe("DiffPane", () => {
       expect(onRebaseAbort).toHaveBeenCalled();
     });
 
+    it("names the pre-hook the merge commit will run in the Skip hooks tooltip", () => {
+      const commitHooks = { skip: false, onToggleSkip: () => {}, running: null, onCancel: () => {} };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "Merge" as const, squashMessage: null, commitHooks: ["pre-merge-commit"], sequence: null, rebase: null };
+      const { unmount } = renderUncommitted(fakeClient({}), status, { headInfo, commitHooks });
+      expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
+        "title",
+        "Skip the pre-merge-commit and commit-msg hooks for the next commit (--no-verify)",
+      );
+      unmount();
+
+      renderUncommitted(fakeClient({}), status, { headInfo: { ...headInfo, commitHooks: ["pre-commit"] }, commitHooks });
+      expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
+        "title",
+        "Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)",
+      );
+    });
+
     it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
       const onSequenceContinue = vi.fn();
       const onSequenceAbort = vi.fn();

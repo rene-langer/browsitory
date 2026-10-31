@@ -1,5 +1,5 @@
 use super::{
-    worker_handle, AppState, ConflictSegmentDto, ConflictSideDto, FileConflictChoiceDto,
+    repo_worker, AppState, ConflictSegmentDto, ConflictSideDto, FileConflictChoiceDto,
     MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto,
 };
 use std::path::Path;
@@ -13,7 +13,9 @@ pub async fn start_merge(
     state: State<'_, AppState>,
 ) -> Result<MergeOutcomeDto, String> {
     Ok(MergeOutcomeDto::from(
-        worker_handle(&state, &repo_path)?.start_merge(branch_name, options.into())?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.start_merge(branch_name, options.into()))
+            .await?,
     ))
 }
 /// The merge dialog's preselected options: the choice remembered for this repository, else the
@@ -29,7 +31,9 @@ pub async fn get_merge_options(
         return Ok(MergeOptionsDto::from(preference));
     }
     Ok(MergeOptionsDto::from(
-        worker_handle(&state, &repo_path)?.merge_defaults()?,
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.merge_defaults())
+            .await?,
     ))
 }
 #[tauri::command]
@@ -47,8 +51,9 @@ pub async fn get_conflict_hunks(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<ConflictSegmentDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_conflict_hunks(path)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_conflict_hunks(path))
+        .await?
         .into_iter()
         .map(ConflictSegmentDto::from)
         .collect())
@@ -60,18 +65,24 @@ pub async fn resolve_conflict(
     resolved_content: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.resolve_conflict(path, resolved_content)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.resolve_conflict(path, resolved_content))
+        .await
 }
 #[tauri::command]
 pub async fn abort_merge(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.abort_merge()
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.abort_merge())
+        .await
 }
 #[tauri::command]
 pub async fn get_merge_message(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    worker_handle(&state, &repo_path)?.get_merge_message()
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_merge_message())
+        .await
 }
 #[tauri::command]
 pub async fn resolve_add_delete_conflict(
@@ -80,7 +91,9 @@ pub async fn resolve_add_delete_conflict(
     choice: FileConflictChoiceDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.resolve_add_delete_conflict(path, choice.into())
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.resolve_add_delete_conflict(path, choice.into()))
+        .await
 }
 
 /// Stages a conflicted file. Without `force`, a file that still has conflict markers is left
@@ -92,7 +105,9 @@ pub async fn resolve_whole_file(
     side: ConflictSideDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.resolve_whole_file(path, side.into())
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.resolve_whole_file(path, side.into()))
+        .await
 }
 
 #[tauri::command]
@@ -102,7 +117,8 @@ pub async fn mark_resolved(
     force: bool,
     state: State<'_, AppState>,
 ) -> Result<MarkResolvedOutcomeDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .mark_resolved(path, force)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.mark_resolved(path, force))
+        .await?
         .into())
 }

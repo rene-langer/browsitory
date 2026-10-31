@@ -23,9 +23,11 @@ pub const HOOK_TIMEOUT: Duration = Duration::from_secs(600);
 pub const OUTPUT_LIMIT: usize = 64 * 1024;
 /// The commit hooks `--no-verify` skips: what the "Skip hooks" checkbox is about, so it shows
 /// only when one of these is installed (not for `prepare-commit-msg` or `post-commit` alone).
+/// While a merge is staged `repo::head_info` also lists `pre-merge-commit`, which the commit
+/// concluding a clean merge runs instead of `pre-commit` (`commit::CommitHookSet`).
 pub const SKIPPABLE_COMMIT_HOOKS: [&str; 2] = ["pre-commit", "commit-msg"];
-/// What `--no-verify` skips.
-pub const SKIPPABLE_HOOKS: [&str; 3] = ["pre-commit", "commit-msg", "pre-push"];
+/// What `--no-verify` skips (on a commit, a clean merge's commit, or a push).
+pub const SKIPPABLE_HOOKS: [&str; 4] = ["pre-commit", "pre-merge-commit", "commit-msg", "pre-push"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookRun {
@@ -321,6 +323,11 @@ pub fn failure_output(outcome: &HookOutcome, timeout: Duration) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_verify_skips_pre_merge_commit() {
+        assert!(SKIPPABLE_HOOKS.contains(&"pre-merge-commit"));
+    }
 
     #[test]
     fn sh_candidates_cover_git_for_windows_layouts() {

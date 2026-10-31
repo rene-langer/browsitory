@@ -1,3 +1,4 @@
+import { HookStatus } from "./HookStatus";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./RebaseProgressPanel.module.css";
@@ -13,6 +14,7 @@ export function RebaseProgressPanel({
   continueLabel = "Continue rebase",
   abortLabel = "Abort rebase",
   abortDisabled = false,
+  hooks,
 }: {
   currentStep: number;
   totalSteps: number;
@@ -26,6 +28,8 @@ export function RebaseProgressPanel({
   continueLabel?: string;
   abortLabel?: string;
   abortDisabled?: boolean;
+  /** A sequence's Continue runs the commit hooks: the running hook's status line and Cancel. */
+  hooks?: { running: { operationId: string; hook: string } | null; onCancel: () => void };
 }) {
   return (
     <Panel title={title}>
@@ -37,6 +41,7 @@ export function RebaseProgressPanel({
           {disabledReason}
         </p>
       )}
+      {hooks?.running != null && <HookStatus running={hooks.running} onCancel={hooks.onCancel} />}
       <Toolbar>
         <button
           onClick={onContinue}

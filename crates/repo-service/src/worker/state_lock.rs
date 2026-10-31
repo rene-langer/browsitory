@@ -161,7 +161,10 @@ mod tests {
             panic!("holder panics while holding the lock");
         });
         assert!(holder.join().is_err());
-        held(StateLock::open(&repo).try_acquire());
+        // A short wait, not `try_acquire`: a child process that a parallel test forks can hold a
+        // copy of the lock's descriptor until its `exec`, keeping the `flock` for that instant.
+        // A lock the panic never released would still be busy after the wait.
+        held(StateLock::open(&repo).acquire(Duration::from_secs(2)));
     }
 
     /// Not a test on its own: the child process of `a_killed_holder_process_releases_the_lock`.

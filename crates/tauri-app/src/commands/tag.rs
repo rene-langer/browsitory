@@ -1,14 +1,15 @@
 use tauri::State;
 
-use super::{worker_handle, AppState, TagInfoDto};
+use super::{repo_worker, AppState, TagInfoDto};
 
 #[tauri::command]
 pub async fn list_tags(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<TagInfoDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .list_tags()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_tags())
+        .await?
         .into_iter()
         .map(TagInfoDto::from)
         .collect())
@@ -21,7 +22,9 @@ pub async fn create_tag(
     message: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.create_tag(name, message)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.create_tag(name, message))
+        .await
 }
 
 #[tauri::command]
@@ -30,5 +33,7 @@ pub async fn delete_tag(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.delete_tag(name)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.delete_tag(name))
+        .await
 }

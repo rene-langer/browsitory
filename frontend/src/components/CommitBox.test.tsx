@@ -77,6 +77,23 @@ describe("CommitBox", () => {
     expect(screen.queryByLabelText("Skip hooks")).toBeNull();
   });
 
+  it("names pre-merge-commit in the Skip hooks tooltip while a merge is staged", () => {
+    const hooks = { installed: true, skip: false, onToggleSkip: () => {}, running: null, onCancel: () => {} };
+    const { rerender } = render(
+      <CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={{ ...hooks, merging: true }} />,
+    );
+    expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
+      "title",
+      "Skip the pre-merge-commit and commit-msg hooks for the next commit (--no-verify)",
+    );
+
+    rerender(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={hooks} />);
+    expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
+      "title",
+      "Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)",
+    );
+  });
+
   it("shows the running hook with a cancel button that latches", () => {
     const onCancel = vi.fn();
     render(

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use repo_service::worker::{HookEvent, TransferEvent, Worker};
+use repo_service::worker::{HookEvent, TransferEvent, Worker, WorkerHandle};
 
 mod branch;
 mod clone;
@@ -741,6 +741,12 @@ pub enum SequenceOutcomeDto {
         files: Vec<String>,
         progress: SequenceProgressDto,
     },
+    /// Continue's commit hook failed; the step is still paused (#133).
+    HookFailed {
+        hook: String,
+        output: String,
+        progress: SequenceProgressDto,
+    },
 }
 
 impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
@@ -751,6 +757,15 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
             }
             git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
                 files,
+                progress: progress.into(),
+            },
+            git_core::pick::SequenceOutcome::HookFailed {
+                hook,
+                output,
+                progress,
+            } => Self::HookFailed {
+                hook,
+                output,
                 progress: progress.into(),
             },
         }
@@ -1911,18 +1926,53 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-// Clone the worker's channel handle and drop the guard before blocking on the reply —
-// holding the mutex across the round-trip would serialize every command behind this one
-// and let a wedged worker hold the lock forever.
-fn worker_handle(
-    state: &State<AppState>,
-    repo_path: &str,
-) -> Result<repo_service::worker::WorkerHandle, String> {
+/// A repository's worker as commands reach it (#125). Every round trip runs on Tokio's blocking
+/// pool (`call` → `off_runtime`), so a busy worker (a hook, a signer, a transfer, or a queue of
+/// commands behind one) never holds one of the async runtime's few threads. With those held,
+/// every other command stalled, for every repository, including the `cancel_transfer` meant to
+/// stop the hook. `repo_worker` is the only way commands get at a worker, so a new command
+/// can't block the runtime by accident.
+///
+/// `scan_repos_in_root` stays plain async on purpose: it involves no worker and is microseconds
+/// of work (see its comment).
+pub(crate) struct RepoWorker(WorkerHandle);
+
+impl RepoWorker {
+    /// Runs `f` (one or more worker round trips) on the blocking pool and awaits its result.
+    pub(crate) async fn call<T, F>(self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&WorkerHandle) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let handle = self.0;
+        off_runtime(move || f(&handle)).await?
+    }
+
+    /// For calls that never wait on the worker's queue (`cancel_transfer`, `cancel_search`):
+    /// they write into state shared with the worker thread and return at once.
+    pub(crate) fn signal(&self) -> &WorkerHandle {
+        &self.0
+    }
+}
+
+/// Looks up `repo_path`'s worker. Clones the worker's channel handle and drops the guard before
+/// any round trip: holding the mutex across one would serialize every command behind it and let
+/// a wedged worker hold the lock forever.
+pub(crate) fn repo_worker(state: &State<AppState>, repo_path: &str) -> Result<RepoWorker, String> {
     let guard = state.workers.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .get(repo_path)
-        .map(Worker::handle)
+        .map(|worker| RepoWorker(worker.handle()))
         .ok_or_else(|| format!("repo not open: {repo_path}"))
+}
+
+/// Runs blocking work on Tokio's blocking pool, off the async runtime's threads (#125).
+pub(crate) async fn off_runtime<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|_| "worker task stopped".to_string())
 }
 
 /// Opens `url` in the user's default external browser/handler, never inside this app's own
@@ -1937,6 +1987,122 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use repo_service::worker::Worker;
+    #[cfg(unix)]
+    use std::path::Path;
+    use std::sync::mpsc;
+
+    /// More runtime threads than the async runtime has.
+    fn saturating_count() -> usize {
+        std::thread::available_parallelism().map_or(4, |n| n.get()) + 2
+    }
+
+    /// Spawns a trivial task and waits (from a plain thread) up to 5 s for it to run.
+    fn runtime_responds() -> bool {
+        let probe = tauri::async_runtime::spawn(async { 7 });
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(tauri::async_runtime::block_on(probe).ok());
+        });
+        done_rx.recv_timeout(std::time::Duration::from_secs(5)) == Ok(Some(7))
+    }
+
+    #[test]
+    fn off_runtime_keeps_async_runtime_threads_free() {
+        let mut releases = Vec::new();
+        let mut blockers = Vec::new();
+        for _ in 0..saturating_count() {
+            let (release_tx, release_rx) = mpsc::channel::<()>();
+            releases.push(release_tx);
+            blockers.push(tauri::async_runtime::spawn(super::off_runtime(move || {
+                release_rx.recv().is_ok()
+            })));
+        }
+
+        let responded = runtime_responds();
+
+        for release in releases {
+            let _ = release.send(());
+        }
+        for blocker in blockers {
+            assert_eq!(tauri::async_runtime::block_on(blocker).unwrap(), Ok(true));
+        }
+        assert!(
+            responded,
+            "a blocked off_runtime job held an async runtime thread"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_worker_call_does_not_hold_a_runtime_thread_while_a_hook_runs() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+            config.set_bool("commit.gpgSign", false).unwrap();
+            config
+                .set_str(
+                    "core.hooksPath",
+                    repo.path().join("hooks").to_str().unwrap(),
+                )
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let release = repo.path().join("release");
+        let hooks = repo.path().join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("pre-commit");
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\nwhile [ ! -e '{}' ]; do sleep 0.05; done\n",
+                release.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let commit = tauri::async_runtime::spawn(
+            super::RepoWorker(worker.handle())
+                .call(move |w| w.commit("msg".into(), false, Vec::new(), started_tx)),
+        );
+        // The hook is running: the worker is busy until the release file appears.
+        assert!(matches!(
+            started_rx.recv_timeout(std::time::Duration::from_secs(10)),
+            Ok(HookEvent::Started { .. })
+        ));
+        let reads: Vec<_> = (0..saturating_count())
+            .map(|_| {
+                tauri::async_runtime::spawn(
+                    super::RepoWorker(worker.handle()).call(|w| w.get_status()),
+                )
+            })
+            .collect();
+
+        let responded = runtime_responds();
+
+        std::fs::write(&release, "").unwrap();
+        assert!(matches!(
+            tauri::async_runtime::block_on(commit).unwrap(),
+            Ok(git_core::commit::CommitOutcome::Committed { .. })
+        ));
+        for read in reads {
+            assert!(tauri::async_runtime::block_on(read).unwrap().is_ok());
+        }
+        assert!(
+            responded,
+            "a queued worker call held an async runtime thread"
+        );
+    }
     use std::path::PathBuf;
 
     use config::{OpenRepoEntry, Workspace};
@@ -2841,6 +3007,33 @@ mod tests {
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
             serde_json::json!("Squashed commit of the following:\n")
+        );
+    }
+
+    #[test]
+    fn sequence_outcome_hook_failed_serializes_with_hook_output_and_progress() {
+        use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
+        let failed = serde_json::to_value(super::SequenceOutcomeDto::from(
+            SequenceOutcome::HookFailed {
+                hook: "commit-msg".into(),
+                output: "x".into(),
+                progress: SequenceProgress {
+                    kind: SequenceKind::CherryPick,
+                    current_step: 2,
+                    total_steps: 3,
+                    current_commit: "abc".into(),
+                },
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            failed,
+            serde_json::json!({
+                "kind": "HookFailed",
+                "hook": "commit-msg",
+                "output": "x",
+                "progress": { "kind": "CherryPick", "currentStep": 2, "totalSteps": 3, "currentCommit": "abc" }
+            })
         );
     }
 

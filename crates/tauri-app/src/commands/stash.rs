@@ -1,7 +1,7 @@
 use tauri::State;
 
 use super::{
-    worker_handle, AppState, StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashOptionsDto,
+    repo_worker, AppState, StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashOptionsDto,
 };
 
 #[tauri::command]
@@ -9,7 +9,9 @@ pub async fn list_stashes(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<StashEntryDto>, String> {
-    let stashes = worker_handle(&state, &repo_path)?.list_stashes()?;
+    let stashes = repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_stashes())
+        .await?;
     Ok(stashes.into_iter().map(StashEntryDto::from).collect())
 }
 
@@ -19,7 +21,9 @@ pub async fn save_stash(
     options: StashOptionsDto,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.save_stash(options.into())
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.save_stash(options.into()))
+        .await
 }
 
 #[tauri::command]
@@ -30,8 +34,9 @@ pub async fn apply_stash(
     restore_index: bool,
     state: State<'_, AppState>,
 ) -> Result<StashApplyOutcomeDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .apply_stash(index, commit_id, restore_index)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.apply_stash(index, commit_id, restore_index))
+        .await?
         .into())
 }
 
@@ -43,8 +48,9 @@ pub async fn pop_stash(
     restore_index: bool,
     state: State<'_, AppState>,
 ) -> Result<StashApplyOutcomeDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .pop_stash(index, commit_id, restore_index)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.pop_stash(index, commit_id, restore_index))
+        .await?
         .into())
 }
 
@@ -54,8 +60,9 @@ pub async fn get_stash_files(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<StashFilesDto, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .get_stash_files(commit_id)?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_stash_files(commit_id))
+        .await?
         .into())
 }
 
@@ -66,5 +73,7 @@ pub async fn drop_stash(
     commit_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.drop_stash(index, commit_id)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.drop_stash(index, commit_id))
+        .await
 }

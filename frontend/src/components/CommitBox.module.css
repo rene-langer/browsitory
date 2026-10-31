@@ -63,16 +63,6 @@
   align-items: center;
 }
 
-/* "Running pre-commit hook…" with its Cancel button. */
-.hookStatus {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  margin: var(--space-1, 4px) 0;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
 /* Co-author chips and the "Add co-author" picker. */
 .coAuthors {
   display: flex;

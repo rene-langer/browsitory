@@ -1,5 +1,6 @@
 // What a failed git hook leaves behind for the UI: the hook's output, and the exact request to
-// replay with `noVerify: true` ("Commit without hooks" / "Push without hooks").
+// replay with `noVerify: true` ("Commit without hooks" / "Push without hooks" / "Continue without
+// hooks").
 
 /** A push the UI started, recorded so a `pre-push` failure can be retried as-is. */
 export type PushRequest =
@@ -14,7 +15,9 @@ import type { AmendOptions, Trailer } from "../ipc/RepoClient";
 export type HookRetry =
   | { kind: "commit"; message: string; trailers: Trailer[] }
   | { kind: "amend"; message: string; options: AmendOptions }
-  | { kind: "push"; push: PushRequest };
+  | { kind: "push"; push: PushRequest }
+  /** A paused cherry-pick/revert sequence's Continue (the step it commits runs the hooks). */
+  | { kind: "continueSequence" };
 
 export interface HookFailure {
   hook: string;
@@ -25,7 +28,7 @@ export interface HookFailure {
 }
 
 /** What `--no-verify` skips; mirrors `git_core::hooks::SKIPPABLE_HOOKS`. */
-export const SKIPPABLE_HOOKS: ReadonlySet<string> = new Set(["pre-commit", "commit-msg", "pre-push"]);
+export const SKIPPABLE_HOOKS: ReadonlySet<string> = new Set(["pre-commit", "pre-merge-commit", "commit-msg", "pre-push"]);
 
 export function hookFailedMessage(hook: string): string {
   return `The ${hook} hook failed.`;
@@ -43,11 +46,15 @@ export function retryLabel(failure: HookFailure): string | null {
   if (!SKIPPABLE_HOOKS.has(failure.hook)) return null;
   if (failure.retry.kind === "commit") return "Commit without hooks";
   if (failure.retry.kind === "amend") return "Amend without hooks";
+  if (failure.retry.kind === "continueSequence") return "Continue without hooks";
   return "Push without hooks";
 }
 
-/** The toast after a successful retry: the same one the original action announces. */
-export function retrySuccessLabel(retry: HookRetry): string {
+/**
+ * The toast after a successful retry: the same one the original action announces. A Continue's
+ * toast comes from its outcome (`sequenceToast`), so it is not listed here.
+ */
+export function retrySuccessLabel(retry: Exclude<HookRetry, { kind: "continueSequence" }>): string {
   if (retry.kind === "commit") return "Committed";
   if (retry.kind === "amend") return "Amended commit";
   if (retry.push.operation === "ForcePushBranch") return "Force pushed";

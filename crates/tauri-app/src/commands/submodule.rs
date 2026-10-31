@@ -1,14 +1,15 @@
 use tauri::State;
 
-use super::{worker_handle, AppState, SubmoduleInfoDto};
+use super::{repo_worker, AppState, SubmoduleInfoDto};
 
 #[tauri::command]
 pub async fn list_submodules(
     repo_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<SubmoduleInfoDto>, String> {
-    Ok(worker_handle(&state, &repo_path)?
-        .list_submodules()?
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.list_submodules())
+        .await?
         .into_iter()
         .map(SubmoduleInfoDto::from)
         .collect())
@@ -20,7 +21,9 @@ pub async fn init_submodule(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.init_submodule(path)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.init_submodule(path))
+        .await
 }
 
 #[tauri::command]
@@ -30,5 +33,7 @@ pub async fn update_submodule(
     recursive: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    worker_handle(&state, &repo_path)?.update_submodule(path, recursive)
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.update_submodule(path, recursive))
+        .await
 }

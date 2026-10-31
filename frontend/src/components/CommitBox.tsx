@@ -10,7 +10,7 @@ import { coAuthorTrailers, formatPerson, parsePerson, sameEmail } from "../lib/p
 import { CoAuthorPicker } from "./CoAuthorPicker";
 import { Field } from "./primitives/Field";
 import { Toolbar } from "./primitives/Toolbar";
-import { runningHookLabel } from "../lib/hookFailure";
+import { HookStatus } from "./HookStatus";
 import styles from "./CommitBox.module.css";
 
 /**
@@ -88,6 +88,8 @@ export function CommitBox({
   /** Commit hooks: the "Skip hooks" toggle (only when installed) and the running hook's status. */
   hooks?: {
     installed: boolean;
+    /** The commit concludes a clean merge and runs `pre-merge-commit` instead of `pre-commit`. */
+    merging?: boolean;
     skip: boolean;
     onToggleSkip: (on: boolean) => void;
     running: { operationId: string; hook: string } | null;
@@ -216,8 +218,6 @@ export function CommitBox({
   // True while a commit (and its hooks) is in flight, so Commit cannot be pressed twice now that
   // the message stays in the field until the commit lands.
   const [submitting, setSubmitting] = useState(false);
-  // Keyed by operation id (like `TransferPanel`), so Cancel re-arms for the next hook run.
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   // A merge/pick/revert (or squash) message is git's: no co-authors are added to it.
   const showCoAuthors = loadRecentAuthors !== undefined && initialMessage === undefined;
@@ -363,7 +363,7 @@ export function CommitBox({
       {hooks?.installed === true && (
         <label
           className={styles.amendToggle}
-          title="Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)"
+          title={`Skip the ${hooks.merging === true ? "pre-merge-commit" : "pre-commit"} and commit-msg hooks for the next commit (--no-verify)`}
         >
           <input type="checkbox" checked={hooks.skip} onChange={(event) => hooks.onToggleSkip(event.target.checked)} />
           Skip hooks
@@ -372,21 +372,7 @@ export function CommitBox({
       {amendOn && amend?.pushed === true && (
         <p className={styles.reason}>Already pushed — you'll need to force push.</p>
       )}
-      {hooks?.running != null && (
-        <p role="status" className={styles.hookStatus}>
-          {runningHookLabel(hooks.running.hook)}{" "}
-          <button
-            type="button"
-            disabled={cancellingId === hooks.running.operationId}
-            onClick={() => {
-              setCancellingId(hooks.running?.operationId ?? null);
-              hooks.onCancel();
-            }}
-          >
-            {cancellingId === hooks.running.operationId ? "Cancelling…" : "Cancel"}
-          </button>
-        </p>
-      )}
+      {hooks?.running != null && <HookStatus running={hooks.running} onCancel={hooks.onCancel} />}
       <Toolbar>
         <button
           className={styles.commitButton}
