@@ -51,4 +51,30 @@ describe("placeAnchored", () => {
       maxHeight: 800 - 128 - 10,
     });
   });
+
+  it("keeps a preferred side while the popover still fits there", () => {
+    // Fits below too, but it was above and still fits above: no jump while filtering shrinks it.
+    const placement = placeAnchored({ top: 500, bottom: 520, left: 50 }, size, viewport, { prefer: "above" });
+    expect(placement.side).toBe("above");
+    expect(placement.top).toBe(500 - 4 - 200);
+  });
+
+  it("leaves a preferred side that no longer fits", () => {
+    const placement = placeAnchored({ top: 100, bottom: 120, left: 50 }, size, viewport, { prefer: "above" });
+    expect(placement.side).toBe("below");
+  });
+
+  it("keeps the top inside the window", () => {
+    // An anchor partly below the window's bottom edge.
+    const placement = placeAnchored({ top: 790, bottom: 810, left: 50 }, size, viewport);
+    expect(placement.top).toBeGreaterThanOrEqual(4);
+    expect(placement.top + Math.min(200, placement.maxHeight)).toBeLessThanOrEqual(800 - 4);
+  });
+
+  it("uses the whole window height when neither side has room for the filter field", () => {
+    const tiny = { width: 400, height: 60 };
+    const placement = placeAnchored({ top: 20, bottom: 40, left: 0 }, size, tiny);
+    expect(placement.maxHeight).toBe(60 - 8);
+    expect(placement.top).toBe(4);
+  });
 });

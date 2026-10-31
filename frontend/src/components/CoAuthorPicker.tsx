@@ -33,20 +33,34 @@ export function CoAuthorPicker({
   const [placement, setPlacement] = useState<Placement | null>(null);
   const listId = useId();
 
+  // The side it is on, preferred while it still fits, so filtering doesn't make it jump.
+  const sideRef = useRef<Placement["side"] | undefined>(undefined);
+
   const place = useCallback(() => {
     const button = buttonRef.current;
     const popover = popoverRef.current;
     if (button === null || popover === null) return;
+    const anchor = button.getBoundingClientRect();
+    // A fixed popover would follow a button scrolled out of view: close it instead.
+    if (!isVisibleIn(anchor, scrollingAncestor(button))) {
+      sideRef.current = undefined;
+      setOpen(false);
+      button.focus({ preventScroll: true });
+      return;
+    }
     // Measured uncapped: once placed, `maxHeight` shrinks the list, and the capped height would
     // always "fit" the side it was capped to. Restored before paint.
     const cap = popover.style.maxHeight;
     popover.style.maxHeight = "none";
     const size = { width: popover.offsetWidth, height: popover.scrollHeight };
     popover.style.maxHeight = cap;
-    const next = placeAnchored(button.getBoundingClientRect(), size, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
+    const next = placeAnchored(
+      anchor,
+      size,
+      { width: window.innerWidth, height: window.innerHeight },
+      { prefer: sideRef.current },
+    );
+    sideRef.current = next.side;
     setPlacement((current) =>
       current !== null &&
       current.top === next.top &&
@@ -152,6 +166,7 @@ export function CoAuthorPicker({
           setAuthors(null);
           setLoadError(false);
           setPlacement(null);
+          sideRef.current = undefined;
           setOpen(true);
         }}
       >
@@ -214,4 +229,25 @@ export function CoAuthorPicker({
       )}
     </div>
   );
+}
+
+/** The nearest ancestor that scrolls (where the commit box lives: the diff pane), if any. */
+function scrollingAncestor(element: HTMLElement): HTMLElement | null {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    const style = window.getComputedStyle(parent);
+    if (/(auto|scroll)/.test(`${style.overflowY} ${style.overflowX}`)) return parent;
+  }
+  return null;
+}
+
+/**
+ * True when `rect` overlaps the window and, if given, the scrolling container's box. A rect with
+ * no size has no layout to judge (not rendered yet, or a test DOM) and counts as visible.
+ */
+function isVisibleIn(rect: DOMRect, container: HTMLElement | null): boolean {
+  if (rect.width === 0 && rect.height === 0) return true;
+  const overlaps = (box: { top: number; bottom: number; left: number; right: number }) =>
+    rect.bottom > box.top && rect.top < box.bottom && rect.right > box.left && rect.left < box.right;
+  if (!overlaps({ top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth })) return false;
+  return container === null || overlaps(container.getBoundingClientRect());
 }

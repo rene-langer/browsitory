@@ -137,6 +137,61 @@ describe("CoAuthorPicker placement", () => {
     expect(popover().style.top).toBe(`${500 - 4 - 300}px`);
   });
 
+  it("keeps its side while filtering shrinks the list", async () => {
+    render(<CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />);
+    // Mid-window: 200 px only fits above (room below is 240 − margins, but not 300).
+    popoverHeight = 300;
+    fireEvent.click(stubButton({ top: 500, left: 20 }));
+    await screen.findByRole("option", { name: "Ada <ada@example.com>" });
+    expect(popover()).toHaveAttribute("data-side", "above");
+
+    popoverHeight = 100;
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter authors" }), { target: { value: "zzz" } });
+    expect(popover()).toHaveAttribute("data-side", "above");
+    expect(popover().style.top).toBe(`${500 - 4 - 100}px`);
+  });
+
+  it("closes when the button scrolls out of the window", async () => {
+    render(<CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />);
+    const button = stubButton({ top: 300, left: 20 });
+    fireEvent.click(button);
+    await screen.findByRole("option", { name: "Ada <ada@example.com>" });
+
+    vi.mocked(button.getBoundingClientRect).mockReturnValue({
+      top: 800, bottom: 820, left: 20, right: 140, width: 120, height: 20, x: 20, y: 800, toJSON: () => ({}),
+    } as DOMRect);
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(screen.queryByRole("listbox", { name: "Recent authors" })).toBeNull();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes when the button scrolls out of its scrolling container", async () => {
+    const { container } = render(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />
+      </div>,
+    );
+    const scroller = container.querySelector<HTMLElement>('[data-testid="scroller"]')!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      top: 100, bottom: 400, left: 0, right: 600, width: 600, height: 300, x: 0, y: 100, toJSON: () => ({}),
+    } as DOMRect);
+    const button = stubButton({ top: 300, left: 20 });
+    fireEvent.click(button);
+    await screen.findByRole("option", { name: "Ada <ada@example.com>" });
+
+    vi.mocked(button.getBoundingClientRect).mockReturnValue({
+      top: 420, bottom: 440, left: 20, right: 140, width: 120, height: 20, x: 20, y: 420, toJSON: () => ({}),
+    } as DOMRect);
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(screen.queryByRole("listbox", { name: "Recent authors" })).toBeNull();
+  });
+
   it("stops listening for resize and scroll once closed", async () => {
     const remove = vi.spyOn(window, "removeEventListener");
     render(<CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />);
