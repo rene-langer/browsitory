@@ -24,11 +24,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A symbolic link and a folder whose names are equal apart from how an accent is encoded (é as
   one or two code points), or apart from ẞ/ß/ss, are now recognised as the same name, as on
   macOS (#166).
-- Open in editor (no editor configured) also refuses files starting with "# Config File" or
-  "# KDE Config File", files with "[Desktop Entry]" in their first 33 bytes, .kdelnk files, and
-  files with a [Desktop Entry] group after other lines, as the desktop may run them. A file
-  replaced by a named pipe at that moment no longer hangs it, and Mark resolved refuses a named
-  pipe ("'<file>' is not a regular file or symbolic link") instead of hanging (#165).
+- Open in editor (no editor configured) also refuses .kdelnk files, files that the desktop
+  recognises as launchers by their first bytes ("[Desktop Entry]" within the first 33 bytes, or
+  a start of "[Desktop Action", "[KDE Desktop Entry]", "# Config File" or "# KDE Config File"),
+  and settings files with a [Desktop Entry] group after other groups, as the desktop may run
+  them. A file replaced by a named pipe at that moment no longer hangs it, and Mark resolved
+  refuses a named pipe ("'<file>' is a FIFO, socket or device, not a regular file; replace it
+  before marking it resolved.") instead of hanging (#165).
 
 ### Windows hardening
 

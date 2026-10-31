@@ -353,19 +353,27 @@ fn hfs_ignorable(c: char) -> bool {
 /// `ss` over-matches too: the fold errs towards finding more collisions, which only refuses
 /// more. Anything else is lowercased as ASCII.
 pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
-    use unicode_normalization::UnicodeNormalization;
+    // Most names are ASCII, where the Unicode fold is plain ASCII lowercasing.
+    if name.is_ascii() {
+        return name.to_ascii_lowercase();
+    }
     match std::str::from_utf8(name) {
-        Ok(text) => text
-            .nfd()
-            .filter(|c| !hfs_ignorable(*c))
-            .flat_map(char::to_lowercase)
-            .flat_map(char::to_uppercase)
-            .flat_map(char::to_lowercase)
-            .nfd()
-            .collect::<String>()
-            .into_bytes(),
+        Ok(text) => fold_text(text),
         Err(_) => name.to_ascii_lowercase(),
     }
+}
+
+/// [`fold_name`]'s Unicode path.
+fn fold_text(text: &str) -> Vec<u8> {
+    use unicode_normalization::UnicodeNormalization;
+    text.nfd()
+        .filter(|c| !hfs_ignorable(*c))
+        .flat_map(char::to_lowercase)
+        .flat_map(char::to_uppercase)
+        .flat_map(char::to_lowercase)
+        .nfd()
+        .collect::<String>()
+        .into_bytes()
 }
 
 /// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
@@ -1432,6 +1440,16 @@ mod tests {
             nearest_existing(Path::new("no-such-dir/x")),
             Some(Path::new("."))
         );
+    }
+
+    #[test]
+    fn the_ascii_fast_path_matches_the_unicode_fold() {
+        for byte in 0u8..=0x7f {
+            let text = (byte as char).to_string();
+            assert_eq!(fold_name(&[byte]), fold_text(&text), "byte {byte:#04x}");
+        }
+        let all: String = (0u8..=0x7f).map(char::from).collect();
+        assert_eq!(fold_name(all.as_bytes()), fold_text(&all));
     }
 
     #[test]

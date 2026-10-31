@@ -307,7 +307,8 @@ fn mark_resolved_does_not_block_on_a_fifo() {
     assert!(repo.index().unwrap().has_conflicts());
     assert_eq!(
         git_core::merge::MergeError::NotAFile("shared.txt".into()).to_string(),
-        "'shared.txt' is not a regular file or symbolic link"
+        "'shared.txt' is a FIFO, socket or device, not a regular file; replace it before \
+         marking it resolved."
     );
 }
 

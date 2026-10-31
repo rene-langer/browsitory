@@ -181,8 +181,8 @@ fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
     assert!(repo.find_branch("new", git2::BranchType::Local).is_err());
 }
 
-/// A repository whose config says case doesn't matter, with the branch `evil` holding a
-/// collision.
+/// A repository whose config says case matters (`core.ignorecase=false`: names differing only
+/// in case are different files), with the branch `evil` holding a collision.
 #[cfg(target_os = "linux")]
 fn case_sensitive_repo_with_evil_branch() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();

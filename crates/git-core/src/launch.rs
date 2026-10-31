@@ -331,41 +331,45 @@ fn has_magic(head: &[u8]) -> bool {
 /// the file as runnable.
 const DESKTOP_SNIFF_LIMIT: u64 = 64 * 1024;
 
-/// Whether `head` is a freedesktop launcher (`application/x-desktop`), by the rules of the
-/// programs that type and run one (#165):
+/// Whether `head` is a freedesktop launcher (`application/x-desktop`) (#165): one of
+/// shared-mime-info's x-desktop magics, or a strict key file with a desktop group.
 ///
-/// - shared-mime-info's magics: `[Desktop Entry]` starting anywhere in the first 33 bytes (offset
-///   0:32), `# Config File` / `# KDE Config File` at offset 0 (after a UTF-8 BOM): a launcher;
-/// - otherwise the key-file groups: a desktop group header (`[Desktop Entry]`,
-///   `[KDE Desktop Entry]`, `[Desktop Action …]`) on a line of its own at any position is a
-///   launcher (GLib and KConfig look the group up by name). Blank, `#` comment, other group,
-///   `key=value` lines and invalid lines are skipped, as KConfig skips them.
+/// - The magics (after a UTF-8 BOM): `[Desktop Entry]` starting within the first 33 bytes
+///   (offset 0:32); `[Desktop Action`, `[KDE Desktop Entry]`, `# Config File` and
+///   `# KDE Config File` at offset 0.
+/// - A strict key file, as GLib parses one: blank and `#` comment lines are skipped, the first
+///   other line must be a group header (`[…]`), then only group headers and `key=value` lines
+///   follow; a desktop group (`[Desktop Entry]`, `[KDE Desktop Entry]`, `[Desktop Action …]`)
+///   among them makes it a launcher. Any other line means it isn't a key file, so not a launcher
+///   (a README quoting a launcher in a code block stays a document).
 ///
-/// `None` when `head` ends before that is decided and isn't the whole file (`complete`), while
-/// it still looks like a strict key file (only comments, group headers and `key=value` lines so
-/// far): the rest must be read to decide. A partial head that already had another line, and no
-/// desktop group, is `Some(false)`: a long text file mentioning no desktop group isn't refused.
-/// Whitespace includes the vertical tab, as GLib's key-file parser.
+/// `None` when `head` ends before that is decided and isn't the whole file (`complete`): the rest
+/// must be read to decide. Whitespace includes the vertical tab, as GLib's key-file parser.
 fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
-    let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
-    if head.starts_with(b"# Config File") || head.starts_with(b"# KDE Config File") {
-        return Some(true);
-    }
     const DESKTOP_ENTRY: &[u8] = b"[Desktop Entry]";
-    if head
-        .windows(DESKTOP_ENTRY.len())
-        .take(33)
-        .any(|window| window == DESKTOP_ENTRY)
+    let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
+    if [
+        &b"[Desktop Action"[..],
+        b"[KDE Desktop Entry]",
+        b"# Config File",
+        b"# KDE Config File",
+    ]
+    .iter()
+    .any(|magic| head.starts_with(magic))
+        || head
+            .windows(DESKTOP_ENTRY.len())
+            .take(33)
+            .any(|window| window == DESKTOP_ENTRY)
     {
         return Some(true);
     }
     let blank = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c');
     let mut lines = head.split(|b| *b == b'\n').peekable();
-    let mut strict = true;
+    let mut in_group = false;
     while let Some(line) = lines.next() {
         // The last piece of a partial head may be a cut-off line.
         if !complete && lines.peek().is_none() {
-            return if strict { None } else { Some(false) };
+            return None;
         }
         let start = line.iter().position(|b| !blank(b)).unwrap_or(line.len());
         let end = line
@@ -383,10 +387,11 @@ fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
             {
                 return Some(true);
             }
+            in_group = true;
             continue;
         }
-        if !line.contains(&b'=') {
-            strict = false;
+        if !in_group || !line.contains(&b'=') {
+            return Some(false);
         }
     }
     if complete {
@@ -934,7 +939,8 @@ mod tests {
         assert!(!looks_runnable(
             b"# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n"
         ));
-        assert!(!looks_runnable(b"[Desktop Actions]\n"));
+        // shared-mime-info's `[Desktop Action` magic is a prefix match.
+        assert!(looks_runnable(b"[Desktop Actions]\n"));
         assert_eq!(is_desktop_entry(b"# a\n# b", false), None);
         assert_eq!(is_desktop_entry(b"# a\n# b", true), Some(false));
         assert_eq!(
@@ -946,7 +952,7 @@ mod tests {
     /// #165: the key-file rule (D8-A) and shared-mime-info's other `application/x-desktop`
     /// magics and globs.
     #[test]
-    fn desktop_entries_are_found_in_any_group_and_by_the_config_file_magics() {
+    fn desktop_entries_are_found_in_a_key_file_and_by_the_x_desktop_magics() {
         assert!(looks_runnable(
             b"[Settings]\nA=b\n\n[Desktop Entry]\nExec=x\n"
         ));
@@ -967,10 +973,17 @@ mod tests {
         assert!(!looks_runnable(
             b"abcdefghijklmnopqrstuvwxyz0123456[Desktop Entry]"
         ));
-        // KConfig skips invalid lines, so a desktop group after one still counts.
-        assert!(looks_runnable(b"[Settings]\nplain text\n[Desktop Entry]\n"));
-        assert!(looks_runnable(b"plain\n[Desktop Entry]\n"));
-        // No desktop group: not a launcher.
+        assert!(looks_runnable(b"[KDE Desktop Entry]x\n"));
+        assert!(looks_runnable(b"[Desktop Action"));
+        // Not a strict key file (a line that is neither a comment, a group nor a key), or no
+        // desktop group, and no magic: not a launcher.
+        let pad = "# a comment that pushes the next line past byte 32\n";
+        assert!(!looks_runnable(
+            format!("{pad}[Settings]\nplain text\n[Desktop Entry]\n").as_bytes()
+        ));
+        assert!(!looks_runnable(
+            format!("{pad}plain\n[Desktop Entry]\n").as_bytes()
+        ));
         assert!(!looks_runnable(b"[metadata]\nname = x\n"));
         assert!(!looks_runnable(
             b"# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n"
@@ -978,6 +991,33 @@ mod tests {
         assert!(!looks_runnable(b"  # Config File\n"));
         assert_eq!(is_desktop_entry(b"[a]\nk=v\n", false), None);
         assert_eq!(is_desktop_entry(b"[a]\ntext\n", false), Some(false));
+    }
+
+    /// Documents quoting a launcher stay documents (a regression of the "skip invalid lines"
+    /// rule, reverted).
+    #[test]
+    fn a_document_quoting_a_launcher_opens() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("README.md"),
+            "# Launcher\n\nInstall this file as `~/.local/share/applications/x.desktop`:\n\n\
+             ```ini\n[Desktop Entry]\nType=Application\nExec=x\n```\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("notes.txt"),
+            "Some notes about the launcher we ship:\n[Desktop Entry]\nExec=x\n",
+        )
+        .unwrap();
+        for name in ["README.md", "notes.txt"] {
+            assert!(
+                matches!(
+                    prepare_editor(dir.path(), name, None, None),
+                    Ok(EditorTarget::SystemDefault(_))
+                ),
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -990,7 +1030,7 @@ mod tests {
         let short = dir.path().join("short");
         std::fs::write(&short, "[a]\n".to_string() + &"k=v\n".repeat(10)).unwrap();
         assert!(!file_may_run(&short, Os::Linux));
-        // A long text file (not a strict key file) with no desktop group in the limit isn't.
+        // A long text file (not a strict key file) isn't.
         let text = dir.path().join("text");
         std::fs::write(&text, "plain text\n".repeat(70 * 1024 / 11)).unwrap();
         assert!(!file_may_run(&text, Os::Linux));

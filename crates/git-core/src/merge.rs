@@ -27,7 +27,10 @@ pub enum MergeError {
     #[error("'{0}' is inside a symlinked folder; resolve it with git.")]
     SymlinkedFolder(String),
     /// Mark resolved on a FIFO, socket or device (#165): libgit2 would block reading it.
-    #[error("'{0}' is not a regular file or symbolic link")]
+    #[error(
+        "'{0}' is a FIFO, socket or device, not a regular file; replace it before marking it \
+         resolved."
+    )]
     NotAFile(String),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),

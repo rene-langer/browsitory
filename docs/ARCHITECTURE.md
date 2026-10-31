@@ -744,12 +744,14 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   applied (documented for users in USER_GUIDE).
 - Runnable-file refusal checks one extension list on every OS (Wine runs Windows installers and
   shortcuts from `xdg-open`/`open`) plus content sniffing (`#!`, ELF, PE, Mach-O, OLE except
-  old Office documents, and freedesktop launchers: shared-mime-info's magics, `[Desktop Entry]`
-  starting within the first 33 bytes or `# Config File` / `# KDE Config File` at offset 0, or a
-  `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]` group header on a line of its
-  own at any position, as GLib and KConfig find the group (other lines, invalid ones included,
-  are skipped, as KConfig skips them); a strict key file still undecided after 64 KiB counts as
-  runnable, a longer text file with no desktop group doesn't; #165). `.desktop` and `.kdelnk`
+  old Office documents, and freedesktop launchers: shared-mime-info's x-desktop magics,
+  `[Desktop Entry]` starting within the first 33 bytes, or `[Desktop Action`,
+  `[KDE Desktop Entry]`, `# Config File` / `# KDE Config File` at offset 0; or a strict key file
+  as GLib parses one (after comments, the first line a group header, then only group headers
+  and `key=value` lines) with a `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]`
+  group. Any other line ends the scan as "not a launcher", so a README quoting a launcher in a
+  code block stays a document; a strict key file still undecided after 64 KiB counts as
+  runnable; #165). `.desktop` and `.kdelnk`
   are runnable by name. The head is read through the opened handle (`O_NONBLOCK | O_NOFOLLOW` on
   Unix, the type checked on the handle after a `symlink_metadata` pre-check, so a device node is
   never opened), so a FIFO swapped in after a check can't block; Mark resolved reads its marker check
