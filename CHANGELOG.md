@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### UX polish
+
+- Accessibility: a remote branch's actions button is named with its remote (#106).
+
 ### Hooks bundle
 
 - Merging a branch now runs the pre-merge-commit hook (skipped by Skip hooks and "Commit without hooks") instead of pre-commit when you commit a merge that had no conflicts, and that commit no longer runs post-commit, as with git merge; post-merge runs after that commit instead of when the merge is staged. A merge that had conflicts runs the commit hooks (including post-commit), as in git (#124).

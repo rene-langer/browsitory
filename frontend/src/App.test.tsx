@@ -1012,7 +1012,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "origin" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete origin/topic…" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete remote branch" });
     expect(dialog).toHaveTextContent("Delete origin/topic on the remote? This can't be undone.");
