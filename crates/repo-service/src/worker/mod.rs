@@ -2263,6 +2263,90 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
     }
 
+    /// #178: the commit box shows "Running post-merge hook…" with Cancel, as for post-commit.
+    #[cfg(unix)]
+    #[test]
+    fn a_clean_merge_commit_reports_post_merge_on_the_commit_operation() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "post-merge");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        let (events_tx, events_rx) = mpsc::channel();
+
+        let outcome = handle
+            .commit("Merge feature".into(), false, Vec::new(), events_tx)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        let events: Vec<HookEvent> = events_rx.iter().collect();
+        assert!(
+            matches!(&events[..], [
+                HookEvent::Started { operation_id: a, hook: h1 },
+                HookEvent::Finished { operation_id: b, hook: h2 },
+            ] if a == b && a.starts_with("commit-") && h1 == "post-merge" && h2 == "post-merge"),
+            "{events:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_transfer_stops_a_running_post_merge_and_keeps_the_commit() {
+        let (dir, repo) = diverged_repo(false);
+        install_hook(&repo, "post-merge", "sleep 30");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            for event in events_rx {
+                if let HookEvent::Started { operation_id, hook } = event {
+                    if hook == "post-merge" {
+                        canceller.cancel_transfer(&operation_id);
+                    }
+                }
+            }
+        });
+        let started = std::time::Instant::now();
+
+        let result = handle.commit("Merge feature".into(), false, Vec::new(), events_tx);
+
+        cancel_thread.join().unwrap();
+        assert!(
+            matches!(
+                result,
+                Ok(git_core::commit::CommitOutcome::Committed { .. })
+            ),
+            "{result:?}"
+        );
+        // Generous bound: only proves the hook's `sleep 30` was not waited out.
+        assert!(started.elapsed() < Duration::from_secs(25));
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
+    }
+
+    /// `git merge --no-verify` still runs post-merge; so does "Skip hooks".
+    #[cfg(unix)]
+    #[test]
+    fn post_merge_runs_even_with_skip_hooks() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "post-merge");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+
+        assert!(matches!(
+            commit_message(&handle, true),
+            git_core::commit::CommitOutcome::Committed { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_clean_merge_commit_runs_pre_merge_commit_not_pre_commit() {

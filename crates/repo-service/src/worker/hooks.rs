@@ -1,5 +1,6 @@
 //! Worker side of git hooks: forwards hook progress to the frontend, logs hook problems the UI
-//! does not show, and runs the post-checkout/post-merge hooks after successful commands.
+//! does not show, and runs the post-checkout/post-merge hooks after successful commands (a
+//! merge commit's post-merge on the commit's own operation, reported and cancellable).
 
 use std::sync::mpsc::Sender;
 
@@ -83,6 +84,24 @@ pub(super) fn run_post_hook(repo: &git2::Repository, name: &str, args: &[&str]) 
     };
     let result = git_core::hooks::run_hook(repo, &invocation, &|| false, HOOK_TIMEOUT);
     log_hook_result(name, &result);
+}
+
+/// A post hook run on a command's own operation: reported (the status line) and cancellable like
+/// `post-commit`. Its result never changes the command's outcome; the reporter's `finished` logs
+/// a failure.
+pub(super) fn run_post_hook_reported(
+    repo: &git2::Repository,
+    name: &str,
+    args: &[&str],
+    options: &mut git_core::hooks::HookOptions<'_>,
+) {
+    let invocation = HookInvocation {
+        name,
+        args,
+        stdin: None,
+        env: &[],
+    };
+    let _ = git_core::hooks::run_reported(repo, &invocation, options);
 }
 
 /// HEAD's commit, or the zero id while unborn (what git passes to post-checkout).
