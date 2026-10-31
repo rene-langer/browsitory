@@ -12,8 +12,9 @@
 //! protects the last component of a path. So every component and every leaf opened by path is
 //! checked on its own handle to sit directly in the held parent (`GetFinalPathNameByHandleW` of
 //! both); a mismatch fails the act, and a file created by the failed act is deleted through its
-//! handle. Leaves are deleted through their handle (`FileDispositionInfo`), never by path, and
-//! an existing file is written through a handle whose file ID matches the one classified.
+//! handle. Leaves are deleted through their handle (`FileDispositionInfoEx` with POSIX
+//! semantics, see `delete_by_handle`), never by path, and an existing file is written through a
+//! handle whose file ID matches the one classified.
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
@@ -21,9 +22,10 @@
 //! walk through or a file reopened without the flag (so the file system filter sees the read or
 //! write), which must have the same file ID.
 //!
-//! Residual: creating a missing folder (`CreateDirectoryW`) goes by path; if the held parent is
-//! turned into a junction in that instant, an empty folder may appear in the junction's target
-//! (the walk then fails on the parent check before anything is written into it).
+//! A missing folder is created relative to the held parent's handle (`NtCreateFile` with
+//! `RootDirectory`, see `create_dir_in`), not by path, so a parent turned into a junction in
+//! that instant can't get a folder created in the junction's target (#163). The new folder is
+//! then opened by path and checked like any other component.
 
 use std::ffi::{c_void, OsString};
 use std::fs::{File, OpenOptions};
@@ -58,6 +60,16 @@ const ERROR_DIRECTORY: i32 = 267;
 const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
 const FILE_ID_INFO_CLASS: i32 = 18;
 const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
+const FILE_DISPOSITION_INFO_EX_CLASS: i32 = 21;
+
+/// `FILE_DISPOSITION_INFO_EX` flags.
+const FILE_DISPOSITION_FLAG_DELETE: u32 = 0x1;
+const FILE_DISPOSITION_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+
+/// What a file system without POSIX deletes answers (see `delete_by_handle`).
+const ERROR_INVALID_FUNCTION: i32 = 1;
+const ERROR_NOT_SUPPORTED: i32 = 50;
+const ERROR_INVALID_PARAMETER: i32 = 87;
 
 /// `FILE_ATTRIBUTE_TAG_INFO`.
 #[repr(C)]
@@ -79,6 +91,12 @@ struct FileIdInfo {
 #[repr(C)]
 struct DispositionInfo {
     delete_file: u8,
+}
+
+/// `FILE_DISPOSITION_INFO_EX`: a `ULONG` of `FILE_DISPOSITION_FLAG_*`.
+#[repr(C)]
+struct DispositionInfoEx {
+    flags: u32,
 }
 
 #[link(name = "kernel32")]
@@ -134,24 +152,168 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
     Ok(info)
 }
 
-/// Marks the file or folder `file` refers to for deletion when its last handle closes. Acts on
-/// the object itself, never on a name, never following a link; a folder must be empty. The
-/// handle needs `DELETE` access.
+/// Marks the file or folder `file` refers to for deletion. Acts on the object itself, never on a
+/// name, never following a link; a folder must be empty. The handle needs `DELETE` access.
+///
+/// POSIX semantics (#168): the name leaves its folder as soon as *our* handle closes, even while
+/// another program (an antivirus scanner, the search indexer) keeps the file open with delete
+/// sharing, so a file can be created under that name at once and the folder can be removed.
+/// Where the file system doesn't support that (FAT/exFAT, older Windows, some network shares),
+/// it falls back to the classic disposition, as std's `remove_dir_all` does: the name then stays
+/// until the last handle closes.
 fn delete_by_handle(file: &File) -> io::Result<()> {
-    let mut info = DispositionInfo { delete_file: 1 };
-    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable
-    // `FILE_DISPOSITION_INFO` (one BOOLEAN byte, `repr(C)`) of exactly the size passed.
+    let mut posix = DispositionInfoEx {
+        flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    };
+    match set_information(file, FILE_DISPOSITION_INFO_EX_CLASS, &mut posix) {
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+            ) =>
+        {
+            set_information(
+                file,
+                FILE_DISPOSITION_INFO_CLASS,
+                &mut DispositionInfo { delete_file: 1 },
+            )
+        }
+        other => other,
+    }
+}
+
+/// `SetFileInformationByHandle` with `info` as the `class` structure.
+fn set_information<T>(file: &File, class: i32, info: &mut T) -> io::Result<()> {
+    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable,
+    // `repr(C)` structure of exactly the size passed, and each caller pairs it with its class.
     let ok = unsafe {
         SetFileInformationByHandle(
             file.as_raw_handle(),
-            FILE_DISPOSITION_INFO_CLASS,
-            (&mut info as *mut DispositionInfo).cast(),
-            std::mem::size_of::<DispositionInfo>() as u32,
+            class,
+            (info as *mut T).cast(),
+            std::mem::size_of::<T>() as u32,
         )
     };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
+    Ok(())
+}
+
+/// `UNICODE_STRING`: lengths in bytes, no terminating NUL.
+#[repr(C)]
+struct UnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: *mut u16,
+}
+
+/// `OBJECT_ATTRIBUTES`.
+#[repr(C)]
+struct ObjectAttributes {
+    length: u32,
+    root_directory: *mut c_void,
+    object_name: *mut UnicodeString,
+    attributes: u32,
+    security_descriptor: *mut c_void,
+    security_quality_of_service: *mut c_void,
+}
+
+/// `IO_STATUS_BLOCK`: an `NTSTATUS`/pointer union and a `ULONG_PTR`.
+#[repr(C)]
+struct IoStatusBlock {
+    status: usize,
+    information: usize,
+}
+
+const OBJ_CASE_INSENSITIVE: u32 = 0x40;
+const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+/// `NtCreateFile` create disposition: fail if the name exists.
+const FILE_CREATE: u32 = 2;
+/// `NtCreateFile` create options.
+const FILE_DIRECTORY_FILE: u32 = 0x0000_0001;
+const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
+const FILE_OPEN_FOR_BACKUP_INTENT: u32 = 0x0000_4000;
+const FILE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+#[link(name = "ntdll")]
+extern "system" {
+    fn NtCreateFile(
+        handle: *mut *mut c_void,
+        access: u32,
+        attributes: *mut ObjectAttributes,
+        io_status: *mut IoStatusBlock,
+        allocation_size: *mut i64,
+        file_attributes: u32,
+        share_access: u32,
+        create_disposition: u32,
+        create_options: u32,
+        ea_buffer: *mut c_void,
+        ea_length: u32,
+    ) -> i32;
+    fn RtlNtStatusToDosError(status: i32) -> u32;
+}
+
+/// Creates the folder `name` directly in the held folder `parent`, resolved against `parent`'s
+/// handle rather than a path (#163): a parent turned into a junction meanwhile is never
+/// followed. An existing name fails with `ERROR_ALREADY_EXISTS`, as `CreateDirectoryW` does.
+fn create_dir_in(parent: &File, name: &std::ffi::OsStr) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+
+    let mut wide: Vec<u16> = name.encode_wide().collect();
+    let length = u16::try_from(wide.len() * 2)
+        .ok()
+        .filter(|&length| length > 0)
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let mut object_name = UnicodeString {
+        length,
+        maximum_length: length,
+        buffer: wide.as_mut_ptr(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: std::mem::size_of::<ObjectAttributes>() as u32,
+        root_directory: parent.as_raw_handle(),
+        object_name: &mut object_name,
+        attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null_mut(),
+        security_quality_of_service: std::ptr::null_mut(),
+    };
+    let mut io_status = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    let mut handle = std::ptr::null_mut();
+    // SAFETY: every pointer is to a live local of the documented layout: `handle` receives the
+    // new handle, `attributes` names `wide` (which outlives the call) relative to `parent`'s
+    // handle (owned by `parent`, which outlives the call), `io_status` is writable. No
+    // allocation size and no extended attributes (null, 0).
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &mut attributes,
+            &mut io_status,
+            std::ptr::null_mut(),
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_CREATE,
+            FILE_DIRECTORY_FILE
+                | FILE_SYNCHRONOUS_IO_NONALERT
+                | FILE_OPEN_FOR_BACKUP_INTENT
+                | FILE_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status < 0 {
+        // SAFETY: a pure conversion of a status code.
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(code as i32));
+    }
+    // SAFETY: on success `handle` is a new, open handle that nothing else owns; it is closed
+    // exactly once, here.
+    drop(unsafe { OwnedHandle::from_raw_handle(handle) });
     Ok(())
 }
 
@@ -340,7 +502,7 @@ pub(super) fn walk(
                 Err(error) if missing(&error) => match on_missing {
                     OnMissing::Stop => return Ok(Walk::Missing),
                     OnMissing::Create => {
-                        match std::fs::create_dir(&path) {
+                        match create_dir_in(&at.dirs[at.dirs.len() - 1], &name) {
                             Ok(()) => step(Step::Created(&name)),
                             Err(error) if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) => {}
                             Err(error) => return Err(error),
@@ -918,5 +1080,24 @@ mod tests {
         assert_eq!(std::mem::size_of::<AttributeTagInfo>(), 8);
         assert_eq!(std::mem::size_of::<FileIdInfo>(), 24);
         assert_eq!(std::mem::align_of::<FileIdInfo>(), 8);
+        assert_eq!(std::mem::size_of::<DispositionInfoEx>(), 4);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn nt_structures_have_the_documented_layout() {
+        assert_eq!(std::mem::size_of::<UnicodeString>(), 16);
+        assert_eq!(std::mem::size_of::<ObjectAttributes>(), 48);
+        assert_eq!(std::mem::size_of::<IoStatusBlock>(), 16);
+    }
+
+    #[test]
+    fn create_dir_in_creates_in_the_held_folder_and_refuses_an_existing_name() {
+        let dir = TempDir::new().unwrap();
+        let held = open_pinned(dir.path(), FILE_LIST_DIRECTORY).unwrap();
+        create_dir_in(&held, OsStr::new("new")).unwrap();
+        assert!(dir.path().join("new").is_dir());
+        let again = create_dir_in(&held, OsStr::new("NEW")).unwrap_err();
+        assert_eq!(again.raw_os_error(), Some(ERROR_ALREADY_EXISTS));
     }
 }
