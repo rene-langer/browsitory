@@ -167,7 +167,7 @@ for symmetry). A panicking holder unwinds through `Drop` too. The module docs sa
 
 `CONTENDED_WAIT` = 1 s (300 ms under `cfg(test)`; 100 ms flaked on macOS CI) replaces `Duration::ZERO` for `contended`.
 `LOCK_WAIT` under `cfg(test)` goes from 300 ms to 1 s, so the timing tests have a margin of
-900 ms instead of 200 ms. A long holder in the other window (a pull, a pinentry prompt) still
+about 700 ms (1 s minus the 300 ms test `CONTENDED_WAIT`) instead of 200 ms. A long holder in the other window (a pull, a pinentry prompt) still
 costs one 10 s wait, then 1 s per locked command until the lock is taken.
 
 ### 3. #175: don't record an entry that was stale before the command (D3-A)

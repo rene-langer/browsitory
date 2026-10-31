@@ -26,6 +26,9 @@ pub enum MergeError {
     UnsupportedEntry(String),
     #[error("'{0}' is inside a symlinked folder; resolve it with git.")]
     SymlinkedFolder(String),
+    /// Mark resolved on a FIFO, socket or device (#165): libgit2 would block reading it.
+    #[error("'{0}' is not a regular file or symbolic link")]
+    NotAFile(String),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -478,10 +481,7 @@ pub fn mark_resolved(
     // add one too). A swap between this check and the staging is a residual (#165).
     if let Some(kind) = meta.as_ref().map(std::fs::Metadata::file_type) {
         if !kind.is_file() && !kind.is_symlink() && !kind.is_dir() {
-            return Err(MergeError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("'{path}' is not a regular file or symbolic link"),
-            )));
+            return Err(MergeError::NotAFile(path.to_string()));
         }
     }
     if !force && meta.as_ref().is_some_and(|meta| meta.is_file()) {

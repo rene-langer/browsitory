@@ -287,7 +287,11 @@ fn mark_resolved_does_not_block_on_a_fifo() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let repo = git2::Repository::open(&path).unwrap();
-        let _ = tx.send(git_core::merge::mark_resolved(&repo, "shared.txt", false).is_err());
+        let result = git_core::merge::mark_resolved(&repo, "shared.txt", false);
+        let _ = tx.send(matches!(
+            result,
+            Err(git_core::merge::MergeError::NotAFile(ref path)) if path == "shared.txt"
+        ));
     });
     let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
     if finished.is_err() {
@@ -301,6 +305,10 @@ fn mark_resolved_does_not_block_on_a_fifo() {
     );
     let repo = git2::Repository::open(dir.path()).unwrap();
     assert!(repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        git_core::merge::MergeError::NotAFile("shared.txt".into()).to_string(),
+        "'shared.txt' is not a regular file or symbolic link"
+    );
 }
 
 #[test]

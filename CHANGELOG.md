@@ -26,8 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   macOS (#166).
 - Open in editor (no editor configured) also refuses files starting with "# Config File" or
   "# KDE Config File", files with "[Desktop Entry]" in their first 33 bytes, .kdelnk files, and
-  files with a [Desktop Entry] group after other lines, as the desktop may run them; a file replaced by a named pipe at that moment no longer
-  hangs it, and Mark resolved refuses a named pipe instead of hanging (#165).
+  files with a [Desktop Entry] group after other lines, as the desktop may run them. A file
+  replaced by a named pipe at that moment no longer hangs it, and Mark resolved refuses a named
+  pipe ("'<file>' is not a regular file or symbolic link") instead of hanging (#165).
 
 ### Windows hardening
 
