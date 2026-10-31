@@ -155,7 +155,8 @@ the file and the folder's files deletes the file first and then restores the fol
 file was replaced by a folder, discarding the file deletes the untracked files in the folder, like
 git, and Undo brings them back; if the folder holds anything Undo can't bring back (an ignored
 file or a nested repository), the discard refuses and names it ("Couldn't discard 'd': it is now a
-folder holding 'd/x.log', which Undo can't bring back. Move it first.").
+folder holding 'd/x.log', which Undo can't bring back. Move it first."), and **Discard all**
+leaves the folder's untracked files alone too.
 
 For untracked files the menu also offers ignore items. Each appends a pattern to the
 repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left

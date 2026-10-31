@@ -94,8 +94,9 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     if let Ok(meta) = full.symlink_metadata() {
         if meta.is_dir() && folder_replaced_a_file(repo, &index, rel)? {
             // A folder where HEAD or the index has a file or link: git sees that file deleted.
-            // Its deletion is what stages here; the folder's files stage on their own (#157).
-            if index.get_path(rel, 0).is_some() {
+            // Its deletion is what stages here (a conflict there resolves as deleted, as `git
+            // add -A`); the folder's files stage on their own (#157).
+            if index.get_path(rel, 0).is_some() || has_conflict_entries(&index, path) {
                 index.remove_path(rel)?;
                 index.write()?;
             }
@@ -120,7 +121,7 @@ fn folder_replaced_a_file(
     rel: &Path,
 ) -> Result<bool, StageError> {
     const GITLINK: u32 = 0o160000;
-    if let Some(entry) = index.get_path(rel, 0) {
+    if let Some(entry) = (0..=3).find_map(|stage| index.get_path(rel, stage)) {
         return Ok(entry.mode != GITLINK);
     }
     let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) else {
@@ -242,7 +243,8 @@ fn unrestorable_inside(
         .include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(true)
-        .recurse_ignored_dirs(true)
+        // An ignored folder is reported (and named) as `dir/`, without listing what is in it.
+        .recurse_ignored_dirs(false)
         .exclude_submodules(true)
         .disable_pathspec_match(true)
         .pathspec(format!("{path}/"));
@@ -280,8 +282,36 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     drop(index);
     let mut failed = Vec::new();
     let mut any_folder = false;
-    let mut reason = None;
+    // The reasons that explain failures, with how many failures each explains.
+    let mut reasons: Vec<(String, usize)> = Vec::new();
+    // A tracked file that is now a folder holding what Undo can't bring back is refused before
+    // anything runs, and its untracked files are left alone with it, so nothing is half done.
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    let mut refused: Vec<String> = Vec::new();
+    for path in &tracked {
+        if let Some(inner) = unrestorable_inside(repo, workdir, path)? {
+            failed.push(path.to_string());
+            reasons.push((
+                format!(
+                    " '{path}' is now a folder holding '{inner}', which Undo can't bring back."
+                ),
+                1,
+            ));
+            refused.push(format!("{path}/"));
+        }
+    }
     for path in untracked.into_iter().chain(tracked) {
+        if failed.contains(path) {
+            continue;
+        }
+        if let Some(position) = refused
+            .iter()
+            .position(|folder| path.starts_with(folder.as_str()))
+        {
+            failed.push(path.clone());
+            reasons[position].1 += 1;
+            continue;
+        }
         match discard_file(repo, path) {
             Ok(()) => {}
             Err(StageError::IsFolder(_)) => {
@@ -289,13 +319,7 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
                 failed.push(path.clone());
             }
             Err(StageError::FolderIsNowAFile { parent, .. }) => {
-                reason = Some(format!(" '{parent}' is now a file, not a folder."));
-                failed.push(path.clone());
-            }
-            Err(StageError::FolderHoldsUnrestorable { inner, .. }) => {
-                reason = Some(format!(
-                    " It is now a folder holding '{inner}', which Undo can't bring back."
-                ));
+                reasons.push((format!(" '{parent}' is now a file, not a folder."), 1));
                 failed.push(path.clone());
             }
             Err(_) => failed.push(path.clone()),
@@ -314,9 +338,11 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     if any_folder {
         message.push_str(" Folders (for example nested repositories) are never discarded.");
     }
-    // A single failure names its reason when it is a folder/file swap (#154).
-    if let (1, Some(reason)) = (count, reason) {
-        message.push_str(&reason);
+    // The reason is named when one folder/file swap explains every failure (#154).
+    if let [(reason, explained)] = reasons.as_slice() {
+        if *explained == count {
+            message.push_str(reason);
+        }
     }
     Err(StageError::DiscardIncomplete { failed, message })
 }

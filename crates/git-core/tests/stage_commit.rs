@@ -576,3 +576,42 @@ fn staging_rejects_a_path_outside_the_repository() {
     let (_dir, repo) = init_repo();
     assert!(stage_file(&repo, "../x").is_err());
 }
+
+/// A conflicted file `d` the user replaced by a folder: staging `d` resolves the conflict as its
+/// deletion (as `git add -A d`), instead of silently doing nothing.
+#[test]
+fn staging_a_conflicted_file_now_a_folder_resolves_it_as_deleted() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "base\n");
+    common::commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    let entry = index.get_path(std::path::Path::new("d"), 0).unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    for stage in 1..=3u16 {
+        index
+            .add(&git2::IndexEntry {
+                ctime: entry.ctime,
+                mtime: entry.mtime,
+                dev: entry.dev,
+                ino: entry.ino,
+                mode: entry.mode,
+                uid: entry.uid,
+                gid: entry.gid,
+                file_size: entry.file_size,
+                id: entry.id,
+                flags: (entry.flags & !0x3000) | (stage << 12),
+                flags_extended: entry.flags_extended,
+                path: entry.path.clone(),
+            })
+            .unwrap();
+    }
+    index.write().unwrap();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/u", "u\n");
+
+    stage_file(&repo, "d").unwrap();
+
+    let index = repo.index().unwrap();
+    assert!(!index.has_conflicts());
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
+}

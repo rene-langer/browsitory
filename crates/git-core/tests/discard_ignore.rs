@@ -590,7 +590,7 @@ fn discarding_a_file_that_is_now_a_folder_with_an_ignored_file_is_refused() {
     let err = discard_all_unstaged(&repo, &["d".into()]).unwrap_err();
     assert_eq!(
         err.to_string(),
-        "Couldn't discard 1 file: d. It is now a folder holding 'd/x.log', which Undo can't bring back."
+        "Couldn't discard 1 file: d. 'd' is now a folder holding 'd/x.log', which Undo can't bring back."
     );
 }
 
@@ -624,4 +624,51 @@ fn discarding_a_file_that_is_now_a_folder_with_only_untracked_files_restores_it(
     discard_file(&repo, "d").unwrap();
 
     assert_eq!(read(dir.path(), "d"), "file\n");
+}
+
+/// Discard all over the real status list (`d`, `d/u`) refuses the folder before touching its
+/// untracked files, so nothing is half done.
+#[test]
+fn discard_all_refusing_a_folder_leaves_its_untracked_files_alone() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "*.log\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+    common::write_file(dir.path(), "d/x.log", "ignored\n");
+    let paths: Vec<String> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .filter(|e| !e.staged)
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(paths, ["d", "d/u"]);
+
+    let err = discard_all_unstaged(&repo, &paths).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 2 files: d, d/u. 'd' is now a folder holding 'd/x.log', which Undo can't bring back."
+    );
+    assert_eq!(read(dir.path(), "d/u"), "untracked\n");
+    assert_eq!(read(dir.path(), "d/x.log"), "ignored\n");
+}
+
+/// An ignored folder is named as the folder, not its first file.
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_an_ignored_folder_names_the_folder() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "node_modules/\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/node_modules/p/f.js", "x\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert!(
+        err.to_string().contains("holding 'd/node_modules/'"),
+        "{err}"
+    );
 }

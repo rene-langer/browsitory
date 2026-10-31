@@ -646,8 +646,10 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `discard_all_unstaged` handles untracked paths first, so confirming both the file and the
   folder's files succeeds. Discarding a tracked file that is now a folder refuses with
   `StageError::FolderHoldsUnrestorable` when the folder holds something the undo snapshot
-  (`undo::build_worktree_tree`) leaves out: an ignored file or a nested repository. The path-limited stash refuses with `StashError::FolderIsNowAFile`
-  before anything is recorded.
+  (`undo::build_worktree_tree`) leaves out: an ignored file or folder, or a nested repository.
+  `discard_all_unstaged` checks this before discarding anything and leaves that folder's
+  untracked files alone too. The path-limited stash refuses with
+  `StashError::FolderIsNowAFile` before anything is recorded.
 
 ## Image preview
 
