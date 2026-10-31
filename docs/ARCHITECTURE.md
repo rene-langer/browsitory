@@ -630,16 +630,23 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line
-  staging. `unstage_file` resets the pair as a unit: `pair_root` finds the outermost proper
-  ancestor that is a non-folder in the index (a staged link or file that replaced the folder)
-  or in HEAD (a folder that replaced a committed link or file), and `reset_default` with that
-  root restores HEAD's entries at and below it.
+  staging. In the other direction (a real folder where HEAD or the index has a file or link,
+  not a submodule) `stage_file` of the folder's name stages that file's deletion, so Stage all
+  works in any order. `unstage_file` resets the pair as a unit: `pair_root` finds the outermost
+  proper ancestor that is a non-folder in the index (a staged link or file that replaced the
+  folder) or in HEAD (a folder that replaced a committed link or file), or else the path itself
+  when it is a non-folder on one side and a folder on the other. The pair's index entries are
+  removed first (libgit2 can't reset a root whose entries sit across the swap), then
+  `reset_default` with the root restores HEAD's. Staged renames into the unit unstage with it;
+  a rename source inside another staged pair is left out (its deletion belongs to that pair).
 - A file in a folder's place (#154): `worktree_guard::file_in_place_of_folder` finds a proper
   ancestor that is now a regular file (links are left to the symlink checks).
   `discard_file` of a tracked path then refuses with `StageError::FolderIsNowAFile` (libgit2
   can't recreate the folder, and git would delete the file the user didn't pick);
   `discard_all_unstaged` handles untracked paths first, so confirming both the file and the
-  folder's files succeeds. The path-limited stash refuses with `StashError::FolderIsNowAFile`
+  folder's files succeeds. Discarding a tracked file that is now a folder refuses with
+  `StageError::FolderHoldsUnrestorable` when the folder holds something the undo snapshot
+  (`undo::build_worktree_tree`) leaves out: an ignored file or a nested repository. The path-limited stash refuses with `StashError::FolderIsNowAFile`
   before anything is recorded.
 
 ## Image preview

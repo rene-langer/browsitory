@@ -10,9 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Errors now stay on screen until you dismiss them or start another change (stage, commit, checkout, …); refreshing no longer clears them. Same in the desktop app and the VSCode extension (#177).
 - After you commit a merge that had no conflicts, a running post-merge hook shows under the commit message with Cancel, like post-commit; cancelling stops the hook and keeps the commit (#178).
-- The co-author picker opens above its button when there is no room below and stays inside the window (#141).
-- Discarding or stashing a file whose folder was replaced by a file now names the file in the way, and Discard all with both succeeds (#154).
-- With a folder replaced by a symbolic link, staging one file below it stages that file's deletion (in any order), and unstaging one file of the pair unstages the link and the folder's files together (#157).
+- The co-author picker opens above its button when there is no room below, stays inside the window, keeps its side while you filter, and closes when its button scrolls out of view (#141).
+- Discarding or stashing a file whose folder was replaced by a file now names the file in the way, and Discard all with both succeeds. Discarding a file that was replaced by a folder refuses when the folder holds something Undo can't bring back (an ignored file or a nested repository) (#154).
+- When a folder and a file or symbolic link replace each other, Stage all works in any order (a file below a link stages as its deletion), and unstaging any of them, the folder's name included, puts the whole swap back as it was in the last commit (#157).
 - Accessibility: a remote branch's actions button is named with its remote ("Actions for origin/main"), and closing a dialog opened from the commit menu returns focus to the commit list (#106, #146).
 
 ### Hooks bundle

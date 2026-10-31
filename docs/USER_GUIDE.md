@@ -152,8 +152,10 @@ resolving a conflict do the same. If a tracked folder was replaced by a file of 
 discarding a file that was in the folder refuses and names the file in the way ("Couldn't discard
 'd/f': 'd' is now a file, not a folder. Discard or move 'd' first."); **Discard all** with both
 the file and the folder's files deletes the file first and then restores the folder. If a tracked
-file was replaced by a folder, discarding the file deletes what is in the folder, like git; Undo
-brings it back.
+file was replaced by a folder, discarding the file deletes the untracked files in the folder, like
+git, and Undo brings them back; if the folder holds anything Undo can't bring back (an ignored
+file or a nested repository), the discard refuses and names it ("Couldn't discard 'd': it is now a
+folder holding 'd/x.log', which Undo can't bring back. Move it first.").
 
 For untracked files the menu also offers ignore items. Each appends a pattern to the
 repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left
@@ -457,8 +459,12 @@ the link: "'d' is a symbolic link where the repository has a folder. Remove or r
 Staging a file below such a link stages its deletion (git sees no file there; nothing is read
 through the link), and **Stage all** stages the link itself in place of the folder, in any order.
 Unstaging the link or any of the folder's files puts the link and the folder's files back
-together, since git's index can't hold half of the swap. Discarding a file below the link still
-refuses ("'d/f' is beyond a symbolic link."), like git.
+together, since git's index can't hold half of the swap. The other way round works the same: when
+a folder replaced a committed file or link, **Stage all** stages that file's deletion and the
+folder's files in any order, and unstaging any of them, the folder's name included, puts the file
+or link back. Unstaging a staged rename whose old path is part of such a swap leaves the swap
+staged, as `git restore --staged` does. Discarding a file below the link still refuses ("'d/f'
+is beyond a symbolic link."), like git.
 
 On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
 and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:
