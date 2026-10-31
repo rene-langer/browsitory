@@ -2330,6 +2330,34 @@ mod tests {
         assert_eq!(head.parent_count(), 2);
     }
 
+    /// #154 case A (D9-A): discarding a file that is now a folder deletes the untracked files in
+    /// it, as `git restore` does; Undo must bring them back.
+    #[cfg(unix)]
+    #[test]
+    fn undo_of_discarding_a_file_restores_untracked_files_in_the_folder_that_replaced_it() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "d", "file\n");
+        commit_all(&repo, "base");
+        std::fs::remove_file(dir.path().join("d")).unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        write_file(dir.path(), "d/u", "untracked\n");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle.discard_file("d".into()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d")).unwrap(),
+            "file\n"
+        );
+
+        assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
+        assert!(dir.path().join("d").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/u")).unwrap(),
+            "untracked\n"
+        );
+    }
+
     /// `git merge --no-verify` still runs post-merge; so does "Skip hooks".
     #[cfg(unix)]
     #[test]
