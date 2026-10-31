@@ -1,7 +1,7 @@
 # License compliance
 
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
-ISC, BSD, MIT-0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
+ISC, BSD, MIT-0, Unicode-3.0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
 in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
 and `extension/e2e/package.json` (not the full transitive tree); dependencies added later carry
@@ -16,6 +16,7 @@ their own verification date in the Notes column.
 | reqwest 0.12.28 | MIT OR Apache-2.0 | `repo-service` — blocking HTTP client (`default-features = false`, `["blocking", "rustls-tls", "json"]`) for the GitHub/Bitbucket pull-request adapters; blocking to match the synchronous per-repo worker thread, no tokio runtime elsewhere in this codebase. Source: [crates.io](https://crates.io/crates/reqwest/0.12.28); verified with `cargo info reqwest@0.12.28` on 2026-08-17. |
 | thiserror | MIT OR Apache-2.0 | `git-core`; also `config` |
 | libc 0.2.189 | MIT OR Apache-2.0 | `git-core`, unix targets only — `openat` with `O_DIRECTORY`/`O_NOFOLLOW`/`O_NONBLOCK`/`O_CLOEXEC`/`O_CREAT`/`O_EXCL`, `fstatat`/`fstat` (`AT_SYMLINK_NOFOLLOW`, `S_IF*`), `unlinkat` (`AT_REMOVEDIR`), `mkdirat`, `symlinkat`, `readlinkat` and `fchmod` (and their `errno` values) for `worktree_guard`'s work-tree walker (`worktree_guard/beneath_unix.rs`), which reads, writes and deletes work-tree files one component at a time through held folder descriptors, without following a symlink or hanging on a FIFO (and `mkfifo` in tests); `setsid` (hooks and signing programs start in a new session, `process.rs`) and `killpg` (timeout/cancel kill their process group). Already a transitive dependency. Source: [crates.io](https://crates.io/crates/libc/0.2.189); verified with `cargo info libc@0.2.189` on 2026-10-28. |
+| unicode-normalization 0.1.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | `git-core` — NFD before case folding in `worktree_guard::fold_name`, so names equal after Unicode normalization (é as one or two code points) collide as on APFS/HFS+ (#166). The Unicode-3.0 part covers its Unicode Character Database tables. Pulls `tinyvec` (Zlib OR Apache-2.0 OR MIT), already a transitive dependency. Source: [crates.io](https://crates.io/crates/unicode-normalization/0.1.26); verified with `cargo info unicode-normalization@0.1.26` on 2026-10-31. |
 | url | MIT OR Apache-2.0 | `git-core` and `repo-service` — structurally parses HTTP(S) remote URLs so embedded credentials are rejected and credential keychain keys normalize the default port without fragile string matching. |
 | tempfile | MIT OR Apache-2.0 | dev-dependency of `tauri-app`, `repo-service` and `vscode-sidecar`; runtime dependency of `config` (atomic config-file writes) and `git-core` (signature temp files for the signer programs) |
 | ctor 0.8.0 | Apache-2.0 OR MIT | `test-support` (dev-only crate; dev-dependency of `git-core`, `repo-service`, `vscode-sidecar`, `tauri-app`) — runs the hermetic-git test guard before `main`, so env vars are set before the test harness starts threads (#111). Never linked into the app or the sidecar. Already a transitive dependency. Source: [crates.io](https://crates.io/crates/ctor/0.8.0); verified with `cargo info ctor@0.8.0` on 2026-10-28. |
@@ -121,6 +122,15 @@ Browsitory's MIT), so this is a conscious, documented choice, not an oversight �
 `docs/ARCHITECTURE.md`'s "Why git2 (libgit2 bindings), not gitoxide" for the rationale. No
 other GPL/AGPL/SSPL dependency is acceptable without a new, equally explicit decision recorded
 here.
+
+## Unicode-3.0
+
+Unicode-3.0 (the Unicode License v3, OSI-approved) is a permissive notice license for the
+Unicode Character Database and code derived from it; it allows use, modification and
+redistribution with the copyright and permission notice kept. It is on the allowed list since
+2026-10-31 (#166). Crates carrying it: `unicode-normalization` (direct, above) and the
+transitive `icu_*` crates (`icu_normalizer`, `icu_properties`, `icu_collections`, …) that
+`url` pulls in through `idna`.
 
 ## Process
 

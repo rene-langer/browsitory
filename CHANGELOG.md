@@ -21,8 +21,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Adding a worktree on a drive or folder that ignores case (a USB stick, a casefold folder on
   Linux) now refuses a symbolic link and a folder whose names differ only in case, even when the
   repository itself is on a case-sensitive drive (#162).
-- A symbolic link and a folder whose names differ only by ẞ/ß/ss are now recognised as the same
-  name, as on macOS and Windows (#166).
+- A symbolic link and a folder whose names are equal apart from how an accent is encoded (é as
+  one or two code points), or apart from ẞ/ß/ss, are now recognised as the same name, as on
+  macOS (#166).
 - Open in editor (no editor configured) also refuses files starting with "# Config File" or
   "# KDE Config File", .kdelnk files, and settings files with a [Desktop Entry] group after other
   groups, as the desktop may run them; a file replaced by a named pipe at that moment no longer

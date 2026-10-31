@@ -695,3 +695,37 @@ fn sequence_abort_rewinds_to_an_original_tree_holding_a_collision() {
     assert_eq!(head(&fx), local);
     assert_pair_back(&fx);
 }
+
+/// #166: a link `é` (precomposed, U+00E9) and a folder `é` (`e` + U+0301) name one file on
+/// APFS/HFS+, which compare names after normalization, so a checkout could write `x` through the
+/// link. Refused wherever case collisions are checked (here `core.ignorecase`; on macOS also the
+/// real file-system case), and nothing is written outside.
+#[test]
+fn a_link_and_a_folder_equal_after_normalization_are_refused() {
+    let fx = fixture();
+    let outside = TempDir::new().unwrap();
+    let target = outside.path().to_str().unwrap().as_bytes().to_vec();
+    let base_tree = fx.repo.find_commit(fx.base).unwrap().tree().unwrap();
+    let mut inner = fx.repo.treebuilder(None).unwrap();
+    inner
+        .insert("x", fx.repo.blob(b"PWNED\n").unwrap(), 0o100644)
+        .unwrap();
+    let inner = inner.write().unwrap();
+    let mut outer = fx.repo.treebuilder(Some(&base_tree)).unwrap();
+    outer
+        .insert("\u{e9}", fx.repo.blob(&target).unwrap(), 0o120000)
+        .unwrap();
+    outer.insert("e\u{301}", inner, 0o040000).unwrap();
+    let accented = commit_tree(&fx.repo, outer.write().unwrap(), &[fx.base], "accented");
+    fx.repo
+        .reference("refs/heads/accented", accented, true, "")
+        .unwrap();
+
+    let error = branch::switch_branch(&fx.repo, "accented").unwrap_err();
+    assert!(
+        matches!(&error, BranchError::CaseCollision(c) if c.link == "\u{e9}" && c.folder == "e\u{301}"),
+        "{error}"
+    );
+    assert_eq!(fx.repo.head().unwrap().target().unwrap(), fx.base);
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+}

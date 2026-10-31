@@ -474,7 +474,8 @@ undo/redo, cloning, adding a worktree or updating a submodule refuses ("'D' is a
 and 'd' a folder whose names differ only in case…"). Rename one of them in the repository (on
 Linux, or with git). On Linux this only applies when `core.ignorecase` is set, or, when adding a
 worktree, when the worktree's drive or folder ignores case (a USB stick, a case-insensitive
-folder). `ẞ`, `ß` and `ss` count as the same name.
+folder). `ẞ`, `ß` and `ss` count as the same name, and so do names that differ only in how an
+accent is encoded (`é` as one or two code points).
 
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there

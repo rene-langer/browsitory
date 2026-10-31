@@ -343,20 +343,25 @@ fn hfs_ignorable(c: char) -> bool {
     )
 }
 
-/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 lower-, upper-
+/// `name` (git's bytes) as a case-insensitive file system compares it. Valid UTF-8 is
+/// NFD-normalized (APFS and HFS+ compare names after normalization, so `é` as U+00E9 and as
+/// `e` + U+0301 are one name; #166), stripped of the HFS+ ignorable code points, lower-, upper-
 /// then lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
-/// case folding and NTFS's upcase table; `ẞ` lowercases to `ß`, which the round trip takes on
-/// to `ss`, so the fold is a fixed point (#166); `ß` meeting `ss` over-matches, which only
-/// refuses more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
-/// normalization is not folded (a documented residual, decision D4).
+/// case folding and NTFS's upcase table; `ẞ` lowercases to `ß`, which the round trip takes on to
+/// `ss`), and NFD-normalized again (case mapping can produce composed forms), so the fold is a
+/// fixed point. NTFS doesn't normalize and HFS+ uses an older decomposition, and `ß` meeting
+/// `ss` over-matches too: the fold errs towards finding more collisions, which only refuses
+/// more. Anything else is lowercased as ASCII.
 pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
+    use unicode_normalization::UnicodeNormalization;
     match std::str::from_utf8(name) {
         Ok(text) => text
-            .chars()
+            .nfd()
             .filter(|c| !hfs_ignorable(*c))
             .flat_map(char::to_lowercase)
             .flat_map(char::to_uppercase)
             .flat_map(char::to_lowercase)
+            .nfd()
             .collect::<String>()
             .into_bytes(),
         Err(_) => name.to_ascii_lowercase(),
@@ -1426,6 +1431,35 @@ mod tests {
         assert_eq!(
             nearest_existing(Path::new("no-such-dir/x")),
             Some(Path::new("."))
+        );
+    }
+
+    #[test]
+    fn nfc_and_nfd_spellings_fold_together() {
+        assert_eq!(
+            fold_name("\u{e9}".as_bytes()),
+            fold_name("e\u{301}".as_bytes())
+        );
+        assert_eq!(
+            fold_name("\u{c9}".as_bytes()),
+            fold_name("e\u{301}".as_bytes())
+        );
+        // A precomposed Hangul syllable and its jamo.
+        assert_eq!(
+            fold_name("\u{ac00}".as_bytes()),
+            fold_name("\u{1100}\u{1161}".as_bytes())
+        );
+        for (link, folder) in [("\u{e9}", "e\u{301}"), ("e\u{301}", "\u{e9}")] {
+            let found = first_collision([
+                (link.as_bytes().to_vec(), MODE_LINK),
+                (format!("{folder}/x").into_bytes(), 0o100644),
+            ]);
+            assert_eq!(found, collision(link, folder), "{link:?} / {folder:?}");
+        }
+        // Different letters stay apart.
+        assert_ne!(
+            fold_name("\u{e9}".as_bytes()),
+            fold_name("\u{e8}".as_bytes())
         );
     }
 

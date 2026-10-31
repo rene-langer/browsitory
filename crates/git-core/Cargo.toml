@@ -8,6 +8,7 @@ license = "MIT"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-openssl"] }
 thiserror = "1.0"
 tempfile = "3"
+unicode-normalization = "0.1.26"
 url = "2.5"
 
 [target.'cfg(unix)'.dependencies]

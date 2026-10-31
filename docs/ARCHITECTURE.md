@@ -610,9 +610,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checkout and, under `core.ignorecase`, removes what is in the way, so it silently drops `d/x`
   rather than write through `D` (spec `2026-10-28-security-followups-design.md` §1.1–1.3 has the
   macOS/Windows probe). `worktree_guard::find_case_collision` refuses such a source anyway: a
-  pure pass over the index entries that folds names (each character lower-, upper- then
-  lowercased, so `ẞ`, `ß` and `ss` meet and the fold is a fixed point for every scalar value
-  (#166), without the HFS+ ignorable code points; NFC/NFD is not folded) and compares folded
+  pure pass over the index entries that folds names (NFD-normalized, as APFS/HFS+ compare
+  names, so `é` as one or two code points is one name; without the HFS+ ignorable code points;
+  each character lower-, upper- then lowercased, so `ẞ`, `ß` and `ss` meet; NFD again, so the
+  fold is a fixed point for every scalar value, #166; NTFS doesn't normalize, so there it only
+  refuses more) and compares folded
   link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
   and exact duplicates, over all of an operation's incoming sources together; a file next to a
   folder is fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows
