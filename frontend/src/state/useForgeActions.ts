@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import { errorAfterOwnSuccess, useOwnError } from "./ownError";
+import { errorAfterOwnSuccess, type OwnError } from "./ownError";
 import { credentialFailureMessage, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
 
 export interface ForgeActions {
@@ -23,10 +23,10 @@ export function useForgeActions(
   runMutation: RunMutation,
   runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
-): ForgeActions {
   // The error a failed pull request list set: a later successful list clears that one only, never
   // another action's (#177).
-  const ownError = useOwnError();
+  ownError: OwnError,
+): ForgeActions {
   const listPullRequests = useCallback(
     async (remoteName: string, account: string) => {
       try {

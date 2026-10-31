@@ -247,6 +247,40 @@ describe("useAppState error lifecycle", () => {
     expect(result.current.state.error).toBeNull();
   });
 
+  // m3: a read remembers the text of the error it set only while that error is on screen.
+  it.each([
+    ["after it is dismissed", "dismiss"],
+    ["after a mutation starts", "mutation"],
+  ])("a refresh no longer owns its error text %s", async (_label, how) => {
+    let failStatus = true;
+    let stageCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        if (failStatus) {
+          failStatus = false;
+          throw new Error("worker stopped");
+        }
+        return [];
+      },
+      stageFile: async () => {
+        stageCalls += 1;
+        throw new Error("worker stopped");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBe("worker stopped");
+    if (how === "dismiss") act(() => result.current.dismissError());
+    // The mutation clears the error when it starts, then fails with the same text.
+    await act(() => result.current.stageFile("a.txt"));
+    expect(stageCalls).toBe(1);
+    expect(result.current.state.error).toBe("worker stopped");
+
+    await act(() => result.current.refresh());
+
+    expect(result.current.state.error).toBe("worker stopped");
+  });
+
   it("selecting a reflog reference keeps another action's error", async () => {
     const client = transferClient({
       stageFile: async () => {
