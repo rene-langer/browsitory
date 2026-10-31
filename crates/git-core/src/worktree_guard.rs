@@ -343,16 +343,18 @@ fn hfs_ignorable(c: char) -> bool {
     )
 }
 
-/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 upper- then
-/// lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
-/// case folding and NTFS's upcase table; `ß` meeting `ss` over-matches, which only refuses
-/// more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
+/// `name` (git's bytes) as a case-insensitive file system compares it: valid UTF-8 lower-, upper-
+/// then lowercased per character (so `ſ`/`s`, `ς`/`σ`, `µ`/`μ` and `ı`/`i` meet, as under APFS's
+/// case folding and NTFS's upcase table; `ẞ` lowercases to `ß`, which the round trip takes on
+/// to `ss`, so the fold is a fixed point (#166); `ß` meeting `ss` over-matches, which only
+/// refuses more) without the HFS+ ignorable code points, anything else lowercased as ASCII. NFC/NFD
 /// normalization is not folded (a documented residual, decision D4).
 pub(crate) fn fold_name(name: &[u8]) -> Vec<u8> {
     match std::str::from_utf8(name) {
         Ok(text) => text
             .chars()
             .filter(|c| !hfs_ignorable(*c))
+            .flat_map(char::to_lowercase)
             .flat_map(char::to_uppercase)
             .flat_map(char::to_lowercase)
             .collect::<String>()
@@ -1337,6 +1339,40 @@ mod tests {
         );
         assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "strasse".as_bytes());
         assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[test]
+    fn sharp_s_capital_and_small_fold_together() {
+        assert_eq!(fold_name("ẞ".as_bytes()), fold_name("ß".as_bytes()));
+        assert_eq!(fold_name("ß".as_bytes()), fold_name(b"ss"));
+        let found = first_collision([
+            ("ẞ".as_bytes().to_vec(), MODE_LINK),
+            ("ß/x".as_bytes().to_vec(), 0o100644),
+        ]);
+        assert_eq!(found, collision("ẞ", "ß"));
+    }
+
+    #[test]
+    fn folding_is_idempotent_for_every_scalar_value() {
+        let fold = |text: &str| String::from_utf8(fold_name(text.as_bytes())).unwrap();
+        let mut failures = Vec::new();
+        for c in '\0'..=char::MAX {
+            let once = fold(c.encode_utf8(&mut [0; 4]));
+            let upper: String = c.to_uppercase().collect();
+            if fold(&once) != once || fold(&upper) != once {
+                failures.push(c);
+            }
+        }
+        let first: Vec<String> = failures
+            .iter()
+            .take(20)
+            .map(|c| format!("U+{:04X}", u32::from(*c)))
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} failures: {first:?}",
+            failures.len()
+        );
     }
 
     #[test]
