@@ -247,6 +247,68 @@ describe("useAppState error lifecycle", () => {
     expect(result.current.state.error).toBeNull();
   });
 
+  it("selecting a reflog reference keeps another action's error", async () => {
+    const client = transferClient({
+      stageFile: async () => {
+        throw new Error("boom");
+      },
+      getReflog: async () => [],
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.stageFile("a.txt"));
+    await act(() => result.current.selectReflogReference("HEAD"));
+    expect(result.current.state.error).toBe("boom");
+  });
+
+  it("a reflog read that failed and then succeeds clears its own error", async () => {
+    let fail = true;
+    const client = transferClient({
+      getReflog: async () => {
+        if (fail) {
+          fail = false;
+          throw new Error("reflog failed");
+        }
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.selectReflogReference("HEAD"));
+    expect(result.current.state.error).toContain("reflog failed");
+    await act(() => result.current.selectReflogReference("HEAD"));
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("listing pull requests keeps another action's error", async () => {
+    const client = transferClient({
+      stageFile: async () => {
+        throw new Error("boom");
+      },
+      listPullRequests: async () => ({ pullRequests: [], truncated: false }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.stageFile("a.txt"));
+    await act(() => result.current.listPullRequests("origin", "me"));
+    expect(result.current.state.error).toBe("boom");
+  });
+
+  it("a pull request list that failed and then succeeds clears its own error", async () => {
+    let fail = true;
+    const client = transferClient({
+      listPullRequests: async () => {
+        if (fail) {
+          fail = false;
+          throw new Error("forge down");
+        }
+        return { pullRequests: [], truncated: false };
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.listPullRequests("origin", "me"));
+    expect(result.current.state.error).toBe("forge down");
+    await act(() => result.current.listPullRequests("origin", "me"));
+    expect(result.current.state.error).toBeNull();
+  });
+
   it("a refresh that overlaps a failing mutation keeps that mutation's error (the VSCode Cancel case)", async () => {
     let releaseStatus: () => void = () => {};
     let holdStatus = false;

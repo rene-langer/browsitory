@@ -38,6 +38,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { errorAfterOwnSuccess, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { useBranchActions } from "./useBranchActions";
 import { useForgeActions } from "./useForgeActions";
@@ -378,10 +379,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const graphLimit = useRef(GRAPH_PAGE_SIZE);
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
+  const reflogError = useOwnError();
 
   // The message the last failed `refresh()` set, so a later successful one clears that error and
   // only that one: a refresh never clears another action's error (#177).
-  const lastRefreshError = useRef<string | null>(null);
+  const refreshError = useOwnError();
   const refresh = useCallback(async () => {
     try {
       const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
@@ -419,8 +421,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const reflog = selectedReference === null
         ? []
         : await client.getReflog(repoPath, selectedReference);
-      const ownError = lastRefreshError.current;
-      lastRefreshError.current = null;
+      const own = refreshError.take();
       setState((prev) => ({
         ...prev,
         status,
@@ -448,7 +449,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           : null,
         forgeRepositories,
         undoState,
-        error: prev.error !== null && prev.error === ownError ? null : prev.error,
+        error: errorAfterOwnSuccess(prev.error, own),
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     } catch (err) {
@@ -461,14 +462,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // changed the working tree all the same, so open diffs shouldn't keep trusting what they
       // last fetched.
       const message = credentialFailureMessage(err);
-      lastRefreshError.current = message;
+      refreshError.set(message);
       setState((prev) => ({
         ...prev,
         error: message,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     }
-  }, [client, repoPath]);
+  }, [client, repoPath, refreshError]);
 
   // Cheap focus-time re-check: another process (CLI, the other frontend) may have changed what
   // undo would do. Errors are ignored — the next full refresh reports them.
@@ -552,6 +553,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setState,
     selectedReflogReference,
     reflogRequestGeneration,
+    reflogError,
   );
 
   const {

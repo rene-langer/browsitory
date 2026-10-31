@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
+import { errorAfterOwnSuccess, useOwnError } from "./ownError";
 import { credentialFailureMessage, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
 
 export interface ForgeActions {
@@ -23,28 +24,34 @@ export function useForgeActions(
   runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): ForgeActions {
+  // The error a failed pull request list set: a later successful list clears that one only, never
+  // another action's (#177).
+  const ownError = useOwnError();
   const listPullRequests = useCallback(
     async (remoteName: string, account: string) => {
       try {
         const result = await client.listPullRequests(repoPath, remoteName, account);
+        const own = ownError.take();
         setState((prev) => ({
           ...prev,
           pullRequests: { ...prev.pullRequests, [remoteName]: result },
-          error: null,
+          error: errorAfterOwnSuccess(prev.error, own),
         }));
       } catch (err) {
         // Drop this remote's entry (rather than leaving whatever was there before) so a failed
         // re-list can't leave stale, possibly-successful-looking rows on screen under this
         // remote's heading. Other remotes' entries are untouched — a failure listing remote B
         // must never affect what's shown for remote A.
+        const message = credentialFailureMessage(err);
+        ownError.set(message);
         setState((prev) => {
           const rest = { ...prev.pullRequests };
           delete rest[remoteName];
-          return { ...prev, pullRequests: rest, error: credentialFailureMessage(err) };
+          return { ...prev, pullRequests: rest, error: message };
         });
       }
     },
-    [client, repoPath, setState],
+    [client, repoPath, setState, ownError],
   );
   const saveForgeToken = useCallback(
     (provider: ForgeProvider, account: string, token: string) =>
