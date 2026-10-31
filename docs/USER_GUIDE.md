@@ -148,7 +148,12 @@ any file that couldn't be discarded is named in an error after the rest are done
 never writes or deletes outside the repository, including through a symlinked folder. If a
 tracked file was replaced by a symbolic link, discarding removes the link and restores the file
 (the link's target is never touched), like git; reset, undo/redo, aborting a merge or rebase and
-resolving a conflict do the same.
+resolving a conflict do the same. If a tracked folder was replaced by a file of the same name,
+discarding a file that was in the folder refuses and names the file in the way ("Couldn't discard
+'d/f': 'd' is now a file, not a folder. Discard or move 'd' first."); **Discard all** with both
+the file and the folder's files deletes the file first and then restores the folder. If a tracked
+file was replaced by a folder, discarding the file deletes what is in the folder, like git; Undo
+brings it back.
 
 For untracked files the menu also offers ignore items. Each appends a pattern to the
 repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left
@@ -226,8 +231,12 @@ To skip hooks up front, tick **Skip hooks** under the commit message (shown only
 hook, is installed) or run "Skip hooks for the next commit" from the palette. It applies to the
 next commit or amend only.
 
-While a commit hook runs, "Running pre-commit hook…" shows under the commit message with
-**Cancel**; a running `pre-push` shows in the transfer panel, whose Cancel stops it. Browsitory
+While a commit hook runs, or `post-merge` after you commit a merge that had no conflicts,
+"Running pre-commit hook…" (with the hook's name) shows under the commit message with **Cancel**. Cancelling
+`post-commit` or `post-merge` stops the hook and keeps the commit, and **Skip hooks** doesn't skip
+`post-merge` (as with `git merge --no-verify`). A running `pre-push` shows in the transfer panel,
+whose Cancel stops it. `post-merge` after a fast-forward, squash or pull and `post-checkout` show
+no status line. Browsitory
 stops any hook after 10 minutes. Other actions on the repository wait while a hook runs.
 
 Hooks cannot ask you anything: their input is empty (or, for `pre-push`, the list of refs), and
@@ -445,8 +454,11 @@ link away first). So do switching branches, merging, cherry-picking, reverting, 
 applying a stash and pulling, which could otherwise create files through the link — also when
 nothing tracked the link's name but the operation would create files below it. The message names
 the link: "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
-Staging or discarding a file below such a link refuses too ("'d/f' is beyond a symbolic link."),
-like git; **Stage all** stages the link itself in place of the folder.
+Staging a file below such a link stages its deletion (git sees no file there; nothing is read
+through the link), and **Stage all** stages the link itself in place of the folder, in any order.
+Unstaging the link or any of the folder's files puts the link and the folder's files back
+together, since git's index can't hold half of the swap. Discarding a file below the link still
+refuses ("'d/f' is beyond a symbolic link."), like git.
 
 On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
 and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:
@@ -786,6 +798,9 @@ focused branch, remote, changed file, commit or tab. Press **?** for the full li
 ![The command palette, filtered to branch-related commands](assets/command-palette.png)
 
 ## Diagnosing a failure
+
+An error stays at the top of the window until you dismiss it or start another change (stage,
+commit, checkout, …); refreshing doesn't clear it.
 
 Browsitory writes a rotated failure log (keeping the 5 most recent files) to the OS log
 directory, so a bug report doesn't require a live dev session to reproduce. Attach the
