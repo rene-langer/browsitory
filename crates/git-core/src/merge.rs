@@ -474,11 +474,27 @@ pub fn mark_resolved(
     ensure_inside_workdir(workdir, path)?;
     let full = workdir.join(path);
     let meta = std::fs::symlink_metadata(&full).ok();
-    if !force
-        && meta.as_ref().is_some_and(|meta| meta.is_file())
-        && has_conflict_markers(&std::fs::read(&full)?)
-    {
-        return Ok(MarkResolvedOutcome::MarkersRemain);
+    // A FIFO, socket or device would block libgit2's read of it while staging (git refuses to
+    // add one too). A swap between this check and the staging is a residual (#165).
+    if let Some(kind) = meta.as_ref().map(std::fs::Metadata::file_type) {
+        if !kind.is_file() && !kind.is_symlink() && !kind.is_dir() {
+            return Err(MergeError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("'{path}' is not a regular file or symbolic link"),
+            )));
+        }
+    }
+    if !force && meta.as_ref().is_some_and(|meta| meta.is_file()) {
+        // Read through the opened handle (#165): no link is followed and a FIFO swapped in
+        // after the check above isn't opened for reading. `None` (no longer a regular file)
+        // skips the check, as for a non-file.
+        if let Some(mut file) = crate::worktree_guard::open_beneath(workdir, Path::new(path))? {
+            let mut content = Vec::new();
+            std::io::Read::read_to_end(&mut file, &mut content)?;
+            if has_conflict_markers(&content) {
+                return Ok(MarkResolvedOutcome::MarkersRemain);
+            }
+        }
     }
     let mut index = repo.index()?;
     if meta.is_some() {

@@ -534,17 +534,26 @@ fn file_may_run(file: &Path, os: Os) -> bool {
 }
 
 /// Up to `limit` first bytes of the regular file `path`, and whether that is the whole file.
+/// `None` for anything else, a symlink included on Unix (`file_may_run` checks its target).
+///
+/// The file is opened first and its type checked on the handle (#165): on Unix with
+/// `O_NONBLOCK` (a FIFO opens without waiting for a writer, and isn't read) and `O_NOFOLLOW`.
+/// Checking the path's type and then opening it would let a FIFO swapped in between block.
 fn read_head(path: &Path, limit: u64) -> Option<(Vec<u8>, bool)> {
     use std::io::Read;
-    if !std::fs::metadata(path).ok()?.is_file() {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
         return None;
     }
     let mut head = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(limit + 1)
-        .read_to_end(&mut head)
-        .ok()?;
+    file.take(limit + 1).read_to_end(&mut head).ok()?;
     let complete = head.len() as u64 <= limit;
     head.truncate(limit as usize);
     Some((head, complete))
@@ -913,6 +922,38 @@ mod tests {
         assert!(!file_may_run(&notes, Os::Linux));
         let long_text = write("long", comments(2048) + "plain text\n");
         assert!(!file_may_run(&long_text, Os::Linux));
+    }
+
+    /// #165: the head is read through the opened handle, so a FIFO is never read (and a file
+    /// swapped for one after a type check can't hang the worker).
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_is_not_read_and_does_not_block() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let fifo = dir.path().join("x");
+        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path = fifo.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_head(&path, 1024).is_some());
+        });
+        let read = rx.recv_timeout(std::time::Duration::from_secs(5));
+        if read.is_err() {
+            let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+        }
+        assert_eq!(read, Ok(false));
+        assert!(!file_may_run(&fifo, Os::Linux));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_a_launcher_is_still_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("launcher"), "[Desktop Entry]\nExec=x\n").unwrap();
+        std::os::unix::fs::symlink("launcher", dir.path().join("l")).unwrap();
+        assert!(file_may_run(&dir.path().join("l"), Os::Linux));
     }
 
     #[test]
