@@ -293,7 +293,8 @@ pub(super) fn commit_reply(
 
 /// Commits and replies; returns whether a commit landed. With `CommitHookSet::CleanMerge` (the
 /// loop remembers this exact merge as clean, see `merge::CleanMerge`) it runs `git merge`'s
-/// hooks and, once the commit landed, `post-merge 0`.
+/// hooks and, once the commit landed, `post-merge 0`; both only if the merge is still in
+/// progress when the commit starts.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn commit(
     repo: &mut git2::Repository,
@@ -326,10 +327,12 @@ pub(super) fn commit(
     });
     op.clear();
     let committed = result.is_ok();
-    if committed && set == git_core::commit::CommitHookSet::CleanMerge {
+    // Only when `git merge`'s hooks really ran: the merge may have been aborted (another
+    // window, a terminal) between the loop choosing `set` and the commit.
+    if result.as_ref().is_ok_and(|committed| committed.merge_hooks) {
         super::hooks::run_post_hook(repo, "post-merge", &["0"]);
     }
-    let _ = reply.send(commit_reply(result));
+    let _ = reply.send(commit_reply(result.map(|committed| committed.commit_id)));
     committed
 }
 

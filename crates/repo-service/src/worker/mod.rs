@@ -2317,6 +2317,51 @@ mod tests {
         );
     }
 
+    /// The worker picked the clean-merge hook set, but the merge was aborted (another window, a
+    /// terminal) before the commit: the commit runs the ordinary hooks, and post-merge must not
+    /// run after it.
+    #[cfg(unix)]
+    #[test]
+    fn a_clean_merge_aborted_before_the_commit_runs_no_post_merge() {
+        let (dir, repo) = diverged_repo(false);
+        let log = log_hook(&repo, "pre-commit");
+        log_hook(&repo, "pre-merge-commit");
+        log_hook(&repo, "post-merge");
+        log_hook(&repo, "post-commit");
+        write_file(dir.path(), "staged.txt", "x\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("staged.txt")).unwrap();
+        index.write().unwrap();
+        let mut repo = Repository::open(dir.path()).unwrap();
+        let cancelled: super::CancelRegistry =
+            Arc::new(Mutex::new(std::collections::HashSet::new()));
+        let (reply_tx, reply_rx) = mpsc::channel();
+
+        let committed = super::status::commit(
+            &mut repo,
+            "after the abort".into(),
+            false,
+            Vec::new(),
+            git_core::commit::CommitHookSet::CleanMerge,
+            super::remote::TransferOp {
+                id: "commit-1".into(),
+                cancelled: &cancelled,
+            },
+            mpsc::channel().0,
+            reply_tx,
+        );
+
+        assert!(committed);
+        assert!(matches!(
+            reply_rx.recv().unwrap(),
+            Ok(git_core::commit::CommitOutcome::Committed { .. })
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "pre-commit \npost-commit \n"
+        );
+    }
+
     /// A Merge request refused while the clean merge is staged ("already merging") must not
     /// make the worker forget it.
     #[cfg(unix)]

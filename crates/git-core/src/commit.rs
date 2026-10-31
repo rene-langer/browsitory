@@ -391,7 +391,7 @@ pub fn commit(
     message: &str,
     hooks: HookOptions<'_>,
 ) -> Result<String, CommitError> {
-    commit_with(repo, message, CommitHookSet::Commit, hooks)
+    commit_with(repo, message, CommitHookSet::Commit, hooks).map(|committed| committed.commit_id)
 }
 
 /// Which hooks a commit runs: `git commit`'s, or `git merge`'s when it concludes a clean merge.
@@ -404,17 +404,29 @@ pub enum CommitHookSet {
     /// conflicts (#124): what `git merge` runs when it creates the commit, `pre-merge-commit`
     /// (in place of `pre-commit`, also skipped by `no_verify`), `prepare-commit-msg … merge` and
     /// `commit-msg`, and **no** `post-commit`. The caller (the worker) runs `post-merge 0` after
-    /// it. Outside a merge (`repo.state() != Merge`) this is `Commit`.
+    /// it when `Committed::merge_hooks` says these hooks ran. Outside a merge (`repo.state() != Merge`) this is `Commit`.
     CleanMerge,
 }
 
-/// `commit` with a choice of hook set (see `CommitHookSet`).
+/// What `commit_with` committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Committed {
+    pub commit_id: String,
+    /// `git merge`'s hooks ran (`CleanMerge` while a merge was in progress), so the caller owes
+    /// `post-merge 0`. False when `CleanMerge` fell back to `git commit`'s hooks, for example
+    /// because the merge was aborted after the caller chose the set.
+    pub merge_hooks: bool,
+}
+
+/// `commit` with a choice of hook set (see `CommitHookSet`). Whether the merge hooks really
+/// ran is decided here, from the repository's state at commit time, and reported in
+/// `Committed::merge_hooks`.
 pub fn commit_with(
     repo: &mut git2::Repository,
     message: &str,
     set: CommitHookSet,
     mut hooks: HookOptions<'_>,
-) -> Result<String, CommitError> {
+) -> Result<Committed, CommitError> {
     // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
     // `Drop` impl, which under NLL's drop-check extends its immutable borrow of `repo` to the
@@ -504,7 +516,10 @@ pub fn commit_with(
     if !merge_hooks {
         run_post_commit(repo, &mut hooks);
     }
-    Ok(oid.to_string())
+    Ok(Committed {
+        commit_id: oid.to_string(),
+        merge_hooks,
+    })
 }
 
 /// `signing::create_commit_with`, bounded by the commit's cancel check. While a signing program

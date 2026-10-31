@@ -916,7 +916,7 @@ fn a_clean_merge_commit_runs_git_merges_hooks() {
     let (_dir, mut repo) = clean_merge_fixture();
     common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
 
-    commit_with(
+    let committed = commit_with(
         &mut repo,
         "Merge feature",
         CommitHookSet::CleanMerge,
@@ -924,6 +924,10 @@ fn a_clean_merge_commit_runs_git_merges_hooks() {
     )
     .unwrap();
 
+    assert!(
+        committed.merge_hooks,
+        "the caller runs post-merge only then"
+    );
     assert_eq!(
         common::read_log(&repo),
         "pre-merge-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\n"
@@ -1058,13 +1062,15 @@ fn the_clean_merge_hook_set_outside_a_merge_runs_the_commit_hooks() {
     stage(dir.path(), &repo, "a.txt", "a");
     common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
 
-    commit_with(
+    let committed = commit_with(
         &mut repo,
         "add a",
         CommitHookSet::CleanMerge,
         HookOptions::default(),
     )
     .unwrap();
+
+    assert!(!committed.merge_hooks, "no merge, so no post-merge either");
 
     assert_eq!(
         common::read_log(&repo),
