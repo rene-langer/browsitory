@@ -26,7 +26,16 @@ use std::time::{Duration, Instant};
 #[cfg(not(test))]
 pub(super) const LOCK_WAIT: Duration = Duration::from_secs(10);
 #[cfg(test)]
-pub(super) const LOCK_WAIT: Duration = Duration::from_millis(300);
+pub(super) const LOCK_WAIT: Duration = Duration::from_secs(1);
+
+/// How long a command that must hold the lock waits for it after an earlier one waited the full
+/// `LOCK_WAIT` in vain, until one takes it again (#175, D2-A). A long holder in the other window
+/// (a pull, a hook, a pinentry dialog) then costs one `LOCK_WAIT`, then about this per click,
+/// while a brief hold (the other window staging a file) no longer refuses or goes unrecorded.
+#[cfg(not(test))]
+pub(super) const CONTENDED_WAIT: Duration = Duration::from_secs(1);
+#[cfg(test)]
+pub(super) const CONTENDED_WAIT: Duration = Duration::from_millis(100);
 
 /// `<gitdir>/browsitory/state.lock`. `repo.path()` is per worktree, so each linked worktree has
 /// its own lock, as it has its own `undo.json`.

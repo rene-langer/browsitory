@@ -814,9 +814,10 @@ impl Worker {
             // Undo bookkeeping is shared with other processes on this repository (#172).
             let state_lock = state_lock::StateLock::open(&repo);
             let (mut logged_busy, mut logged_unavailable) = (false, false);
-            // After a command waited `LOCK_WAIT` in vain, later ones try once until the lock is
-            // taken again, so a long holder in the other window (a pull, a hook, a pinentry
-            // dialog) costs one wait, not one per click (the queue, reads included, is behind it).
+            // After a command waited `LOCK_WAIT` in vain, later ones wait only `CONTENDED_WAIT`
+            // until the lock is taken again, so a long holder in the other window (a pull, a
+            // hook, a pinentry dialog) costs one long wait, not one per click (the queue, reads
+            // included, is behind it), while a brief hold is still waited out (#175).
             let mut contended = false;
             for mut command in rx {
                 // A command that can record an entry or end a paused operation holds the lock
@@ -825,7 +826,7 @@ impl Worker {
                 let mut unrecorded = false;
                 let guard = if undo::locks_state(&command) {
                     let wait = if contended {
-                        std::time::Duration::ZERO
+                        state_lock::CONTENDED_WAIT
                     } else {
                         state_lock::LOCK_WAIT
                     };
@@ -6632,7 +6633,7 @@ mod state_lock_tests {
     use git2::Repository;
     use tempfile::TempDir;
 
-    use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
+    use super::state_lock::{Acquire, StateGuard, StateLock, CONTENDED_WAIT, LOCK_WAIT};
     use super::undo::{DISCARD_BUSY, UNDO_BUSY};
     use super::{UndoOutcome, UndoState, Worker};
 
@@ -6880,13 +6881,40 @@ mod state_lock_tests {
         handle.stage_file("a.txt".into()).unwrap();
         let start = Instant::now();
         handle.stage_file("b.txt".into()).unwrap();
-        assert!(start.elapsed() < Duration::from_millis(200));
+        let elapsed = start.elapsed();
+        assert!(elapsed >= CONTENDED_WAIT, "{elapsed:?}");
+        assert!(elapsed < LOCK_WAIT, "{elapsed:?}");
         drop(guard);
         // Once the lock is free again, commands wait for it (and record) as usual.
         handle.unstage_file("b.txt".into()).unwrap();
         assert_eq!(
             handle.get_undo_state().unwrap().undo,
             Some("Unstage b.txt".into())
+        );
+    }
+
+    #[test]
+    fn after_a_timeout_a_locked_command_waits_briefly_for_the_lock() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        write_file(dir.path(), "b.txt", "b\n");
+        commit_all(&repo, "a");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        write_file(dir.path(), "a.txt", "edited\n");
+        write_file(dir.path(), "b.txt", "edited\n");
+
+        let guard = hold(&repo);
+        handle.stage_file("a.txt".into()).unwrap(); // times out after LOCK_WAIT
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            drop(guard);
+        });
+        handle.stage_file("b.txt".into()).unwrap();
+        releaser.join().unwrap();
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Stage b.txt".into())
         );
     }
 
