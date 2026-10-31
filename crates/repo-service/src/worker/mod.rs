@@ -6915,6 +6915,58 @@ mod state_lock_tests {
     }
 
     #[test]
+    fn a_merge_committed_outside_while_the_other_window_held_the_lock_is_not_recorded() {
+        let (dir, repo) = conflicting_branches();
+        let (worker, pause) = Worker::spawn_with_pause_before_finish(dir.path().to_path_buf());
+        let handle = worker.handle();
+        assert!(matches!(
+            handle
+                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .unwrap(),
+            git_core::merge::MergeOutcome::Conflicted { .. }
+        ));
+        // `git commit` in a terminal ends the merge.
+        write_file(dir.path(), "a.txt", "resolved\n");
+        {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("a.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            let theirs = repo
+                .find_reference("refs/heads/feature")
+                .unwrap()
+                .peel_to_commit()
+                .unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Merge feature",
+                &tree,
+                &[&head, &theirs],
+            )
+            .unwrap();
+            repo.cleanup_state().unwrap();
+        }
+
+        // The other window holds the lock while this one's file watcher reads the status: its
+        // `settle` can't drop the stale entry, and the lock is free again by its `finish`.
+        let guard = hold(&repo);
+        pause.arm();
+        let reading = {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.get_status())
+        };
+        pause.wait_reached();
+        drop(guard);
+        pause.go();
+        reading.join().unwrap().unwrap();
+        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+    }
+
+    #[test]
     fn a_locked_command_runs_after_the_wait_when_the_lock_stays_held() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "a.txt", "a\n");
