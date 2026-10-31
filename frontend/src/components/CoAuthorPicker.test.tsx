@@ -168,6 +168,30 @@ describe("CoAuthorPicker placement", () => {
     expect(button).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("leaves focus alone when it closes after focus already moved on", async () => {
+    render(
+      <>
+        <CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />
+        <textarea aria-label="Commit message" />
+      </>,
+    );
+    const button = stubButton({ top: 300, left: 20 });
+    fireEvent.click(button);
+    await screen.findByRole("option", { name: "Ada <ada@example.com>" });
+    const message = screen.getByRole("textbox", { name: "Commit message" });
+    message.focus();
+
+    vi.mocked(button.getBoundingClientRect).mockReturnValue({
+      top: 800, bottom: 820, left: 20, right: 140, width: 120, height: 20, x: 20, y: 800, toJSON: () => ({}),
+    } as DOMRect);
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(screen.queryByRole("listbox", { name: "Recent authors" })).toBeNull();
+    expect(message).toHaveFocus();
+  });
+
   it("closes when the button scrolls out of its scrolling container", async () => {
     const { container } = render(
       <div data-testid="scroller" style={{ overflowY: "auto" }}>

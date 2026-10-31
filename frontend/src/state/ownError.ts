@@ -41,6 +41,8 @@ export function errorAfterOwnSuccess(error: string | null, own: string | null): 
  * Wraps a state setter so each read's remembered error is forgotten as soon as `error` becomes
  * something else (dismissed, cleared by a mutation or transfer starting, or replaced). Done in
  * the update itself, not an effect: a mutation's start and its failure can land in one render.
+ * Best effort: an updater React runs late may forget a read's error that is still showing; that
+ * error then just stays until dismissed. It never makes a read clear another action's error.
  */
 export function forgettingStaleOwnErrors<S extends { error: string | null }>(
   setState: (updater: (prev: S) => S) => void,

@@ -64,11 +64,10 @@ describe("placeAnchored", () => {
     expect(placement.side).toBe("below");
   });
 
-  it("keeps the top inside the window", () => {
-    // An anchor partly below the window's bottom edge.
-    const placement = placeAnchored({ top: 790, bottom: 810, left: 50 }, size, viewport);
-    expect(placement.top).toBeGreaterThanOrEqual(4);
-    expect(placement.top + Math.min(200, placement.maxHeight)).toBeLessThanOrEqual(800 - 4);
+  it("keeps the top inside the window when the anchor is above it", () => {
+    const placement = placeAnchored({ top: -100, bottom: -80, left: 50 }, size, viewport);
+    expect(placement.side).toBe("below");
+    expect(placement.top).toBe(4);
   });
 
   it("uses the whole window height when neither side has room for the filter field", () => {

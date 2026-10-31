@@ -44,8 +44,9 @@ export function CoAuthorPicker({
     // A fixed popover would follow a button scrolled out of view: close it instead.
     if (!isVisibleIn(anchor, scrollingAncestor(button))) {
       sideRef.current = undefined;
+      // Back to the button only from inside the picker: focus that moved on stays where it is.
+      if (rootRef.current?.contains(document.activeElement) === true) button.focus({ preventScroll: true });
       setOpen(false);
-      button.focus({ preventScroll: true });
       return;
     }
     // Measured uncapped: once placed, `maxHeight` shrinks the list, and the capped height would
