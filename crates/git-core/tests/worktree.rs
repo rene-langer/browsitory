@@ -181,11 +181,10 @@ fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
     assert!(repo.find_branch("new", git2::BranchType::Local).is_err());
 }
 
-/// #162: the repository's config says case matters (it was probed where the repository lives),
-/// but the worktree's destination folds case (a USB stick, a casefold folder).
+/// A repository whose config says case doesn't matter, with the branch `evil` holding a
+/// collision.
 #[cfg(target_os = "linux")]
-#[test]
-fn a_collision_is_refused_when_the_destination_folds_case() {
+fn case_sensitive_repo_with_evil_branch() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "initial");
     commit_all(&repo, "initial commit");
@@ -194,25 +193,61 @@ fn a_collision_is_refused_when_the_destination_folds_case() {
         .set_bool("core.ignorecase", false)
         .unwrap();
     add_evil_branch(&repo);
-    let linked = dir.path().join("evil-tree");
+    (dir, repo)
+}
 
-    let error = git_core::worktree::create_worktree_checking(
-        &repo,
-        "evil-tree",
-        &linked,
-        "evil",
-        None,
-        true,
-    )
-    .unwrap_err();
+/// #162: the repository's config says case matters (it was probed where the repository lives),
+/// but the worktree's destination folds case (a USB stick, a casefold folder).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_collision_is_refused_when_the_destination_folds_case() {
+    let (dir, repo) = case_sensitive_repo_with_evil_branch();
+    let linked = dir.path().join("evil-tree");
+    let mut probed = None;
+    let error =
+        git_core::worktree::create_worktree_with(&repo, "evil-tree", &linked, "evil", None, |at| {
+            probed = Some(at.to_path_buf());
+            Ok(true)
+        })
+        .unwrap_err();
     assert!(matches!(error, WorktreeError::CaseCollision(_)), "{error}");
+    assert_eq!(probed.as_deref(), Some(dir.path()));
     assert!(!linked.exists());
     assert!(!repo.path().join("worktrees").join("evil-tree").exists());
 
-    // A destination that keeps case apart takes the tree as before.
-    git_core::worktree::create_worktree_checking(&repo, "evil-tree", &linked, "evil", None, false)
+    // A destination that keeps case apart (or a failed probe) takes the tree as before.
+    let failing = |_: &std::path::Path| Err(std::io::Error::other("probe failed"));
+    git_core::worktree::create_worktree_with(&repo, "evil-tree", &linked, "evil", None, failing)
         .unwrap();
     assert!(linked.join("d").join("x").is_file());
+}
+
+/// The probe runs only when it can change the outcome: not when the path already exists, and
+/// not when the repository's setting already says case folds.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_destination_is_probed_only_when_it_matters() {
+    let (dir, repo) = case_sensitive_repo_with_evil_branch();
+    let never = |_: &std::path::Path| -> std::io::Result<bool> { panic!("probed") };
+    let error =
+        git_core::worktree::create_worktree_with(&repo, "tree", dir.path(), "evil", None, never)
+            .unwrap_err();
+    assert!(matches!(error, WorktreeError::PathExists), "{error}");
+
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    let error = git_core::worktree::create_worktree_with(
+        &repo,
+        "evil-tree",
+        &dir.path().join("evil-tree"),
+        "evil",
+        None,
+        never,
+    )
+    .unwrap_err();
+    assert!(matches!(error, WorktreeError::CaseCollision(_)), "{error}");
 }
 
 /// Through the real probe: a Linux temp dir keeps case apart, so the repository's setting
@@ -220,14 +255,7 @@ fn a_collision_is_refused_when_the_destination_folds_case() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_case_sensitive_destination_keeps_the_repository_setting() {
-    let (dir, repo) = init_repo();
-    write_file(dir.path(), "file.txt", "initial");
-    commit_all(&repo, "initial commit");
-    repo.config()
-        .unwrap()
-        .set_bool("core.ignorecase", false)
-        .unwrap();
-    add_evil_branch(&repo);
+    let (dir, repo) = case_sensitive_repo_with_evil_branch();
     let linked = dir.path().join("evil-tree");
     create_worktree(&repo, "evil-tree", &linked, "evil", None).unwrap();
     assert!(linked.join("d").join("x").is_file());
