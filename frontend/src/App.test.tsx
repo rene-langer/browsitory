@@ -1700,6 +1700,53 @@ describe("App external tools", () => {
     expect(screen.queryByRole("dialog", { name: "Preferences" })).toBeNull();
   });
 
+  // #177: an error stays until it is dismissed or the next change starts; a refresh keeps it.
+  it("the error banner stays through the palette's Refresh and clears when Stage starts", async () => {
+    let releaseStage: () => void = () => {};
+    const stageFile = vi
+      .fn<RepoClient["stageFile"]>()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseStage = resolve;
+          }),
+      );
+    const getStatus = vi.fn(async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }]);
+    render(
+      <App
+        client={fakeClient({
+          listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+          openRepo: async () => {},
+          persistOpenRepos: async () => {},
+          getStatus,
+          getCommitGraph: async () => [],
+          listBranches: async () => [],
+          listStashes: async () => [],
+          stageFile,
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stage a.txt" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+
+    const reads = getStatus.mock.calls.length;
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Refresh" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Refresh" }));
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("boom");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stage a.txt" }));
+    await waitFor(() => expect(stageFile).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => releaseStage());
+  });
+
   it("the palette opens Preferences…", async () => {
     const { container } = render(<App client={toolsClient()} />);
     await screen.findByRole("tab", { name: "a" });

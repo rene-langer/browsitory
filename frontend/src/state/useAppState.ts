@@ -379,6 +379,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
 
+  // The message the last failed `refresh()` set, so a later successful one clears that error and
+  // only that one: a refresh never clears another action's error (#177).
+  const lastRefreshError = useRef<string | null>(null);
   const refresh = useCallback(async () => {
     try {
       const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
@@ -416,6 +419,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const reflog = selectedReference === null
         ? []
         : await client.getReflog(repoPath, selectedReference);
+      const ownError = lastRefreshError.current;
+      lastRefreshError.current = null;
       setState((prev) => ({
         ...prev,
         status,
@@ -443,7 +448,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           : null,
         forgeRepositories,
         undoState,
-        error: null,
+        error: prev.error !== null && prev.error === ownError ? null : prev.error,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     } catch (err) {
@@ -455,9 +460,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // Still advances `refreshGeneration`: a mutation that landed before this refresh failed has
       // changed the working tree all the same, so open diffs shouldn't keep trusting what they
       // last fetched.
+      const message = credentialFailureMessage(err);
+      lastRefreshError.current = message;
       setState((prev) => ({
         ...prev,
-        error: credentialFailureMessage(err),
+        error: message,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     }

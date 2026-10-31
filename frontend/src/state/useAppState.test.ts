@@ -189,6 +189,95 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
   };
 }
 
+// #177: errors survive refreshes. A refresh clears only the error a failed refresh set; a
+// mutation clears any error when it starts.
+describe("useAppState error lifecycle", () => {
+  it("a refresh keeps an error a mutation set", async () => {
+    const client = transferClient({
+      stageFile: async () => {
+        throw new Error("boom");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.stageFile("a.txt"));
+    expect(result.current.state.error).toBe("boom");
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBe("boom");
+  });
+
+  it("a successful refresh clears the error a failed refresh set", async () => {
+    let failStatus = true;
+    const client = transferClient({
+      getStatus: async () => {
+        if (failStatus) {
+          failStatus = false;
+          throw new Error("status failed");
+        }
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBe("status failed");
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("a failed refresh replaces a mutation's error, and a successful refresh then clears it", async () => {
+    let failStatus = false;
+    const client = transferClient({
+      stageFile: async () => {
+        throw new Error("boom");
+      },
+      getStatus: async () => {
+        if (failStatus) {
+          failStatus = false;
+          throw new Error("worker stopped");
+        }
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.stageFile("a.txt"));
+    expect(result.current.state.error).toBe("boom");
+    failStatus = true;
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBe("worker stopped");
+    await act(() => result.current.refresh());
+    expect(result.current.state.error).toBeNull();
+  });
+
+  it("a refresh that overlaps a failing mutation keeps that mutation's error (the VSCode Cancel case)", async () => {
+    let releaseStatus: () => void = () => {};
+    let holdStatus = false;
+    const client = transferClient({
+      getStatus: () =>
+        holdStatus
+          ? new Promise((resolve) => {
+              releaseStatus = () => resolve([]);
+            })
+          : Promise.resolve([]),
+      stageFile: async () => {
+        throw new Error("The pre-commit hook was cancelled.");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    holdStatus = true;
+    let refreshing!: Promise<void>;
+    act(() => {
+      refreshing = result.current.refresh();
+    });
+    holdStatus = false;
+    await act(() => result.current.stageFile("a.txt"));
+    expect(result.current.state.error).toBe("The pre-commit hook was cancelled.");
+    await act(async () => {
+      releaseStatus();
+      await refreshing;
+    });
+    expect(result.current.state.error).toBe("The pre-commit hook was cancelled.");
+  });
+});
+
 describe("useAppState", () => {
   it("reports a failed remote-auth mutation to dependent callers", async () => {
     const client = transferClient({

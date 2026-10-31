@@ -58,9 +58,9 @@ const BASE_STATE: AppState = {
   undoState: { undo: null, redo: null },
 };
 
-function setupRunner() {
+function setupRunner(initial: AppState = BASE_STATE) {
   return renderHook(() => {
-    const [state, setState] = useState<AppState>(BASE_STATE);
+    const [state, setState] = useState<AppState>(initial);
     const refresh = async () => {};
     const runner = useMutationRunner(refresh, setState);
     return { state, ...runner };
@@ -177,5 +177,50 @@ describe("useMutationRunner's optimistic variants", () => {
     );
     expect(failed).toBe(false);
     expect(result.current.state.remotes[0].name).toBe("upstream");
+  });
+});
+
+// #177: an error stays on screen until it is dismissed or the next change starts — so every
+// variant clears it when it starts, not when its trailing refresh lands.
+describe("useMutationRunner clears a previous error when a mutation starts", () => {
+  type Run = (runner: ReturnType<typeof setupRunner>["result"]["current"], mutate: () => Promise<void>) => Promise<unknown>;
+  const variants: [string, Run][] = [
+    ["runMutation", (r, m) => r.runMutation(m)],
+    ["runMutationWithOutcome", (r, m) => r.runMutationWithOutcome(m)],
+    ["runMutationWithMessage", (r, m) => r.runMutationWithMessage(m)],
+    ["runOptimisticMutation", (r, m) => r.runOptimisticMutation((prev) => prev, m)],
+    ["runOptimisticMutationWithMessage", (r, m) => r.runOptimisticMutationWithMessage((prev) => prev, m)],
+    ["runOptimisticMutationWithOutcome", (r, m) => r.runOptimisticMutationWithOutcome((prev) => prev, m)],
+  ];
+
+  it.each(variants)("%s clears a previous error when it starts", async (_name, run) => {
+    const { result } = setupRunner({ ...BASE_STATE, error: "old" });
+    let resolveMutate: () => void = () => {};
+    let done!: Promise<unknown>;
+    act(() => {
+      done = run(result.current, () => new Promise<void>((resolve) => { resolveMutate = resolve; }));
+    });
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.pending).toBe(true);
+    await act(async () => {
+      resolveMutate();
+      await done;
+    });
+    expect(result.current.state.error).toBeNull();
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("an optimistic failure shows the new error, not the restored one", async () => {
+    const { result } = setupRunner({ ...BASE_STATE, error: "old" });
+    await act(() =>
+      result.current.runOptimisticMutation(
+        (prev) => ({ ...prev, branches: [{ name: "feature", isCurrent: false }] }),
+        async () => {
+          throw new Error("new");
+        },
+      ),
+    );
+    expect(result.current.state.error).toBe("new");
+    expect(result.current.state.branches).toEqual([]);
   });
 });

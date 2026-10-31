@@ -200,9 +200,10 @@ export function useRemoteTransferActions(
         void refresh().finally(() => {
           if (activeTransferId.current !== progress.operationId) return;
           activeTransferId.current = null;
-          // Set after `refresh()` (which resets `error`) and in the same update that clears
-          // `transfer`, so a partial Fetch all both reports the dead remotes and suppresses
-          // App's "Fetch complete" toast.
+          // Set after `refresh()` (the transfer cleared `error` when it started; a refresh only
+          // clears an error a failed refresh set) and in the same update that clears `transfer`,
+          // so a partial Fetch all both reports the dead remotes and suppresses App's "Fetch
+          // complete" toast.
           setState((prev) => ({
             ...prev,
             transfer: null,
