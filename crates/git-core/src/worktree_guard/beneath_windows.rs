@@ -1079,18 +1079,15 @@ mod tests {
             left.is_empty(),
             "created in the junction's target: {left:?}"
         );
-        // Pins how NTFS treats the relative create (so a change shows up here): `e` is created
-        // once relative to the held handle, i.e. inside the junction folder itself, never in its
-        // target; every reopen by path then follows the junction and misses it, so the walk gives
-        // up as "kept changing".
+        // Pins how NTFS treats the relative create (so a change shows up here): with the held
+        // parent now a reparse point, `NtCreateFile` relative to it is refused outright with
+        // `ERROR_CANT_RESOLVE_FILENAME` (1921), creating nothing anywhere, and the walk fails
+        // with that error.
+        const ERROR_CANT_RESOLVE_FILENAME: i32 = 1921;
         let error = written.expect_err("the write went through");
         assert_eq!(
-            (created, error.kind(), error.to_string()),
-            (
-                1,
-                io::ErrorKind::Other,
-                "the working tree kept changing while it was being written".to_string()
-            ),
+            (created, error.raw_os_error()),
+            (0, Some(ERROR_CANT_RESOLVE_FILENAME)),
             "{error:?}"
         );
     }
