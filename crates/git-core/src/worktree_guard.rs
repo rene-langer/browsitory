@@ -861,6 +861,29 @@ pub(crate) fn has_symlinked_ancestor(workdir: &Path, path: &str) -> bool {
     false
 }
 
+/// The first proper ancestor of `path` (relative to `workdir`) that exists as a regular file: a
+/// folder on the way to `path` was replaced by a file (#154). A link on the way, or a missing
+/// one, ends the walk with `None`; links are the symlink checks' business.
+pub(crate) fn file_in_place_of_folder(workdir: &Path, path: &str) -> io::Result<Option<String>> {
+    let rel = Path::new(path);
+    if !plain_relative(rel) {
+        return Ok(None);
+    }
+    let components: Vec<_> = rel.components().collect();
+    let mut prefix = PathBuf::new();
+    for component in &components[..components.len().saturating_sub(1)] {
+        prefix.push(component);
+        match workdir.join(&prefix).symlink_metadata() {
+            Ok(meta) if meta.file_type().is_file() => return Ok(Some(git_path(&prefix))),
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(None)
+}
+
 /// Refuses when `rel` itself or a folder on the way to it (below `workdir`) is a symlink, for a
 /// whole folder that is about to be written, such as a submodule's checkout.
 pub(crate) fn refuse_linked_path(workdir: &Path, rel: &Path) -> Result<(), LinkedFolder> {

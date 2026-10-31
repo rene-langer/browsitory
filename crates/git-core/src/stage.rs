@@ -37,6 +37,9 @@ pub enum StageError {
     InvalidPattern,
     #[error("{0} is a folder (for example a nested repository) and wasn't discarded.")]
     IsFolder(String),
+    /// A folder on the way to `path` was replaced by the (untracked) file `parent` (#154).
+    #[error("Couldn't discard '{path}': '{parent}' is now a file, not a folder. Discard or move '{parent}' first.")]
+    FolderIsNowAFile { path: String, parent: String },
     /// "Discard all" went through every listed path but some couldn't be discarded.
     #[error("{message}")]
     DiscardIncomplete {
@@ -145,6 +148,14 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     ensure_no_symlinked_parent(workdir, rel)?;
     let index = repo.index()?;
     if index.get_path(rel, 0).is_some() {
+        // libgit2 can't put the folder back over a file ("directory exists"), and git would
+        // delete that file, which the user didn't pick. Say what's in the way instead (#154).
+        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
+            return Err(StageError::FolderIsNowAFile {
+                path: path.to_string(),
+                parent,
+            });
+        }
         // A forced checkout writes through a symlink that replaced the file (#114).
         crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
             repo,
@@ -171,9 +182,11 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
 const MAX_NAMED_FAILURES: usize = 3;
 
 /// Discards the unstaged changes of exactly `paths` (the list the user confirmed), each the way
-/// `discard_file` does. Conflicted entries are skipped. A path that can't be discarded (a folder
-/// such as a nested repository, an I/O error) doesn't stop the rest; they are all reported
-/// together afterwards as `DiscardIncomplete`.
+/// `discard_file` does. Conflicted entries are skipped. Untracked paths go first (each group in
+/// the given order), so a file that replaced a folder is deleted before the folder's files are
+/// restored (#154). A path that can't be discarded (a folder such as a nested repository, an I/O
+/// error) doesn't stop the rest; they are all reported together afterwards as
+/// `DiscardIncomplete`.
 pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
     let conflicted: std::collections::HashSet<String> = crate::status::status(repo)
         .map_err(|e| StageError::Status(e.to_string()))?
@@ -181,13 +194,24 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
         .filter(|e| e.kind == crate::status::StatusKind::Conflicted)
         .map(|e| e.path)
         .collect();
+    let index = repo.index()?;
+    let (tracked, untracked): (Vec<&String>, Vec<&String>) = paths
+        .iter()
+        .filter(|p| !conflicted.contains(*p))
+        .partition(|p| index.get_path(Path::new(p.as_str()), 0).is_some());
+    drop(index);
     let mut failed = Vec::new();
     let mut any_folder = false;
-    for path in paths.iter().filter(|p| !conflicted.contains(*p)) {
+    let mut in_the_way = None;
+    for path in untracked.into_iter().chain(tracked) {
         match discard_file(repo, path) {
             Ok(()) => {}
             Err(StageError::IsFolder(_)) => {
                 any_folder = true;
+                failed.push(path.clone());
+            }
+            Err(StageError::FolderIsNowAFile { parent, .. }) => {
+                in_the_way = Some(parent);
                 failed.push(path.clone());
             }
             Err(_) => failed.push(path.clone()),
@@ -205,6 +229,10 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     let mut message = format!("Couldn't discard {count} {noun}: {names}.");
     if any_folder {
         message.push_str(" Folders (for example nested repositories) are never discarded.");
+    }
+    // A single failure names its reason when it is a file in a folder's place (#154).
+    if let (1, Some(parent)) = (count, in_the_way) {
+        message.push_str(&format!(" '{parent}' is now a file, not a folder."));
     }
     Err(StageError::DiscardIncomplete { failed, message })
 }

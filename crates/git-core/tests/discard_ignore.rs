@@ -470,3 +470,84 @@ fn ignore_swap_race_never_writes_outside() {
     eprintln!("outside target = {:?}", outside_text.lines().count());
     assert_eq!(outside_text, "OUTSIDE\n");
 }
+
+/// HEAD has `d/f`; the folder `d` was replaced by a regular (untracked) file `d` (#154).
+fn folder_replaced_by_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f", "f\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    std::fs::write(dir.path().join("d"), "now a file\n").unwrap();
+    (dir, repo)
+}
+
+fn index_paths(repo: &git2::Repository) -> Vec<String> {
+    repo.index()
+        .unwrap()
+        .iter()
+        .map(|e| String::from_utf8(e.path).unwrap())
+        .collect()
+}
+
+#[test]
+fn discarding_a_file_whose_folder_is_now_a_file_names_the_file_in_the_way() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    let err = discard_file(&repo, "d/f").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd/f': 'd' is now a file, not a folder. Discard or move 'd' first."
+    );
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+    assert_eq!(index_paths(&repo), vec!["d/f".to_string()]);
+}
+
+#[test]
+fn discard_all_with_the_file_and_the_folder_restores_the_folder() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    discard_all_unstaged(&repo, &["d/f".into(), "d".into()]).unwrap();
+
+    assert_eq!(read(dir.path(), "d/f"), "f\n");
+}
+
+#[test]
+fn discard_all_with_only_the_folders_file_names_the_reason() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    let err = discard_all_unstaged(&repo, &["d/f".into()]).unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 1 file: d/f. 'd' is now a file, not a folder."
+    );
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+}
+
+#[test]
+fn discarding_a_stale_untracked_path_below_such_a_file_is_a_no_op() {
+    let (dir, repo) = folder_replaced_by_file();
+
+    discard_file(&repo, "d/u").unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn discarding_a_file_whose_folder_is_now_a_link_still_says_beyond_a_symbolic_link() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d/f", "f\n");
+    common::commit_all(&repo, "base");
+    let outside = common::outside_dir();
+    common::replace_with_link(dir.path(), "d", outside.path());
+
+    let err = discard_file(&repo, "d/f").unwrap_err();
+
+    assert!(
+        matches!(err, StageError::BeyondSymlink(ref p) if p == "d/f"),
+        "{err:?}"
+    );
+    common::assert_outside_untouched(outside.path());
+}
