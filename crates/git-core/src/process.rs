@@ -224,9 +224,36 @@ fn detach(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+}
+
+/// Windows `CreateProcess` flag: no console window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Starts a hook suspended and puts it in a new job object (#122), so it can't start anything
+/// outside the job (#180). The caller resumes it ([`job_windows::resume`]). Replaces `detach`'s
+/// creation flags (`CREATE_NO_WINDOW` is kept).
+#[cfg(windows)]
+fn spawn_suspended_in_job(command: &mut Command) -> std::io::Result<(Child, Option<Job>)> {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW | job_windows::CREATE_SUSPENDED);
+    let child = spawn_retrying(command)?;
+    let job = Job::assign(&child);
+    Ok((child, job))
+}
+
+/// Starts a hook in its job and lets it run. A hook that can't be resumed is killed rather than
+/// left suspended until the time limit.
+#[cfg(windows)]
+fn spawn_in_job(command: &mut Command) -> Result<(Child, Option<Job>), RunError> {
+    let (mut child, job) = spawn_suspended_in_job(command).map_err(RunError::Spawn)?;
+    if let Err(error) = job_windows::resume(&child) {
+        let _ = kill_and_reap(&mut child, job.as_ref());
+        return Err(RunError::Spawn(error));
+    }
+    Ok((child, job))
 }
 
 /// Writes `stdin` from its own thread so a program that prints a lot before reading stdin cannot
@@ -292,16 +319,15 @@ pub(crate) fn run_captured(
         .stdout(writer)
         .stderr(writer_for_stderr);
     detach(&mut command);
-    let spawned = spawn_retrying(&mut command);
+    #[cfg(windows)]
+    let spawned = spawn_in_job(&mut command);
+    #[cfg(not(windows))]
+    let spawned = spawn_retrying(&mut command)
+        .map(|child| (child, None::<Job>))
+        .map_err(RunError::Spawn);
     // `command` still owns the pipe's write ends; until they close the reader never sees EOF.
     drop(command);
-    let mut child = spawned.map_err(RunError::Spawn)?;
-    // Put the hook in a job right away, before it has started anything (see `job_windows` for
-    // the residual race).
-    #[cfg(windows)]
-    let job = job_windows::Job::assign(&child);
-    #[cfg(not(windows))]
-    let job: Option<Job> = None;
+    let (mut child, job) = spawned?;
 
     // The reader drains the pipe continuously, so a chatty program never blocks on a full pipe.
     let buffer = Arc::new(Mutex::new(TailBuffer::new(limit)));
@@ -780,7 +806,6 @@ pub fn spawn(spec: &SpawnSpec) -> Result<Child, LaunchError> {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut flags = CREATE_NEW_PROCESS_GROUP;
         if spec.new_console {
             flags |= CREATE_NEW_CONSOLE;
@@ -1398,6 +1423,68 @@ mod tests {
         assert!(matches!(result, Err(RunError::Cancelled)));
         std::thread::sleep(Duration::from_secs(6));
         assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn IsProcessInJob(
+            process: *mut std::ffi::c_void,
+            job: *mut std::ffi::c_void,
+            result: *mut i32,
+        ) -> i32;
+    }
+
+    /// #180: the hook is in its job before it has run a single instruction, so nothing it starts
+    /// can escape the job.
+    #[cfg(windows)]
+    #[test]
+    fn a_hook_is_in_its_job_before_it_runs() {
+        use std::os::windows::io::AsRawHandle;
+        let mut command = Command::new("cmd");
+        command
+            .args(["/C", "exit", "0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach(&mut command);
+        let (child, job) = spawn_suspended_in_job(&mut command).unwrap();
+        // Killed and reaped on drop, so a failing assertion never leaves a suspended cmd.exe.
+        let mut child = job_windows::KillOnDrop(child);
+        let job = job.expect("no job");
+        let mut in_job = 0;
+        // SAFETY: both handles are open (`child` is not yet waited on, `job` is owned here);
+        // `in_job` is a writable BOOL.
+        let ok = unsafe { IsProcessInJob(child.0.as_raw_handle(), job.handle(), &mut in_job) };
+        assert_ne!(ok, 0, "{}", std::io::Error::last_os_error());
+        assert_ne!(in_job, 0, "the hook is not in its job");
+        // The real regression check: `IsProcessInJob` above would also pass for a hook assigned
+        // right after an unsuspended spawn (the #180 race is too short to lose reliably), but
+        // `cmd /C exit 0` that hasn't exited after 300 ms proves it was still suspended.
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the hook ran before it was resumed"
+        );
+        job_windows::resume(&child.0).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while child.0.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the hook never ran after resume");
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    /// A hook started suspended still runs to completion, with its output (#180).
+    #[cfg(windows)]
+    #[test]
+    fn run_captured_runs_a_windows_program() {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "echo", "ran"]);
+        let captured =
+            run_captured(command, None, &|| false, Duration::from_secs(30), 1024).unwrap();
+        assert!(!captured.timed_out);
+        assert!(captured.success, "{}", captured.output);
+        assert_eq!(captured.output.trim_end(), "ran");
     }
 
     /// D6-A: only a timeout or cancel kills the job, as on Unix.
