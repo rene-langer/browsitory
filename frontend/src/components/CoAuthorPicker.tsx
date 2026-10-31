@@ -37,11 +37,16 @@ export function CoAuthorPicker({
     const button = buttonRef.current;
     const popover = popoverRef.current;
     if (button === null || popover === null) return;
-    const next = placeAnchored(
-      button.getBoundingClientRect(),
-      { width: popover.offsetWidth, height: popover.scrollHeight },
-      { width: window.innerWidth, height: window.innerHeight },
-    );
+    // Measured uncapped: once placed, `maxHeight` shrinks the list, and the capped height would
+    // always "fit" the side it was capped to. Restored before paint.
+    const cap = popover.style.maxHeight;
+    popover.style.maxHeight = "none";
+    const size = { width: popover.offsetWidth, height: popover.scrollHeight };
+    popover.style.maxHeight = cap;
+    const next = placeAnchored(button.getBoundingClientRect(), size, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
     setPlacement((current) =>
       current !== null &&
       current.top === next.top &&

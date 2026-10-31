@@ -330,7 +330,9 @@ pub(super) fn commit(
     });
     let committed = result.is_ok();
     // Only when `git merge`'s hooks really ran: the merge may have been aborted (another
-    // window, a terminal) between the loop choosing `set` and the commit.
+    // window, a terminal) between the loop choosing `set` and the commit. The cancel flag is the
+    // commit's: a Cancel that landed after the last pre hook but before the commit stops
+    // post-merge at once (still reported); the commit stands either way.
     if result.as_ref().is_ok_and(|committed| committed.merge_hooks) {
         super::hooks::run_post_hook_reported(
             repo,

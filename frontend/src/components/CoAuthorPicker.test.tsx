@@ -109,6 +109,34 @@ describe("CoAuthorPicker placement", () => {
     expect(popover().style.top).toBe(`${740 - 4 - 200}px`);
   });
 
+  // Once placed, the popover's max-height caps it (the list shrinks), so the measure must read
+  // its natural height: otherwise a list that outgrew the room below never flips above.
+  it("flips above when the loaded list outgrows the room below, measuring the uncapped height", async () => {
+    let natural = 80;
+    Object.defineProperty(Element.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        const cap = this.style.maxHeight;
+        return cap === "" || cap === "none" ? natural : Math.min(natural, parseFloat(cap));
+      },
+    });
+    let resolve: (value: SignatureInput[]) => void = () => {};
+    const load = () =>
+      new Promise<SignatureInput[]>((r) => {
+        resolve = r;
+      });
+    render(<CoAuthorPicker load={load} exclude={[]} onPick={vi.fn()} />);
+    fireEvent.click(stubButton({ top: 500, left: 20 }));
+    await screen.findByRole("status");
+    expect(popover()).toHaveAttribute("data-side", "below");
+
+    natural = 300;
+    await act(async () => resolve(authors));
+    await screen.findByRole("option", { name: "Ada <ada@example.com>" });
+    expect(popover()).toHaveAttribute("data-side", "above");
+    expect(popover().style.top).toBe(`${500 - 4 - 300}px`);
+  });
+
   it("stops listening for resize and scroll once closed", async () => {
     const remove = vi.spyOn(window, "removeEventListener");
     render(<CoAuthorPicker load={async () => authors} exclude={[]} onPick={vi.fn()} />);
