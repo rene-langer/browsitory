@@ -477,7 +477,8 @@ sidecar runs each request on its own thread and is unaffected.
   box. The worker remembers such a merge in memory (`worker/merge.rs` `CleanMerge`: HEAD and the
   `MERGE_HEAD` commits) and, while the repository still shows exactly that merge, commits it with
   `CommitHookSet::CleanMerge` and runs `post-merge 0` after the commit (not when the merge is
-  staged). The memory is cleared by any other `StartMerge` result, by `AbortMerge` and by a
+  staged), and only when `commit_with` reports `Committed::merge_hooks` (the merge was still in
+  progress at commit time, not aborted by another window or a terminal in between). The memory is cleared by any other `StartMerge` result, by `AbortMerge` and by a
   successful commit; a failed or cancelled commit keeps it, so "Commit without hooks" is
   `git merge --no-verify`. After a restart, or for a merge started by the other window or
   outside Browsitory, there is none and the commit runs `git commit`'s hooks, which is what git
