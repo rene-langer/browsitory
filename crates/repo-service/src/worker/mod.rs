@@ -3040,7 +3040,7 @@ mod tests {
     /// base: a.txt="base\n". feature: "f one" (+b.txt), "f two" (a.txt="feature\n"),
     /// "f three" (+c.txt). The base branch (checked out): a.txt="main\n". Returns the feature
     /// ids oldest-first.
-    fn side_commits_with_a_conflict() -> (TempDir, Repository, Vec<String>) {
+    pub(super) fn side_commits_with_a_conflict() -> (TempDir, Repository, Vec<String>) {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "a.txt", "base\n");
         commit_all(&repo, "base");
@@ -6742,11 +6742,80 @@ mod state_lock_tests {
         let (tx, _rx) = mpsc::channel();
         assert!(super::undo::locks_state(&Command::Redo { reply: tx }));
         let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::SaveStash {
+            options: git_core::stash::StashOptions::default(),
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
+        assert!(super::undo::locks_state(&Command::CreateWorktree {
+            name: "wt".into(),
+            path: "wt".into(),
+            branch: "x".into(),
+            start_point: None,
+            reply: tx
+        }));
+        let (tx, _rx) = mpsc::channel();
         assert!(!super::undo::locks_state(&Command::GetStatus { reply: tx }));
         let (tx, _rx) = mpsc::channel();
         assert!(!super::undo::locks_state(&Command::GetUndoState {
             reply: tx
         }));
+    }
+
+    /// Starts a cherry-pick sequence of `side_commits_with_a_conflict` through git-core, as the
+    /// other window's worker would, and stores it. Returns the branch it runs on.
+    fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let store = super::sequence_store::SequenceStore::open(repo);
+        assert!(matches!(
+            super::history::pick_many(repo, &store, git_core::pick::SequenceKind::CherryPick, ids)
+                .unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        branch
+    }
+
+    fn in_progress() -> String {
+        git_core::pick::PickError::OperationInProgress.to_string()
+    }
+
+    #[test]
+    fn stash_save_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
+        let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let guard = hold(&repo);
+        let saving = {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.save_stash(Default::default()))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        start_sequence_outside(&repo, ids);
+        write_file(dir.path(), "b.txt", "edited\n");
+        drop(guard);
+        assert_eq!(saving.join().unwrap(), Err(in_progress()));
+        assert!(repo.find_reference("refs/stash").is_err());
+    }
+
+    #[test]
+    fn worktree_add_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
+        let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let path = dir.path().with_extension("wt");
+
+        let guard = hold(&repo);
+        let adding = {
+            let (handle, path) = (handle.clone(), path.clone());
+            std::thread::spawn(move || handle.create_worktree("wt".into(), path, branch, None))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        start_sequence_outside(&repo, ids);
+        drop(guard);
+        assert_eq!(adding.join().unwrap(), Err(in_progress()));
+        assert!(!path.exists());
     }
 
     #[test]

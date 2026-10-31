@@ -118,7 +118,10 @@ pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
 
 /// Commands that hold the state lock (#172) from before `settle` until their `finish`: every
 /// recordable one (which covers everything that starts an operation, and `Commit`/`AmendCommit`,
-/// which end a merge or pick), the ones that end a paused operation, and Undo/Redo.
+/// which end a merge or pick), the ones that end a paused operation, Undo/Redo, and the gated
+/// commands that start no operation: stash save and worktree add (#174). They record nothing,
+/// but under the lock their gate check and the change itself can't interleave with the other
+/// window starting a rebase or a cherry-pick/revert sequence.
 pub(super) fn locks_state(command: &Command) -> bool {
     plan_for(command).is_some()
         || matches!(
@@ -130,6 +133,8 @@ pub(super) fn locks_state(command: &Command) -> bool {
                 | Command::AbortMerge { .. }
                 | Command::Undo { .. }
                 | Command::Redo { .. }
+                | Command::SaveStash { .. }
+                | Command::CreateWorktree { .. }
         )
 }
 
