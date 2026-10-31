@@ -373,6 +373,48 @@ pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
             .unwrap_or(false)
 }
 
+/// Whether the file system holding `dir` (an existing folder) folds case (#162): creates a
+/// hidden temp file there and looks it up with its ASCII case flipped. The file is removed
+/// again. A worktree shares its main repository's config, whose `core.ignorecase` was probed
+/// where the main repository lives; a worktree on a USB stick or in a casefold folder needs its
+/// own answer.
+pub(crate) fn dir_folds_case(dir: &Path) -> io::Result<bool> {
+    let probe = tempfile::Builder::new()
+        .prefix(".browsitory-case-probe-")
+        .tempfile_in(dir)?;
+    let name = probe
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::other("the case probe has no UTF-8 name"))?;
+    let flipped: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect();
+    Ok(std::fs::symlink_metadata(dir.join(flipped)).is_ok())
+}
+
+/// The nearest ancestor of `path` (itself included) that is an existing folder; a relative
+/// path's ancestors end at `.`. Folders created below it are on the same file system (and, in an
+/// ext4 casefold folder, inherit its flag).
+pub(crate) fn nearest_existing(path: &Path) -> Option<&Path> {
+    path.ancestors()
+        .map(|ancestor| {
+            if ancestor.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                ancestor
+            }
+        })
+        .find(|ancestor| ancestor.is_dir())
+}
+
 /// When a fresh checkout (clone, submodule) checks for case collisions. Tests can't preset a
 /// fresh clone's config, so they force the check with `Always`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -656,7 +698,20 @@ where
     E: From<git2::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
-    if !folds_case(repo) {
+    refuse_case_collision_if(folds_case(repo), source, paths)
+}
+
+/// [`refuse_case_collision`] with the caller's answer to whether case matters (`applies`).
+pub(crate) fn refuse_case_collision_if<E, P>(
+    applies: bool,
+    source: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CaseCollision>,
+    P: AsRef<[u8]>,
+{
+    if !applies {
         return Ok(());
     }
     match find_case_collision(source, paths)? {
@@ -1339,6 +1394,39 @@ mod tests {
         );
         assert_eq!(fold_name("Straße\u{feff}".as_bytes()), "strasse".as_bytes());
         assert_eq!(fold_name(b"AB\xff"), b"ab\xff");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_linux_temp_dir_does_not_fold_case() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(!dir_folds_case(dir.path()).unwrap());
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn the_temp_dir_folds_case() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(dir_folds_case(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn the_probe_leaves_nothing_behind() {
+        let dir = tempfile::TempDir::new().unwrap();
+        dir_folds_case(dir.path()).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn the_probe_uses_the_nearest_existing_ancestor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let missing = dir.path().join("a").join("b").join("c");
+        assert_eq!(nearest_existing(&missing), Some(dir.path()));
+        assert_eq!(nearest_existing(dir.path()), Some(dir.path()));
+        assert_eq!(
+            nearest_existing(Path::new("no-such-dir/x")),
+            Some(Path::new("."))
+        );
     }
 
     #[test]
