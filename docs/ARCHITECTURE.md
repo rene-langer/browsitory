@@ -744,13 +744,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   applied (documented for users in USER_GUIDE).
 - Runnable-file refusal checks one extension list on every OS (Wine runs Windows installers and
   shortcuts from `xdg-open`/`open`) plus content sniffing (`#!`, ELF, PE, Mach-O, OLE except
-  old Office documents, and freedesktop launchers: shared-mime-info's `# Config File` /
-  `# KDE Config File` magics, or a key file (first non-comment line a group header, then only
-  group headers and `key=value` lines) with a `[Desktop Entry]`, `[KDE Desktop Entry]` or
-  `[Desktop Action …]` group at any position, as GLib finds it; a key file still undecided after
-  64 KiB counts as runnable; #165). `.desktop` and `.kdelnk` are runnable by name. The head is
-  read through the opened handle (`O_NONBLOCK | O_NOFOLLOW` on Unix, the type checked on the
-  handle), so a FIFO swapped in after a check can't block; Mark resolved reads its marker check
+  old Office documents, and freedesktop launchers: shared-mime-info's magics, `[Desktop Entry]`
+  starting within the first 33 bytes or `# Config File` / `# KDE Config File` at offset 0, or a
+  `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]` group header on a line of its
+  own at any position, as GLib and KConfig find the group (other lines, invalid ones included,
+  are skipped, as KConfig skips them); a strict key file still undecided after 64 KiB counts as
+  runnable, a longer text file with no desktop group doesn't; #165). `.desktop` and `.kdelnk`
+  are runnable by name. The head is read through the opened handle (`O_NONBLOCK | O_NOFOLLOW` on
+  Unix, the type checked on the handle after a `symlink_metadata` pre-check, so a device node is
+  never opened), so a FIFO swapped in after a check can't block; Mark resolved reads its marker check
   through `worktree_guard::open_beneath` and refuses a FIFO, socket or device in the conflicted
   path, which libgit2 would block reading while staging.
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw

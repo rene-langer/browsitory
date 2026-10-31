@@ -332,30 +332,40 @@ fn has_magic(head: &[u8]) -> bool {
 const DESKTOP_SNIFF_LIMIT: u64 = 64 * 1024;
 
 /// Whether `head` is a freedesktop launcher (`application/x-desktop`), by the rules of the
-/// programs that run one (#165):
+/// programs that type and run one (#165):
 ///
-/// - shared-mime-info's magics `# Config File` / `# KDE Config File` at offset 0 (after a UTF-8
-///   BOM): a launcher;
-/// - otherwise GLib's key-file structure: blank and `#` comment lines are skipped, the first other
-///   line must be a group header (`[…]`), and a desktop group (`[Desktop Entry]`,
-///   `[KDE Desktop Entry]`, `[Desktop Action …]`) at any position makes it a launcher (GLib looks
-///   the group up by name). Other group headers and `key=value` lines keep the scan going; any
-///   other line means it isn't a key file, so not a launcher.
+/// - shared-mime-info's magics: `[Desktop Entry]` starting anywhere in the first 33 bytes (offset
+///   0:32), `# Config File` / `# KDE Config File` at offset 0 (after a UTF-8 BOM): a launcher;
+/// - otherwise the key-file groups: a desktop group header (`[Desktop Entry]`,
+///   `[KDE Desktop Entry]`, `[Desktop Action …]`) on a line of its own at any position is a
+///   launcher (GLib and KConfig look the group up by name). Blank, `#` comment, other group,
+///   `key=value` lines and invalid lines are skipped, as KConfig skips them.
 ///
-/// `None` when `head` ends before that is decided and isn't the whole file (`complete`): the rest
-/// must be read to decide. Whitespace includes the vertical tab, as GLib's key-file parser.
+/// `None` when `head` ends before that is decided and isn't the whole file (`complete`), while
+/// it still looks like a strict key file (only comments, group headers and `key=value` lines so
+/// far): the rest must be read to decide. A partial head that already had another line, and no
+/// desktop group, is `Some(false)`: a long text file mentioning no desktop group isn't refused.
+/// Whitespace includes the vertical tab, as GLib's key-file parser.
 fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
     let head = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head);
     if head.starts_with(b"# Config File") || head.starts_with(b"# KDE Config File") {
         return Some(true);
     }
+    const DESKTOP_ENTRY: &[u8] = b"[Desktop Entry]";
+    if head
+        .windows(DESKTOP_ENTRY.len())
+        .take(33)
+        .any(|window| window == DESKTOP_ENTRY)
+    {
+        return Some(true);
+    }
     let blank = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0b' | b'\x0c');
     let mut lines = head.split(|b| *b == b'\n').peekable();
-    let mut in_group = false;
+    let mut strict = true;
     while let Some(line) = lines.next() {
         // The last piece of a partial head may be a cut-off line.
         if !complete && lines.peek().is_none() {
-            return None;
+            return if strict { None } else { Some(false) };
         }
         let start = line.iter().position(|b| !blank(b)).unwrap_or(line.len());
         let end = line
@@ -367,17 +377,16 @@ fn is_desktop_entry(head: &[u8], complete: bool) -> Option<bool> {
             continue;
         }
         if line.starts_with(b"[") && line.ends_with(b"]") {
-            if line == b"[Desktop Entry]"
+            if line == DESKTOP_ENTRY
                 || line == b"[KDE Desktop Entry]"
                 || line.starts_with(b"[Desktop Action ")
             {
                 return Some(true);
             }
-            in_group = true;
             continue;
         }
-        if !in_group || !line.contains(&b'=') {
-            return Some(false);
+        if !line.contains(&b'=') {
+            strict = false;
         }
     }
     if complete {
@@ -563,6 +572,11 @@ fn file_may_run(file: &Path, os: Os) -> bool {
 /// Checking the path's type and then opening it would let a FIFO swapped in between block.
 fn read_head(path: &Path, limit: u64) -> Option<(Vec<u8>, bool)> {
     use std::io::Read;
+    // A cheap first check, so a device node or FIFO is never even opened; the check on the
+    // opened handle below is the authoritative one.
+    if !std::fs::symlink_metadata(path).ok()?.is_file() {
+        return None;
+    }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -876,7 +890,9 @@ mod tests {
         assert!(looks_runnable(b"# comment\n\n  [Desktop Entry]\nExec=x\n"));
         assert!(looks_runnable(b"\xef\xbb\xbf[Desktop Entry]\n"));
         assert!(looks_runnable(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1rest"));
-        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+        assert!(!looks_runnable(
+            b"# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n"
+        ));
     }
 
     #[test]
@@ -915,7 +931,9 @@ mod tests {
         assert!(looks_runnable(b"[Desktop Action new]\nExec=x\n"));
         assert!(looks_runnable(b"\x0b[Desktop Entry]\n"));
         assert!(looks_runnable(b"#c\n\x0b\n[Desktop Entry]\x0b\n"));
-        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+        assert!(!looks_runnable(
+            b"# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n"
+        ));
         assert!(!looks_runnable(b"[Desktop Actions]\n"));
         assert_eq!(is_desktop_entry(b"# a\n# b", false), None);
         assert_eq!(is_desktop_entry(b"# a\n# b", true), Some(false));
@@ -941,13 +959,22 @@ mod tests {
         for os in [Os::Linux, Os::MacOs, Os::Windows] {
             assert!(may_execute(Path::new("x.kdelnk"), os, false), "{os:?}");
         }
-        // Not a key file, or no desktop group: not a launcher.
+        // shared-mime-info's `[Desktop Entry]` magic at offset 0:32, wherever on the line.
+        assert!(looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
+        assert!(looks_runnable(
+            b"abcdefghijklmnopqrstuvwxyz012345[Desktop Entry]"
+        ));
+        assert!(!looks_runnable(
+            b"abcdefghijklmnopqrstuvwxyz0123456[Desktop Entry]"
+        ));
+        // KConfig skips invalid lines, so a desktop group after one still counts.
+        assert!(looks_runnable(b"[Settings]\nplain text\n[Desktop Entry]\n"));
+        assert!(looks_runnable(b"plain\n[Desktop Entry]\n"));
+        // No desktop group: not a launcher.
         assert!(!looks_runnable(b"[metadata]\nname = x\n"));
         assert!(!looks_runnable(
-            b"[Settings]\nplain text\n[Desktop Entry]\n"
+            b"# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n"
         ));
-        assert!(!looks_runnable(b"# Notes\n[Desktop Entry] is a header\n"));
-        assert!(!looks_runnable(b"plain\n[Desktop Entry]\n"));
         assert!(!looks_runnable(b"  # Config File\n"));
         assert_eq!(is_desktop_entry(b"[a]\nk=v\n", false), None);
         assert_eq!(is_desktop_entry(b"[a]\ntext\n", false), Some(false));
@@ -963,6 +990,10 @@ mod tests {
         let short = dir.path().join("short");
         std::fs::write(&short, "[a]\n".to_string() + &"k=v\n".repeat(10)).unwrap();
         assert!(!file_may_run(&short, Os::Linux));
+        // A long text file (not a strict key file) with no desktop group in the limit isn't.
+        let text = dir.path().join("text");
+        std::fs::write(&text, "plain text\n".repeat(70 * 1024 / 11)).unwrap();
+        assert!(!file_may_run(&text, Os::Linux));
     }
 
     #[test]
@@ -980,14 +1011,18 @@ mod tests {
         assert!(file_may_run(&endless, Os::Linux));
         let short = write("short", comments(100));
         assert!(!file_may_run(&short, Os::Linux));
-        let notes = write("notes", "# Notes\n[Desktop Entry] is a header\n".into());
+        let notes = write(
+            "notes",
+            "# Notes on launcher files, part 1\nA [Desktop Entry] is a header\n".into(),
+        );
         assert!(!file_may_run(&notes, Os::Linux));
         let long_text = write("long", comments(2048) + "plain text\n");
         assert!(!file_may_run(&long_text, Os::Linux));
     }
 
-    /// #165: the head is read through the opened handle, so a FIFO is never read (and a file
-    /// swapped for one after a type check can't hang the worker).
+    /// #165: a FIFO is neither read nor waited on. A regression guard only: the old path-based
+    /// check also passes it; the swap race the opened-handle check closes can't be made
+    /// deterministic without a seam.
     #[cfg(unix)]
     #[test]
     fn a_fifo_is_not_read_and_does_not_block() {

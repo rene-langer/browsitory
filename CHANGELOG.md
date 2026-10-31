@@ -25,8 +25,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one or two code points), or apart from ẞ/ß/ss, are now recognised as the same name, as on
   macOS (#166).
 - Open in editor (no editor configured) also refuses files starting with "# Config File" or
-  "# KDE Config File", .kdelnk files, and settings files with a [Desktop Entry] group after other
-  groups, as the desktop may run them; a file replaced by a named pipe at that moment no longer
+  "# KDE Config File", files with "[Desktop Entry]" in their first 33 bytes, .kdelnk files, and
+  files with a [Desktop Entry] group after other lines, as the desktop may run them; a file replaced by a named pipe at that moment no longer
   hangs it, and Mark resolved refuses a named pipe instead of hanging (#165).
 
 ### Windows hardening
