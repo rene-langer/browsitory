@@ -1,11 +1,16 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SignatureInput } from "../ipc/RepoClient";
+import { placeAnchored, type Placement } from "../lib/anchoredPosition";
 import { formatPerson as label, parsePerson as typedPerson } from "../lib/people";
 import styles from "./CommitBox.module.css";
 
 /**
  * "Add co-author": a small popover listing the repository's recent authors (loaded each time it
  * opens), filtered as you type. A `Name <email>` typed into the filter can be added too.
+ *
+ * The popover is `position: fixed` and placed with `placeAnchored` (#141): below the button when
+ * it fits, otherwise above, shifted to stay inside the window. It re-measures when it opens, when
+ * its content changes (the authors load asynchronously), and on window resize and any scroll.
  */
 export function CoAuthorPicker({
   load,
@@ -24,7 +29,41 @@ export function CoAuthorPicker({
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<Placement | null>(null);
   const listId = useId();
+
+  const place = useCallback(() => {
+    const button = buttonRef.current;
+    const popover = popoverRef.current;
+    if (button === null || popover === null) return;
+    const next = placeAnchored(
+      button.getBoundingClientRect(),
+      { width: popover.offsetWidth, height: popover.scrollHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPlacement((current) =>
+      current !== null &&
+      current.top === next.top &&
+      current.left === next.left &&
+      current.maxHeight === next.maxHeight &&
+      current.side === next.side
+        ? current
+        : next,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    // Capture: the diff pane (not the window) is what scrolls under the commit box.
+    const options = { capture: true, passive: true } as const;
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, options);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, options);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +103,11 @@ export function CoAuthorPicker({
       ? [...matches, typed]
       : matches;
   const activeIndex = Math.min(active, Math.max(options.length - 1, 0));
+
+  // Measured before paint, so the popover never flashes at its unplaced position.
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place, authors, options.length, loadError]);
   const pick = (person: SignatureInput) => {
     onPick(person);
     close();
@@ -102,13 +146,23 @@ export function CoAuthorPicker({
           setActive(0);
           setAuthors(null);
           setLoadError(false);
+          setPlacement(null);
           setOpen(true);
         }}
       >
         Add co-author
       </button>
       {open && (
-        <div className={styles.popover}>
+        <div
+          ref={popoverRef}
+          className={styles.popover}
+          data-side={placement?.side}
+          style={
+            placement === null
+              ? { visibility: "hidden" }
+              : { top: placement.top, left: placement.left, maxHeight: placement.maxHeight }
+          }
+        >
           <input
             type="text"
             aria-label="Filter authors"
