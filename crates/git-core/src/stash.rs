@@ -30,6 +30,10 @@ pub enum StashError {
     /// untracked files when they are left out). git refuses this too.
     #[error("Can't stash '{path}': it was {was} and is now a directory. Commit or move its contents first.")]
     DirectoryReplacedNonDirectory { path: String, was: &'static str },
+    /// A folder on the way to a selected tracked path was replaced by the file `parent`: the
+    /// revert couldn't put the folder back (#154).
+    #[error("Can't stash '{path}': '{parent}' is now a file, not a folder. Move or delete '{parent}' first.")]
+    FolderIsNowAFile { path: String, parent: String },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
     #[error("{0}")]
@@ -283,6 +287,16 @@ fn save_path_limited_stash(
             path: path.clone(),
             was,
         });
+    }
+    // The mirror case: `d/f` is tracked but `d` is now a file. The revert can't restore `d/f`
+    // without deleting `d`; refuse before anything is recorded.
+    for path in &tracked {
+        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(&workdir, path)? {
+            return Err(StashError::FolderIsNowAFile {
+                path: path.clone(),
+                parent,
+            });
+        }
     }
     // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
     // possibly outside the repository. Refuse before anything is written, like git does.
