@@ -40,6 +40,10 @@ pub enum StageError {
     /// A folder on the way to `path` was replaced by the (untracked) file `parent` (#154).
     #[error("Couldn't discard '{path}': '{parent}' is now a file, not a folder. Discard or move '{parent}' first.")]
     FolderIsNowAFile { path: String, parent: String },
+    /// A tracked file that is now a folder holding `inner`, which the discard would delete and
+    /// Undo's snapshot can't hold (an ignored file, a nested repository) (#154).
+    #[error("Couldn't discard '{path}': it is now a folder holding '{inner}', which Undo can't bring back. Move it first.")]
+    FolderHoldsUnrestorable { path: String, inner: String },
     /// "Discard all" went through every listed path but some couldn't be discarded.
     #[error("{message}")]
     DiscardIncomplete {
@@ -88,6 +92,15 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     }
     let full = workdir.join(rel);
     if let Ok(meta) = full.symlink_metadata() {
+        if meta.is_dir() && folder_replaced_a_file(repo, &index, rel)? {
+            // A folder where HEAD or the index has a file or link: git sees that file deleted.
+            // Its deletion is what stages here; the folder's files stage on their own (#157).
+            if index.get_path(rel, 0).is_some() {
+                index.remove_path(rel)?;
+                index.write()?;
+            }
+            return Ok(());
+        }
         if meta.file_type().is_symlink() {
             // A link that replaced a tracked folder takes the folder's place, like `git add`.
             index.remove_dir(rel, 0)?;
@@ -98,6 +111,24 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     }
     index.write()?;
     Ok(())
+}
+
+/// True when HEAD or the index has a file or link (not a folder, not a submodule) at `rel`.
+fn folder_replaced_a_file(
+    repo: &git2::Repository,
+    index: &git2::Index,
+    rel: &Path,
+) -> Result<bool, StageError> {
+    const GITLINK: u32 = 0o160000;
+    if let Some(entry) = index.get_path(rel, 0) {
+        return Ok(entry.mode != GITLINK);
+    }
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) else {
+        return Ok(false);
+    };
+    Ok(head
+        .get_path(rel)
+        .is_ok_and(|entry| entry.kind() == Some(git2::ObjectType::Blob)))
 }
 
 fn has_conflict_entries(index: &git2::Index, path: &str) -> bool {
@@ -144,7 +175,10 @@ pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(
 }
 
 /// Throws away the unstaged changes of one file; staged changes are kept. Untracked files are
-/// deleted. Folders (for example an untracked nested repository) are never removed.
+/// deleted. Folders (for example an untracked nested repository) are never removed. A tracked
+/// file that is now a folder is restored and the folder's untracked files deleted, as `git
+/// restore` does (Undo brings them back); a folder that holds anything Undo can't bring back
+/// (an ignored file, a nested repository) is refused instead (#154).
 pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
@@ -158,6 +192,12 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
             return Err(StageError::FolderIsNowAFile {
                 path: path.to_string(),
                 parent,
+            });
+        }
+        if let Some(inner) = unrestorable_inside(repo, workdir, path)? {
+            return Err(StageError::FolderHoldsUnrestorable {
+                path: path.to_string(),
+                inner,
             });
         }
         // A forced checkout writes through a symlink that replaced the file (#114).
@@ -180,6 +220,40 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         }
     }
     Ok(())
+}
+
+/// When `path` is now a real folder: the first thing in it that Undo's snapshot leaves out (an
+/// ignored file or folder, a nested repository reported as `dir/`), which a forced checkout of
+/// `path` would delete for good.
+fn unrestorable_inside(
+    repo: &git2::Repository,
+    workdir: &Path,
+    path: &str,
+) -> Result<Option<String>, StageError> {
+    let is_folder = workdir
+        .join(path)
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.is_dir());
+    if !is_folder {
+        return Ok(None);
+    }
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(true)
+        .recurse_ignored_dirs(true)
+        .exclude_submodules(true)
+        .disable_pathspec_match(true)
+        .pathspec(format!("{path}/"));
+    let below = format!("{path}/");
+    let statuses = repo.statuses(Some(&mut options))?;
+    let found = statuses.iter().find_map(|entry| {
+        let inner = entry.path().ok()?;
+        let unrestorable = entry.status().contains(git2::Status::IGNORED) || inner.ends_with('/');
+        (unrestorable && inner.starts_with(&below)).then(|| inner.to_string())
+    });
+    Ok(found)
 }
 
 /// At most this many paths are named in a `DiscardIncomplete` message.
@@ -206,7 +280,7 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     drop(index);
     let mut failed = Vec::new();
     let mut any_folder = false;
-    let mut in_the_way = None;
+    let mut reason = None;
     for path in untracked.into_iter().chain(tracked) {
         match discard_file(repo, path) {
             Ok(()) => {}
@@ -215,7 +289,13 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
                 failed.push(path.clone());
             }
             Err(StageError::FolderIsNowAFile { parent, .. }) => {
-                in_the_way = Some(parent);
+                reason = Some(format!(" '{parent}' is now a file, not a folder."));
+                failed.push(path.clone());
+            }
+            Err(StageError::FolderHoldsUnrestorable { inner, .. }) => {
+                reason = Some(format!(
+                    " It is now a folder holding '{inner}', which Undo can't bring back."
+                ));
                 failed.push(path.clone());
             }
             Err(_) => failed.push(path.clone()),
@@ -234,9 +314,9 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     if any_folder {
         message.push_str(" Folders (for example nested repositories) are never discarded.");
     }
-    // A single failure names its reason when it is a file in a folder's place (#154).
-    if let (1, Some(parent)) = (count, in_the_way) {
-        message.push_str(&format!(" '{parent}' is now a file, not a folder."));
+    // A single failure names its reason when it is a folder/file swap (#154).
+    if let (1, Some(reason)) = (count, reason) {
+        message.push_str(&reason);
     }
     Err(StageError::DiscardIncomplete { failed, message })
 }
@@ -278,41 +358,51 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
 
 /// Puts `path`'s index entry back to HEAD's. Inside a folder/link pair (a folder replaced by a
 /// link or file, or the reverse) the pair is the unit: git's index can't hold half of it, so
-/// unstaging any member restores HEAD's entries for the whole pair (#157).
+/// unstaging any member, the root included, restores HEAD's entries for the whole pair (#157).
+/// A staged rename unstages with its source (#137), except a source inside another staged pair:
+/// its deletion belongs to that pair, which stays staged (as `git restore --staged` leaves it).
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let target = head_commit.as_ref().map(|c| c.as_object());
     let head_tree = head_commit.as_ref().map(|c| c.tree()).transpose()?;
     let mut index = repo.index()?;
-    let Some(root) = pair_root(&index, head_tree.as_ref(), path) else {
-        // A staged rename unstages as a whole: resetting only the new path would leave the old
-        // one staged as deleted (#137).
-        let mut paths = vec![path.to_string()];
-        paths.extend(staged_rename_sources(repo, |new| new == path)?);
-        repo.reset_default(target, paths.iter())?;
-        return Ok(());
-    };
-    // Renames into the pair unstage with it (#137), whichever member was clicked.
-    let below = format!("{root}/");
-    let mut paths = vec![root.clone()];
-    paths.extend(staged_rename_sources(repo, |new| {
-        new == root || new.starts_with(&below)
-    })?);
-    // libgit2 can't reset a root whose index entries sit on the other side of the file/folder
-    // swap (re-adding `l` silently drops `l/a`, then "index does not contain l/a"), so the
-    // pair's entries go first and the reset only adds HEAD's back.
-    let _ = index.remove_path(Path::new(&root));
-    index.remove_dir(Path::new(&root), 0)?;
-    index.write()?;
+    let root = pair_root(&index, head_tree.as_ref(), path)?;
+    let unit = root.clone().unwrap_or_else(|| path.to_string());
+    let below = format!("{unit}/");
+    let in_unit = |new: &str| new == unit || (root.is_some() && new.starts_with(&below));
+    let mut paths = vec![unit.clone()];
+    for source in staged_rename_sources(repo, in_unit)? {
+        let inside_unit = source == unit || source.starts_with(&below);
+        if !inside_unit && pair_root(&index, head_tree.as_ref(), &source)?.is_none() {
+            paths.push(source);
+        }
+    }
+    if root.is_some() {
+        // libgit2 can't reset a root whose index entries sit on the other side of the
+        // file/folder swap (re-adding `l` silently drops `l/a`, then "index does not contain
+        // l/a"), so the pair's entries go first and the reset only adds HEAD's back.
+        let _ = index.remove_path(Path::new(&unit));
+        index.remove_dir(Path::new(&unit), 0)?;
+        index.write()?;
+    }
     repo.reset_default(target, paths.iter())?;
     Ok(())
 }
 
-/// The outermost proper ancestor `a` of `path` that is a non-folder in the index (a staged link
-/// or file that replaced the folder) or in HEAD (a folder that replaced a committed link or
-/// file, with `a/…` staged): the root of the folder/link pair `path` belongs to. Resetting `a`
-/// restores HEAD's entries at and below it and drops index-only ones below it.
-fn pair_root(index: &git2::Index, head_tree: Option<&git2::Tree>, path: &str) -> Option<String> {
+/// The root of the folder/link pair `path` belongs to, if any: the outermost of `path`'s proper
+/// ancestors that is a non-folder in the index (a staged link or file that replaced the folder)
+/// or in HEAD (a folder that replaced a committed link or file, with `a/…` staged), or else
+/// `path` itself when it is a non-folder on one side and a folder on the other (HEAD's file or
+/// link with entries below it in the index, or the index's link or file over HEAD's folder).
+/// Resetting the root restores HEAD's entries at and below it.
+fn pair_root(
+    index: &git2::Index,
+    head_tree: Option<&git2::Tree>,
+    path: &str,
+) -> Result<Option<String>, StageError> {
+    let head_kind = |p: &str| {
+        head_tree.and_then(|tree| tree.get_path(Path::new(p)).ok().map(|entry| entry.kind()))
+    };
     let mut ancestor = String::new();
     let components: Vec<&str> = path.split('/').collect();
     for component in &components[..components.len().saturating_sub(1)] {
@@ -321,15 +411,32 @@ fn pair_root(index: &git2::Index, head_tree: Option<&git2::Tree>, path: &str) ->
         }
         ancestor.push_str(component);
         let in_index = index.get_path(Path::new(&ancestor), 0).is_some();
-        let in_head = head_tree.is_some_and(|tree| {
-            tree.get_path(Path::new(&ancestor))
-                .is_ok_and(|entry| entry.kind() != Some(git2::ObjectType::Tree))
-        });
+        let in_head = head_kind(&ancestor).is_some_and(|kind| kind != Some(git2::ObjectType::Tree));
         if in_index || in_head {
-            return Some(ancestor);
+            return Ok(Some(ancestor));
         }
     }
-    None
+    let index_file = index.get_path(Path::new(path), 0).is_some();
+    let index_folder = index_has_entries_below(index, path)?;
+    let head = head_kind(path);
+    let head_file = head.is_some_and(|kind| kind != Some(git2::ObjectType::Tree));
+    let head_folder = head == Some(Some(git2::ObjectType::Tree));
+    if (head_file && index_folder) || (index_file && head_folder) {
+        return Ok(Some(path.to_string()));
+    }
+    Ok(None)
+}
+
+/// True when the index has a (stage-0 or conflict) entry below the folder `path`.
+fn index_has_entries_below(index: &git2::Index, path: &str) -> Result<bool, StageError> {
+    let prefix = format!("{path}/");
+    match index.find_prefix(Path::new(&prefix)) {
+        Ok(position) => Ok(index
+            .get(position)
+            .is_some_and(|entry| entry.path.starts_with(prefix.as_bytes()))),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// The old paths of the staged renames whose new path `matches`.

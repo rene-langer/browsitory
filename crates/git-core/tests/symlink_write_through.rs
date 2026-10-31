@@ -1697,6 +1697,150 @@ fn unstaging_a_rename_into_a_folder_that_replaced_a_committed_link_restores_its_
         .is_some());
 }
 
+/// HEAD has a link `l` (and `z.txt`, which sorts after it); the work tree has a folder `l/a`.
+fn folder_over_committed_link() -> (TempDir, Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "z.txt", "z\n");
+    std::os::unix::fs::symlink("x", dir.path().join("l")).unwrap();
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    common::write_file(dir.path(), "l/a", "a\n");
+    (dir, repo)
+}
+
+/// HEAD has a file `d` (and `z.txt`); the work tree has a folder `d/u`.
+fn folder_over_committed_file() -> (TempDir, Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::write_file(dir.path(), "z.txt", "z\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "u\n");
+    (dir, repo)
+}
+
+fn staged_paths(repo: &Repository) -> Vec<String> {
+    git_core::status::status(repo)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.staged)
+        .map(|entry| entry.path)
+        .collect()
+}
+
+fn unstaged_paths(repo: &Repository) -> Vec<String> {
+    git_core::status::status(repo)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| !entry.staged)
+        .map(|entry| entry.path)
+        .collect()
+}
+
+/// #157 M1: the clicked path is the root itself (`l`, a link in HEAD, with `l/a` staged).
+#[test]
+fn unstaging_the_root_of_a_folder_that_replaced_a_committed_link_restores_the_link() {
+    let (_dir, repo) = folder_over_committed_link();
+    git_core::stage::stage_file(&repo, "l/a").unwrap();
+
+    git_core::stage::unstage_file(&repo, "l").unwrap();
+
+    assert_eq!(entries_under(&repo, "l"), [("l".to_string(), 0o120000)]);
+    assert_eq!(
+        entries_under(&repo, "z.txt"),
+        [("z.txt".to_string(), 0o100644)]
+    );
+}
+
+#[test]
+fn unstaging_the_root_of_a_folder_that_replaced_a_committed_file_restores_the_file() {
+    let (_dir, repo) = folder_over_committed_file();
+    git_core::stage::stage_file(&repo, "d/u").unwrap();
+
+    git_core::stage::unstage_file(&repo, "d").unwrap();
+
+    assert_eq!(entries_under(&repo, "d"), [("d".to_string(), 0o100644)]);
+}
+
+/// Stage all, then Unstage all, both in status order, over a folder that replaced a committed
+/// link or file (#157 M1, m1).
+#[test]
+fn stage_all_then_unstage_all_over_a_folder_that_replaced_a_committed_link_or_file() {
+    for (fixture, root, mode) in [
+        (
+            folder_over_committed_link as fn() -> (TempDir, Repository),
+            "l",
+            0o120000,
+        ),
+        (folder_over_committed_file, "d", 0o100644),
+    ] {
+        let (_dir, repo) = fixture();
+        let leaf = format!("{root}/{}", if root == "l" { "a" } else { "u" });
+        for path in unstaged_paths(&repo) {
+            git_core::stage::stage_file(&repo, &path).unwrap();
+        }
+        assert_eq!(entries_under(&repo, root), [(leaf.clone(), 0o100644)]);
+        assert!(
+            unstaged_paths(&repo).is_empty(),
+            "{:?}",
+            unstaged_paths(&repo)
+        );
+
+        for path in staged_paths(&repo) {
+            git_core::stage::unstage_file(&repo, &path).unwrap();
+        }
+        assert_eq!(entries_under(&repo, root), [(root.to_string(), mode)]);
+        assert!(staged_paths(&repo).is_empty(), "{:?}", staged_paths(&repo));
+    }
+}
+
+/// m1: Stage all in reverse status order still stages both halves.
+#[test]
+fn staging_the_root_after_its_folders_file_is_a_no_op() {
+    let (_dir, repo) = folder_over_committed_link();
+    git_core::stage::stage_file(&repo, "l/a").unwrap();
+
+    git_core::stage::stage_file(&repo, "l").unwrap();
+
+    assert_eq!(entries_under(&repo, "l"), [("l/a".to_string(), 0o100644)]);
+}
+
+/// M2: a rename whose source is inside a staged folder/link pair. Unstaging the rename's new
+/// path leaves the pair staged (its source's deletion belongs to the pair), like
+/// `git restore --staged e.txt`.
+#[test]
+fn unstaging_a_rename_out_of_a_staged_link_pair_leaves_the_pair_staged() {
+    let f = fx();
+    f.commit(
+        &[
+            ("d/f", "moved content\nline 2\nline 3\nline 4\n"),
+            ("d/g", "g\n"),
+        ],
+        "content",
+    );
+    common::write_file(f.path(), "e.txt", "moved content\nline 2\nline 3\nline 4\n");
+    f.link_ancestor();
+    for path in unstaged_paths(&f.repo) {
+        git_core::stage::stage_file(&f.repo, &path).unwrap();
+    }
+    let renamed = git_core::status::status(&f.repo)
+        .unwrap()
+        .into_iter()
+        .any(|e| {
+            e.staged
+                && e.kind == git_core::status::StatusKind::Renamed
+                && e.path == "e.txt"
+                && e.old_path.as_deref() == Some("d/f")
+        });
+    assert!(renamed, "fixture: e.txt must be a staged rename of d/f");
+
+    git_core::stage::unstage_file(&f.repo, "e.txt").unwrap();
+
+    assert_eq!(entries_under(&f.repo, "d"), [("d".to_string(), 0o120000)]);
+    assert!(entries_under(&f.repo, "e.txt").is_empty());
+    f.untouched();
+}
+
 #[test]
 fn stage_file_of_the_linked_folder_itself_replaces_its_entries() {
     let f = fx();

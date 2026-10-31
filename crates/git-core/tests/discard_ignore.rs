@@ -565,3 +565,63 @@ fn discard_all_with_a_folder_that_replaced_a_file_restores_the_file() {
 
     assert_eq!(read(dir.path(), "d"), "file\n");
 }
+
+/// #154 m2: a tracked file `d` that is now a folder holding something Undo's snapshot leaves out
+/// (an ignored file, a nested repository) is not discarded: that would delete it for good.
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_an_ignored_file_is_refused() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "*.log\n");
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+    common::write_file(dir.path(), "d/x.log", "ignored\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd': it is now a folder holding 'd/x.log', which Undo can't bring back. Move it first."
+    );
+    assert_eq!(read(dir.path(), "d/x.log"), "ignored\n");
+    assert_eq!(read(dir.path(), "d/u"), "untracked\n");
+
+    let err = discard_all_unstaged(&repo, &["d".into()]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 1 file: d. It is now a folder holding 'd/x.log', which Undo can't bring back."
+    );
+}
+
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_a_nested_repository_is_refused() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    std::fs::create_dir(dir.path().join("d")).unwrap();
+    git2::Repository::init(dir.path().join("d/nested")).unwrap();
+    common::write_file(dir.path(), "d/nested/n.txt", "n\n");
+
+    let err = discard_file(&repo, "d").unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "Couldn't discard 'd': it is now a folder holding 'd/nested/', which Undo can't bring back. Move it first."
+    );
+    assert!(dir.path().join("d/nested/.git").exists());
+}
+
+#[test]
+fn discarding_a_file_that_is_now_a_folder_with_only_untracked_files_restores_it() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+
+    discard_file(&repo, "d").unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "file\n");
+}
