@@ -283,15 +283,27 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let target = head_commit.as_ref().map(|c| c.as_object());
     let head_tree = head_commit.as_ref().map(|c| c.tree()).transpose()?;
-    let path =
-        pair_root(&repo.index()?, head_tree.as_ref(), path).unwrap_or_else(|| path.to_string());
-    let path = path.as_str();
-    // A staged rename unstages as a whole: resetting only the new path would leave the old one
-    // staged as deleted (#137).
-    let mut paths = vec![path.to_string()];
-    if let Some(old) = staged_rename_source(repo, path)? {
-        paths.push(old);
-    }
+    let mut index = repo.index()?;
+    let Some(root) = pair_root(&index, head_tree.as_ref(), path) else {
+        // A staged rename unstages as a whole: resetting only the new path would leave the old
+        // one staged as deleted (#137).
+        let mut paths = vec![path.to_string()];
+        paths.extend(staged_rename_sources(repo, |new| new == path)?);
+        repo.reset_default(target, paths.iter())?;
+        return Ok(());
+    };
+    // Renames into the pair unstage with it (#137), whichever member was clicked.
+    let below = format!("{root}/");
+    let mut paths = vec![root.clone()];
+    paths.extend(staged_rename_sources(repo, |new| {
+        new == root || new.starts_with(&below)
+    })?);
+    // libgit2 can't reset a root whose index entries sit on the other side of the file/folder
+    // swap (re-adding `l` silently drops `l/a`, then "index does not contain l/a"), so the
+    // pair's entries go first and the reset only adds HEAD's back.
+    let _ = index.remove_path(Path::new(&root));
+    index.remove_dir(Path::new(&root), 0)?;
+    index.write()?;
     repo.reset_default(target, paths.iter())?;
     Ok(())
 }
@@ -320,15 +332,19 @@ fn pair_root(index: &git2::Index, head_tree: Option<&git2::Tree>, path: &str) ->
     None
 }
 
-/// The old path of the staged rename whose new path is `path`, if any.
-fn staged_rename_source(repo: &git2::Repository, path: &str) -> Result<Option<String>, StageError> {
+/// The old paths of the staged renames whose new path `matches`.
+fn staged_rename_sources(
+    repo: &git2::Repository,
+    matches: impl Fn(&str) -> bool,
+) -> Result<Vec<String>, StageError> {
     let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
     Ok(entries
         .into_iter()
-        .find(|entry| {
-            entry.staged && entry.kind == crate::status::StatusKind::Renamed && entry.path == path
+        .filter(|entry| {
+            entry.staged && entry.kind == crate::status::StatusKind::Renamed && matches(&entry.path)
         })
-        .and_then(|entry| entry.old_path))
+        .filter_map(|entry| entry.old_path)
+        .collect())
 }
 
 /// Stages one whole hunk of the index→workdir diff, identified by the `(old_start, new_start)`

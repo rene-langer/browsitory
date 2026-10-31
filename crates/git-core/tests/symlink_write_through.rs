@@ -1627,6 +1627,76 @@ fn unstaging_a_file_in_a_folder_that_replaced_a_committed_link_restores_the_link
     assert_eq!(entries_under(&repo, "l"), [("l".to_string(), 0o120000)]);
 }
 
+/// The root sorts before a sibling (`z.txt`): libgit2's reset of the root alone fails with
+/// "index does not contain l/a" (review finding).
+#[test]
+fn unstaging_a_file_in_a_folder_that_replaced_a_committed_link_with_a_later_sibling() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "z.txt", "z\n");
+    std::os::unix::fs::symlink("x", dir.path().join("l")).unwrap();
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    common::write_file(dir.path(), "l/a", "a\n");
+    git_core::stage::stage_file(&repo, "l/a").unwrap();
+
+    git_core::stage::unstage_file(&repo, "l/a").unwrap();
+
+    assert_eq!(entries_under(&repo, "l"), [("l".to_string(), 0o120000)]);
+    assert!(repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new("z.txt"), 0)
+        .is_some());
+}
+
+#[test]
+fn unstaging_a_file_in_a_nested_folder_that_replaced_a_committed_file() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a/b", "b\n");
+    common::write_file(dir.path(), "a/c", "c\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("a/b")).unwrap();
+    common::write_file(dir.path(), "a/b/c", "inner\n");
+    git_core::stage::stage_file(&repo, "a/b/c").unwrap();
+    assert_eq!(
+        entries_under(&repo, "a/b"),
+        [("a/b/c".to_string(), 0o100644)]
+    );
+
+    git_core::stage::unstage_file(&repo, "a/b/c").unwrap();
+
+    assert_eq!(entries_under(&repo, "a/b"), [("a/b".to_string(), 0o100644)]);
+    assert_eq!(entries_under(&repo, "a/c"), [("a/c".to_string(), 0o100644)]);
+}
+
+/// A staged rename into the pair unstages its source too (#137 inside #157).
+#[test]
+fn unstaging_a_rename_into_a_folder_that_replaced_a_committed_link_restores_its_source() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "old.txt", "moved content\nline 2\nline 3\n");
+    std::os::unix::fs::symlink("x", dir.path().join("l")).unwrap();
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("l")).unwrap();
+    std::fs::create_dir(dir.path().join("l")).unwrap();
+    std::fs::rename(dir.path().join("old.txt"), dir.path().join("l/f")).unwrap();
+    git_core::stage::stage_file(&repo, "old.txt").unwrap();
+    git_core::stage::stage_file(&repo, "l/f").unwrap();
+    let renamed = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .any(|e| e.staged && e.kind == git_core::status::StatusKind::Renamed && e.path == "l/f");
+    assert!(renamed, "fixture: l/f must show as a staged rename");
+
+    git_core::stage::unstage_file(&repo, "l/f").unwrap();
+
+    assert_eq!(entries_under(&repo, "l"), [("l".to_string(), 0o120000)]);
+    assert!(repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new("old.txt"), 0)
+        .is_some());
+}
+
 #[test]
 fn stage_file_of_the_linked_folder_itself_replaces_its_entries() {
     let f = fx();

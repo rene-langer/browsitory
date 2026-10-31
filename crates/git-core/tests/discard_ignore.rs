@@ -551,3 +551,17 @@ fn discarding_a_file_whose_folder_is_now_a_link_still_says_beyond_a_symbolic_lin
     );
     common::assert_outside_untouched(outside.path());
 }
+
+/// #154 case A through Discard all: a file `d` that is now a folder with untracked `d/u`.
+#[test]
+fn discard_all_with_a_folder_that_replaced_a_file_restores_the_file() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "d", "file\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    common::write_file(dir.path(), "d/u", "untracked\n");
+
+    discard_all_unstaged(&repo, &["d".into(), "d/u".into()]).unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "file\n");
+}
