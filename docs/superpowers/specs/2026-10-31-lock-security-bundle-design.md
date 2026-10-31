@@ -165,7 +165,7 @@ for symmetry). A panicking holder unwinds through `Drop` too. The module docs sa
 
 ### 2. #175: a short wait after a timeout (D2-A)
 
-`CONTENDED_WAIT` = 1 s (100 ms under `cfg(test)`) replaces `Duration::ZERO` for `contended`.
+`CONTENDED_WAIT` = 1 s (300 ms under `cfg(test)`; 100 ms flaked on macOS CI) replaces `Duration::ZERO` for `contended`.
 `LOCK_WAIT` under `cfg(test)` goes from 300 ms to 1 s, so the timing tests have a margin of
 900 ms instead of 200 ms. A long holder in the other window (a pull, a pinentry prompt) still
 costs one 10 s wait, then 1 s per locked command until the lock is taken.

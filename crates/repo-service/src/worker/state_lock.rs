@@ -35,7 +35,7 @@ pub(super) const LOCK_WAIT: Duration = Duration::from_secs(1);
 #[cfg(not(test))]
 pub(super) const CONTENDED_WAIT: Duration = Duration::from_secs(1);
 #[cfg(test)]
-pub(super) const CONTENDED_WAIT: Duration = Duration::from_millis(100);
+pub(super) const CONTENDED_WAIT: Duration = Duration::from_millis(300);
 
 /// `<gitdir>/browsitory/state.lock`. `repo.path()` is per worktree, so each linked worktree has
 /// its own lock, as it has its own `undo.json`.

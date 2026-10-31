@@ -163,7 +163,7 @@ Reconciled with the code at 5ae3d42e on 2026-10-31:
   - assert `get_undo_state().undo == Some("Stage b.txt")`. Today it is `None`: it tried once
     and ran unrecorded.
 - [ ] **Implement:**
-  - `state_lock.rs`: `pub(super) const CONTENDED_WAIT` = 1 s (`cfg(test)`: 100 ms); `LOCK_WAIT`
+  - `state_lock.rs`: `pub(super) const CONTENDED_WAIT` = 1 s (`cfg(test)`: 300 ms); `LOCK_WAIT`
     under `cfg(test)` 300 ms → 1 s.
   - `mod.rs` l. 817–831: `contended` selects `CONTENDED_WAIT` instead of `Duration::ZERO`;
     update the comment.
