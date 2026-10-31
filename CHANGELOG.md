@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Hooks bundle
 
-- Merging a branch now runs the pre-merge-commit hook (skipped by Skip hooks and "Commit without hooks") when you commit a merge that had no conflicts, and post-merge runs after that commit instead of when the merge is staged. A merge that had conflicts runs the commit hooks, as in git (#124).
+- Merging a branch now runs the pre-merge-commit hook (skipped by Skip hooks and "Commit without hooks") instead of pre-commit when you commit a merge that had no conflicts, and that commit no longer runs post-commit, as with git merge; post-merge runs after that commit instead of when the merge is staged. A merge that had conflicts runs the commit hooks (including post-commit), as in git (#124).
 - Fixed: post-merge ran when a merge without conflicts was only staged, before its merge commit existed; it now runs after that commit, as in git (#124).
 - Continue on a paused multi-commit cherry-pick or revert runs pre-commit, prepare-commit-msg, commit-msg and post-commit for the step it commits, so a Gerrit Change-Id hook works. A failing hook keeps the step paused and offers "Continue without hooks", and a running hook shows on the panel with Cancel (#133).
 - Fixed: started from a terminal, a hook (or signing program) that reads the terminal no longer hangs until Cancel or the time limit; it fails at once, as when Browsitory is started from the desktop (#126).
