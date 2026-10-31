@@ -1104,6 +1104,30 @@ describe("App", () => {
       });
     }
 
+    // #146: the menu the palette opens must hand focus to the commit list, so the dialog it opens
+    // returns there on Cancel (not to whatever was focused before the palette).
+    it("the palette's Reset to… returns focus to the commit list after the dialog closes", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        render(<App client={pickClient({})} />);
+        fireEvent.click((await screen.findByText(/c1 one/)).closest("li")!);
+        screen.getByRole("tab", { name: "a" }).focus();
+
+        fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+        fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+          target: { value: "Reset to c1" },
+        });
+        fireEvent.click(await screen.findByRole("option", { name: "Reset to c1…" }));
+        fireEvent.click(await screen.findByRole("menuitem", { name: "Reset main to here…" }));
+        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+        await waitFor(() => expect(screen.getByRole("listbox", { name: "Commit history" })).toHaveFocus());
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
     it("says Cherry-picked only when the pick committed (#107)", async () => {
       const cherryPick = vi
         .fn<RepoClient["cherryPick"]>()
