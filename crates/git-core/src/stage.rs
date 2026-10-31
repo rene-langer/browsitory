@@ -276,9 +276,16 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     Ok(())
 }
 
+/// Puts `path`'s index entry back to HEAD's. Inside a folder/link pair (a folder replaced by a
+/// link or file, or the reverse) the pair is the unit: git's index can't hold half of it, so
+/// unstaging any member restores HEAD's entries for the whole pair (#157).
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let target = head_commit.as_ref().map(|c| c.as_object());
+    let head_tree = head_commit.as_ref().map(|c| c.tree()).transpose()?;
+    let path =
+        pair_root(&repo.index()?, head_tree.as_ref(), path).unwrap_or_else(|| path.to_string());
+    let path = path.as_str();
     // A staged rename unstages as a whole: resetting only the new path would leave the old one
     // staged as deleted (#137).
     let mut paths = vec![path.to_string()];
@@ -287,6 +294,30 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     }
     repo.reset_default(target, paths.iter())?;
     Ok(())
+}
+
+/// The outermost proper ancestor `a` of `path` that is a non-folder in the index (a staged link
+/// or file that replaced the folder) or in HEAD (a folder that replaced a committed link or
+/// file, with `a/…` staged): the root of the folder/link pair `path` belongs to. Resetting `a`
+/// restores HEAD's entries at and below it and drops index-only ones below it.
+fn pair_root(index: &git2::Index, head_tree: Option<&git2::Tree>, path: &str) -> Option<String> {
+    let mut ancestor = String::new();
+    let components: Vec<&str> = path.split('/').collect();
+    for component in &components[..components.len().saturating_sub(1)] {
+        if !ancestor.is_empty() {
+            ancestor.push('/');
+        }
+        ancestor.push_str(component);
+        let in_index = index.get_path(Path::new(&ancestor), 0).is_some();
+        let in_head = head_tree.is_some_and(|tree| {
+            tree.get_path(Path::new(&ancestor))
+                .is_ok_and(|entry| entry.kind() != Some(git2::ObjectType::Tree))
+        });
+        if in_index || in_head {
+            return Some(ancestor);
+        }
+    }
+    None
 }
 
 /// The old path of the staged rename whose new path is `path`, if any.
