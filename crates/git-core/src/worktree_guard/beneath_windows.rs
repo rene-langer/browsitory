@@ -23,9 +23,11 @@
 //! write), which must have the same file ID.
 //!
 //! A missing folder is created relative to the held parent's handle (`NtCreateFile` with
-//! `RootDirectory`, see `create_dir_in`), not by path, so a parent turned into a junction in
-//! that instant can't get a folder created in the junction's target (#163). The new folder is
-//! then opened by path and checked like any other component.
+//! `RootDirectory`, see `create_dir_in`), not by path, so on a local NTFS or ReFS volume a
+//! parent turned into a junction in that instant can't get a folder created in the junction's
+//! target (#163). On an SMB share the redirector resolves a relative open by path on the server,
+//! so there this narrows the race but doesn't close it. The new folder is then opened by path
+//! and checked like any other component.
 
 use std::ffi::{c_void, OsString};
 use std::fs::{File, OpenOptions};
@@ -255,8 +257,9 @@ extern "system" {
 }
 
 /// Creates the folder `name` directly in the held folder `parent`, resolved against `parent`'s
-/// handle rather than a path (#163): a parent turned into a junction meanwhile is never
-/// followed. An existing name fails with `ERROR_ALREADY_EXISTS`, as `CreateDirectoryW` does.
+/// handle rather than a path (#163): on a local NTFS/ReFS volume a parent turned into a junction
+/// meanwhile is never followed (an SMB share resolves it by path, see the module docs). Only
+/// `FILE_READ_ATTRIBUTES | SYNCHRONIZE` is asked for: the handle is closed at once. An existing name fails with `ERROR_ALREADY_EXISTS`, as `CreateDirectoryW` does.
 fn create_dir_in(parent: &File, name: &std::ffi::OsStr) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
@@ -291,7 +294,7 @@ fn create_dir_in(parent: &File, name: &std::ffi::OsStr) -> io::Result<()> {
     let status = unsafe {
         NtCreateFile(
             &mut handle,
-            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             &mut attributes,
             &mut io_status,
             std::ptr::null_mut(),
@@ -1055,16 +1058,19 @@ mod tests {
         let outside = TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("d")).unwrap();
         let mut converted = None;
-        let written = write(
-            dir.path(),
-            Path::new("d/e/f"),
-            b"x",
-            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
-        );
+        let mut created = 0;
+        let written = {
+            let mut convert = junction_d_when_opened(dir.path(), outside.path(), &mut converted);
+            write(dir.path(), Path::new("d/e/f"), b"x", &mut |step| {
+                if step == Step::Created(OsStr::new("e")) {
+                    created += 1;
+                }
+                convert(step);
+            })
+        };
         converted
             .expect("the walk never opened d")
             .expect("turning the held folder into a junction");
-        assert!(written.is_err(), "the write went through: {written:?}");
         let left: Vec<_> = std::fs::read_dir(outside.path())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -1072,6 +1078,20 @@ mod tests {
         assert!(
             left.is_empty(),
             "created in the junction's target: {left:?}"
+        );
+        // Pins how NTFS treats the relative create (so a change shows up here): `e` is created
+        // once relative to the held handle, i.e. inside the junction folder itself, never in its
+        // target; every reopen by path then follows the junction and misses it, so the walk gives
+        // up as "kept changing".
+        let error = written.expect_err("the write went through");
+        assert_eq!(
+            (created, error.kind(), error.to_string()),
+            (
+                1,
+                io::ErrorKind::Other,
+                "the working tree kept changing while it was being written".to_string()
+            ),
+            "{error:?}"
         );
     }
 

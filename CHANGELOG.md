@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Windows hardening
 
 - Fixed (Windows): a hook that starts a program right away could leave it running after Cancel or the time limit; hooks now start only once they are in their job (#180).
-- Fixed (Windows): undo, redo and discards no longer fail when an antivirus scanner or the search indexer has the file open (#168).
+- Fixed (Windows): undo, redo and discards no longer fail when another program has the file open with delete sharing, as Microsoft Defender and the search indexer do. This needs NTFS or ReFS; FAT/exFAT drives and network shares without POSIX deletes behave as before (#168).
 - Windows: a missing folder is created through the folder Browsitory already holds, so a folder swapped for a junction at that moment can't get an empty folder created outside the repository (#163). Tests cover folders turned into junctions during a write (#164).
 
 ### Test hygiene

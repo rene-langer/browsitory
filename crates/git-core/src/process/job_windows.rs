@@ -12,9 +12,12 @@
 //!   closed when the run ends, and the job object goes away with its last process.
 //! - **No escape before the job (#180):** a hook starts with `CREATE_SUSPENDED`, is assigned to
 //!   its job, and only then resumed ([`resume`], a Toolhelp32 walk over its threads, since std
-//!   doesn't expose the primary thread's handle). So nothing it starts can run outside the job.
-//!   If it can't be resumed it is killed at once rather than left suspended until the time
-//!   limit; if the job can't be created or assigned it is still resumed (see the last point).
+//!   doesn't expose the primary thread's handle). So nothing it starts directly or through its
+//!   descendants can run outside the job. Out of reach: processes started on its behalf by a
+//!   broker (COM/DCOM activation, Task Scheduler, WMI, a service), which belong to the broker's
+//!   tree, and a hook whose job can't be created or assigned (it is still resumed, see the last
+//!   point). A hook that can't be resumed is killed at once rather than left suspended until
+//!   the time limit.
 //! - **Signing programs are not put in a job** (`run_captured_split`): gpg may auto-start
 //!   `gpg-agent` during the call, and a job kill on a signing timeout would take the agent down.
 //! - If creating or assigning the job fails, the run falls back to killing the direct child.
@@ -106,20 +109,40 @@ extern "system" {
     fn ResumeThread(thread: *mut c_void) -> u32;
 }
 
-/// Resumes every thread of a process started with [`CREATE_SUSPENDED`] (std closes the primary
-/// thread's handle, so the threads are found with a Toolhelp32 snapshot). An error when any
-/// thread can't be resumed, or none was found: the caller must not leave the process suspended.
+/// How often `resume` tries to take a thread snapshot (which can fail transiently, e.g. with
+/// `ERROR_BAD_LENGTH` while threads come and go) before giving up.
+const SNAPSHOT_ATTEMPTS: usize = 3;
+
+/// A Toolhelp32 snapshot of every thread in the system, retried a few times.
+fn thread_snapshot() -> std::io::Result<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    let mut attempt = 1;
+    loop {
+        // SAFETY: plain call; the result is checked before use.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if !snapshot.is_null() && snapshot != (-1isize) as *mut c_void {
+            // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
+            return Ok(unsafe { OwnedHandle::from_raw_handle(snapshot) });
+        }
+        let error = std::io::Error::last_os_error();
+        if attempt == SNAPSHOT_ATTEMPTS {
+            return Err(error);
+        }
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Resumes the threads of a process started with [`CREATE_SUSPENDED`] (std closes the primary
+/// thread's handle, so the threads are found with a Toolhelp32 snapshot). A thread that can't be
+/// opened or resumed is skipped; an error only when no thread at all was resumed, so the caller
+/// never leaves the process suspended.
 pub(super) fn resume(child: &Child) -> std::io::Result<()> {
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
-    // SAFETY: plain call; the result is checked before use.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    if snapshot.is_null() || snapshot == (-1isize) as *mut c_void {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
-    let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
+    let snapshot = thread_snapshot()?;
     let pid = child.id();
     let mut resumed = 0;
+    let mut last_error = None;
     let mut entry = ThreadEntry32 {
         size: std::mem::size_of::<ThreadEntry32>() as u32,
         ..ThreadEntry32::default()
@@ -132,23 +155,40 @@ pub(super) fn resume(child: &Child) -> std::io::Result<()> {
             // SAFETY: plain call; the result is checked before use.
             let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.thread_id) };
             if thread.is_null() {
-                return Err(std::io::Error::last_os_error());
+                last_error = Some(std::io::Error::last_os_error());
+            } else {
+                // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
+                let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+                // SAFETY: the thread handle is open and has THREAD_SUSPEND_RESUME access.
+                if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+                    last_error = Some(std::io::Error::last_os_error());
+                } else {
+                    resumed += 1;
+                }
             }
-            // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
-            let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
-            // SAFETY: the thread handle is open and has THREAD_SUSPEND_RESUME access.
-            if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
-                return Err(std::io::Error::last_os_error());
-            }
-            resumed += 1;
         }
         // SAFETY: as for `Thread32First`.
         more = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
     }
     if resumed == 0 {
-        return Err(std::io::Error::other("the hook's thread was not found"));
+        return Err(
+            last_error.unwrap_or_else(|| std::io::Error::other("the hook's thread was not found"))
+        );
     }
     Ok(())
+}
+
+/// Kills and reaps a test's child when dropped, so a failing assertion never leaves a suspended
+/// process behind.
+#[cfg(test)]
+pub(super) struct KillOnDrop(pub(super) Child);
+
+#[cfg(test)]
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }
 
 #[cfg(test)]
@@ -182,22 +222,24 @@ mod tests {
 
     #[test]
     fn a_suspended_program_runs_only_after_resume() {
-        let mut child = Command::new("cmd")
-            .args(["/C", "exit", "0"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
-            .spawn()
-            .unwrap();
+        let mut child = KillOnDrop(
+            Command::new("cmd")
+                .args(["/C", "exit", "0"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
+                .spawn()
+                .unwrap(),
+        );
         std::thread::sleep(Duration::from_millis(300));
         assert!(
-            child.try_wait().unwrap().is_none(),
+            child.0.try_wait().unwrap().is_none(),
             "a suspended program ran"
         );
-        resume(&child).unwrap();
+        resume(&child.0).unwrap();
         assert!(
-            exited_within(&mut child, Duration::from_secs(20)),
+            exited_within(&mut child.0, Duration::from_secs(20)),
             "the program never ran after resume"
         );
     }

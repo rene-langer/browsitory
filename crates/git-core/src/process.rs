@@ -1448,26 +1448,28 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         detach(&mut command);
-        let (mut child, job) = spawn_suspended_in_job(&mut command).unwrap();
+        let (child, job) = spawn_suspended_in_job(&mut command).unwrap();
+        // Killed and reaped on drop, so a failing assertion never leaves a suspended cmd.exe.
+        let mut child = job_windows::KillOnDrop(child);
         let job = job.expect("no job");
         let mut in_job = 0;
         // SAFETY: both handles are open (`child` is not yet waited on, `job` is owned here);
         // `in_job` is a writable BOOL.
-        let ok = unsafe { IsProcessInJob(child.as_raw_handle(), job.handle(), &mut in_job) };
+        let ok = unsafe { IsProcessInJob(child.0.as_raw_handle(), job.handle(), &mut in_job) };
         assert_ne!(ok, 0, "{}", std::io::Error::last_os_error());
         assert_ne!(in_job, 0, "the hook is not in its job");
+        // The real regression check: `IsProcessInJob` above would also pass for a hook assigned
+        // right after an unsuspended spawn (the #180 race is too short to lose reliably), but
+        // `cmd /C exit 0` that hasn't exited after 300 ms proves it was still suspended.
         std::thread::sleep(Duration::from_millis(300));
         assert!(
-            child.try_wait().unwrap().is_none(),
+            child.0.try_wait().unwrap().is_none(),
             "the hook ran before it was resumed"
         );
-        job_windows::resume(&child).unwrap();
+        job_windows::resume(&child.0).unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
-        while child.try_wait().unwrap().is_none() {
-            if Instant::now() >= deadline {
-                let _ = kill_and_reap(&mut child, Some(&job));
-                panic!("the hook never ran after resume");
-            }
+        while child.0.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "the hook never ran after resume");
             std::thread::sleep(POLL_INTERVAL);
         }
     }

@@ -455,10 +455,13 @@ sidecar runs each request on its own thread and is unaffected.
   grandchild holds it open (the hook's result is not held up longer than that). Windows runs
   hooks through Git for Windows' `sh.exe`, started with `CREATE_SUSPENDED`, assigned to an
   unnamed job object and only then resumed (`process/job_windows.rs`, hand-written kernel32
-  FFI, #122, #180), so nothing the hook starts can escape the job. std closes the primary
-  thread's handle, so `resume` finds the process's threads with a Toolhelp32 snapshot
-  (`OpenThread` + `ResumeThread`); a hook that can't be resumed is killed at once instead of
-  waiting out the time limit. Timeout/cancel `TerminateJobObject` and then kill the child, so
+  FFI, #122, #180), so nothing the hook starts directly or through its descendants can escape
+  the job. Out of reach: processes a broker starts on the hook's behalf (COM/DCOM activation,
+  Task Scheduler, WMI, a service), which belong to the broker's tree, and the fallback below
+  when the job can't be created or assigned. std closes the primary thread's handle, so
+  `resume` finds the process's threads with a Toolhelp32 snapshot (retried a few times;
+  `OpenThread` + `ResumeThread`, skipping a thread that fails); a hook of which no thread could
+  be resumed is killed at once instead of waiting out the time limit. Timeout/cancel `TerminateJobObject` and then kill the child, so
   programs the hook started die too. There is no `KILL_ON_JOB_CLOSE` (D6-A): a hook that exits
   normally keeps its background processes, as on Unix. If creating or assigning the job fails,
   the hook still runs and only the child is killed.
@@ -555,7 +558,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `FileDispositionInfo` where the file system refuses, as std's `remove_dir_all` does), new
   files are created with `create_new` and deleted again through their handle if misplaced. A
   missing folder is created relative to the held parent's handle (`NtCreateFile` with
-  `RootDirectory`, #163), so a parent turned into a junction in that instant is never followed;
+  `RootDirectory`, #163), so on a local NTFS/ReFS volume a parent turned into a junction in
+  that instant is never followed (on an SMB share the redirector resolves the relative open by
+  path on the server, so there the race is only narrowed);
   tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write,
   a read and a folder creation (#164). Hand-declared `kernel32` and `ntdll` imports, no new
   dependency. A `Step` seam in both walkers makes the races deterministic in tests.
