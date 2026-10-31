@@ -2,8 +2,7 @@ mod common;
 
 use common::{commit_all, init_repo, write_file};
 use git_core::worktree::{
-    create_worktree, create_worktree_checking, list_worktrees, prune_worktrees, remove_worktree,
-    WorktreeError,
+    create_worktree, list_worktrees, prune_worktrees, remove_worktree, WorktreeError,
 };
 
 #[test]
@@ -197,14 +196,22 @@ fn a_collision_is_refused_when_the_destination_folds_case() {
     add_evil_branch(&repo);
     let linked = dir.path().join("evil-tree");
 
-    let error =
-        create_worktree_checking(&repo, "evil-tree", &linked, "evil", None, true).unwrap_err();
+    let error = git_core::worktree::create_worktree_checking(
+        &repo,
+        "evil-tree",
+        &linked,
+        "evil",
+        None,
+        true,
+    )
+    .unwrap_err();
     assert!(matches!(error, WorktreeError::CaseCollision(_)), "{error}");
     assert!(!linked.exists());
     assert!(!repo.path().join("worktrees").join("evil-tree").exists());
 
     // A destination that keeps case apart takes the tree as before.
-    create_worktree_checking(&repo, "evil-tree", &linked, "evil", None, false).unwrap();
+    git_core::worktree::create_worktree_checking(&repo, "evil-tree", &linked, "evil", None, false)
+        .unwrap();
     assert!(linked.join("d").join("x").is_file());
 }
 
