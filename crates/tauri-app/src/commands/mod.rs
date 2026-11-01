@@ -1961,24 +1961,45 @@ impl RepoWorker {
     /// thread (#181). Each queued call used to hold its own thread until the serial worker got
     /// to it: a long hook plus repeated refreshes could fill Tokio's pool (512 threads), and every
     /// other repository's commands then queued behind them. The worker runs one command at a
-    /// time anyway, so the gate costs no concurrency; waiting calls are parked tasks, and Tokio's
-    /// mutex is FIFO, so they keep their order. No `call` closure waits on another command of
-    /// the same repository, so the gate can't deadlock.
+    /// time, so waiting at the gate instead of in its queue loses little; waiting calls are
+    /// parked tasks, and Tokio's mutex is FIFO, so calls keep the order in which they reach the
+    /// gate. Each `call` closure only makes round trips on its own handle and never awaits
+    /// another call, so the gate can't deadlock. Anything that must not wait behind the worker
+    /// goes through `signal()` instead.
+    ///
+    /// The guard moves into the blocking closure: if the caller's future is dropped while the
+    /// round trip runs, the gate stays held until the round trip ends.
     pub(crate) async fn call<T, F>(self, f: F) -> Result<T, String>
     where
         F: FnOnce(&WorkerHandle) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
     {
-        let _turn = self.gate.lock().await;
+        let turn = Arc::clone(&self.gate).lock_owned().await;
         let handle = self.handle;
-        off_runtime(move || f(&handle)).await?
+        off_runtime(move || {
+            let _turn = turn;
+            f(&handle)
+        })
+        .await?
     }
 
-    /// For calls that never wait on the worker's queue (`cancel_transfer`, `cancel_search`):
-    /// they write into state shared with the worker thread and return at once. No gate: a
-    /// cancel must reach the worker while the call it stops holds the gate.
+    /// Ungated access for what never waits on the worker's queue: `cancel_transfer`,
+    /// `cancel_search`, claiming a search generation (`search::queue_search`) and the stored
+    /// work tree path (`tools::workdir_of`). These write into or read state shared with the
+    /// worker thread and return at once, so they must not queue behind the call holding the
+    /// gate (a cancel exists to stop that call).
     pub(crate) fn signal(&self) -> &WorkerHandle {
         &self.handle
+    }
+
+    /// A worker with a gate of its own, so tests can queue calls that each take a blocking
+    /// thread (as before #181) on one worker.
+    #[cfg(test)]
+    fn with_own_gate(handle: WorkerHandle) -> Self {
+        Self {
+            handle,
+            gate: Arc::default(),
+        }
     }
 }
 
@@ -2086,8 +2107,16 @@ mod tests {
                 )
                 .unwrap();
         }
-        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        // A first commit ("base"), made by git2 so no hook runs, gives a search something to find.
+        std::fs::write(dir.path().join("base.txt"), "base").unwrap();
         let mut index = repo.index().unwrap();
+        index.add_path(Path::new("base.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
+            .unwrap();
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
         index.add_path(Path::new("a.txt")).unwrap();
         index.write().unwrap();
         let release = repo.path().join("release");
@@ -2190,12 +2219,13 @@ mod tests {
             started_rx.recv_timeout(std::time::Duration::from_secs(10)),
             Ok(HookEvent::Started { .. })
         ));
+        // Each read gets a gate of its own, so every one of them reaches `off_runtime` and waits
+        // on the worker there: this checks the #125 property, not the #181 gate.
+        let handle = state.workers.lock().unwrap()[&keys[0]].handle();
         let reads: Vec<_> = (0..saturating_count())
             .map(|_| {
                 tauri::async_runtime::spawn(
-                    super::repo_worker(&state, &keys[0])
-                        .unwrap()
-                        .call(|w| w.get_status()),
+                    super::RepoWorker::with_own_gate(handle.clone()).call(|w| w.get_status()),
                 )
             })
             .collect();
@@ -2214,6 +2244,80 @@ mod tests {
             responded,
             "a queued worker call held an async runtime thread"
         );
+    }
+
+    /// Starts a commit whose `pre-commit` hook waits for `release`, and returns once the hook
+    /// runs, i.e. once the commit's call holds the repository's gate.
+    #[cfg(unix)]
+    fn hold_gate_with_hook(
+        state: &super::AppState,
+        key: &str,
+    ) -> tauri::async_runtime::JoinHandle<Result<git_core::commit::CommitOutcome, String>> {
+        let (started_tx, started_rx) = mpsc::channel();
+        let commit = tauri::async_runtime::spawn(
+            super::repo_worker(state, key)
+                .unwrap()
+                .call(move |w| w.commit("msg".into(), false, Vec::new(), started_tx)),
+        );
+        assert!(matches!(
+            started_rx.recv_timeout(std::time::Duration::from_secs(10)),
+            Ok(HookEvent::Started { .. })
+        ));
+        assert!(state.gates.lock().unwrap()[key].try_lock().is_err());
+        commit
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workdir_answers_while_a_hook_holds_the_gate() {
+        let (dir, release) = repo_with_waiting_pre_commit();
+        let (state, keys) = state_with_repos(&[dir.path()]);
+        let commit = hold_gate_with_hook(&state, &keys[0]);
+
+        let (tx, rx) = mpsc::channel();
+        let workdir = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let _ = tx.send(super::tools::workdir_of(&state, &keys[0]));
+            });
+            rx.recv_timeout(std::time::Duration::from_secs(2))
+        });
+
+        std::fs::write(&release, "").unwrap();
+        assert!(tauri::async_runtime::block_on(commit).unwrap().is_ok());
+        let workdir = workdir.expect("workdir waited behind the gate").unwrap();
+        assert_eq!(
+            std::fs::canonicalize(workdir).unwrap(),
+            std::fs::canonicalize(dir.path()).unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_search_waiting_at_the_gate_is_cancelled_before_it_runs() {
+        let (dir, release) = repo_with_waiting_pre_commit();
+        let (state, keys) = state_with_repos(&[dir.path()]);
+        let commit = hold_gate_with_hook(&state, &keys[0]);
+        let search = tauri::async_runtime::spawn(
+            super::search::queue_search(&state, &keys[0], "base".into(), None, None).unwrap(),
+        );
+
+        super::repo_worker(&state, &keys[0])
+            .unwrap()
+            .signal()
+            .cancel_search();
+        std::fs::write(&release, "").unwrap();
+
+        assert!(tauri::async_runtime::block_on(commit).unwrap().is_ok());
+        assert_eq!(
+            tauri::async_runtime::block_on(search).unwrap().unwrap_err(),
+            "Search cancelled."
+        );
+        // A search started after the cancel runs normally.
+        let page = tauri::async_runtime::block_on(
+            super::search::queue_search(&state, &keys[0], "base".into(), None, None).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(page.commits.len(), 1);
     }
 
     #[test]

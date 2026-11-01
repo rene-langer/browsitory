@@ -3584,21 +3584,15 @@ mod tests {
         let handle = worker.handle();
         // Claim a generation the way `search_commits` does, then let a newer search/cancel
         // supersede it before the command is even queued.
-        let stale = handle.search_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let stale = handle.claim_search_generation();
         handle.cancel_search();
-        let (tx, rx) = mpsc::channel();
-        handle
-            .tx
-            .send(Command::SearchCommits {
-                query: "alpha".into(),
-                refs: None,
-                cursor: None,
-                generation: stale,
-                reply: tx,
-            })
-            .unwrap();
 
-        assert_eq!(rx.recv().unwrap().unwrap_err(), "Search cancelled.");
+        assert_eq!(
+            handle
+                .search_commits_claimed(stale, "alpha".into(), None, None)
+                .unwrap_err(),
+            "Search cancelled."
+        );
         // A fresh search after the cancel runs normally.
         assert_eq!(
             handle

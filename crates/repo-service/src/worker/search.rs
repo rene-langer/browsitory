@@ -42,7 +42,27 @@ impl WorkerHandle {
         refs: Option<Vec<String>>,
         cursor: Option<String>,
     ) -> Result<SearchPage, String> {
-        let generation = self.search_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.claim_search_generation();
+        self.search_commits_claimed(generation, query, refs, cursor)
+    }
+
+    /// Claims a new `SearchGeneration`, cancelling any older search, without queueing anything.
+    /// For a caller that waits before it reaches the worker (the desktop app's per-repository
+    /// gate): claiming first keeps that search cancellable by a cancel or a newer search while
+    /// it waits. Pass the result to `search_commits_claimed`.
+    pub fn claim_search_generation(&self) -> u64 {
+        self.search_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Runs one page of a commit search under a generation from `claim_search_generation`. A
+    /// generation superseded since the claim replies `Search cancelled.`.
+    pub fn search_commits_claimed(
+        &self,
+        generation: u64,
+        query: String,
+        refs: Option<Vec<String>>,
+        cursor: Option<String>,
+    ) -> Result<SearchPage, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::SearchCommits {

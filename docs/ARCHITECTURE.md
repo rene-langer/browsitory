@@ -211,10 +211,16 @@ hook plus repeated refreshes on one repository could fill the pool, and every ot
 repository's commands then queued behind it until the hook ended. So `call` first awaits the
 repository's gate (`AppState`'s per-path `tauri::async_runtime::Mutex<()>`, created by
 `repo_worker` on first use and dropped by `close_repo`) and only then takes a blocking thread.
-The worker runs one command at a time anyway, so this costs no concurrency; waiting calls are
-parked tasks, not threads, and Tokio's mutex is FIFO, so they keep their order. Every `call`
-closure is a single worker round trip that never waits on another command of the same
-repository, so nothing can deadlock on the gate. `signal()` takes no gate.
+The guard moves into the blocking closure, so a dropped command future can't release the gate
+while its round trip still runs. The worker runs one command at a time, so waiting at the gate
+instead of in the worker's queue loses little; waiting calls are parked tasks, not threads, and
+Tokio's mutex is FIFO, so calls keep the order in which they reach the gate. Each `call` closure
+only makes round trips on its own handle and never awaits another call, so nothing can deadlock
+on the gate. What must not wait behind the worker goes through the ungated `signal()`:
+`cancel_transfer` and `cancel_search`; the search generation, which `search_commits` claims
+before it waits for the gate (`WorkerHandle::claim_search_generation`), so a cancel or a newer
+search also cancels a search still waiting there; and the stored work tree path
+(`tools::workdir_of`) behind Open in editor, Reveal and Open terminal.
 
 ## Undo stack
 
