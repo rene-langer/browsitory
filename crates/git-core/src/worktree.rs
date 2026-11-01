@@ -17,6 +17,8 @@ pub enum WorktreeError {
     Locked,
     #[error("git operation failed")]
     Git,
+    #[error("Can't create the folder '{}': {reason}", path.display())]
+    CreateFolder { path: PathBuf, reason: String },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -105,7 +107,12 @@ pub fn create_worktree_with(
 ) -> Result<(), WorktreeError> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => return Err(WorktreeError::PathExists),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        // A file where a parent folder should be is named when the parents are created.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) => {}
         Err(_) => return Err(WorktreeError::Git),
     }
     // The worktree may live on another file system than the repository (#162): probed only
@@ -135,14 +142,98 @@ pub fn create_worktree_with(
         &crate::worktree_guard::GuardSource::Tree(&tree),
         None,
     )?;
-    let reference = match existing {
-        Some(branch) => branch.into_reference(),
-        None => repo.branch(branch, &commit, false)?.into_reference(),
+    // Like `git worktree add`, missing parent folders of the destination are created (#200);
+    // libgit2 only creates the last one. Whatever this call creates is removed again when a
+    // later step fails, so a retry with the same name and branch starts clean.
+    let mut created = Vec::new();
+    if let Err(error) = create_parent_folders(path, &mut created) {
+        remove_created_folders(&created);
+        return Err(error);
+    }
+    let admin = single_component(name).map(|name| repo.commondir().join("worktrees").join(name));
+    let admin_existed = admin
+        .as_deref()
+        .is_none_or(|admin| std::fs::symlink_metadata(admin).is_ok());
+    let mut created_branch = false;
+    let added = (|| {
+        let reference = match existing {
+            Some(branch) => branch.into_reference(),
+            None => {
+                let new_branch = repo.branch(branch, &commit, false)?;
+                created_branch = true;
+                new_branch.into_reference()
+            }
+        };
+        let mut options = git2::WorktreeAddOptions::new();
+        options.reference(Some(&reference));
+        repo.worktree(name, path, Some(&options))?;
+        Ok::<(), WorktreeError>(())
+    })();
+    if added.is_err() {
+        // A half-made entry (no `gitdir` file yet) blocks a retry with the same name, and its
+        // HEAD would keep the new branch from being deleted.
+        if let Some(admin) = admin.filter(|_| !admin_existed) {
+            if !admin.join("gitdir").exists() {
+                let _ = std::fs::remove_dir_all(&admin);
+            }
+        }
+        if created_branch {
+            if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
+                let _ = new_branch.delete();
+            }
+        }
+        // libgit2 creates the destination itself; it goes only while still empty.
+        let _ = std::fs::remove_dir(path);
+        remove_created_folders(&created);
+    }
+    added
+}
+
+/// Creates the missing ancestors of `path` below its nearest existing folder, top-down, pushing
+/// each folder made here on `created`.
+fn create_parent_folders(path: &Path, created: &mut Vec<PathBuf>) -> Result<(), WorktreeError> {
+    let (Some(parent), Some(base)) = (path.parent(), crate::worktree_guard::nearest_existing(path))
+    else {
+        return Ok(());
     };
-    let mut options = git2::WorktreeAddOptions::new();
-    options.reference(Some(&reference));
-    repo.worktree(name, path, Some(&options))?;
+    let missing: Vec<&Path> = parent
+        .ancestors()
+        .take_while(|ancestor| *ancestor != base && !ancestor.as_os_str().is_empty())
+        .collect();
+    for folder in missing.into_iter().rev() {
+        match std::fs::create_dir(folder) {
+            Ok(()) => created.push(folder.to_path_buf()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && folder.is_dir() => {}
+            Err(error) => {
+                let reason = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    "a file with that name is in the way.".to_string()
+                } else {
+                    error.to_string()
+                };
+                return Err(WorktreeError::CreateFolder {
+                    path: folder.to_path_buf(),
+                    reason,
+                });
+            }
+        }
+    }
     Ok(())
+}
+
+/// Removes the folders [`create_parent_folders`] made, deepest first, each only while empty.
+fn remove_created_folders(created: &[PathBuf]) {
+    for folder in created.iter().rev() {
+        let _ = std::fs::remove_dir(folder);
+    }
+}
+
+/// `name` when it is one plain path component, so joining it can't leave `worktrees/`.
+fn single_component(name: &str) -> Option<&str> {
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Some(name),
+        _ => None,
+    }
 }
 
 pub fn remove_worktree(repo: &Repository, path: &Path) -> Result<(), WorktreeError> {
