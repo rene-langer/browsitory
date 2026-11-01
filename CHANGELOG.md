@@ -15,6 +15,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   moment can't make Browsitory open a file in the link's target, briefly create one there, or
   contact a network share it points to (#193).
 
+### Test robustness
+
+- Fixed (tests): the Unix tests for stopping a hook or a signing program now check that a
+  background process it started can't finish its work after a timeout or Cancel; control tests
+  (also for the Windows job object) show the checks fail without the process group or job
+  (#179).
+- Fixed (tests): the /dev/tty check now runs under a real terminal, so it also proves something
+  on CI (#179).
+- Fixed (tests): flaky desktop E2E tests: a merge test that could start the next test before the
+  app's merge commit landed, and stale-element failures when a row disappears during a lookup
+  (#182).
+- E2E harness: tauri-driver, WebKitWebDriver and the app run in one process group that is
+  stopped as a whole after each session; leftovers of an aborted earlier session are reaped,
+  a driver port held by another process fails with a clear message, and each session logs how
+  long it took to start (#182).
+- CI: the desktop E2E suite runs with a D-Bus session bus, so each WebDriver session starts in
+  under a second instead of ~31 seconds (#182).
+
+### Folder/file swaps
+
+- Fixed: unstaging a file whose folder a merge left conflicts in failed with "invalid entry
+  mode" and could unstage other files below it; it now says "Can't unstage 'd': the merge left
+  conflicts in it. Resolve them first." and changes nothing (#187).
+- Stashing a file that replaced a tracked folder now also stashes the folder's deletion and puts
+  the folder back, as git stash does, instead of refusing with "'d' is now a file" (#186).
+- Fixed: applying or popping a stash that holds a file which replaced a folder reported success
+  but left the file as "d~Stashed changes", and Pop dropped the stash. It now says "This stash
+  can't be applied here because a file replaced a folder; use git stash apply from a terminal."
+  and keeps the stash (#186).
+- Stash… with Include untracked files off refuses when an untracked file is in the way of a
+  stashed folder or file, instead of deleting it, also when the names differ only in case on a
+  case-insensitive drive (#186).
+- Applying or popping a stash whose untracked file is now a folder says "The untracked file 'd'
+  in this stash would overwrite the folder 'd'; move the folder first." and keeps the stash
+  (#186).
+||||||| parent of 9d088aa4 (tests: Windows walker read-only and converted-folder tests, red (#193, #194))
+
 ### Lock and security follow-ups
 
 - Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,

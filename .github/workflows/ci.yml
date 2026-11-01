@@ -256,7 +256,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb dbus
       - name: Install Tauri system dependencies (Linux)
         run: |
           sudo apt-get update
@@ -311,7 +311,7 @@ jobs:
         # --ignore-workspace: same reason as the install step above — extension/e2e isn't a
         # workspace member, and pnpm 11 hard-errors ("packages field missing or empty") walking
         # up to extension/pnpm-workspace.yaml otherwise, instead of just running the script.
-        run: xvfb-run --auto-servernum pnpm --ignore-workspace test
+        run: dbus-run-session -- xvfb-run --auto-servernum pnpm --ignore-workspace test
 
   e2e:
     runs-on: ubuntu-latest
@@ -328,7 +328,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
-            webkit2gtk-driver xvfb
+            webkit2gtk-driver xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
       - name: Install tauri-driver
         # tauri-driver's version is independent of any other Tauri versions.
@@ -372,5 +372,8 @@ jobs:
         # wdio.conf.ts spawns/reaps `tauri-driver` itself around the session (the pattern from
         # the official Tauri WebdriverIO guide), so `xvfb-run` just needs to wrap the one
         # `pnpm test` command to give the whole thing (tauri-driver -> WebKitWebDriver ->
-        # tauri-app) a fake display.
-        run: xvfb-run --auto-servernum pnpm test
+        # tauri-app) a fake display. `dbus-run-session` gives it a session bus: without one,
+        # every WebDriver session start waited ~31 s on this runner (about 15 minutes per run);
+        # with one it takes under a second (measured in #182; NO_AT_BRIDGE=1,
+        # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference).
+        run: dbus-run-session -- xvfb-run --auto-servernum pnpm test

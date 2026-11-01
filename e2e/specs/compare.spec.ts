@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "compare-e2e.txt";
@@ -57,6 +58,6 @@ describe("Browsitory compare", () => {
     await expect(heading).toHaveText(`Comparing ${tip}..${base}`);
 
     await browser.execute((el) => (el as HTMLElement).click(), await $(`button[aria-label="Close compare"]`));
-    await browser.waitUntil(async () => !(await $(`section[aria-label="Comparison"]`).isExisting()), { timeout: 10000 });
+    await waitUntilGoneInPage(`section[aria-label="Comparison"]`);
   });
 });

@@ -126,6 +126,27 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   file next to a conflicted path, and a failed apply over a directory that replaced a symlink can
   remove HEAD's symlink from the worktree (it is still in HEAD and recoverable with a checkout,
   and the stash is kept).
+- Untracked files in the way (#186). Without "Include untracked files", the reset after stashing
+  (libgit2's forced reset, or the path-limited revert) deletes an untracked file that sits where
+  the restored tree has a folder, or inside a folder where it has a file, as git's `reset --hard`
+  does. The restored tree is HEAD's; with keep-index the index's too, because libgit2 and git
+  both reset to HEAD before checking the index back out. `save_stash` refuses first with
+  `StashError::UntrackedInTheWay` (Stash all checks every untracked file, the path-limited stash
+  its own tracked paths); with untracked files included the file is in the stash. Under
+  `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked symlink
+  is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from the index
+  and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused: like git, the
+  stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings the edit back.
+- libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
+  the other way round), so a stash holding an untracked file `d` and the deletion of the folder
+  `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
+  `d~Stashed changes` and a pop would drop the stash. `apply_stash` refuses up front with
+  `StashError::FileReplacedFolder` when an untracked-tree file's path is a real folder in the
+  worktree and the stash recorded that swap (its base has the folder, its worktree tree doesn't);
+  nothing is written, the stash is kept, and `git stash apply` handles it. A folder that appeared
+  after stashing gets `UntrackedOverFolder` ("move the folder first") instead. The mirror
+  stash (the untracked `d/x` with the file `d` deleted) is not detected; git can't pop it
+  either.
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
   file whose directory is a symlink in HEAD; `apply_stash` maps it to
   `StashError::SymlinkReplacedByDirectory` (nothing is written, the stash is kept).
@@ -687,7 +708,18 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   (`undo::build_worktree_tree`) leaves out: an ignored file or folder, or a nested repository.
   `discard_all_unstaged` checks this before discarding anything and leaves that folder's
   untracked files alone too. The path-limited stash refuses with
-  `StashError::FolderIsNowAFile` before anything is recorded.
+  `StashError::FolderIsNowAFile` before anything is recorded, unless the file is stashed too
+  (the user picked `d`, or everything): then the revert removes it before checking `d/f` out,
+  as `git stash push -u -- d` does (#186). Without untracked files it refuses with
+  `UntrackedInTheWay` instead (see "git2 API gotchas"). This covers only the "file replaced a
+  folder" direction: a selected path whose file a folder replaced (`d/x` where HEAD has the file
+  `d`) is still refused with `DirectoryReplacedNonDirectory`, which loses nothing, although
+  `git stash push -u -- d` accepts it.
+- Conflicts below a pair (#187): when the index has conflict entries (stage 1–3) at or below the
+  pair root, `unstage_file` refuses with `StageError::ConflictsBelow` before changing anything:
+  libgit2's `reset_default` fails on them ("invalid entry mode"), and dropping them would
+  discard a side of the merge. The pair's removals stay in memory (`reset_default` uses the same
+  repository index and writes it once); a failed reset re-reads the index from disk.
 
 ## Image preview
 
@@ -844,6 +876,29 @@ only `error`.
   actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
   `packageManager: "pnpm@9.15.9"` — a contributor running a different pnpm major without
   Corepack honoring this pin can break `e2e/`'s frozen-lockfile install.
+  - Elements that unmount: waiting for a row, menu or dialog to disappear, or clicking one that
+    may re-render, goes through `e2e/support/dom.ts` (`waitUntilGoneInPage`, `clickInPage`),
+    which query and act inside one `browser.execute` (`waitUntilInPage` for the opposite wait).
+    WebdriverIO's own `waitForExist({ reverse: true })` looks the element up and inspects it in
+    separate round trips; once React unmounted it, WebKitWebDriver failed with a stale-element
+    error on every retry until the wait timed out (#182), so retrying doesn't help.
+    `waitForDisplayed({ reverse: true })` on an element that stays mounted is fine. After a
+    commit made through the UI, wait on the repository (`e2e/support/git.ts`), not on a row
+    whose text may already match something else.
+  - Harness hardening (#182): `wdio.conf.ts` starts `tauri-driver` in its own process group,
+    which also holds WebKitWebDriver and the app, and records the group id in
+    `target/e2e-tauri-driver.pgid`. `afterSession` SIGTERMs the group, waits up to 5 s and
+    SIGKILLs it. `beforeSession` reaps (and logs) only what an aborted earlier session of this
+    worktree left: that recorded group, this worktree's app binary running under WebDriver
+    automation without its WebKitWebDriver, or a WebKitWebDriver on port 4445 without its
+    tauri-driver (Linux, via `/proc`). A driver port still held by anything else fails the
+    session with "port … is in use by another process" rather than being killed. It then waits
+    for ports 4444 and 4445, and every session logs `[e2e] session start: N ms`. CI runs the
+    suite under `dbus-run-session`: without a session bus each session start waited ~31 s.
+  - Process tests (`git-core/src/process.rs`): each check that a timeout or Cancel kills a
+    hook's background process has a negative control showing the check fails without the
+    process group (Unix) or job object (Windows), and the `/dev/tty` check runs the test binary
+    again under a pty it creates, so it discriminates without a terminal on CI (#179).
 - E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
   a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
   Development Host against the unpacked dev-mode extension and drives `vscode.*` commands
