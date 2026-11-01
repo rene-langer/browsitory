@@ -2,7 +2,8 @@ import { useCallback } from "react";
 import type { AmendOptions, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
-import { hookFailedMessage } from "../lib/hookFailure";
+import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
+import { credentialFailureMessage } from "./useMutationRunner";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
 
@@ -51,47 +52,76 @@ export function useHistoryActions(
     },
     [runMutation],
   );
+  // Picks and Continue may change the repository and still end in a failure: steps committed
+  // before a failing hook, a step whose commit stands after Cancel, a pick left staged. So the
+  // refresh always runs: the call's failure is held back from `runMutation` (which skips the
+  // refresh when its mutation throws) and only shown afterwards (#183).
+  //
+  // A failing hook (`HookFailed`: a pick's `prepare-commit-msg`, or Continue's commit hooks)
+  // opens the hook dialog and resolves `null` with the error banner, like a failed commit. The
+  // step stays staged and paused: the operation strip and the commit box finish it. `retry`:
+  // a single pick has nothing to retry (`prepare-commit-msg` can't be skipped); a sequence
+  // offers Continue.
+  const runRepoChanging = useCallback(
+    async <T extends PickOutcome | SequenceOutcome>(call: () => Promise<T>, retry: HookRetry): Promise<T | null> => {
+      let outcome: T | null = null;
+      let failure: unknown = undefined;
+      let failed = false;
+      await runMutation(async () => {
+        try {
+          outcome = await call();
+        } catch (err) {
+          failed = true;
+          failure = err;
+        }
+      });
+      setState((prev) => ({ ...prev, hookRun: null }));
+      if (failed) {
+        setState((prev) => ({ ...prev, error: credentialFailureMessage(failure) }));
+        return null;
+      }
+      const settled = outcome as T | null;
+      if (settled === null) return null;
+      if (settled.kind === "HookFailed") {
+        setState((prev) => ({
+          ...prev,
+          error: hookFailedMessage(settled.hook),
+          hookFailure: { hook: settled.hook, output: settled.output, retry, dialogOpen: true },
+        }));
+        return null;
+      }
+      return settled;
+    },
+    [runMutation, setState],
+  );
   const cherryPick = useCallback(
     (commitId: string, mainline?: number | null) =>
-      withOutcome(() => client.cherryPick(repoPath, commitId, mainline ?? null)),
-    [client, withOutcome, repoPath],
+      runRepoChanging(() => client.cherryPick(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+    [client, runRepoChanging, repoPath],
   );
   const revertCommit = useCallback(
     (commitId: string, mainline?: number | null) =>
-      withOutcome(() => client.revertCommit(repoPath, commitId, mainline ?? null)),
-    [client, withOutcome, repoPath],
+      runRepoChanging(() => client.revertCommit(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+    [client, runRepoChanging, repoPath],
   );
   const cherryPickMany = useCallback(
-    (commitIds: string[]) => withOutcome(() => client.cherryPickMany(repoPath, commitIds)),
-    [client, withOutcome, repoPath],
+    (commitIds: string[]) =>
+      runRepoChanging(() => client.cherryPickMany(repoPath, commitIds), { kind: "continueSequence" }),
+    [client, runRepoChanging, repoPath],
   );
   const revertMany = useCallback(
-    (commitIds: string[]) => withOutcome(() => client.revertMany(repoPath, commitIds)),
-    [client, withOutcome, repoPath],
+    (commitIds: string[]) => runRepoChanging(() => client.revertMany(repoPath, commitIds), { kind: "continueSequence" }),
+    [client, runRepoChanging, repoPath],
   );
   const continueSequence = useCallback(
     async (noVerify = false) => {
-      const outcome = await withOutcome(async () => {
-        const outcome = await client.continueSequence(repoPath, noVerify);
-        if (outcome.kind === "HookFailed") {
-          setState((prev) => ({
-            ...prev,
-            hookFailure: {
-              hook: outcome.hook,
-              output: outcome.output,
-              retry: { kind: "continueSequence" },
-              dialogOpen: true,
-            },
-          }));
-          throw new Error(hookFailedMessage(outcome.hook));
-        }
-        setState((prev) => ({ ...prev, hookFailure: null }));
-        return outcome;
+      const outcome = await runRepoChanging(() => client.continueSequence(repoPath, noVerify), {
+        kind: "continueSequence",
       });
-      setState((prev) => ({ ...prev, hookRun: null }));
+      if (outcome !== null) setState((prev) => ({ ...prev, hookFailure: null }));
       return outcome;
     },
-    [client, withOutcome, repoPath, setState],
+    [client, runRepoChanging, repoPath, setState],
   );
   const abortSequence = useCallback(
     () => withOutcome(() => client.abortSequence(repoPath)),

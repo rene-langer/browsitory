@@ -10,8 +10,9 @@ export interface HookActions {
   clearCommitMessageHandled(): void;
 }
 
-// Owns the hook-progress subscription (commit/amend; pushes report through transfer progress)
-// and the small pieces of hook UI state that are not tied to one action.
+// Owns the hook-progress subscription (commit/amend/Continue, checkout, merge and pick hooks;
+// pushes and pulls report through transfer progress) and the small pieces of hook UI state that
+// are not tied to one action.
 export function useHookActions(
   client: RepoClient,
   repoPath: string,
@@ -28,7 +29,10 @@ export function useHookActions(
       client.subscribeHookProgress((event) => {
         if (event.repoPath !== repoPath) return;
         if (event.phase === "Started") {
-          setState((prev) => ({ ...prev, hookRun: { operationId: event.operationId, hook: event.hook } }));
+          setState((prev) => ({
+            ...prev,
+            hookRun: { operationId: event.operationId, hook: event.hook, source: event.source },
+          }));
         } else {
           setState((prev) =>
             prev.hookRun?.operationId === event.operationId ? { ...prev, hookRun: null } : prev,

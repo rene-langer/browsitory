@@ -29,6 +29,13 @@ describe("operationStatus", () => {
     expect(pickToast("Revert", { kind: "Conflicted", files: ["a"] })).toBeNull();
     expect(sequenceToast("CherryPick", { kind: "Completed", applied: 3, skipped: [] })).toBe("Cherry-picked 3 commits");
     expect(sequenceToast("Revert", { kind: "Completed", applied: 1, skipped: [] })).toBe("Reverted 1 commit");
+    expect(
+      sequenceToast("CherryPick", {
+        kind: "Stopped",
+        kept: "f one",
+        progress: { kind: "CherryPick", currentStep: 2, totalSteps: 3, currentCommit: "b" },
+      }),
+    ).toBe('Stopped after "f one"; its commit was kept. Continue to resume.');
     expect(sequenceToast("CherryPick", { kind: "Completed", applied: 2, skipped: ["x"] })).toBe(
       "Cherry-picked 2 commits, skipped 1 with no changes",
     );

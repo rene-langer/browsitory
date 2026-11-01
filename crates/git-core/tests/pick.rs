@@ -39,7 +39,13 @@ fn stage(repo: &git2::Repository, path: &str) {
 fn clean_cherry_pick_commits_with_original_message_and_author() {
     let (dir, repo, feature_tip) = repo_with_feature_branch();
     let before = repo.head().unwrap().target().unwrap();
-    let outcome = cherry_pick(&repo, &feature_tip, None).unwrap();
+    let outcome = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     let PickOutcome::Committed { commit_id } = outcome else {
         panic!("expected commit")
     };
@@ -70,7 +76,13 @@ fn conflicting_cherry_pick_pauses_with_merge_msg_and_can_be_finished() {
     common::write_file(dir.path(), "shared.txt", "ours\n");
     common::commit_all(&repo, "ours edit");
 
-    let outcome = cherry_pick(&repo, &theirs, None).unwrap();
+    let outcome = cherry_pick(
+        &repo,
+        &theirs,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         outcome,
@@ -112,7 +124,13 @@ fn aborting_a_conflicted_cherry_pick_restores_head_and_files() {
     common::commit_all(&repo, "ours edit");
     let before = repo.head().unwrap().target().unwrap();
 
-    cherry_pick(&repo, &theirs, None).unwrap();
+    cherry_pick(
+        &repo,
+        &theirs,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     abort_merge(&repo).unwrap();
 
     assert_eq!(repo.head().unwrap().target().unwrap(), before);
@@ -126,10 +144,21 @@ fn aborting_a_conflicted_cherry_pick_restores_head_and_files() {
 #[test]
 fn cherry_picking_an_already_applied_commit_is_empty_and_leaves_state_clean() {
     let (_dir, repo, feature_tip) = repo_with_feature_branch();
-    cherry_pick(&repo, &feature_tip, None).unwrap();
+    cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     let head_before = repo.head().unwrap().target().unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip, None),
+        cherry_pick(
+            &repo,
+            &feature_tip,
+            None,
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::EmptyResult)
     ));
     assert_eq!(repo.head().unwrap().target().unwrap(), head_before);
@@ -142,7 +171,12 @@ fn cherry_pick_refuses_staged_changes() {
     common::write_file(dir.path(), "staged.txt", "x\n");
     stage(&repo, "staged.txt");
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip, None),
+        cherry_pick(
+            &repo,
+            &feature_tip,
+            None,
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::DirtyIndex)
     ));
 }
@@ -161,7 +195,7 @@ fn cherry_pick_never_overwrites_an_unstaged_edit_to_a_touched_file() {
         .unwrap();
     common::write_file(dir.path(), "shared.txt", "my unsaved work\n");
 
-    assert!(cherry_pick(&repo, &edit, None).is_err());
+    assert!(cherry_pick(&repo, &edit, None, git_core::hooks::HookOptions::default()).is_err());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
         "my unsaved work\n"
@@ -183,17 +217,32 @@ fn cherry_pick_refuses_merge_commits_and_paused_operations() {
         .commit(None, &sig, &sig, "merge", &tree, &[&head, &other])
         .unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &merge_id.to_string(), None),
+        cherry_pick(
+            &repo,
+            &merge_id.to_string(),
+            None,
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::MainlineRequired)
     ));
     assert!(matches!(
-        revert(&repo, &merge_id.to_string(), None),
+        revert(
+            &repo,
+            &merge_id.to_string(),
+            None,
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::MainlineRequired)
     ));
 
     std::fs::write(repo.path().join("MERGE_HEAD"), format!("{}\n", head.id())).unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &feature_tip, None),
+        cherry_pick(
+            &repo,
+            &feature_tip,
+            None,
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::OperationInProgress)
     ));
     let _ = dir;
@@ -208,7 +257,13 @@ fn clean_revert_commits_the_inverse_with_the_standard_message() {
     common::commit_all(&repo, "add b");
     let target = repo.head().unwrap().target().unwrap();
 
-    let PickOutcome::Committed { .. } = revert(&repo, &target.to_string(), None).unwrap() else {
+    let PickOutcome::Committed { .. } = revert(
+        &repo,
+        &target.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap() else {
         panic!("expected commit")
     };
 
@@ -232,7 +287,13 @@ fn conflicting_revert_pauses_in_revert_state() {
     common::write_file(dir.path(), "a.txt", "three\n");
     common::commit_all(&repo, "to three");
 
-    let outcome = revert(&repo, &target.to_string(), None).unwrap();
+    let outcome = revert(
+        &repo,
+        &target.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
 
     assert_eq!(
         outcome,
@@ -278,7 +339,13 @@ fn aborting_a_conflicted_cherry_pick_keeps_unrelated_unstaged_edits() {
     common::write_file(dir.path(), "other.txt", "my unsaved other work\n");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs, None).unwrap(),
+        cherry_pick(
+            &repo,
+            &theirs,
+            None,
+            git_core::hooks::HookOptions::default()
+        )
+        .unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     abort_merge(&repo).unwrap();
@@ -298,7 +365,13 @@ fn aborting_a_conflicted_cherry_pick_keeps_unrelated_unstaged_edits() {
 fn aborting_after_resolving_and_staging_a_cherry_pick_still_works() {
     let (dir, repo, _) = repo_with_feature_branch();
     let theirs = conflicting_pick_setup(dir.path(), &repo);
-    cherry_pick(&repo, &theirs, None).unwrap();
+    cherry_pick(
+        &repo,
+        &theirs,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     common::write_file(dir.path(), "shared.txt", "resolved\n");
     stage(&repo, "shared.txt");
 
@@ -331,7 +404,13 @@ fn abort_treats_conflicted_paths_literally_not_as_globs() {
     common::write_file(dir.path(), "a.txt", "my unsaved a work\n");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs, None).unwrap(),
+        cherry_pick(
+            &repo,
+            &theirs,
+            None,
+            git_core::hooks::HookOptions::default()
+        )
+        .unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     abort_merge(&repo).unwrap();
@@ -372,7 +451,13 @@ fn finishing_a_conflicted_cherry_pick_keeps_the_original_author() {
     common::commit_all(&repo, "ours edit");
 
     assert!(matches!(
-        cherry_pick(&repo, &theirs, None).unwrap(),
+        cherry_pick(
+            &repo,
+            &theirs,
+            None,
+            git_core::hooks::HookOptions::default()
+        )
+        .unwrap(),
         PickOutcome::Conflicted { .. }
     ));
     common::write_file(dir.path(), "shared.txt", "resolved\n");
@@ -450,11 +535,11 @@ fn a_merge_commit_needs_a_mainline() {
     let (_dir, repo, merge, _) = merge_commit_fixture();
     let before = repo.head().unwrap().target().unwrap();
     assert!(matches!(
-        cherry_pick(&repo, &merge, None),
+        cherry_pick(&repo, &merge, None, git_core::hooks::HookOptions::default()),
         Err(PickError::MainlineRequired)
     ));
     assert!(matches!(
-        revert(&repo, &merge, None),
+        revert(&repo, &merge, None, git_core::hooks::HookOptions::default()),
         Err(PickError::MainlineRequired)
     ));
     assert_eq!(repo.head().unwrap().target().unwrap(), before);
@@ -464,7 +549,13 @@ fn a_merge_commit_needs_a_mainline() {
 #[test]
 fn cherry_picking_a_merge_against_parent_one_applies_the_merged_side() {
     let (dir, repo, merge, _) = merge_commit_fixture();
-    let outcome = cherry_pick(&repo, &merge, Some(1)).unwrap();
+    let outcome = cherry_pick(
+        &repo,
+        &merge,
+        Some(1),
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert!(matches!(outcome, PickOutcome::Committed { .. }));
     assert!(dir.path().join("f.txt").exists());
     assert!(!dir.path().join("m.txt").exists());
@@ -481,7 +572,13 @@ fn reverting_a_merge_against_parent_one_removes_the_merged_side_with_gits_messag
     repo.set_head(&base_branch_ref(&repo)).unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
-    let outcome = revert(&repo, &merge, Some(1)).unwrap();
+    let outcome = revert(
+        &repo,
+        &merge,
+        Some(1),
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert!(matches!(outcome, PickOutcome::Committed { .. }));
     assert!(!dir.path().join("f.txt").exists());
     assert!(dir.path().join("m.txt").exists());
@@ -498,15 +595,30 @@ fn reverting_a_merge_against_parent_one_removes_the_merged_side_with_gits_messag
 fn an_out_of_range_or_needless_mainline_is_refused() {
     let (_dir, repo, merge, main_tip) = merge_commit_fixture();
     assert!(matches!(
-        cherry_pick(&repo, &merge, Some(3)),
+        cherry_pick(
+            &repo,
+            &merge,
+            Some(3),
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::InvalidMainline { mainline: 3 })
     ));
     assert!(matches!(
-        cherry_pick(&repo, &merge, Some(0)),
+        cherry_pick(
+            &repo,
+            &merge,
+            Some(0),
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::InvalidMainline { mainline: 0 })
     ));
     assert!(matches!(
-        cherry_pick(&repo, &main_tip, Some(1)),
+        cherry_pick(
+            &repo,
+            &main_tip,
+            Some(1),
+            git_core::hooks::HookOptions::default()
+        ),
         Err(PickError::InvalidMainline { mainline: 1 })
     ));
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
@@ -517,5 +629,142 @@ fn an_out_of_range_or_needless_mainline_is_refused() {
     assert_eq!(
         PickError::MainlineRequired.to_string(),
         "This is a merge commit. Choose which parent to apply it against."
+    );
+}
+
+// ---- hooks on a clean pick (#183) ------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn a_clean_cherry_pick_and_revert_run_prepare_commit_msg_and_post_commit() {
+    let (_dir, repo, feature_tip) = repo_with_feature_branch();
+    common::log_hooks(
+        &repo,
+        &[
+            "pre-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+        ],
+    );
+
+    let PickOutcome::Committed { commit_id } = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap() else {
+        panic!("expected a commit")
+    };
+    revert(
+        &repo,
+        &commit_id,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        common::read_log(&repo),
+        "prepare-commit-msg <msg> message\npost-commit \n".repeat(2)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_prepare_commit_msg_leaves_a_single_pick_staged() {
+    let (dir, repo, feature_tip) = repo_with_feature_branch();
+    let before = repo.head().unwrap().target().unwrap();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "prepare-commit-msg",
+        "echo rejected; exit 1",
+    );
+
+    let outcome = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        outcome,
+        PickOutcome::HookFailed {
+            hook: "prepare-commit-msg".to_string(),
+            output: "rejected\n".to_string()
+        }
+    );
+    assert_eq!(repo.head().unwrap().target().unwrap(), before);
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+    assert!(dir.path().join("feature.txt").exists());
+    let index = repo.index().unwrap();
+    assert!(index.get_path(Path::new("feature.txt"), 0).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_prepare_commit_msg_that_empties_the_message_leaves_the_pick_staged() {
+    let (_dir, repo, feature_tip) = repo_with_feature_branch();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "prepare-commit-msg",
+        r#": > "$1""#,
+    );
+
+    let outcome = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        outcome,
+        PickOutcome::HookFailed {
+            hook: "prepare-commit-msg".to_string(),
+            output: "Aborting commit due to empty commit message.".to_string()
+        }
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+}
+
+/// D7-A on a clean pick (#216): a post-commit hook makes `.git` read-only after the commit
+/// landed, so the pick state can't be cleared; the pick still counts as committed.
+#[cfg(unix)]
+#[test]
+fn a_cleanup_failure_after_a_clean_pick_still_counts_it() {
+    let (_dir, repo, feature_tip) = repo_with_feature_branch();
+    let before = repo.head().unwrap().target().unwrap();
+    let Some(restore) = common::ReadOnlyGitDir::restore_later(&repo) else {
+        return;
+    };
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!("chmod 555 '{}'", repo.path().display()),
+    );
+
+    let outcome = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
+    drop(restore);
+
+    let Ok(PickOutcome::Committed { commit_id }) = outcome else {
+        panic!("expected Committed, got {outcome:?}")
+    };
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.id().to_string(), commit_id);
+    assert_eq!(head.parent_id(0).unwrap(), before);
+    assert_eq!(
+        repo.state(),
+        git2::RepositoryState::CherryPick,
+        "the leftover state stays for Abort"
     );
 }

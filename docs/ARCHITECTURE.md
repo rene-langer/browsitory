@@ -397,8 +397,41 @@ sidecar runs each request on its own thread and is unaffected.
   index) untouched, so `sequence.json` still describes the paused step and Continue (with
   `no_verify` from "Continue without hooks") or Abort work as before; a cancelled hook is
   `PickError::Hook`, also with the state kept. The worker holds the #173 state lock across the
-  hooks, as for any Continue. Steps applied cleanly (start, after Continue) run no hooks
-  (D3-A); real git runs `prepare-commit-msg`/`post-commit` on them.
+  hooks, as for any Continue.
+- Steps applied cleanly (a single `cherry_pick`/`revert`, every step of `cherry_pick_many`/
+  `revert_many`, and the steps Continue applies after the paused one) run what git's sequencer
+  runs for a commit it creates (#183, D5-A; checked against `git cherry-pick A B C` in a twin
+  repo): `commit::run_message_hook` (`prepare-commit-msg <COMMIT_EDITMSG> message`, the file
+  written only when the hook is installed, no `pre-commit`/`commit-msg`), then
+  `create_commit_reporting`, then `post-commit` while `CHERRY_PICK_HEAD` and `MERGE_MSG` are still
+  there, as in git's `try_to_commit` (the parity tests log what each hook sees; a revert has
+  `MERGE_MSG` only in git, and libgit2's `REVERT_HEAD` is not compared), and only then the state
+  is cleared. git 2.53 passes no `GIT_REFLOG_ACTION` to these hooks, so Browsitory sets none.
+  A failing (or message-emptying)
+  `prepare-commit-msg` is `StepResult::HookFailed`: nothing is committed, git's pick state and the
+  staged step stay, a single pick returns `PickOutcome::HookFailed` and a sequence stops as
+  `SequenceOutcome::HookFailed` with `stopped_on_conflict` set, so Continue commits it through
+  `finish_paused` (the full commit hooks) or the user commits it by hand. A cancel during
+  `prepare-commit-msg` is `PickError::Hook` with the step paused likewise. D9-A: `run` checks the
+  cancel flag before each step, so a Cancel during a step's `post-commit` (or between hooks)
+  keeps that commit and stops the sequence after it as `SequenceOutcome::Stopped { kept,
+  progress }`, not an error (state kept with `expected_head` at the kept commit); the UI shows
+  "Stopped after "<summary>"; its commit was kept. Continue to resume." and Continue resumes
+  with the next step. The hooks report on the pick's own operation
+  (`pick-<n>`, `HookSource::Pick`) and the later steps of a Continue on its `continue-<n>`
+  (`HookSource::Commit`, so they show on the sequence panel).
+- A clean step and `finish_paused` treat a `cleanup_state` failure after the commit landed like
+  `commit_with` does (`commit::cleanup_after_commit`: logged, `post-commit` still runs, the step
+  counts and `next`/`expected_head` move past it, D7-A, #216). The next step then usually fails
+  to write its own pick state and the sequence stops there; Continue first clears a leftover pick
+  state that names the previous step while HEAD is still `expected_head`
+  (`is_leftover_of_committed_step`; never after a conflict stop, whose pick state is the paused
+  step), then goes on. Abort of a stored sequence (`abort_sequence`) clears such a leftover the
+  same way, then rewinds to the start only while HEAD is still `expected_head`, which `run` sets
+  to each step's base before the step and to the kept commit when it stops after one, so a step
+  whose commit landed but whose state stayed behind is rewound with the rest. `start` drops
+  repeated commit ids (keeping the first), so no two steps share an id and a pick state always
+  names exactly one step.
 
 ## Interactive rebase
 
@@ -509,26 +542,53 @@ sidecar runs each request on its own thread and is unaffected.
   the hook still runs and only the child is killed.
 - Gate hooks live in `git-core`: `commit`/`amend_head` (`pre-commit` → reload the index only if
   it ran → `prepare-commit-msg` → `commit-msg` via `<git dir>/COMMIT_EDITMSG` → commit →
-  `post-commit`), `commit_with(.., CommitHookSet::CleanMerge, ..)` (#124: while a merge is
-  staged, `pre-merge-commit` in place of `pre-commit` and no `post-commit`, as `git merge` runs
-  them; the message file stays `COMMIT_EDITMSG`, not `MERGE_MSG`), `continue_sequence` (see
-  "Cherry-pick sequences") and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
+  `post-commit`), `commit_with(.., CommitHookSet::CleanMerge { head, merge_heads }, ..)` (#124:
+  while exactly that merge is staged, `pre-merge-commit` in place of `pre-commit` and no
+  `post-commit`, as `git merge` runs them; the message hooks get `<git dir>/MERGE_MSG`
+  (`MessageFile::MergeMsg`, #183, D6-A), as with `git merge`), the picks and `continue_sequence`
+  (see "Cherry-pick sequences") and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
   after the ref advertisement and the lease check, before any pack data). Every push
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
   `delete_remote_branch`) funnels through `push_refs`, so all of them run `pre-push`.
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
-  so undo restores, rebase and other git-core internals never trigger hooks. A clean merge's
-  commit runs `post-merge 0` on the commit's own operation, before the cancel id is released and
-  before the reply (`worker::hooks::run_post_hook_reported`, #178): it reports
-  `Started`/`Finished` like `post-commit`, `cancelTransfer(commit-<n>)` stops it, and its result
-  (cancel included) never changes the `Committed` outcome; `no_verify` doesn't skip it. The
-  other post hooks (`post-merge` after a fast-forward, squash or pull, and `post-checkout`) still
-  use `run_post_hook`: unreported, not cancellable, bounded by the 10-minute timeout.
+  so undo restores, rebase and other git-core internals never trigger hooks. Each runs on its
+  command's own operation, before the cancel id is released and before the reply
+  (`worker::hooks::run_post_hook_reported` / `run_post_hook_on`, #178, #185): a clean merge's
+  commit runs `post-merge 0` on `commit-<n>`; a branch switch and a commit checkout run
+  `post-checkout` on `switch-<n>` / `checkout-<n>`; a fast-forward or squash `StartMerge` runs
+  `post-merge 0|1` on `merge-<n>`. Each reports `Started`/`Finished`, `cancelTransfer(id)` stops
+  it, and its result (cancel included) never changes the command's outcome; `no_verify` doesn't
+  skip it. A pull that fast-forwarded sends `TransferEvent::Progress { phase: RunningHook }` on
+  its own transfer operation (only when `post-merge` is installed) and runs `post-merge 0` with
+  the pull's cancel check, before `Completed`; the transfer panel labels `RunningHook` by
+  operation (`Pull` → `post-merge`, else `pre-push`).
+- `HookEvent::{Started, Finished}` carry `source: HookSource` (`Commit` for commit, amend and
+  Continue; `Checkout`, `Merge`, `Pick`), sent as `source` in both transports' `hook-progress` /
+  `hookProgress` payloads (#185). The frontend keeps it in `state.hookRun`: a `Commit` hook shows
+  in the commit box and sequence panel (`HookStatus`), any other in the non-modal `HookRunStrip`
+  ("Hook status", role `status`) under `OperationStatusStrip`, with Cancel (D8-A). `RepoClient`
+  method signatures don't change; the transports create the event channel per command.
+- `commit_with` re-reads the merge after the pre hook and again after the message hooks (#183):
+  if the state is no longer `Merge`, or HEAD or `MERGE_HEAD` changed (a merge aborted and
+  restarted in a terminal during `pre-merge-commit`), it returns `CommitError::MergeChanged` and
+  commits nothing; the first check comes before the message file is written, so a restarted
+  merge's own `MERGE_MSG` is kept. Once the commit landed, `cleanup_state` and
+  `clear_squash_message` failures are logged (`commit::cleanup_after_commit`) and the result is
+  still `Ok` (D7-A): post hooks run, the worker forgets the clean merge, the frontend clears the
+  message, and the leftover merge/pick state stays visible in the operation strip, where Abort
+  clears it harmlessly (worktree and index equal the new HEAD). A later commit that finds such a
+  leftover merge (every `MERGE_HEAD` already in HEAD's history) clears it first and commits as an
+  ordinary single-parent commit, so no second merge commit is made; if it still can't be cleared,
+  `CommitError::LeftoverMergeState` refuses the commit.
+- A pull drops its cancel flag (`TransferOp::clear`) before `post-merge`, so a Cancel pressed
+  during the fetch that came too late to stop the pull doesn't kill the hook at once; only a
+  Cancel pressed while `post-merge` runs stops it.
 - Clean merges (#124, D1-A/D2-A): Browsitory never creates the merge commit in `start_merge`; a
   clean non-fast-forward merge (`MergeOutcome::Merged`) is staged and committed from the commit
   box. The worker remembers such a merge in memory (`worker/merge.rs` `CleanMerge`: HEAD and the
   `MERGE_HEAD` commits) and, while the repository still shows exactly that merge, commits it with
-  `CommitHookSet::CleanMerge` and runs `post-merge 0` after the commit (not when the merge is
+  `CleanMerge::hook_set()` (the same HEAD and heads, which `commit_with` checks again before and
+  after the hooks) and runs `post-merge 0` after the commit (not when the merge is
   staged), and only when `commit_with` reports `Committed::merge_hooks` (the merge was still in
   progress at commit time, not aborted by another window or a terminal in between). The memory is cleared by any other `StartMerge` result, by `AbortMerge` and by a
   successful commit; a failed or cancelled commit keeps it, so "Commit without hooks" is

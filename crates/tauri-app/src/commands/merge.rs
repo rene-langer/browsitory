@@ -1,20 +1,24 @@
 use super::{
-    repo_worker, AppState, ConflictSegmentDto, ConflictSideDto, FileConflictChoiceDto,
-    MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto,
+    hook_event_channel, repo_worker, AppState, ConflictSegmentDto, ConflictSideDto,
+    FileConflictChoiceDto, MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto,
 };
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, State};
 /// `branch_name` is a local branch name or a full ref (`refs/remotes/...` from the pull dialog).
+/// A fast-forward's or squash's `post-merge` is reported as `hook-progress` events with
+/// `source: "Merge"` (#185).
 #[tauri::command]
 pub async fn start_merge(
     repo_path: String,
     branch_name: String,
     options: MergeOptionsDto,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<MergeOutcomeDto, String> {
+    let events = hook_event_channel(app, &repo_path);
     Ok(MergeOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.start_merge(branch_name, options.into()))
+            .call(move |w| w.start_merge(branch_name, options.into(), events))
             .await?,
     ))
 }

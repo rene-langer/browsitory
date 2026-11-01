@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { CommitOutcome, RepoClient, SequenceOutcome } from "./ipc/RepoClient";
+import type { CommitOutcome, HookProgress, RepoClient, SequenceOutcome } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
@@ -240,6 +240,48 @@ describe("App", () => {
     render(<App client={client} />);
     await screen.findByRole("tab", { name: "a" });
     expect(screen.getAllByRole("status", { name: "Notifications" })).toHaveLength(1);
+  });
+
+  it("shows a checkout's hook in the Hook status strip, not the commit box, and cancels it (#185)", async () => {
+    let emit: ((event: HookProgress) => void) | undefined;
+    const cancelTransfer = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      cancelTransfer,
+      subscribeHookProgress: (listener) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+
+    act(() =>
+      emit?.({ repoPath: "/repos/a", operationId: "switch-1", hook: "post-checkout", phase: "Started", source: "Checkout" }),
+    );
+
+    const strip = screen.getByRole("status", { name: "Hook status" });
+    expect(strip).toHaveTextContent("Running post-checkout hook…");
+    expect(screen.getAllByText("Running post-checkout hook…")).toHaveLength(1);
+    fireEvent.click(within(strip).getByRole("button", { name: "Cancel post-checkout hook" }));
+    await waitFor(() => expect(cancelTransfer).toHaveBeenCalledWith("/repos/a", "switch-1"));
+
+    act(() =>
+      emit?.({ repoPath: "/repos/a", operationId: "switch-1", hook: "post-checkout", phase: "Finished", source: "Checkout" }),
+    );
+    expect(screen.getByRole("status", { name: "Hook status" })).toHaveTextContent("The post-checkout hook was cancelled.");
+
+    act(() =>
+      emit?.({ repoPath: "/repos/a", operationId: "commit-2", hook: "pre-commit", phase: "Started", source: "Commit" }),
+    );
+    // A commit's hook shows in the commit box, never in the strip.
+    expect(screen.getByRole("status", { name: "Hook status" })).not.toHaveTextContent("pre-commit");
   });
 
   it("closes the active tab on Ctrl/Cmd+W", async () => {
