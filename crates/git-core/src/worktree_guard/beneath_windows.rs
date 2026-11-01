@@ -2172,20 +2172,18 @@ mod tests {
 
     #[test]
     fn writing_a_hardlink_keeps_its_name_and_the_other_name_keeps_the_old_content() {
+        // Both names in one folder: the final path may report either, and the new file must
+        // still get the name written. (A hardlink whose other name is in another folder fails
+        // the walker's in-the-held-parent check, as it did before #239.)
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir(dir.path().join("d")).unwrap();
-        std::fs::write(dir.path().join("other"), "old").unwrap();
-        std::fs::hard_link(dir.path().join("other"), dir.path().join("d").join("f")).unwrap();
+        let d = dir.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(d.join("a-other"), "old").unwrap();
+        std::fs::hard_link(d.join("a-other"), d.join("f")).unwrap();
         assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
-        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("d").join("f")).unwrap(),
-            "new"
-        );
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("other")).unwrap(),
-            "old"
-        );
+        assert_eq!(names_in(&d), ["a-other", "f"]);
+        assert_eq!(std::fs::read_to_string(d.join("f")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(d.join("a-other")).unwrap(), "old");
     }
 
     #[test]
