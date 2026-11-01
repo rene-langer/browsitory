@@ -314,6 +314,7 @@ pub(super) fn write(
             }
             open_at(at.parent(), at.leaf(), flags | libc::O_EXCL, 0o666)?
         }
+        Err(error) if errno(&error) == libc::EACCES => return Err(read_only_or(&at, error)),
         Err(error) => return Err(error),
     };
     let mut file = File::from(fd);
@@ -327,6 +328,35 @@ pub(super) fn write(
     file.set_len(0)?;
     file.write_all(bytes)?;
     Ok(true)
+}
+
+/// `write`'s error for a leaf it may not open: `read_only_error` when the leaf is read-only
+/// (`leaf_is_read_only`), else `error` itself.
+fn read_only_or(at: &Beneath, error: io::Error) -> io::Error {
+    match leaf_is_read_only(at) {
+        Ok(true) => super::read_only_error(),
+        _ => error,
+    }
+}
+
+/// Whether `at`'s leaf is a regular file the user owns without write permission for its owner
+/// (#209): `fstatat` in the held parent, never following a link, never opening the file.
+fn leaf_is_read_only(at: &Beneath) -> io::Result<bool> {
+    // SAFETY: `geteuid` has no preconditions.
+    let euid = unsafe { libc::geteuid() };
+    Ok(stat_at(at.parent(), at.leaf())?.is_some_and(|stat| {
+        file_type(&stat) == libc::S_IFREG
+            && stat.st_uid == euid
+            && stat.st_mode & libc::S_IWUSR == 0
+    }))
+}
+
+/// See `worktree_guard::is_read_only_beneath`.
+pub(super) fn is_read_only(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
+    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => leaf_is_read_only(&at),
+        Walk::Link | Walk::Missing | Walk::NotDir => Ok(false),
+    }
 }
 
 /// `unlinkat` of a leaf that isn't a folder; `Ok(false)` when it is (or became) one.
@@ -706,6 +736,24 @@ mod tests {
         assert!(write(dir.path(), Path::new("d/f"), b"x", &mut no_step).unwrap());
         assert_eq!(mode(&f), 0o755);
         assert_eq!(std::fs::read(&f).unwrap(), b"x");
+    }
+
+    #[test]
+    fn writing_a_read_only_file_is_reported_as_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: `geteuid` has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped: root writes read-only files");
+            return;
+        }
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(super::super::is_read_only(&error), "{error:?}");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&f).unwrap(), b"inner\n");
+        assert_eq!(mode(&f), 0o444);
     }
 
     #[test]

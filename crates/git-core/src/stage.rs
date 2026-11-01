@@ -60,6 +60,9 @@ pub enum StageError {
     Status(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The file to write is read-only; nothing was written (#209).
+    #[error("'{0}' is read-only. Make it writable, then try again.")]
+    ReadOnlyFile(String),
 }
 
 impl From<LinePatchError> for StageError {
@@ -380,7 +383,15 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     next.push_str(pattern);
     next.push('\n');
     // A link swapped in meanwhile is removed, never written through.
-    if !crate::worktree_guard::write_beneath(workdir, ".gitignore", next.as_bytes())? {
+    let written = crate::worktree_guard::write_beneath(workdir, ".gitignore", next.as_bytes())
+        .map_err(|error| {
+            if crate::worktree_guard::is_read_only(&error) {
+                StageError::ReadOnlyFile(".gitignore".to_string())
+            } else {
+                StageError::Io(error)
+            }
+        })?;
+    if !written {
         return Err(StageError::InvalidPath);
     }
     Ok(())
