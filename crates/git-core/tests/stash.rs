@@ -2160,3 +2160,498 @@ fn a_staged_deletion_replaced_by_a_folder_is_not_an_ignored_file() {
     assert_untracked_in_the_way(&mut repo, result, "d/x", "d", &status_before);
     assert_eq!(read(dir.path(), "d/x"), "x\n");
 }
+
+/// HEAD has `path` = "head\n" and `a`; `path` was removed from the index (`git rm --cached`,
+/// not ignored), then edited to "local\n" (#247). `path` is `d/f` (the folder form: status
+/// without recursion reports `d/` untracked) or the top-level `f`.
+fn removed_from_index(path: &str) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), path, "head\n");
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new(path)).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), path, "local\n");
+    (dir, repo)
+}
+
+/// The same with the git CLI: `git rm -r -q --cached <path>`, then the edit.
+fn removed_from_index_twin(path: &str) -> tempfile::TempDir {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), path, "head\n");
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    assert!(git(dir.path(), &["rm", "-r", "-q", "--cached", path])
+        .status
+        .success());
+    write_file(dir.path(), path, "local\n");
+    dir
+}
+
+/// The content of `path` in `tree`, if it has it.
+fn blob_in(repo: &git2::Repository, tree: &git2::Tree, path: &str) -> Option<String> {
+    let entry = tree.get_path(std::path::Path::new(path)).ok()?;
+    let blob = repo.find_blob(entry.id()).ok()?;
+    Some(String::from_utf8_lossy(blob.content()).into_owned())
+}
+
+/// What `stash@{0}` holds for `path`: in its worktree tree, its index commit and its untracked
+/// commit.
+fn stashed(repo: &mut git2::Repository, path: &str) -> [Option<String>; 3] {
+    let id = stash_commit(repo, 0);
+    let stash = repo.find_commit(id).unwrap();
+    let worktree = blob_in(repo, &stash.tree().unwrap(), path);
+    let index = blob_in(repo, &stash.parent(1).unwrap().tree().unwrap(), path);
+    let untracked = stash
+        .parent(2)
+        .ok()
+        .and_then(|commit| blob_in(repo, &commit.tree().unwrap(), path));
+    [worktree, index, untracked]
+}
+
+/// `git stash push [-u] [-k]` in `dir`; `git show stash@{0}:<path>`.
+fn git_stash_push_shows(dir: &std::path::Path, opts: &StashOptions, path: &str) -> String {
+    let mut args = vec!["stash", "push"];
+    if opts.include_untracked {
+        args.push("-u");
+    }
+    if opts.keep_index {
+        args.push("-k");
+    }
+    assert!(git(dir, &args).status.success());
+    String::from_utf8_lossy(&git(dir, &["show", &format!("stash@{{0}}:{path}")]).stdout)
+        .into_owned()
+}
+
+/// The content of `path` in the index on disk, if it has it.
+fn in_index(repo: &git2::Repository, path: &str) -> Option<String> {
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    let entry = index.get_path(std::path::Path::new(path), 0)?;
+    let blob = repo.find_blob(entry.id).unwrap();
+    Some(String::from_utf8_lossy(blob.content()).into_owned())
+}
+
+/// `git status --porcelain` in `dir`.
+fn git_status(dir: &std::path::Path) -> String {
+    String::from_utf8_lossy(&git(dir, &["status", "--porcelain"]).stdout).into_owned()
+}
+
+/// Both forms of #247: a file in a folder, and a top-level file.
+const REMOVED_FROM_INDEX: [&str; 2] = ["d/f", "f"];
+
+#[test]
+fn stash_all_keeps_an_edit_in_a_folder_removed_from_the_index() {
+    // #247: libgit2 missed the edit in a folder (and recorded a top-level one twice with
+    // untracked files). The stash now records it once, in its worktree tree, and puts the
+    // committed version back in the worktree and the index; Pop brings the edit back.
+    for path in REMOVED_FROM_INDEX {
+        for include_untracked in [false, true] {
+            let opts = with(|o| o.include_untracked = include_untracked);
+            let (dir, mut repo) = removed_from_index(path);
+            // The rest is stashed as usual.
+            write_file(dir.path(), "a", "a2\n");
+            write_file(dir.path(), "u", "u\n");
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert_eq!(
+                stashed(&mut repo, path),
+                [Some("local\n".into()), None, None],
+                "{path} {opts:?}"
+            );
+            assert_eq!(read(dir.path(), path), "head\n");
+            assert_eq!(in_index(&repo, path).as_deref(), Some("head\n"));
+            assert_eq!(read(dir.path(), "a"), "a\n");
+            assert_eq!(dir.path().join("u").exists(), !include_untracked);
+            if include_untracked {
+                assert!(git_core::status::status(&repo).unwrap().is_empty());
+            } else {
+                assert_eq!(git_status(dir.path()), "?? u\n");
+            }
+
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+                StashApplyOutcome::Applied,
+                "{path} {opts:?}"
+            );
+            assert_eq!(read(dir.path(), path), "local\n");
+            assert_eq!(in_index(&repo, path).as_deref(), Some("head\n"));
+            assert_eq!(read(dir.path(), "a"), "a2\n");
+            assert_eq!(read(dir.path(), "u"), "u\n");
+            assert_eq!(git_status(dir.path()), format!(" M a\n M {path}\n?? u\n"));
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            // git records the edit too; with -u also in its untracked commit, and then its own
+            // pop fails ("could not restore untracked files"), keeping the edit and the stash.
+            let twin = removed_from_index_twin(path);
+            assert_eq!(git_stash_push_shows(twin.path(), &opts, path), "local\n");
+            assert_eq!(read(twin.path(), path), "head\n");
+            let popped = git(twin.path(), &["stash", "pop"]).status.success();
+            assert_eq!(popped, !include_untracked, "{path} {opts:?}");
+            assert_eq!(read(twin.path(), path), "local\n");
+        }
+    }
+}
+
+#[test]
+fn stash_all_keeps_an_edit_removed_from_the_index_and_restores_the_removal_with_restore_staged_changes(
+) {
+    for path in REMOVED_FROM_INDEX {
+        for include_untracked in [false, true] {
+            let opts = with(|o| o.include_untracked = include_untracked);
+            let (dir, mut repo) = removed_from_index(path);
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+                StashApplyOutcome::Applied,
+                "{path} {opts:?}"
+            );
+
+            assert_eq!(read(dir.path(), path), "local\n");
+            assert_eq!(in_index(&repo, path), None);
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn stash_all_with_keep_index_deletes_an_edit_removed_from_the_index_and_keeps_it_in_the_stash() {
+    // Keep staged changes leaves the index's removal in place, so the file goes, as with git;
+    // the edit is in the stash. Pop refuses while the removal is still staged and keeps the
+    // stash; once it is unstaged, Pop brings the edit back.
+    for path in REMOVED_FROM_INDEX {
+        for include_untracked in [false, true] {
+            let opts = with(|o| {
+                o.include_untracked = include_untracked;
+                o.keep_index = true;
+            });
+            let (dir, mut repo) = removed_from_index(path);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert!(!dir.path().join(path).exists(), "{path} {opts:?}");
+            assert_eq!(in_index(&repo, path), None);
+            let twin = removed_from_index_twin(path);
+            assert_eq!(git_stash_push_shows(twin.path(), &opts, path), "local\n");
+            assert!(!twin.path().join(path).exists());
+            assert_eq!(
+                stashed(&mut repo, path),
+                [Some("local\n".into()), None, None],
+                "{path} {opts:?}"
+            );
+            let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+            assert!(matches!(error, StashError::StagedChanges), "{error:?}");
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+
+            {
+                let head = repo.head().unwrap().peel_to_commit().unwrap();
+                repo.reset_default(Some(head.as_object()), [path]).unwrap();
+            }
+            // Unstaged, the file is still deleted in the worktree: libgit2's safe checkout
+            // won't write over a deletion, so Pop refuses and keeps the stash.
+            let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+            assert!(matches!(error, StashError::WouldOverwrite), "{error:?}");
+            assert_eq!(
+                stashed(&mut repo, path),
+                [Some("local\n".into()), None, None]
+            );
+            // Discarding the deletion too (the committed version back), Pop brings the edit back.
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force().path(path);
+            repo.checkout_head(Some(&mut checkout)).unwrap();
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+                StashApplyOutcome::Applied,
+                "{path} {opts:?}"
+            );
+            assert_eq!(read(dir.path(), path), "local\n");
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn git_stash_pop_restores_a_stashed_edit_removed_from_the_index() {
+    // Browsitory's stash pops in git too: plain and with --index (git's own stash with untracked
+    // files can't, see #247).
+    for path in REMOVED_FROM_INDEX {
+        for index in [false, true] {
+            let (dir, mut repo) = removed_from_index(path);
+            git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+            let mut args = vec!["stash", "pop"];
+            if index {
+                args.push("--index");
+            }
+            let output = git(dir.path(), &args);
+
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(read(dir.path(), path), "local\n");
+            let untracked = if path == "d/f" { "d/" } else { path };
+            let expected = if index {
+                format!("D  {path}\n?? {untracked}\n")
+            } else {
+                format!(" M {path}\n")
+            };
+            assert_eq!(git_status(dir.path()), expected);
+        }
+    }
+}
+
+/// HEAD has `committed` (each = "head\n") and `a`; `removed` were removed from the index, and
+/// `edited` then set to "local\n".
+fn removed_paths(
+    committed: &[&str],
+    removed: &[&str],
+    edited: &[&str],
+) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    for path in committed {
+        write_file(dir.path(), path, "head\n");
+    }
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    for path in removed {
+        index.remove_path(std::path::Path::new(path)).unwrap();
+    }
+    index.write().unwrap();
+    for path in edited {
+        write_file(dir.path(), path, "local\n");
+    }
+    (dir, repo)
+}
+
+#[test]
+fn stash_all_puts_back_the_index_entries_of_a_folder_removed_from_the_index() {
+    // #247 review: `git rm -r --cached d` with only `d/f` edited. The revert's checkout writes
+    // `d/f` (and adds it back to the index) but not the unchanged `d/g`, which stayed removed:
+    // status kept `D  d/g` and Pop refused with `StagedChanges`.
+    for include_untracked in [false, true] {
+        for restore_index in [false, true] {
+            let opts = with(|o| o.include_untracked = include_untracked);
+            let (dir, mut repo) = removed_paths(&["d/f", "d/g"], &["d/f", "d/g"], &["d/f"]);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert!(
+                git_core::status::status(&repo).unwrap().is_empty(),
+                "{opts:?}: {}",
+                git_status(dir.path())
+            );
+            assert_eq!(in_index(&repo, "d/f").as_deref(), Some("head\n"));
+            assert_eq!(in_index(&repo, "d/g").as_deref(), Some("head\n"));
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap(),
+                StashApplyOutcome::Applied,
+                "{opts:?} restore_index={restore_index}"
+            );
+            assert_eq!(read(dir.path(), "d/f"), "local\n");
+            assert_eq!(read(dir.path(), "d/g"), "head\n");
+            if restore_index {
+                assert_eq!(in_index(&repo, "d/f"), None);
+                assert_eq!(in_index(&repo, "d/g"), None);
+            } else {
+                assert_eq!(git_status(dir.path()), " M d/f\n");
+            }
+        }
+    }
+}
+
+#[test]
+fn stash_all_of_an_unedited_file_removed_from_the_index_puts_its_entry_back() {
+    // #248: `git rm --cached f` alone. The stash holds the removal; the index gets `f` back, so
+    // Pop isn't refused, and "Restore staged changes" removes it again.
+    for include_untracked in [false, true] {
+        for restore_index in [false, true] {
+            let opts = with(|o| o.include_untracked = include_untracked);
+            let (dir, mut repo) = removed_paths(&["f"], &["f"], &[]);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert!(
+                git_core::status::status(&repo).unwrap().is_empty(),
+                "{opts:?}: {}",
+                git_status(dir.path())
+            );
+            assert_eq!(in_index(&repo, "f").as_deref(), Some("head\n"));
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap(),
+                StashApplyOutcome::Applied,
+                "{opts:?} restore_index={restore_index}"
+            );
+            assert_eq!(read(dir.path(), "f"), "head\n");
+            assert_eq!(in_index(&repo, "f").is_none(), restore_index);
+        }
+    }
+}
+
+#[test]
+fn stashing_a_file_removed_from_the_index_puts_its_entry_back() {
+    // #248: Stash file… on a file removed from the index, edited or not, and on a folder of
+    // them. Other changes stay as they are.
+    let cases: [(&[&str], &[&str], &str); 3] = [
+        (&["f"], &["f"], "f"),
+        (&[], &["f"], "f"),
+        (&["d/f"], &["d/f", "d/g"], "d"),
+    ];
+    for (edited, removed, picked) in cases {
+        for restore_index in [false, true] {
+            let (dir, mut repo) = removed_paths(&["f", "d/f", "d/g"], removed, edited);
+            write_file(dir.path(), "a", "a2\n");
+            let opts = with(|o| o.paths = vec![picked.into()]);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert_eq!(git_status(dir.path()), " M a\n", "{picked} {edited:?}");
+            for path in removed {
+                assert_eq!(in_index(&repo, path).as_deref(), Some("head\n"));
+            }
+            // Pop needs a clean index; the unrelated edit to `a` is only in the worktree.
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap(),
+                StashApplyOutcome::Applied,
+                "{picked} {edited:?} restore_index={restore_index}"
+            );
+            for path in edited {
+                assert_eq!(read(dir.path(), path), "local\n");
+            }
+            for path in removed {
+                assert_eq!(in_index(&repo, path).is_none(), restore_index, "{path}");
+            }
+            assert_eq!(read(dir.path(), "a"), "a2\n");
+        }
+    }
+}
+
+#[test]
+fn stash_all_with_a_file_removed_from_the_index_refuses_a_folder_that_replaced_a_file() {
+    // Known limitation of the #247 route: the path-limited stash refuses a folder that replaced
+    // a tracked file, which libgit2's whole stash would have stashed. Nothing is written.
+    let (dir, mut repo) = removed_paths(&["f", "t"], &["f"], &["f"]);
+    std::fs::remove_file(dir.path().join("t")).unwrap();
+    write_file(dir.path(), "t/x", "x\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "t"),
+        "{error:?}"
+    );
+    assert_nothing_stashed(
+        &mut repo,
+        &error,
+        "Can't stash 't': it was a file and is now a directory. Commit or move its contents first.",
+        &status_before,
+    );
+    assert_eq!(read(dir.path(), "f"), "local\n");
+    assert_eq!(read(dir.path(), "t/x"), "x\n");
+}
+
+/// A merge stopped on a conflict in `c` (status `UU c`); HEAD also has `f` = "head\n". With
+/// `remove_f`, `f` was then removed from the index (`git rm --cached f`).
+fn merge_conflict(remove_f: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "c", "base\n");
+    write_file(dir.path(), "f", "head\n");
+    commit_all(&repo, "base");
+    let run = |args: &[&str]| {
+        let output = git(dir.path(), args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(&["checkout", "-q", "-b", "other"]);
+    write_file(dir.path(), "c", "other\n");
+    run(&["commit", "-q", "-am", "other"]);
+    run(&["checkout", "-q", "-"]);
+    write_file(dir.path(), "c", "main\n");
+    run(&["commit", "-q", "-am", "main"]);
+    assert!(!git(dir.path(), &["merge", "-q", "other"]).status.success());
+    if remove_f {
+        run(&["rm", "-q", "--cached", "f"]);
+    }
+    (dir, repo)
+}
+
+#[test]
+fn stashing_during_a_merge_conflict_is_refused() {
+    // #255 review: with a file removed from the index, Stash all took the path-limited route,
+    // which flattened the conflict to HEAD's entry and left MERGE_HEAD, so the next commit
+    // dropped the other side. git and libgit2 refuse ("cannot create a tree from a not fully
+    // merged index"); Browsitory now refuses first, on every route, Stash file… included.
+    let cases: [(bool, Vec<String>); 4] = [
+        (true, vec![]),
+        (false, vec![]),
+        (false, vec!["c".into()]),
+        (true, vec!["f".into()]),
+    ];
+    for (remove_f, paths) in cases {
+        let (dir, mut repo) = merge_conflict(remove_f);
+        let status_before = git_status(dir.path());
+        let conflicted = read(dir.path(), "c");
+
+        let error =
+            git_core::stash::save_stash(&mut repo, &with(|o| o.paths = paths.clone())).unwrap_err();
+
+        assert!(
+            matches!(error, StashError::ConflictsBeforeStash),
+            "{remove_f} {paths:?}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "Resolve the current conflicts before stashing."
+        );
+        assert!(repo.find_reference("refs/stash").is_err());
+        assert_eq!(git_status(dir.path()), status_before);
+        assert_eq!(read(dir.path(), "c"), conflicted);
+        assert!(repo.path().join("MERGE_HEAD").exists());
+    }
+    // git refuses too.
+    let (twin, _repo) = merge_conflict(true);
+    assert!(!git(twin.path(), &["stash", "push"]).status.success());
+}
+
+#[test]
+fn stash_all_reverting_a_path_that_head_has_as_a_folder_keeps_the_index_valid() {
+    // #255 review: HEAD has `t/y`; the index has the staged file `t` instead, and `t` is gone
+    // from the worktree. With a file removed from the index (the path-limited route) the revert
+    // must not put HEAD's folder `t` into the index as an entry ("invalid entry mode").
+    let (dir, mut repo) = removed_paths(&["f", "t/y"], &["f", "t/y"], &["f"]);
+    {
+        let mut index = repo.index().unwrap();
+        let blob = repo.blob(b"staged\n").unwrap();
+        let mut entry = index.get_path(std::path::Path::new("a"), 0).unwrap();
+        entry.id = blob;
+        entry.path = b"t".to_vec();
+        entry.flags = 1;
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+    }
+    std::fs::remove_dir_all(dir.path().join("t")).unwrap();
+
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    assert_eq!(in_index(&repo, "t/y").as_deref(), Some("head\n"));
+    assert_eq!(in_index(&repo, "t"), None);
+    assert_eq!(read(dir.path(), "t/y"), "head\n");
+    assert!(
+        git_core::status::status(&repo).unwrap().is_empty(),
+        "{}",
+        git_status(dir.path())
+    );
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "f"), "local\n");
+}

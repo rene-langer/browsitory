@@ -146,9 +146,42 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   tracked paths (`UntrackedInTheWay`, `FolderIsNowAFile`, `DirectoryReplacedNonDirectory`).
   Under `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked
   symlink is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from
-  the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused:
-  like git, the stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings
-  the edit back.
+  the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused.
+- A file removed from the index but not ignored (`git rm -r --cached d`, then edited). libgit2
+  1.9.6 builds the stash's worktree tree from an index-to-worktree diff without
+  `RECURSE_UNTRACKED_DIRS` (stash.c l.391). For `d/f` it reports `d/` untracked and `d/f`
+  deleted, and `stash_delta_merge` (l.360) only joins the two for the same path, so the edit
+  was lost: Pop deleted `d/f`, and with keep-index the reset deleted it at once. With untracked
+  files `build_untracked_tree` (l.292) does recurse, so the edit landed in the untracked commit
+  (a top-level `f` in both trees), and the apply merged it against HEAD's version: conflict
+  markers and `WouldOverwrite`. `save_stash` therefore sends a whole stash with any such
+  non-folder through the path-limited stash. The check (`edit_removed_from_index`) costs a
+  HEAD-to-index diff plus one no-follow stat and one ignore check per staged deletion, with no
+  worktree scan. The path-limited stash records the file once, as a tracked change: the edit in
+  the worktree tree, the index commit without it, never in the untracked commit. Then it puts
+  HEAD's version back in the worktree and HEAD's entry back in the index (with keep-index the
+  index has no entry, so the file is deleted, as with git). Pop brings the edit back; with
+  "Restore staged changes" the removal from the index too (`git stash pop --index`). Deliberate
+  difference: git's `stash -u` records the edit in both trees and its own pop then fails;
+  Browsitory's stash pops in both. Known limitation: the path-limited stash's own refusals
+  apply on this route. For example, a file removed from the index plus an unrelated tracked
+  file `t` that is now a folder gets `DirectoryReplacedNonDirectory` for `t`, which libgit2's
+  whole stash would have handled.
+- The path-limited stash's revert (`git_checkout_tree` with the reverted paths) updates the
+  index only for the files it writes. A path removed from the index whose worktree file already
+  matches HEAD (an unedited `git rm --cached f`, or the unedited `d/g` of `git rm -r --cached
+  d`) stayed removed, so Pop refused with `StagedChanges` (#248). After the checkout it now puts
+  HEAD's entry back for every reverted path HEAD has as a file or link. HEAD may have a folder
+  or submodule at a path whose index entry was a staged file; that path is skipped. It does
+  this entry by entry, not with `reset_default`, which takes pathspecs (`[ab]` would also
+  unstage `a` and `b`). A replaced entry keeps its assume-unchanged and skip-worktree flags;
+  intent-to-add is dropped.
+- `save_stash` refuses any stash while the index has conflicts (`ConflictsBeforeStash`),
+  before choosing a route. libgit2's whole stash and git refuse too ("cannot create a tree from
+  a not fully merged index"). The path-limited stash (Stash file…, and Stash all on the hazard
+  or #247 routes) would otherwise record the file with its markers and put HEAD's entry back in
+  the index. The merge would stay in progress, so the next commit would drop the other side.
+  The index is re-read first (`read(false)`), so a conflict from a terminal merge counts.
 - Repositories and ignored files in an untracked folder. With untracked files, libgit2's reset
   (`REMOVE_UNTRACKED`) removes an untracked folder whole (`checkout_action_wd_only`);
   `wd_item_is_removable` only spares a folder that itself holds a `.git`, so `vendor/lib/.git`

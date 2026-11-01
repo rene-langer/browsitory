@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Stash: edits removed from the index
+
+- Fixed: Stash all lost your edits to files in a folder you had removed from the index
+  (`git rm -r --cached d`, without ignoring it). Without Include untracked files Pop deleted
+  them, with Keep staged changes they were deleted at once, and with Include untracked files
+  Pop wrote conflict markers and said it would overwrite local changes (also for a single file
+  removed this way). The edits are now stashed and Pop brings them back; with Restore staged
+  changes the removal from the index comes back too (#247).
+- Fixed: after stashing a file removed from the index (Stash file…, or Stash all when the file
+  wasn't edited or was one of several files in a removed folder), its removal stayed staged, so
+  Pop said "Commit or unstage your staged changes before applying a stash." The stash now puts
+  the file back in the index, so Pop works (#248).
+- Fixed: Stash file… on a file with merge conflicts (and Stash all in the cases above) stashed
+  the conflict markers and dropped the conflict from the index while the merge was still in
+  progress, so the next commit lost the other side. Stashing now says "Resolve the current
+  conflicts before stashing." and changes nothing, as git does (#247).
+- Known limitation: in these cases Stash all works like Stash file… on every change, so it also
+  refuses a tracked file that is now a folder ("Can't stash 't': it was a file and is now a
+  directory. Commit or move its contents first.") (#247).
+
 ### Terminal cherry-picks
 
 - Fixed: when a cherry-pick or revert of several commits started in a terminal paused on a
