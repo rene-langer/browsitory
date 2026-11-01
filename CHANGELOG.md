@@ -28,6 +28,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where
   'd' is tracked. Commit the deletion of 'd' first, then apply it; the stash is kept." (#206).
 
+### Read-only files
+
+- Fixed: resolving a conflict or adding a pattern to .gitignore failed with "Access is denied"
+  (Windows) or "Permission denied" (macOS, Linux) when the file was read-only, and Use ours /
+  Use theirs (whole file) replaced the read-only file. They now say "'f.txt' is read-only. Make
+  it writable, then try again." and change nothing (#209).
+
 ### Cherry-pick leftovers
 
 - Fixed: when git's cherry-pick state couldn't be cleared after a cherry-pick was committed,

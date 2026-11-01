@@ -688,3 +688,58 @@ fn discarding_a_read_only_untracked_file_deletes_it() {
     discard_file(&repo, "nested/new.txt").unwrap();
     assert!(std::fs::symlink_metadata(&path).is_err());
 }
+
+/// Adding a pattern to a read-only `.gitignore` says so and changes nothing (#209).
+#[test]
+fn adding_to_a_read_only_gitignore_is_refused() {
+    #[cfg(unix)]
+    {
+        // SAFETY: no arguments, no side effects.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("SKIP: root writes read-only files");
+            return;
+        }
+    }
+    let (dir, repo) = common::init_repo();
+    let file = dir.path().join(".gitignore");
+    common::write_file(dir.path(), ".gitignore", "target\n");
+    let _read_only = ReadOnly::new(&file);
+
+    let result = ignore_path(&repo, "*.log");
+
+    let error = result.unwrap_err();
+    assert!(
+        matches!(error, StageError::ReadOnlyFile(ref p) if p == ".gitignore"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'.gitignore' is read-only. Make it writable, then try again."
+    );
+    assert_eq!(read(dir.path(), ".gitignore"), "target\n");
+    assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
+}
+
+/// Makes `path` read-only until dropped, so a failed assertion doesn't leave a read-only file
+/// the temp folder can't delete on Windows.
+struct ReadOnly(std::path::PathBuf);
+
+impl ReadOnly {
+    fn new(path: &std::path::Path) -> Self {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(path, permissions).unwrap();
+        ReadOnly(path.to_path_buf())
+    }
+}
+
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        if let Ok(meta) = std::fs::symlink_metadata(&self.0) {
+            let mut permissions = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = std::fs::set_permissions(&self.0, permissions);
+        }
+    }
+}
