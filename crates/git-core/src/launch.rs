@@ -327,15 +327,17 @@ fn has_magic(head: &[u8]) -> bool {
     MAGICS.iter().any(|magic| head.starts_with(magic))
 }
 
-/// Extensions shared-mime-info has a long-standing glob for, none of them typed
-/// `application/x-desktop`. A name ending in one is typed by that glob before any magic: GLib
-/// never types a named file as a launcher from its contents, and Qt sniffs only when no glob
-/// matches the name. So such a file isn't sniffed for `[Desktop Entry]` (#201). Lower case;
+/// Extensions shared-mime-info has a long-standing glob for (all already in 1.15, the version in
+/// Ubuntu 20.04), none of them typed `application/x-desktop`. A name ending in one is typed by
+/// that glob before any magic: GLib never types a named file as a launcher from its contents,
+/// and Qt sniffs only when no glob matches the name. So such a file isn't sniffed for
+/// `[Desktop Entry]` (#201). Newer globs (`.org`, `.toml`) are left out: on an older desktop
+/// such a name matches no glob, so Qt sniffs it. Lower case;
 /// `document_extensions_have_a_shared_mime_info_glob` checks the list on Linux CI.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "txt", "md", "markdown", "rst", "org", "tex", "log", "csv", "tsv", "json", "yaml", "yml",
-    "toml", "xml", "html", "htm", "xhtml", "svg", "css", "diff", "patch", "c", "h", "cpp", "hpp",
-    "rs", "go", "java", "pdf", "rtf", "odt", "docx", "ipynb", "srt", "vtt",
+    "txt", "md", "markdown", "rst", "tex", "log", "csv", "tsv", "json", "yaml", "yml", "xml",
+    "html", "htm", "xhtml", "svg", "css", "diff", "patch", "c", "h", "cpp", "hpp", "rs", "go",
+    "java", "pdf", "rtf", "odt", "docx", "ipynb", "srt", "vtt",
 ];
 
 /// Whether `path`'s name ends in a document extension. The raw extension, not
@@ -1161,7 +1163,7 @@ mod tests {
         std::fs::write(&notes, "Some notes\n[Desktop Entry]\nExec=x\n").unwrap();
         let readme = dir.path().join("README.md");
         std::fs::write(&readme, "[Desktop Entry]\nExec=x\n").unwrap();
-        let upper = dir.path().join("NOTES.TXT");
+        let upper = dir.path().join("CHANGES.TXT");
         std::fs::write(&upper, "[Desktop Entry]\nExec=x\n").unwrap();
         for path in [&notes, &readme, &upper] {
             assert!(!file_may_run(path, Os::Linux), "{path:?}");
@@ -1236,7 +1238,8 @@ mod tests {
             path
         };
         let desktop = "[Desktop Entry]\nExec=x\n";
-        for name in ["x.foo", "notes.txt.", "LAUNCH"] {
+        // `.org` and `.toml` are left out of `DOCUMENT_EXTENSIONS` (their globs are recent).
+        for name in ["x.foo", "notes.txt.", "LAUNCH", "notes.org", "Cargo.toml"] {
             assert!(file_may_run(&write(name, desktop), Os::Linux), "{name}");
         }
         let script = write("run.txt", "#!/bin/sh\nx\n");
