@@ -20,7 +20,7 @@
 //! its own handle (`FSCTL_GET_REPARSE_POINT`), never by path. Leaves are deleted through their
 //! handle (`FileDispositionInfoEx` with POSIX semantics, read-only files included, see
 //! `delete_by_handle`), never by path, and an existing file is written through a handle whose
-//! file ID matches the one classified.
+//! file ID matches the one classified; a read-only one is refused and left as it is (#209).
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
@@ -954,9 +954,10 @@ pub(super) fn write(
                 ))
             }
             Some((first, Found::File { reopen })) => {
-                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE)? {
-                    Some(file) => file,
-                    None => continue,
+                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
+                    Ok(Some(file)) => file,
+                    Ok(None) => continue,
+                    Err(error) => return Err(read_only_or(&first, error)),
                 }
             }
         };
@@ -966,6 +967,19 @@ pub(super) fn write(
         return Ok(true);
     }
     Err(redirected())
+}
+
+/// `write`'s error for a file it may not open for writing: `read_only_error` when the open was
+/// denied and `first` (the classified handle) has the read-only attribute (#209), which is left
+/// as it is; else `error` itself (an ACL that denies writing, for one).
+fn read_only_or(first: &File, error: io::Error) -> io::Error {
+    if error.raw_os_error() != Some(ERROR_ACCESS_DENIED) {
+        return error;
+    }
+    match attribute_tag(first) {
+        Ok(info) if info.file_attributes & FILE_ATTRIBUTE_READONLY != 0 => super::read_only_error(),
+        _ => error,
+    }
 }
 
 /// See `worktree_guard::remove_beneath`.

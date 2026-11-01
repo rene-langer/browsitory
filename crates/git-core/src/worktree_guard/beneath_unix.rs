@@ -314,6 +314,7 @@ pub(super) fn write(
             }
             open_at(at.parent(), at.leaf(), flags | libc::O_EXCL, 0o666)?
         }
+        Err(error) if errno(&error) == libc::EACCES => return Err(read_only_or(&at, error)),
         Err(error) => return Err(error),
     };
     let mut file = File::from(fd);
@@ -327,6 +328,23 @@ pub(super) fn write(
     file.set_len(0)?;
     file.write_all(bytes)?;
     Ok(true)
+}
+
+/// `write`'s error for a leaf it may not open: `read_only_error` when the leaf is a regular
+/// file the user owns without write permission for its owner (#209), else `error` itself.
+fn read_only_or(at: &Beneath, error: io::Error) -> io::Error {
+    // SAFETY: `geteuid` has no preconditions.
+    let euid = unsafe { libc::geteuid() };
+    match stat_at(at.parent(), at.leaf()) {
+        Ok(Some(stat))
+            if file_type(&stat) == libc::S_IFREG
+                && stat.st_uid == euid
+                && stat.st_mode & libc::S_IWUSR == 0 =>
+        {
+            super::read_only_error()
+        }
+        _ => error,
+    }
 }
 
 /// `unlinkat` of a leaf that isn't a folder; `Ok(false)` when it is (or became) one.
