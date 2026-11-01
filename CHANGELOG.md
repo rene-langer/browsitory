@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Safe file writes
+
+- Fixed: a failed write of a resolved conflict or .gitignore left the file empty or
+  half-written (#239).
+
 ### Stash: things in the way
 
 - Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it

@@ -296,6 +296,16 @@ pub(super) fn write(
     bytes: &[u8],
     step: StepFn<'_>,
 ) -> io::Result<bool> {
+    write_with(workdir, rel, step, &mut |file| file.write_all(bytes))
+}
+
+/// `write` with `fill` writing the content into the opened file (a test seam).
+fn write_with(
+    workdir: &Path,
+    rel: &Path,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
+) -> io::Result<bool> {
     let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
@@ -326,7 +336,7 @@ pub(super) fn write(
     }
     // An existing file keeps its mode, like `fs::write`.
     file.set_len(0)?;
-    file.write_all(bytes)?;
+    fill(&mut file)?;
     Ok(true)
 }
 
@@ -754,6 +764,28 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&f).unwrap(), b"inner\n");
         assert_eq!(mode(&f), 0o444);
+    }
+
+    /// A fill that writes "par" and then fails, as a full disk would.
+    fn fail_halfway(file: &mut File) -> io::Result<()> {
+        file.write_all(b"par")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    #[test]
+    fn a_failed_write_empties_the_file_today() {
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::write(&f, "old content").unwrap();
+        let error = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut fail_halfway,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read(&f).unwrap(), b"par");
     }
 
     #[test]
