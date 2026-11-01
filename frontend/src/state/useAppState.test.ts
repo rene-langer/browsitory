@@ -13,7 +13,8 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
-import type { CommitOutcome, HookProgress, TransferProgress } from "../ipc/RepoClient";
+import type { CommitOutcome, HookProgress, PickOutcome, SequenceOutcome, TransferProgress } from "../ipc/RepoClient";
+import { retryLabel } from "../lib/hookFailure";
 import { useAppState } from "./useAppState";
 
 function unimplemented(): never {
@@ -4849,16 +4850,161 @@ describe("git hooks", () => {
     act(() => {
       pending = result.current.commit("m", false);
     });
-    act(() => emit?.({ repoPath: "/other", operationId: "commit-9", hook: "pre-commit", phase: "Started" }));
+    act(() => emit?.({ repoPath: "/other", operationId: "commit-9", hook: "pre-commit", phase: "Started", source: "Commit" }));
     expect(result.current.state.hookRun).toBeNull();
-    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started" }));
-    expect(result.current.state.hookRun).toEqual({ operationId: "commit-1", hook: "pre-commit" });
+    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started", source: "Commit" }));
+    expect(result.current.state.hookRun).toEqual({ operationId: "commit-1", hook: "pre-commit", source: "Commit" });
 
     await act(async () => {
       finish?.({ kind: "Committed", commitId: "c" });
       await pending;
     });
     expect(result.current.state.hookRun).toBeNull();
+  });
+
+  it("keeps a hook's source, so the UI can show it in the right place (#185)", () => {
+    let emit: ((event: HookProgress) => void) | undefined;
+    const client = transferClient({
+      subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    act(() =>
+      emit?.({ repoPath: TEST_REPO_PATH, operationId: "switch-1", hook: "post-checkout", phase: "Started", source: "Checkout" }),
+    );
+
+    expect(result.current.state.hookRun).toEqual({ operationId: "switch-1", hook: "post-checkout", source: "Checkout" });
+  });
+
+  it("opens the hook dialog without a retry when a cherry-pick's prepare-commit-msg fails (#183)", async () => {
+    const client = transferClient({
+      cherryPick: async () => ({ kind: "HookFailed" as const, hook: "prepare-commit-msg", output: "no ticket\n" }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: PickOutcome | null | undefined;
+    await act(async () => {
+      outcome = await result.current.cherryPick("abc");
+    });
+
+    expect(outcome).toBeNull();
+    expect(result.current.state.error).toBe("The prepare-commit-msg hook failed.");
+    expect(result.current.state.hookFailure).toEqual({
+      hook: "prepare-commit-msg",
+      output: "no ticket\n",
+      retry: { kind: "pick" },
+      dialogOpen: true,
+    });
+    expect(retryLabel(result.current.state.hookFailure!)).toBeNull();
+  });
+
+  it("opens the hook dialog when a sequence step's prepare-commit-msg fails (#183)", async () => {
+    const client = transferClient({
+      cherryPickMany: async () => ({
+        kind: "HookFailed" as const,
+        hook: "prepare-commit-msg",
+        output: "no ticket\n",
+        progress: { kind: "CherryPick" as const, currentStep: 2, totalSteps: 3, currentCommit: "b" },
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(async () => {
+      await result.current.cherryPickMany(["a", "b", "c"]);
+    });
+
+    expect(result.current.state.hookFailure?.retry).toEqual({ kind: "continueSequence" });
+    expect(result.current.state.hookFailure?.hook).toBe("prepare-commit-msg");
+    expect(result.current.state.error).toBe("The prepare-commit-msg hook failed.");
+  });
+
+  it("refreshes after a pick whose prepare-commit-msg failed: the pick is staged and in progress (#183)", async () => {
+    const getHeadInfo = vi.fn(async () => ({
+      headId: null,
+      detachedAt: null,
+      headPushed: false,
+      operation: null,
+      squashMessage: null,
+      commitHooks: [],
+      sequence: null,
+      rebase: null,
+    }));
+    const getStatus = vi.fn(async () => []);
+    const client = transferClient({
+      getHeadInfo,
+      getStatus,
+      cherryPick: async () => ({ kind: "HookFailed" as const, hook: "prepare-commit-msg", output: "no\n" }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {});
+    const headInfoCalls = getHeadInfo.mock.calls.length;
+    const statusCalls = getStatus.mock.calls.length;
+
+    await act(async () => {
+      await result.current.cherryPick("abc");
+    });
+
+    expect(getHeadInfo.mock.calls.length).toBeGreaterThan(headInfoCalls);
+    expect(getStatus.mock.calls.length).toBeGreaterThan(statusCalls);
+    expect(result.current.state.error).toBe("The prepare-commit-msg hook failed.");
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("refreshes after a rejected cherry-pick sequence, which may have committed steps (#183)", async () => {
+    const getHeadInfo = vi.fn(async () => ({
+      headId: null,
+      detachedAt: null,
+      headPushed: false,
+      operation: null,
+      squashMessage: null,
+      commitHooks: [],
+      sequence: null,
+      rebase: null,
+    }));
+    const getStatus = vi.fn(async () => []);
+    const client = transferClient({
+      getHeadInfo,
+      getStatus,
+      cherryPickMany: async () => {
+        throw new Error("could not write CHERRY_PICK_HEAD");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {});
+    const headInfoCalls = getHeadInfo.mock.calls.length;
+    const statusCalls = getStatus.mock.calls.length;
+
+    let outcome: SequenceOutcome | null | undefined;
+    await act(async () => {
+      outcome = await result.current.cherryPickMany(["a", "b", "c"]);
+    });
+
+    expect(outcome).toBeNull();
+    expect(getHeadInfo.mock.calls.length).toBeGreaterThan(headInfoCalls);
+    expect(getStatus.mock.calls.length).toBeGreaterThan(statusCalls);
+    expect(result.current.state.error).toBe("could not write CHERRY_PICK_HEAD");
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  it("resolves a sequence stopped by Cancel as an outcome, not an error (#183)", async () => {
+    const stopped = {
+      kind: "Stopped" as const,
+      kept: "f one",
+      progress: { kind: "CherryPick" as const, currentStep: 2, totalSteps: 3, currentCommit: "b" },
+    };
+    const client = transferClient({ cherryPickMany: async () => stopped });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let outcome: SequenceOutcome | null | undefined;
+    await act(async () => {
+      outcome = await result.current.cherryPickMany(["a", "b", "c"]);
+    });
+
+    expect(outcome).toEqual(stopped);
+    expect(result.current.state.error).toBeNull();
   });
 
   it("cancels the running hook through cancelTransfer", async () => {
@@ -4872,7 +5018,7 @@ describe("git hooks", () => {
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started" }));
+    act(() => emit?.({ repoPath: TEST_REPO_PATH, operationId: "commit-1", hook: "pre-commit", phase: "Started", source: "Commit" }));
 
     await act(async () => result.current.cancelHookRun());
 

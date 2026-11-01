@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use repo_service::worker::{HookEvent, TransferEvent, Worker, WorkerHandle};
+use repo_service::worker::{HookEvent, HookSource, TransferEvent, Worker, WorkerHandle};
 
 mod branch;
 mod clone;
@@ -741,10 +741,17 @@ pub enum SequenceOutcomeDto {
         files: Vec<String>,
         progress: SequenceProgressDto,
     },
-    /// Continue's commit hook failed; the step is still paused (#133).
+    /// A commit hook failed (Continue's, #133, or a clean step's `prepare-commit-msg`, #183);
+    /// the step is paused.
     HookFailed {
         hook: String,
         output: String,
+        progress: SequenceProgressDto,
+    },
+    /// Cancel during a step's post-commit: that commit (`kept`, its summary) stands and the
+    /// sequence stopped before `progress.currentCommit` (#183, D9-A).
+    Stopped {
+        kept: String,
         progress: SequenceProgressDto,
     },
 }
@@ -766,6 +773,10 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
             } => Self::HookFailed {
                 hook,
                 output,
+                progress: progress.into(),
+            },
+            git_core::pick::SequenceOutcome::Stopped { kept, progress } => Self::Stopped {
+                kept,
                 progress: progress.into(),
             },
         }
@@ -827,8 +838,9 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
     }
 }
 
-/// Payload of the `hook-progress` event (commit/amend hooks; pushes report `RunningHook`
-/// through `transfer-progress` instead).
+/// Payload of the `hook-progress` event (commit/amend/Continue, checkout, merge and pick hooks;
+/// pushes and a pull's post-merge report `RunningHook` through `transfer-progress` instead).
+/// `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it (#185).
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookProgressDto {
@@ -836,19 +848,46 @@ pub struct HookProgressDto {
     pub operation_id: String,
     pub hook: String,
     pub phase: &'static str,
+    pub source: &'static str,
+}
+
+/// The wire name of a `HookSource`.
+fn hook_source_name(source: HookSource) -> &'static str {
+    match source {
+        HookSource::Commit => "Commit",
+        HookSource::Checkout => "Checkout",
+        HookSource::Merge => "Merge",
+        HookSource::Pick => "Pick",
+    }
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
-    let (operation_id, hook, phase) = match event {
-        HookEvent::Started { operation_id, hook } => (operation_id, hook, "Started"),
-        HookEvent::Finished { operation_id, hook } => (operation_id, hook, "Finished"),
+    let (operation_id, hook, phase, source) = match event {
+        HookEvent::Started {
+            operation_id,
+            hook,
+            source,
+        } => (operation_id, hook, "Started", source),
+        HookEvent::Finished {
+            operation_id,
+            hook,
+            source,
+        } => (operation_id, hook, "Finished", source),
     };
     HookProgressDto {
         repo_path: repo_path.to_string(),
         operation_id,
         hook,
         phase,
+        source: hook_source_name(source),
     }
+}
+
+/// A hook event channel whose events are emitted as `hook-progress` for `repo_path`.
+fn hook_event_channel(app: AppHandle, repo_path: &str) -> mpsc::Sender<HookEvent> {
+    let (event_tx, event_rx) = mpsc::channel();
+    emit_hook_events(app, repo_path.to_string(), event_rx);
+    event_tx
 }
 
 /// Like `emit_transfer_events`: drains on its own thread until the worker drops its sender.
@@ -870,6 +909,11 @@ pub enum PickOutcomeDto {
     Conflicted {
         files: Vec<String>,
     },
+    /// `prepare-commit-msg` failed; the pick stays staged and in progress (#183).
+    HookFailed {
+        hook: String,
+        output: String,
+    },
 }
 
 impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
@@ -877,6 +921,9 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
         match outcome {
             git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
             git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
+            git_core::pick::PickOutcome::HookFailed { hook, output } => {
+                Self::HookFailed { hook, output }
+            }
         }
     }
 }
@@ -2389,7 +2436,7 @@ mod tests {
     use git_core::submodule::SubmoduleInfo;
     use git_core::worktree::WorktreeInfo;
 
-    use repo_service::worker::{HookEvent, TransferEvent};
+    use repo_service::worker::{HookEvent, HookSource, TransferEvent};
 
     use super::{hook_progress_dto, ChangedFileDto, CommitOutcomeDto, CompareRangeDto};
     use super::{
@@ -3217,20 +3264,56 @@ mod tests {
             HookEvent::Started {
                 operation_id: "commit-1".into(),
                 hook: "pre-commit".into(),
+                source: HookSource::Commit,
             },
         );
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"repoPath": "/repo", "operationId": "commit-1", "hook": "pre-commit", "phase": "Started"})
+            serde_json::json!({"repoPath": "/repo", "operationId": "commit-1", "hook": "pre-commit", "phase": "Started", "source": "Commit"})
         );
         let dto = hook_progress_dto(
             "/repo",
             HookEvent::Finished {
                 operation_id: "commit-1".into(),
                 hook: "pre-commit".into(),
+                source: HookSource::Commit,
             },
         );
         assert_eq!(serde_json::to_value(dto).unwrap()["phase"], "Finished");
+    }
+
+    #[test]
+    fn hook_progress_dto_serializes_its_source() {
+        for (source, name) in [
+            (HookSource::Commit, "Commit"),
+            (HookSource::Checkout, "Checkout"),
+            (HookSource::Merge, "Merge"),
+            (HookSource::Pick, "Pick"),
+        ] {
+            let dto = hook_progress_dto(
+                "/repo",
+                HookEvent::Started {
+                    operation_id: "switch-1".into(),
+                    hook: "post-checkout".into(),
+                    source,
+                },
+            );
+            assert_eq!(serde_json::to_value(dto).unwrap()["source"], name);
+        }
+    }
+
+    #[test]
+    fn pick_outcome_dto_serializes_a_hook_failure() {
+        assert_eq!(
+            serde_json::to_value(PickOutcomeDto::from(
+                git_core::pick::PickOutcome::HookFailed {
+                    hook: "prepare-commit-msg".into(),
+                    output: "no ticket\n".into()
+                }
+            ))
+            .unwrap(),
+            serde_json::json!({"kind": "HookFailed", "hook": "prepare-commit-msg", "output": "no ticket\n"})
+        );
     }
 
     #[test]
@@ -3285,6 +3368,26 @@ mod tests {
             serde_json::to_value(dto).unwrap()["squashMessage"],
             serde_json::json!("Squashed commit of the following:\n")
         );
+    }
+
+    #[test]
+    fn sequence_outcome_stopped_serializes_the_kept_commit_and_progress() {
+        use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
+        let stopped =
+            serde_json::to_value(super::SequenceOutcomeDto::from(SequenceOutcome::Stopped {
+                kept: "f one".into(),
+                progress: SequenceProgress {
+                    kind: SequenceKind::CherryPick,
+                    current_step: 2,
+                    total_steps: 3,
+                    current_commit: "c2".into(),
+                },
+            }))
+            .unwrap();
+        assert_eq!(stopped["kind"], "Stopped");
+        assert_eq!(stopped["kept"], "f one");
+        assert_eq!(stopped["progress"]["currentStep"], 2);
+        assert_eq!(stopped["progress"]["currentCommit"], "c2");
     }
 
     #[test]

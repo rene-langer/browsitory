@@ -63,6 +63,9 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
         Ok(SequenceOutcome::HookFailed { hook, .. }) => Err(format!(
             "The {hook} hook failed, and the cherry-pick or revert's progress could not be saved ({store_error}). Commit the paused step, or abort it."
         )),
+        Ok(SequenceOutcome::Stopped { kept, .. }) => Err(format!(
+            "Stopped after \"{kept}\" (its commit was kept), but the cherry-pick or revert's progress could not be saved ({store_error})."
+        )),
         Ok(_) => Err(format!(
             "The cherry-pick or revert stopped on a conflict, but its progress could not be saved ({store_error}). Resolve the conflict and commit, or abort it."
         )),
@@ -73,16 +76,39 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
     }
 }
 
+/// Hook options for a pick's own hooks (`prepare-commit-msg`, signing, `post-commit`, #183):
+/// reported on `events` as `HookSource::Pick`, cancellable through `op`.
+fn pick_reporter(
+    op: &super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
+) -> super::hooks::ChannelHookReporter {
+    super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Pick,
+    }
+}
+
 pub(super) fn pick_many(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
     kind: SequenceKind,
     commit_ids: Vec<String>,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
 ) -> Result<SequenceOutcome, String> {
-    let run = match kind {
-        SequenceKind::CherryPick => git_core::pick::cherry_pick_many(repo, &commit_ids),
-        SequenceKind::Revert => git_core::pick::revert_many(repo, &commit_ids),
+    let cancel = op.cancel_check();
+    let mut reporter = pick_reporter(&op, events);
+    let hooks = git_core::hooks::HookOptions {
+        cancel: Some(&cancel),
+        reporter: Some(&mut reporter),
+        ..Default::default()
     };
+    let run = match kind {
+        SequenceKind::CherryPick => git_core::pick::cherry_pick_many(repo, &commit_ids, hooks),
+        SequenceKind::Revert => git_core::pick::revert_many(repo, &commit_ids, hooks),
+    };
+    op.clear();
     persist(sequence_store, run)
 }
 
@@ -105,6 +131,7 @@ pub(super) fn continue_sequence(
     let mut reporter = super::hooks::ChannelHookReporter {
         events,
         operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Commit,
     };
     let run = git_core::pick::continue_sequence(
         repo,
@@ -161,6 +188,7 @@ pub(super) fn amend(
     let mut reporter = super::hooks::ChannelHookReporter {
         events,
         operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Commit,
     };
     // Trailers before the hooks, as for a commit.
     let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {
@@ -192,25 +220,30 @@ pub(super) fn recent_authors(
 /// How many co-author suggestions the commit box offers.
 pub const RECENT_AUTHORS_LIMIT: usize = 20;
 
-pub(super) fn cherry_pick(
+/// A single cherry-pick (`kind` `CherryPick`) or revert, its hooks reported and cancellable on
+/// `op` (#183).
+pub(super) fn pick_one(
     repo: &git2::Repository,
+    kind: SequenceKind,
     commit_id: String,
     mainline: Option<u32>,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
     reply: Sender<Result<PickOutcome, String>>,
 ) {
-    let _ = reply.send(
-        git_core::pick::cherry_pick(repo, &commit_id, mainline).map_err(|error| error.to_string()),
-    );
-}
-pub(super) fn revert(
-    repo: &git2::Repository,
-    commit_id: String,
-    mainline: Option<u32>,
-    reply: Sender<Result<PickOutcome, String>>,
-) {
-    let _ = reply.send(
-        git_core::pick::revert(repo, &commit_id, mainline).map_err(|error| error.to_string()),
-    );
+    let cancel = op.cancel_check();
+    let mut reporter = pick_reporter(&op, events);
+    let hooks = git_core::hooks::HookOptions {
+        cancel: Some(&cancel),
+        reporter: Some(&mut reporter),
+        ..Default::default()
+    };
+    let result = match kind {
+        SequenceKind::CherryPick => git_core::pick::cherry_pick(repo, &commit_id, mainline, hooks),
+        SequenceKind::Revert => git_core::pick::revert(repo, &commit_id, mainline, hooks),
+    };
+    op.clear();
+    let _ = reply.send(result.map_err(|error| error.to_string()));
 }
 pub(super) fn reset(
     repo: &git2::Repository,
@@ -221,17 +254,22 @@ pub(super) fn reset(
     let _ = reply
         .send(git_core::reset::reset_to(repo, &commit_id, mode).map_err(|error| error.to_string()));
 }
+/// Checks out a commit (detached HEAD); `post-checkout` then runs reported and cancellable on
+/// `op`, before the reply (#185).
 pub(super) fn checkout(
     repo: &git2::Repository,
     commit_id: String,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
     reply: Sender<Result<(), String>>,
 ) {
     let before = super::hooks::head_oid(repo);
     let result =
         git_core::branch::checkout_commit(repo, &commit_id).map_err(|error| error.to_string());
     if result.is_ok() {
-        super::hooks::run_post_checkout(repo, before);
+        super::hooks::run_post_checkout(repo, before, &op, events);
     }
+    op.clear();
     let _ = reply.send(result);
 }
 
@@ -276,41 +314,69 @@ impl WorkerHandle {
     pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, String> {
         round_trip(self, |reply| Command::ListRecentAuthors { reply })
     }
-    /// `mainline` (1-based parent) is required for a merge commit and refused otherwise.
+    /// `mainline` (1-based parent) is required for a merge commit and refused otherwise. A clean
+    /// pick runs `prepare-commit-msg` and `post-commit` (#183), reported on `events`
+    /// (`HookSource::Pick`) under a `pick-<n>` id that `cancel_transfer` stops.
     pub fn cherry_pick(
         &self,
         commit_id: String,
         mainline: Option<u32>,
+        events: Sender<super::HookEvent>,
     ) -> Result<PickOutcome, String> {
         round_trip(self, |reply| Command::CherryPick {
             commit_id,
             mainline,
+            operation_id: super::remote::next_operation_id("pick"),
+            events,
             reply,
         })
     }
+    /// As `cherry_pick`, for a revert.
     pub fn revert_commit(
         &self,
         commit_id: String,
         mainline: Option<u32>,
+        events: Sender<super::HookEvent>,
     ) -> Result<PickOutcome, String> {
         round_trip(self, |reply| Command::RevertCommit {
             commit_id,
             mainline,
+            operation_id: super::remote::next_operation_id("pick"),
+            events,
             reply,
         })
     }
-    /// Cherry-picks `commit_ids` (oldest-first) as one sequence; a conflict pauses it, stored
-    /// in `<gitdir>/browsitory/sequence.json` until `continue_sequence`/`abort_sequence`.
-    pub fn cherry_pick_many(&self, commit_ids: Vec<String>) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::CherryPickMany { commit_ids, reply })
+    /// Cherry-picks `commit_ids` (oldest-first) as one sequence; a conflict or a failing
+    /// `prepare-commit-msg` pauses it, stored in `<gitdir>/browsitory/sequence.json` until
+    /// `continue_sequence`/`abort_sequence`. Hooks as for `cherry_pick`.
+    pub fn cherry_pick_many(
+        &self,
+        commit_ids: Vec<String>,
+        events: Sender<super::HookEvent>,
+    ) -> Result<SequenceOutcome, String> {
+        round_trip(self, |reply| Command::CherryPickMany {
+            commit_ids,
+            operation_id: super::remote::next_operation_id("pick"),
+            events,
+            reply,
+        })
     }
     /// Reverts `commit_ids` (oldest-first; applied newest-first) as one sequence.
-    pub fn revert_many(&self, commit_ids: Vec<String>) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::RevertMany { commit_ids, reply })
+    pub fn revert_many(
+        &self,
+        commit_ids: Vec<String>,
+        events: Sender<super::HookEvent>,
+    ) -> Result<SequenceOutcome, String> {
+        round_trip(self, |reply| Command::RevertMany {
+            commit_ids,
+            operation_id: super::remote::next_operation_id("pick"),
+            events,
+            reply,
+        })
     }
     /// Continues the stored sequence. The step it commits runs the commit hooks (skipped with
-    /// `no_verify`), reported on `events` under a `continue-<n>` id that `cancel_transfer`
-    /// stops (#133).
+    /// `no_verify`), and the clean steps after it `prepare-commit-msg`/`post-commit` (#183), all
+    /// reported on `events` under a `continue-<n>` id that `cancel_transfer` stops (#133).
     pub fn continue_sequence(
         &self,
         no_verify: bool,
@@ -333,7 +399,18 @@ impl WorkerHandle {
             reply,
         })
     }
-    pub fn checkout_commit(&self, commit_id: String) -> Result<(), String> {
-        round_trip(self, |reply| Command::CheckoutCommit { commit_id, reply })
+    /// Checks out `commit_id`; `post-checkout` is reported on `events` (`HookSource::Checkout`)
+    /// under a `checkout-<n>` id that `cancel_transfer` stops (#185).
+    pub fn checkout_commit(
+        &self,
+        commit_id: String,
+        events: Sender<super::HookEvent>,
+    ) -> Result<(), String> {
+        round_trip(self, |reply| Command::CheckoutCommit {
+            commit_id,
+            operation_id: super::remote::next_operation_id("checkout"),
+            events,
+            reply,
+        })
     }
 }

@@ -1,5 +1,5 @@
-use super::{repo_worker, AppState, BranchInfoDto};
-use tauri::State;
+use super::{hook_event_channel, repo_worker, AppState, BranchInfoDto};
+use tauri::{AppHandle, State};
 #[tauri::command]
 pub async fn list_branches(
     repo_path: String,
@@ -23,14 +23,17 @@ pub async fn create_branch(
         .call(move |w| w.create_branch(name, start_point))
         .await
 }
+/// `post-checkout` is reported as `hook-progress` events with `source: "Checkout"` (#185).
 #[tauri::command]
 pub async fn switch_branch(
     repo_path: String,
     name: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let events = hook_event_channel(app, &repo_path);
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.switch_branch(name))
+        .call(move |w| w.switch_branch(name, events))
         .await
 }
 #[tauri::command]

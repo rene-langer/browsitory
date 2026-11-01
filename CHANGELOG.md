@@ -65,6 +65,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   app's background threads, and actions in every other open repository then hung until the hook
   ended. Actions waiting for one repository now share one background thread (#181).
 
+### Hooks: status and parity
+
+- While post-checkout runs after you switch branches or check out a commit, or post-merge after
+  a fast-forward or squash merge, "Running post-checkout hook…" shows at the top of the
+  repository with Cancel. Cancelling stops the hook and keeps the switch or merge (#185).
+- A pull that fast-forwards shows its post-merge hook in the transfer panel, with Cancel (#185).
+- Cherry-picks and reverts that apply without conflicts now run prepare-commit-msg and
+  post-commit for each commit they create, as git does, including the steps a Continue applies
+  after the paused one. If prepare-commit-msg fails, that commit stays staged and paused, so you
+  can fix the hook and continue or commit it. Their hooks show in the same status strip, and
+  Cancel during a step's post-commit keeps that commit and stops the cherry-pick or revert after
+  it ("Stopped after …; its commit was kept. Continue to resume.") (#183).
+- Fixed: after a cherry-pick or revert that changed the repository but then stopped (a failing
+  hook, Cancel, an error on a later step), the history, file list and operation strip now
+  refresh instead of showing the state from before (#183).
+- When you commit a merge that had no conflicts, prepare-commit-msg and commit-msg get
+  .git/MERGE_MSG, as with git merge (#183).
+- Fixed: if a merge was aborted and restarted in a terminal while pre-merge-commit ran, the
+  commit used the old merge's parents; it now stops with "The merge changed while its hooks
+  ran." (#183).
+- Fixed: a commit (also a cherry-pick or revert step) that was created but whose merge or
+  cherry-pick state couldn't be cleared was reported as failed and skipped its post-commit or
+  post-merge hook; it now counts as done, and a multi-commit cherry-pick or revert moves on past
+  it (#183, #216). The next commit no longer turns such a leftover merge into a second merge
+  commit: it clears the leftover state first, or says it can't (#183).
+
 ### Lock and security follow-ups
 
 - Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,

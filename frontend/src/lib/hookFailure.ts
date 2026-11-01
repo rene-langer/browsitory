@@ -17,7 +17,12 @@ export type HookRetry =
   | { kind: "amend"; message: string; options: AmendOptions }
   | { kind: "push"; push: PushRequest }
   /** A paused cherry-pick/revert sequence's Continue (the step it commits runs the hooks). */
-  | { kind: "continueSequence" };
+  | { kind: "continueSequence" }
+  /**
+   * A single cherry-pick/revert whose `prepare-commit-msg` failed (#183). Never retried:
+   * `--no-verify` can't skip that hook; the commit box finishes the staged pick instead.
+   */
+  | { kind: "pick" };
 
 export interface HookFailure {
   hook: string;
@@ -43,7 +48,7 @@ export function runningHookLabel(hook: string): string {
 
 /** The dialog's retry button; `null` for a hook `--no-verify` cannot skip (it would fail again). */
 export function retryLabel(failure: HookFailure): string | null {
-  if (!SKIPPABLE_HOOKS.has(failure.hook)) return null;
+  if (!SKIPPABLE_HOOKS.has(failure.hook) || failure.retry.kind === "pick") return null;
   if (failure.retry.kind === "commit") return "Commit without hooks";
   if (failure.retry.kind === "amend") return "Amend without hooks";
   if (failure.retry.kind === "continueSequence") return "Continue without hooks";
@@ -54,7 +59,7 @@ export function retryLabel(failure: HookFailure): string | null {
  * The toast after a successful retry: the same one the original action announces. A Continue's
  * toast comes from its outcome (`sequenceToast`), so it is not listed here.
  */
-export function retrySuccessLabel(retry: Exclude<HookRetry, { kind: "continueSequence" }>): string {
+export function retrySuccessLabel(retry: Exclude<HookRetry, { kind: "continueSequence" } | { kind: "pick" }>): string {
   if (retry.kind === "commit") return "Committed";
   if (retry.kind === "amend") return "Amended commit";
   if (retry.push.operation === "ForcePushBranch") return "Force pushed";

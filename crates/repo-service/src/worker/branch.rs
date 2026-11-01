@@ -15,12 +15,21 @@ pub(super) fn create(
             .map_err(|error| error.to_string()),
     );
 }
-pub(super) fn switch(repo: &git2::Repository, name: String, reply: Sender<Result<(), String>>) {
+/// Switches branches; `post-checkout` then runs reported and cancellable on `op`, before the
+/// reply. A cancel stops only the hook: the switch stands (#185).
+pub(super) fn switch(
+    repo: &git2::Repository,
+    name: String,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
+    reply: Sender<Result<(), String>>,
+) {
     let before = super::hooks::head_oid(repo);
     let result = git_core::branch::switch_branch(repo, &name).map_err(|error| error.to_string());
     if result.is_ok() {
-        super::hooks::run_post_checkout(repo, before);
+        super::hooks::run_post_checkout(repo, before, &op, events);
     }
+    op.clear();
     let _ = reply.send(result);
 }
 pub(super) fn delete(
@@ -67,11 +76,19 @@ impl WorkerHandle {
             .recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
-    pub fn switch_branch(&self, name: String) -> Result<(), String> {
+    /// Switches to `name`; `post-checkout` is reported on `events` (`HookSource::Checkout`)
+    /// under a `switch-<n>` id that `cancel_transfer` stops (#185).
+    pub fn switch_branch(
+        &self,
+        name: String,
+        events: Sender<super::HookEvent>,
+    ) -> Result<(), String> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::SwitchBranch {
                 name,
+                operation_id: super::remote::next_operation_id("switch"),
+                events,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
