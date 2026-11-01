@@ -430,3 +430,65 @@ fn a_failed_add_keeps_a_branch_it_did_not_create() {
     assert!(has_branch(&repo, "feature"));
     assert!(!dir.path().join("a").exists());
 }
+
+/// Commits HEAD's tree plus a file called `name` on a new branch `bad`, leaving HEAD alone. A
+/// name the file system can't hold (too long, or reserved on Windows) makes the checkout of a
+/// worktree on `bad` fail after `file.txt` was written (#245).
+fn branch_with_unwritable_name(repo: &git2::Repository, name: &str) {
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let blob = repo.blob(b"unwritable").unwrap();
+    let mut builder = repo.treebuilder(Some(&head.tree().unwrap())).unwrap();
+    builder.insert(name, blob, 0o100644).unwrap();
+    let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    let commit = repo
+        .commit(None, &signature, &signature, "bad", &tree, &[&head])
+        .unwrap();
+    repo.branch("bad", &repo.find_commit(commit).unwrap(), false)
+        .unwrap();
+}
+
+/// A name longer than any file system allows for one component.
+fn too_long_name() -> String {
+    "x".repeat(300)
+}
+
+#[test]
+fn a_checkout_failure_leaves_a_registered_worktree_today() {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, &too_long_name());
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert!(matches!(result, Err(WorktreeError::Git)), "{result:?}");
+    assert!(repo
+        .path()
+        .join("worktrees")
+        .join("wt")
+        .join("gitdir")
+        .is_file());
+    assert!(linked.join("file.txt").is_file());
+    let mut newb = repo.find_branch("newb", git2::BranchType::Local).unwrap();
+    assert!(newb.delete().is_err());
+
+    // git removes the destination and the entry, and keeps the branch it created.
+    let (twin, twin_repo, _) = committed_repo();
+    branch_with_unwritable_name(&twin_repo, &too_long_name());
+    let twin_linked = twin.path().join("wt");
+    let output = git(
+        twin.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "newb",
+            twin_linked.to_str().unwrap(),
+            "bad",
+        ],
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(!twin_linked.exists());
+    assert!(!twin_repo.path().join("worktrees").join("wt").exists());
+    assert!(has_branch(&twin_repo, "newb"));
+}

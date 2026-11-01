@@ -37,9 +37,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: a worktree add that failed could leave a half-made worktree entry and the new branch
   behind, so trying again with the same name failed with "git operation failed". When an add
   fails before the worktree is set up, Browsitory now removes the folders, entry and branch it
-  created, and a folder it can't create is named in the error. A failure later, while the files
-  are checked out, still leaves the worktree and branch; delete the folder, prune, and delete
-  the branch (#200).
+  created, and a folder it can't create is named in the error (#200).
+- Fixed: a worktree add that failed while checking out the files (a full disk, or on Windows a
+  file name such as aux or a path that's too long) left the worktree registered with its branch,
+  so it could neither be added again nor removed. Browsitory now removes the files it checked
+  out, the folder, the worktree entry and the new branch, and says why it failed instead of "git
+  operation failed"; if something else is in the folder, the folder is kept and named (#245).
 
 ### Repository identity
 
