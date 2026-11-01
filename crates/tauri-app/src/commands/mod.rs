@@ -1994,7 +1994,7 @@ impl RepoWorker {
 
     /// A worker with a gate of its own, so tests can queue calls that each take a blocking
     /// thread (as before #181) on one worker.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn with_own_gate(handle: WorkerHandle) -> Self {
         Self {
             handle,
