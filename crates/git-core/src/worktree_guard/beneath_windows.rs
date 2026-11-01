@@ -41,6 +41,7 @@ use super::{Content, Leaf, OnLink, OnMissing, Step, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
@@ -59,6 +60,7 @@ const ERROR_ALREADY_EXISTS: i32 = 183;
 const ERROR_DIRECTORY: i32 = 267;
 
 /// `FILE_INFO_BY_HANDLE_CLASS` values.
+const FILE_BASIC_INFO_CLASS: i32 = 0;
 const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
 const FILE_ID_INFO_CLASS: i32 = 18;
 const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
@@ -67,11 +69,16 @@ const FILE_DISPOSITION_INFO_EX_CLASS: i32 = 21;
 /// `FILE_DISPOSITION_INFO_EX` flags.
 const FILE_DISPOSITION_FLAG_DELETE: u32 = 0x1;
 const FILE_DISPOSITION_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+/// Windows 10 1809 and later; earlier builds refuse it with `ERROR_INVALID_PARAMETER`.
+const FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE: u32 = 0x10;
+
+const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
 
 /// What a file system without POSIX deletes answers (see `delete_by_handle`).
 const ERROR_INVALID_FUNCTION: i32 = 1;
 const ERROR_NOT_SUPPORTED: i32 = 50;
 const ERROR_INVALID_PARAMETER: i32 = 87;
+const ERROR_ACCESS_DENIED: i32 = 5;
 
 /// `FILE_ATTRIBUTE_TAG_INFO`.
 #[repr(C)]
@@ -99,6 +106,17 @@ struct DispositionInfo {
 #[repr(C)]
 struct DispositionInfoEx {
     flags: u32,
+}
+
+/// `FILE_BASIC_INFO`: four `LARGE_INTEGER` times (0 = leave unchanged) and the attributes.
+#[repr(C)]
+#[derive(Default)]
+struct BasicInfo {
+    creation_time: i64,
+    last_access_time: i64,
+    last_write_time: i64,
+    change_time: i64,
+    file_attributes: u32,
 }
 
 #[link(name = "kernel32")]
@@ -163,25 +181,83 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
 /// Where the file system doesn't support that (FAT/exFAT, older Windows, some network shares),
 /// it falls back to the classic disposition, as std's `remove_dir_all` does: the name then stays
 /// until the last handle closes.
+///
+/// A read-only file is deleted too, as std's `remove_file` and git do (#194): with
+/// `IGNORE_READONLY_ATTRIBUTE` (Windows 10 1809+), else (1607–1803, which answer
+/// `ERROR_INVALID_PARAMETER` to the unknown flag) POSIX semantics alone, else the classic
+/// disposition, which clears the attribute first (see `delete_classic`).
 fn delete_by_handle(file: &File) -> io::Result<()> {
-    let mut posix = DispositionInfoEx {
-        flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    let posix = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
+    let mut ignoring_read_only = DispositionInfoEx {
+        flags: posix | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     };
-    match set_information(file, FILE_DISPOSITION_INFO_EX_CLASS, &mut posix) {
+    let result = match set_information(
+        file,
+        FILE_DISPOSITION_INFO_EX_CLASS,
+        &mut ignoring_read_only,
+    ) {
+        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) => set_information(
+            file,
+            FILE_DISPOSITION_INFO_EX_CLASS,
+            &mut DispositionInfoEx { flags: posix },
+        ),
+        other => other,
+    };
+    match result {
+        // No POSIX deletes here, or (1607–1803) a read-only file.
         Err(error)
             if matches!(
                 error.raw_os_error(),
-                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+                Some(
+                    ERROR_INVALID_FUNCTION
+                        | ERROR_NOT_SUPPORTED
+                        | ERROR_INVALID_PARAMETER
+                        | ERROR_ACCESS_DENIED
+                )
             ) =>
         {
-            set_information(
-                file,
-                FILE_DISPOSITION_INFO_CLASS,
-                &mut DispositionInfo { delete_file: 1 },
-            )
+            delete_classic(file)
         }
         other => other,
     }
+}
+
+/// The classic disposition (`FileDispositionInfo`). It has no way to ignore the read-only
+/// attribute, so a read-only file has the attribute cleared through the same handle (which needs
+/// `FILE_WRITE_ATTRIBUTES`) and is tried again; the attribute is put back if that fails too.
+fn delete_classic(file: &File) -> io::Result<()> {
+    let delete = |file| {
+        set_information(
+            file,
+            FILE_DISPOSITION_INFO_CLASS,
+            &mut DispositionInfo { delete_file: 1 },
+        )
+    };
+    let error = match delete(file) {
+        Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED) => error,
+        other => return other,
+    };
+    let attributes = attribute_tag(file)?.file_attributes;
+    if attributes & FILE_ATTRIBUTE_READONLY == 0 {
+        return Err(error);
+    }
+    set_attributes(file, attributes & !FILE_ATTRIBUTE_READONLY)?;
+    delete(file).inspect_err(|_| {
+        let _ = set_attributes(file, attributes);
+    })
+}
+
+/// Sets `file`'s attributes (`FILE_ATTRIBUTE_NORMAL` for none), leaving its times alone.
+fn set_attributes(file: &File, attributes: u32) -> io::Result<()> {
+    let mut info = BasicInfo {
+        file_attributes: if attributes == 0 {
+            FILE_ATTRIBUTE_NORMAL
+        } else {
+            attributes
+        },
+        ..BasicInfo::default()
+    };
+    set_information(file, FILE_BASIC_INFO_CLASS, &mut info)
 }
 
 /// `SetFileInformationByHandle` with `info` as the `class` structure.
@@ -418,7 +494,7 @@ enum Found {
 /// what any later act uses, so a rename of the name meanwhile changes nothing.
 fn open_leaf_at(at: &Beneath, path: &Path) -> io::Result<Option<(File, Found)>> {
     let file = match OpenOptions::new()
-        .access_mode(DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .access_mode(DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)
@@ -939,7 +1015,6 @@ mod tests {
     fn junction_in_place(dir: &Path, target: &Path) -> io::Result<()> {
         use std::os::windows::ffi::OsStrExt;
         const FILE_WRITE_DATA: u32 = 0x0002;
-        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
         const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
         const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
 
@@ -1227,6 +1302,27 @@ mod tests {
         assert_eq!(std::mem::size_of::<FileIdInfo>(), 24);
         assert_eq!(std::mem::align_of::<FileIdInfo>(), 8);
         assert_eq!(std::mem::size_of::<DispositionInfoEx>(), 4);
+        assert_eq!(std::mem::size_of::<BasicInfo>(), 40);
+        assert_eq!(std::mem::offset_of!(BasicInfo, file_attributes), 32);
+    }
+
+    /// The fallback for file systems without POSIX deletes (FAT/exFAT, some shares), tested
+    /// directly on NTFS: it clears the read-only attribute itself.
+    #[test]
+    fn delete_classic_deletes_a_read_only_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        make_read_only(&path);
+        let file = OpenOptions::new()
+            .access_mode(DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&path)
+            .unwrap();
+        delete_classic(&file).unwrap();
+        drop(file);
+        assert!(std::fs::symlink_metadata(&path).is_err());
     }
 
     #[cfg(target_pointer_width = "64")]
