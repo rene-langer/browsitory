@@ -19,8 +19,11 @@
 //! file created by the failed act is deleted through its handle. A link's target is read from
 //! its own handle (`FSCTL_GET_REPARSE_POINT`), never by path. Leaves are deleted through their
 //! handle (`FileDispositionInfoEx` with POSIX semantics, read-only files included, see
-//! `delete_by_handle`), never by path, and an existing file is written through a handle whose
-//! file ID matches the one classified; a read-only one is refused and left as it is (#209).
+//! `delete_by_handle`), never by path. A write never opens the existing file for writing data:
+//! it checks that the file may be written through a handle whose file ID matches the one
+//! classified (a read-only one is refused and left as it is, #209), writes a new temporary file
+//! created in the held parent, and renames that over the name through the temporary file's
+//! handle, the new name resolved against the held parent (`rename_in_parent`, #239).
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
@@ -369,7 +372,23 @@ extern "system" {
         ea_length: u32,
     ) -> i32;
     fn RtlNtStatusToDosError(status: i32) -> u32;
+    fn NtSetInformationFile(
+        handle: *mut c_void,
+        io_status: *mut IoStatusBlock,
+        info: *mut c_void,
+        length: u32,
+        class: i32,
+    ) -> i32;
 }
+
+/// `FILE_INFORMATION_CLASS` values (ntdll's, not kernel32's `FILE_INFO_BY_HANDLE_CLASS`).
+const FILE_RENAME_INFORMATION_CLASS: i32 = 10;
+const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
+/// `FILE_RENAME_INFORMATION_EX` flags.
+const FILE_RENAME_REPLACE_IF_EXISTS: u32 = 0x1;
+const FILE_RENAME_POSIX_SEMANTICS: u32 = 0x2;
+
+const ERROR_SHARING_VIOLATION: i32 = 32;
 
 /// What `NtCreateFile` relative to a held folder answers once that folder has become a reparse
 /// point (a junction or symbolic link set on it in place): the name is not resolved at all.
@@ -943,19 +962,54 @@ fn write_with(
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
+    let in_use = || file_in_use(rel);
+    let (attributes, target) = classify_for_writing(&at, &in_use)?;
+    let mut temp = create_temp(&at)?;
+    let written = (|| {
+        if attributes != 0 {
+            keep_attributes(&temp, attributes)?;
+        }
+        fill(&mut temp)?;
+        temp.sync_all()?;
+        rename_in_parent(&temp, at.parent_file(), &target)
+            .map_err(|error| rename_error(&at, &target, error, &in_use))
+    })();
+    if let Err(error) = written {
+        // Gone when `temp` closes, right here.
+        let _ = delete_by_handle(&temp);
+        return Err(error);
+    }
+    Ok(true)
+}
+
+fn file_in_use(rel: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::ResourceBusy,
+        super::FileInUse {
+            name: rel.to_string_lossy().into_owned(),
+        },
+    )
+}
+
+/// What `write` replaces at `at`'s leaf: the settable attributes to keep and the name to give
+/// the new file (the existing file's own spelling, so the case on disk stays). Nothing for a
+/// missing leaf. A link is deleted itself (through its own handle, never followed); a folder is
+/// an error. An existing file must be one the user may write: opened for reading and writing
+/// (by its file ID, see `reopen_same`), the handle closed at once. A read-only file is refused
+/// as such (#209) and a file another program holds without sharing writing as in use.
+fn classify_for_writing(
+    at: &Beneath,
+    in_use: &dyn Fn() -> io::Error,
+) -> io::Result<(u32, OsString)> {
     for _ in 0..ATTEMPTS {
         // Classified for reading: a file the user may write but not delete stays writable.
-        let mut file = match open_leaf(&at, Purpose::Read)? {
-            None => match create_leaf(&at)? {
-                Some(file) => file,
-                None => continue,
-            },
+        match open_leaf(at, Purpose::Read)? {
+            None => return Ok((0, at.leaf_name().to_os_string())),
             Some((_, Found::Link)) => {
                 // Reopened to delete it, checked to still be the link in the held parent.
-                if let Some((link, Found::Link)) = open_leaf(&at, Purpose::Delete)? {
+                if let Some((link, Found::Link)) = open_leaf(at, Purpose::Delete)? {
                     delete_by_handle(&link)?;
                 }
-                continue;
             }
             Some((_, Found::Dir)) => {
                 return Err(io::Error::new(
@@ -964,19 +1018,233 @@ fn write_with(
                 ))
             }
             Some((first, Found::File { reopen })) => {
-                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
-                    Ok(Some(file)) => file,
-                    Ok(None) => continue,
+                match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
+                    Ok(Some(_writable)) => {
+                        let attributes = attribute_tag(&first)?.file_attributes;
+                        let name = final_path(&first)?
+                            .file_name()
+                            .map_or_else(|| at.leaf_name().to_os_string(), OsStr::to_os_string);
+                        return Ok((attributes & SETTABLE_ATTRIBUTES, name));
+                    }
+                    Ok(None) => {}
+                    Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                        return Err(in_use())
+                    }
                     Err(error) => return Err(read_only_or(&first, error)),
                 }
             }
-        };
-        // An existing file keeps its attributes, like `fs::write`.
-        file.set_len(0)?;
-        fill(&mut file)?;
-        return Ok(true);
+        }
     }
     Err(redirected())
+}
+
+/// The temporary file's name for `leaf`: hidden by its leading dot as on Unix, named after it
+/// and this process so a left-over one (after a crash) says where it came from. The part taken
+/// from `leaf` is kept short so the name fits where `leaf` itself fits.
+fn temp_name(leaf: &OsStr, n: usize) -> OsString {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let units: Vec<u16> = leaf.encode_wide().collect();
+    let mut cut = units.len().min(TEMP_PREFIX_UNITS);
+    // Not between the two halves of a surrogate pair.
+    if cut > 0 && cut < units.len() && (0xD800..0xDC00).contains(&units[cut - 1]) {
+        cut -= 1;
+    }
+    let mut name: Vec<u16> = ".".encode_utf16().collect();
+    name.extend_from_slice(&units[..cut]);
+    name.extend(format!(".browsitory-{}-{n}.tmp", std::process::id()).encode_utf16());
+    OsString::from_wide(&name)
+}
+
+/// At most this many UTF-16 units of the leaf's name go into its temporary file's name.
+const TEMP_PREFIX_UNITS: usize = 64;
+
+/// Creates a new, empty temporary file next to `at`'s leaf, in the held parent and checked to
+/// be there (deleted again through its handle when it isn't). Its handle can write, set
+/// attributes and rename or delete it.
+fn create_temp(at: &Beneath) -> io::Result<File> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let parent = at.parent_file();
+    for _ in 0..ATTEMPTS {
+        let name = temp_name(at.leaf_name(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let file = match nt_open(
+            parent,
+            &name,
+            GENERIC_WRITE | DELETE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            FILE_ATTRIBUTE_NORMAL,
+        ) {
+            Ok(file) => file,
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS)
+                    || error.kind() == io::ErrorKind::AlreadyExists =>
+            {
+                continue
+            }
+            Err(error) => return Err(error),
+        };
+        if !in_parent(&file, parent)? {
+            delete_by_handle(&file)?;
+            return Err(redirected());
+        }
+        return Ok(file);
+    }
+    Err(io::Error::from_raw_os_error(ERROR_ALREADY_EXISTS))
+}
+
+/// Gives the new file the replaced file's settable attributes. OneDrive's pinned/unpinned
+/// attributes only mean something in a synced folder: where they are refused, the others
+/// (read-only, hidden, system, archive, not content indexed) are set alone.
+fn keep_attributes(file: &File, attributes: u32) -> io::Result<()> {
+    const BASIC: u32 = 0x1 | 0x2 | 0x4 | 0x20 | 0x2000;
+    set_attributes(file, attributes).or_else(|_| set_attributes(file, attributes & BASIC))
+}
+
+/// `write`'s error for a rename that failed: in use when another program holds the target
+/// without sharing delete (a sharing violation, or access denied while an open of it for
+/// deleting is refused as a sharing violation); read-only when it became read-only meanwhile;
+/// else `error` itself.
+fn rename_error(
+    at: &Beneath,
+    target: &OsStr,
+    error: io::Error,
+    in_use: &dyn Fn() -> io::Error,
+) -> io::Error {
+    match error.raw_os_error() {
+        Some(ERROR_SHARING_VIOLATION) => in_use(),
+        Some(ERROR_ACCESS_DENIED) => {
+            if let Ok(Some((first, Found::File { .. }))) = open_leaf_at(at, target, Purpose::Read) {
+                if has_read_only_attribute(&first).unwrap_or(false) {
+                    return super::read_only_error();
+                }
+            }
+            let held = nt_open(
+                at.parent_file(),
+                target,
+                DELETE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+                0,
+            );
+            match held {
+                Err(probe) if probe.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => in_use(),
+                _ => error,
+            }
+        }
+        _ => error,
+    }
+}
+
+/// Renames the open file `file` to `name` in the held folder `parent`, replacing whatever file
+/// or link has that name (never following it): `NtSetInformationFile` on `file`'s handle with
+/// `RootDirectory` = `parent`, so the name is resolved against the held folder, never a path.
+/// POSIX semantics (`FileRenameInformationEx`) replace a file another program keeps open with
+/// delete sharing (a scanner, the indexer); where that class or flag isn't supported (older
+/// Windows, FAT, some shares) the classic `FileRenameInformation` with `ReplaceIfExists`.
+fn rename_in_parent(file: &File, parent: &File, name: &OsStr) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = name.encode_wide().collect();
+    rename_in_parent_with(|class, flags| set_rename_info(file, parent, class, flags, &wide))
+}
+
+/// `rename_in_parent` with `set(class, flags)` as the rename call (a test seam).
+fn rename_in_parent_with(mut set: impl FnMut(i32, u32) -> io::Result<()>) -> io::Result<()> {
+    match set(
+        FILE_RENAME_INFORMATION_EX_CLASS,
+        FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS,
+    ) {
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+            ) =>
+        {
+            // `ReplaceIfExists` = TRUE, the first byte of the same field.
+            set(FILE_RENAME_INFORMATION_CLASS, 1)
+        }
+        other => other,
+    }
+}
+
+/// `FILE_RENAME_INFORMATION(_EX)`'s fixed part: a `BOOLEAN ReplaceIfExists` / `ULONG Flags`
+/// union, the `RootDirectory` handle and the name's length in bytes; the name (`WCHAR`s, no
+/// terminating NUL) follows at `RENAME_NAME_OFFSET`.
+#[repr(C)]
+struct RenameInfo {
+    flags: u32,
+    root_directory: *mut c_void,
+    file_name_length: u32,
+}
+
+const RENAME_NAME_OFFSET: usize = std::mem::offset_of!(RenameInfo, file_name_length) + 4;
+
+/// A `FILE_RENAME_INFORMATION(_EX)` for `name` in `root`, in a buffer aligned for it. Its size
+/// in bytes is the buffer's, at least the structure's.
+fn rename_info(flags: u32, root: *mut c_void, name: &[u16]) -> io::Result<Vec<u64>> {
+    let name_bytes = name.len() * 2;
+    let file_name_length = u32::try_from(name_bytes)
+        .ok()
+        .filter(|&length| length > 0)
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let size = (RENAME_NAME_OFFSET + name_bytes).max(std::mem::size_of::<RenameInfo>());
+    let mut buf = vec![0u64; size.div_ceil(8)];
+    let base = buf.as_mut_ptr().cast::<u8>();
+    // SAFETY: `buf` holds at least `size` bytes, aligned for `RenameInfo` (8); the fixed part is
+    // written first, then the name after `RENAME_NAME_OFFSET`, which may overwrite the fixed
+    // part's trailing padding only, and ends within `size`.
+    unsafe {
+        base.cast::<RenameInfo>().write(RenameInfo {
+            flags,
+            root_directory: root,
+            file_name_length,
+        });
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr().cast::<u8>(),
+            base.add(RENAME_NAME_OFFSET),
+            name_bytes,
+        );
+    }
+    Ok(buf)
+}
+
+fn set_rename_info(
+    file: &File,
+    parent: &File,
+    class: i32,
+    flags: u32,
+    name: &[u16],
+) -> io::Result<()> {
+    let mut info = rename_info(flags, parent.as_raw_handle(), name)?;
+    let length =
+        u32::try_from(info.len() * 8).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let mut io_status = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    // SAFETY: the handles belong to `file` and `parent`, which outlive the call; `info` is a
+    // `FILE_RENAME_INFORMATION(_EX)` of `length` bytes built by `rename_info`, and `io_status`
+    // is writable.
+    let status = unsafe {
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut io_status,
+            info.as_mut_ptr().cast(),
+            length,
+            class,
+        )
+    };
+    if status < 0 {
+        // SAFETY: a pure conversion of a status code.
+        let code = unsafe { RtlNtStatusToDosError(status) } as i32;
+        if code == ERROR_CANT_RESOLVE_FILENAME {
+            return Err(redirected());
+        }
+        return Err(io::Error::from_raw_os_error(code));
+    }
+    Ok(())
 }
 
 /// `write`'s error for a file it may not open for writing: `read_only_error` when the open was
@@ -2074,6 +2342,104 @@ mod tests {
         assert_eq!(std::mem::size_of::<UnicodeString>(), 16);
         assert_eq!(std::mem::size_of::<ObjectAttributes>(), 48);
         assert_eq!(std::mem::size_of::<IoStatusBlock>(), 16);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn rename_info_has_the_documented_layout() {
+        // `FILE_RENAME_INFORMATION` on 64-bit: Flags at 0, RootDirectory at 8, FileNameLength
+        // at 16, FileName at 20; `sizeof` 24.
+        assert_eq!(std::mem::size_of::<RenameInfo>(), 24);
+        assert_eq!(RENAME_NAME_OFFSET, 20);
+        let root = 0x1234_5678_usize as *mut c_void;
+        let name: Vec<u16> = "f.txt".encode_utf16().collect();
+        let buf = rename_info(3, root, &name).unwrap();
+        // SAFETY: reading back the bytes of a plain `Vec<u64>`.
+        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), buf.len() * 8) };
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(&bytes[0..4], &3u32.to_ne_bytes());
+        assert_eq!(&bytes[8..16], &0x1234_5678_u64.to_ne_bytes());
+        assert_eq!(&bytes[16..20], &10u32.to_ne_bytes());
+        let written: Vec<u16> = bytes[20..30]
+            .chunks(2)
+            .map(|unit| u16::from_ne_bytes([unit[0], unit[1]]))
+            .collect();
+        assert_eq!(written, name);
+        // A one-letter name still passes the whole structure's size.
+        assert_eq!(rename_info(1, root, &[0x66]).unwrap().len() * 8, 24);
+        assert!(rename_info(1, root, &[]).is_err());
+    }
+
+    #[test]
+    fn rename_falls_back_to_the_classic_class_where_posix_renames_are_refused() {
+        for refusal in [
+            ERROR_INVALID_PARAMETER,
+            ERROR_NOT_SUPPORTED,
+            ERROR_INVALID_FUNCTION,
+        ] {
+            let mut calls = Vec::new();
+            rename_in_parent_with(|class, flags| {
+                calls.push((class, flags));
+                if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                    Err(io::Error::from_raw_os_error(refusal))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
+            assert_eq!(
+                calls,
+                [
+                    (FILE_RENAME_INFORMATION_EX_CLASS, 0x3),
+                    (FILE_RENAME_INFORMATION_CLASS, 1)
+                ]
+            );
+        }
+        // Any other failure is the answer.
+        let mut calls = 0;
+        let error = rename_in_parent_with(|_, _| {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION))
+        })
+        .unwrap_err();
+        assert_eq!(
+            (calls, error.raw_os_error()),
+            (1, Some(ERROR_SHARING_VIOLATION))
+        );
+    }
+
+    #[test]
+    fn rename_in_parent_replaces_a_file_in_the_held_folder() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f"), "old").unwrap();
+        let held = open_pinned(dir.path(), FILE_LIST_DIRECTORY).unwrap();
+        let mut temp = nt_open(
+            &held,
+            OsStr::new("t"),
+            GENERIC_WRITE | DELETE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            FILE_ATTRIBUTE_NORMAL,
+        )
+        .unwrap();
+        temp.write_all(b"new").unwrap();
+        rename_in_parent(&temp, &held, OsStr::new("f")).unwrap();
+        drop(temp);
+        assert_eq!(names_in(dir.path()), ["f"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn temp_names_are_short_hidden_and_distinct() {
+        let long: String = "x".repeat(200);
+        let name = temp_name(OsStr::new(&long), 7).into_string().unwrap();
+        assert!(name.starts_with(&format!(".{}.browsitory-", "x".repeat(64))));
+        assert!(name.ends_with("-7.tmp"));
+        assert_ne!(temp_name(OsStr::new("f"), 1), temp_name(OsStr::new("f"), 2));
     }
 
     #[test]

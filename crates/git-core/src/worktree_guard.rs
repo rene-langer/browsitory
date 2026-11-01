@@ -1005,7 +1005,7 @@ pub(crate) fn is_read_only(error: &io::Error) -> bool {
 /// The error source [`write_beneath`] reports on Windows for a file another program keeps open
 /// so it can't be replaced (#239): opened without sharing delete, as some editors do.
 #[derive(Debug)]
-#[allow(dead_code)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) struct FileInUse {
     pub(crate) name: String,
 }
@@ -1023,7 +1023,7 @@ impl std::fmt::Display for FileInUse {
 impl std::error::Error for FileInUse {}
 
 /// Whether `error` is the [`FileInUse`] error of [`write_beneath`].
-#[allow(dead_code)]
+#[cfg_attr(not(all(windows, test)), allow(dead_code))]
 pub(crate) fn is_in_use(error: &io::Error) -> bool {
     error
         .get_ref()
