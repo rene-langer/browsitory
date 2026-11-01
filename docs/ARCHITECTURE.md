@@ -891,12 +891,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   ours, in this order: when the destination's `.git` file points at our entry (libgit2 writes it
   only into the folder it just created), `roll_back_destination` removes each file, link and
   submodule path of the branch's tree through `remove_and_prune_beneath` (no link followed,
-  emptied folders pruned), then `.git`, then the destination if it is empty; then the entry
-  (`remove_dir_all`), which frees the branch; then the new branch; then the parent folders. Every
-  libgit2 error of the add is `WorktreeError::AddFailed` ("Couldn't create the worktree:
-  {reason}.", `reason` = libgit2's message); when something else is left in the destination, it
-  is kept and the error is `AddFailedFolderLeft`, naming the folder. git does it differently: it
-  deletes the whole destination and keeps the `-b` branch. There is no forced remove for a
+  emptied folders pruned), then the tree's folders deepest first while empty (a file the
+  checkout never wrote stops the pruning of its folder), then `.git`, then the destination if it
+  is empty; then the entry (`remove_dir_all`), which frees the branch; then the new branch; then
+  the parent folders. A tree path that isn't UTF-8 is skipped (the walker takes `&str`), so such
+  a file stays and its folder is kept. Every libgit2 error of the add is
+  `WorktreeError::AddFailed` ("Couldn't create the worktree: {reason}.", `reason` = libgit2's
+  message); when anything is left in the destination (which didn't exist when the call
+  started), it is kept and the error is `AddFailedFolderLeft`, naming the folder. git does it
+  differently: it deletes the whole destination and keeps the `-b` branch. There is no forced remove for a
   half-made worktree left by an older version; the user deletes the folder, prunes and deletes
   the branch. Residual risk: another process that creates the same `worktrees/<name>` between the
   existence check and libgit2's mkdir, or an empty destination folder after it, can have that

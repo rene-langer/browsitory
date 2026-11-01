@@ -433,13 +433,37 @@ fn a_failed_add_keeps_a_branch_it_did_not_create() {
 }
 
 /// Commits HEAD's tree plus a file called `name` on a new branch `bad`, leaving HEAD alone. A
-/// name the file system can't hold (too long, or reserved on Windows) makes the checkout of a
-/// worktree on `bad` fail after `file.txt` was written (#245).
+/// name the file system can't hold makes the checkout of a worktree on `bad` fail (#245): one
+/// that's too long fails while writing it, after `file.txt` was written; on Windows a reserved
+/// name (`aux`) or a trailing dot (`a.`) is refused while the checkout is planned
+/// (`checkout_verify_paths`), before any file is written.
 fn branch_with_unwritable_name(repo: &git2::Repository, name: &str) {
+    branch_with_entries(repo, &[(name.as_bytes(), Entry::File)]);
+}
+
+enum Entry<'a> {
+    File,
+    /// A folder holding one file of this name.
+    Folder(&'a str),
+}
+
+/// Commits HEAD's tree plus `entries` on a new branch `bad`, leaving HEAD alone.
+fn branch_with_entries(repo: &git2::Repository, entries: &[(&[u8], Entry<'_>)]) {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     let blob = repo.blob(b"unwritable").unwrap();
     let mut builder = repo.treebuilder(Some(&head.tree().unwrap())).unwrap();
-    builder.insert(name, blob, 0o100644).unwrap();
+    for (name, entry) in entries {
+        match entry {
+            Entry::File => builder.insert(name.to_vec(), blob, 0o100644).unwrap(),
+            Entry::Folder(file) => {
+                let mut folder = repo.treebuilder(None).unwrap();
+                folder.insert(*file, blob, 0o100644).unwrap();
+                builder
+                    .insert(name.to_vec(), folder.write().unwrap(), 0o040000)
+                    .unwrap()
+            }
+        };
+    }
     let tree = repo.find_tree(builder.write().unwrap()).unwrap();
     let signature = git2::Signature::now("Test", "test@example.com").unwrap();
     let commit = repo
@@ -535,6 +559,47 @@ fn a_checkout_failure_in_missing_parents_removes_them() {
     assert!(!has_branch(&repo, "newb"));
 }
 
+/// The too-long name is in a folder: the folder checked out for it is removed too.
+#[test]
+fn a_checkout_failure_in_a_nested_folder_is_rolled_back() {
+    let (dir, repo, _) = committed_repo();
+    let long = too_long_name();
+    branch_with_entries(&repo, &[(b"zdir", Entry::Folder(&long))]);
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    assert!(!has_branch(&repo, "newb"));
+    create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
+}
+
+/// The work tree walker takes UTF-8 paths, so a checked-out file whose name isn't UTF-8 is not
+/// removed: the folder is kept and named; the entry and the new branch still go.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_checked_out_file_with_a_non_utf8_name_keeps_the_folder() {
+    let (dir, repo, _) = committed_repo();
+    let long = too_long_name();
+    // Sorted before the too-long name, so it is written before the checkout fails.
+    branch_with_entries(
+        &repo,
+        &[(b"a\x80", Entry::File), (long.as_bytes(), Entry::File)],
+    );
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    let Err(WorktreeError::AddFailedFolderLeft { ref path, .. }) = result else {
+        panic!("expected AddFailedFolderLeft, got {result:?}");
+    };
+    assert_eq!(path, &linked);
+    assert!(!linked.join("file.txt").exists());
+    assert!(!linked.join(".git").exists());
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert!(!has_branch(&repo, "newb"));
+}
+
 #[test]
 fn an_admin_folder_naming_another_destination_is_left_alone() {
     let (dir, repo, _) = committed_repo();
@@ -582,7 +647,7 @@ fn rolling_back_removes_the_checked_out_files_and_the_folder() {
     let tree = repo.find_tree(half_made_worktree(&repo, &linked)).unwrap();
     write_file(&linked, "d/e/nested.txt", "nested");
 
-    let error = roll_back_destination(&linked, &tree, "disk full".to_string());
+    let error = roll_back_destination(&repo, &linked, &tree, "disk full".to_string());
 
     assert!(
         matches!(error, WorktreeError::AddFailed { .. }),
@@ -602,7 +667,7 @@ fn a_foreign_file_in_the_new_folder_is_kept() {
     let tree = repo.find_tree(half_made_worktree(&repo, &linked)).unwrap();
     write_file(&linked, "zzz-foreign", "not ours");
 
-    let error = roll_back_destination(&linked, &tree, "disk full".to_string());
+    let error = roll_back_destination(&repo, &linked, &tree, "disk full".to_string());
 
     let WorktreeError::AddFailedFolderLeft { ref path, .. } = error else {
         panic!("expected AddFailedFolderLeft, got {error:?}");

@@ -197,7 +197,7 @@ pub fn create_worktree_with(
     if let Some(admin) = ours {
         if let WorktreeError::AddFailed { reason } = error {
             error = if destination_written_by(&admin, path) {
-                roll_back_destination(path, &tree, reason)
+                roll_back_destination(repo, path, &tree, reason)
             } else {
                 WorktreeError::AddFailed { reason }
             };
@@ -210,8 +210,14 @@ pub fn create_worktree_with(
         }
     }
     // libgit2 creates the destination itself; when it isn't known to be ours, it goes only while
-    // still empty.
-    let _ = std::fs::remove_dir(path);
+    // still empty. It didn't exist when the call started, so one left behind is named.
+    error = match error {
+        WorktreeError::AddFailed { reason } => folder_left(path, reason),
+        other => {
+            let _ = std::fs::remove_dir(path);
+            other
+        }
+    };
     remove_created_folders(&created);
     Err(error)
 }
@@ -255,22 +261,62 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// Removes from `path` what a failed worktree add wrote there: each file, link or submodule
-/// folder of `tree` (then the folders that emptied), the `.git` file, and `path` itself once
-/// empty. Anything else is kept, and so is `path`, which the returned error then names.
+/// folder of `tree` (then the folders that emptied), the tree's folders while empty, the `.git`
+/// file, and `path` itself once empty. Anything else is kept, and so is `path`, which the
+/// returned error then names.
 #[doc(hidden)]
-pub fn roll_back_destination(path: &Path, tree: &git2::Tree<'_>, reason: String) -> WorktreeError {
-    let _ = tree.walk(git2::TreeWalkMode::PreOrder, |parent, entry| {
-        if entry.kind() != Some(git2::ObjectType::Tree) {
-            if let Ok(name) = entry.name() {
-                let _ = crate::worktree_guard::remove_and_prune_beneath(
-                    path,
-                    &format!("{parent}{name}"),
-                );
-            }
-        }
-        git2::TreeWalkResult::Ok
-    });
+pub fn roll_back_destination(
+    repo: &Repository,
+    path: &Path,
+    tree: &git2::Tree<'_>,
+    reason: String,
+) -> WorktreeError {
+    let mut leaves = Vec::new();
+    let mut folders = Vec::new();
+    tree_paths(repo, tree, "", &mut leaves, &mut folders);
+    for rel in &leaves {
+        let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
+    }
+    // A file the checkout never wrote (a name the file system refuses) stops the pass above
+    // before its folder is pruned, so the tree's folders go too: deepest first, each only while
+    // empty.
+    for rel in folders.iter().rev() {
+        let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
+    }
     let _ = crate::worktree_guard::remove_beneath(path, ".git");
+    folder_left(path, reason)
+}
+
+/// Collects the paths of `tree` below `prefix`: files, links and submodules on `leaves`,
+/// folders on `folders` (each before what it holds). The work tree walker takes UTF-8 paths,
+/// so an entry whose name isn't UTF-8 is skipped with what is below it; it stays in the
+/// folder, which is then kept and named.
+fn tree_paths(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    prefix: &str,
+    leaves: &mut Vec<String>,
+    folders: &mut Vec<String>,
+) {
+    for entry in tree.iter() {
+        let Ok(name) = std::str::from_utf8(entry.name_bytes()) else {
+            continue;
+        };
+        let rel = format!("{prefix}{name}");
+        if entry.kind() == Some(git2::ObjectType::Tree) {
+            folders.push(rel.clone());
+            if let Ok(subtree) = repo.find_tree(entry.id()) {
+                tree_paths(repo, &subtree, &format!("{rel}/"), leaves, folders);
+            }
+        } else {
+            leaves.push(rel);
+        }
+    }
+}
+
+/// [`WorktreeError::AddFailed`] once `path` is removed (or was never made), else
+/// [`WorktreeError::AddFailedFolderLeft`] naming it.
+fn folder_left(path: &Path, reason: String) -> WorktreeError {
     match std::fs::remove_dir(path) {
         Ok(()) => WorktreeError::AddFailed { reason },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
