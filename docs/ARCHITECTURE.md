@@ -792,6 +792,39 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder creation (#164, #193), and use a work tree through the admin share
   `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
   `Step` seam in both walkers makes the races deterministic in tests.
+- `write_beneath` replaces the file whole and never truncates it first (#239). It writes a new
+  temporary file `.{name}.browsitory-{pid}-{n}.tmp` (at most 64 bytes or UTF-16 units of the
+  name) in the held parent, flushes it (`sync_all`) and renames it over the name in that same
+  held folder; on any failure the temporary file is removed and the old file stays as it was.
+  Unix: `fstatat` without following decides first: a folder, FIFO, socket or device is an
+  error and is never opened; a regular file must open `O_WRONLY | O_NOFOLLOW | O_NONBLOCK`
+  (no create, no truncate; the #209 read-only check runs on `EACCES`), and its mode
+  (`& 0o7777`) is copied to the temporary file with `fchmod`. The temporary file is created
+  `O_CREAT | O_EXCL | O_NOFOLLOW` (another name on `EEXIST`), then `renameat(parent, tmp,
+  parent, name)` and a best-effort `fsync` of the parent. On a case-insensitive volume the
+  name is the existing entry's own spelling (a `readdir` of the held parent: the exact name,
+  else the single entry equal ignoring case, `fold_name`). Windows: the leaf is classified as
+  before; an existing file must reopen for reading and writing by its file ID (read-only →
+  #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
+  on-disk name comes from `GetFinalPathNameByHandleW`. The temporary file is created with
+  `nt_open(FILE_CREATE)` in the held parent (checked with `in_parent`) and renamed through its
+  own handle with `NtSetInformationFile(FileRenameInformationEx, REPLACE_IF_EXISTS |
+  POSIX_SEMANTICS)` whose `RootDirectory` is the held parent, so the new name is resolved
+  against that handle, never a path; POSIX semantics replace a file a scanner or the indexer
+  keeps open with delete sharing. Where the class or flag is refused (`ERROR_INVALID_PARAMETER`,
+  `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_FUNCTION`: older Windows, FAT, some shares) the
+  classic `FileRenameInformation` with `ReplaceIfExists` follows. A file another program holds
+  open without sharing delete (some editors) can't be replaced: a sharing violation, or access
+  denied while an open of it for deleting is refused as a sharing violation, becomes
+  `worktree_guard::FileInUse` (`ResourceBusy`, tested with `is_in_use`): "'f.txt' is open in
+  another program. Close it, then try again." Nothing is changed, and the temporary file is
+  deleted through its handle. `MergeError::Io` and `StageError::Io` carry that text. What a
+  replace doesn't keep: ACLs, extended attributes, alternate data streams, the owner (Unix: a
+  group-writable file owned by someone else becomes the user's, as with git's checkout), and
+  hardlinks (the other names keep the old content). Writing now also needs permission to
+  create files in the folder. A crash between creating and renaming the temporary file leaves
+  it behind as an untracked file. `replace_beneath` (undo/redo restores) still deletes the old
+  file before writing the new one.
 - `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
   written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
   owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:
@@ -898,8 +931,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
   `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
-  is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
-  the outside name sees the new content). A hardlink is indistinguishable from a regular file by
+  is written in place by libgit2's checkouts (the shared inode changes, so the outside name
+  sees the new content). Browsitory's own writes (`write_beneath`) replace the name instead,
+  so the outside name keeps its content (#239). A hardlink is indistinguishable from a regular file by
   path; it needs the user (or a local process) to have created it on the same filesystem, and
   git behaves the same way.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes

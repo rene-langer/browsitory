@@ -8,8 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Safe file writes
 
-- Fixed: a failed write of a resolved conflict or .gitignore left the file empty or
-  half-written (#239).
+- Fixed: if writing a resolved conflict or .gitignore failed partway (for example a full
+  disk), the file was left empty or half-written. Browsitory now writes a new copy next to it
+  and swaps it in only when it is complete, so a failure leaves the file as it was (#239).
+- Windows: if another program keeps the file open so it can't be swapped, Browsitory now says
+  "'f.txt' is open in another program. Close it, then try again." and changes nothing (#239).
 
 ### Stash: things in the way
 
