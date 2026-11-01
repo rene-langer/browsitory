@@ -98,6 +98,17 @@ Reconciled with the code at 25040598 on 2026-11-01:
 
 (fill in: baseline counts, whether `main` moved, decisions confirmed, T7 measurements, D2 results)
 
+- 2026-11-01: the user accepted every recommended option (D1-A … D13-A).
+- Part T (PR 1): T1 and T2 landed in one commit (the Unix control sits next to the marker
+  tests). The Unix control doesn't kill the survivor: it exits by itself right after writing the
+  marker, and killing a pid read from a file after it may have exited risks hitting a reused pid.
+  Red checks run locally: with `killpg` sending signal 0 instead of `SIGKILL`, all six marker /
+  time-bound tests fail; with `setsid` removed from `detach`, only the new pty `/dev/tty` test
+  fails (the old one still passes). T4 and T5 landed in one commit (both touch
+  `merge.spec.ts`). T5 also converts `refs-and-remotes.spec.ts`'s reverse wait (a row that
+  unmounts, missing from the spec's list). `reapLeftovers` matches WebKitWebDriver only with
+  `--port=4445` (tauri-driver's native port), so an unrelated WebKitWebDriver is left alone.
+
 ---
 
 ## Part T: tests that can fail (PR 1, `test/robustness`)

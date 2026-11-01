@@ -869,6 +869,22 @@ only `error`.
   actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
   `packageManager: "pnpm@9.15.9"` — a contributor running a different pnpm major without
   Corepack honoring this pin can break `e2e/`'s frozen-lockfile install.
+  - Elements that unmount: waiting for a row, menu or dialog to disappear, or clicking one that
+    may re-render, goes through `e2e/support/dom.ts` (`waitUntilGoneInPage`, `clickInPage`),
+    which query and act inside one `browser.execute`. WebdriverIO's own
+    `waitForExist({ reverse: true })` looks the element up and inspects it in separate round
+    trips, and WebKitWebDriver fails the lookup with a stale-element error when React unmounts
+    it in between (#182). `waitForDisplayed({ reverse: true })` on an element that stays
+    mounted is fine. After a commit made through the UI, wait on the repository
+    (`e2e/support/git.ts`), not on a row whose text may already match something else.
+  - Harness: `wdio.conf.ts` starts `tauri-driver` in its own process group, which also holds
+    WebKitWebDriver and the app; `afterSession` SIGTERMs the group, waits up to 5 s and
+    SIGKILLs it, and `beforeSession` kills and logs leftovers from an earlier session and waits
+    for ports 4444 and 4445. Every session logs `[e2e] session start: N ms` (#182).
+  - Process tests (`git-core/src/process.rs`): each check that a timeout or Cancel kills a
+    hook's background process has a negative control showing the check fails without the
+    process group (Unix) or job object (Windows), and the `/dev/tty` check runs the test binary
+    again under a pty it creates, so it discriminates without a terminal on CI (#179).
 - E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
   a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
   Development Host against the unpacked dev-mode extension and drives `vscode.*` commands

@@ -13,6 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   job object) show the checks fail without the process group or job (#179).
 - Fixed (tests): the /dev/tty check now runs under a real terminal, so it also proves something
   on CI (#179).
+- Fixed (tests): flaky desktop E2E tests: a merge test that could start the next test before the
+  app's merge commit landed, stale-element failures when a row disappears during a lookup, and
+  WebDriver sessions that hung after an earlier app instance was left running (#182).
 
 ### Folder/file swaps
 
