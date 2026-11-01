@@ -1037,7 +1037,7 @@ fn is_beneath(path: &Path, root: &Path) -> bool {
 
 /// How often `write` tries a file another program holds open before reporting it in use, and
 /// how long it waits in between.
-const IN_USE_TRIES: usize = 1;
+const IN_USE_TRIES: usize = 3;
 const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// The next number for a temporary file's name, unique in this process.
