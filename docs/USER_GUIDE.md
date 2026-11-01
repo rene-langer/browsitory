@@ -278,7 +278,8 @@ the paused one. If `prepare-commit-msg` fails (or empties the message), that com
 it stays staged and paused, as with git. The dialog shows the hook's output (with **Close**
 only: the hook can't be skipped); fix the hook and **Continue**, or commit it from the commit
 box, or abort. **Cancel** during a step's `post-commit` keeps that commit and stops the
-multi-commit cherry-pick or revert after it; **Continue** goes on with the next step.
+multi-commit cherry-pick or revert after it ("Stopped after …; its commit was kept. Continue to
+resume."); **Continue** goes on with the next step.
 **Continue** on a paused multi-commit cherry-pick or revert runs the commit hooks for the step it
 commits (the one you resolved). If one fails, the step stays paused and the dialog offers
 **Continue without hooks**; a running hook shows on the panel with **Cancel**.
@@ -286,7 +287,10 @@ commits (the one you resolved). If one fails, the step stays paused and the dial
 If a commit was created but git's merge or cherry-pick state could not be cleared afterwards
 (for example a read-only `.git` folder), the commit still counts and its `post-commit` or
 `post-merge` runs; the leftover state stays in the operation strip, and **Abort** clears it
-without changing the commit.
+without changing the commit. A multi-commit cherry-pick or revert counts that step too: it
+stops on the next step if that one can't be applied either, and **Continue** clears the
+leftover state and goes on. The next commit after a leftover merge state clears it first, so it
+doesn't become a second merge commit.
 
 ## Browsing history and diffs
 
