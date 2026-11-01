@@ -8,7 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Windows walker
 
-- Windows: read-only files and junction-converted folders in working-tree writes (#193, #194).
+- Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
+  files in the working tree (#194).
+- Windows: every file and folder of a working-tree read, write or delete is opened through the
+  folder Browsitory already holds, so a folder swapped for a junction or symbolic link at that
+  moment can't make Browsitory open a file in the link's target, briefly create one there, or
+  contact a network share it points to (#193).
 
 ### Lock and security follow-ups
 

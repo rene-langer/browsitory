@@ -555,28 +555,35 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder's descriptor, and the leaf acted on through its parent's descriptor (`unlinkat`,
   `openat(O_NOFOLLOW | O_NONBLOCK)` + `fstat`, `symlinkat`, `readlinkat`, `fchmod`). A write
   never truncates a FIFO or device; an existing file keeps its mode. Windows
-  (`worktree_guard/beneath_windows.rs`): each component is opened by full path *as itself*
-  (`FILE_FLAG_OPEN_REPARSE_POINT`) and held without `FILE_SHARE_DELETE`, which pins it against
-  rename and delete until the act is done; the handle's attributes and reparse tag
+  (`worktree_guard/beneath_windows.rs`): the work tree root is opened by path; every component
+  below it and every leaf is opened (or created) by its single name relative to the held folder
+  above it (`NtCreateFile` with `RootDirectory`, `nt_open`, #163, #193), *as itself*
+  (`FILE_OPEN_REPARSE_POINT`), and folders are held without `FILE_SHARE_DELETE`, which pins
+  them against rename and delete until the act is done; the handle's attributes and reparse tag
   (`GetFileInformationByHandleEx`) decide. A name surrogate (symbolic link, junction, WSL link)
   is refused, or removed itself where the caller clears links, and never contacted (a junction
-  to a UNC share included). Another reparse point (OneDrive/Cloud Files placeholder) is walked
-  through as a folder, or as a file read and written through a second, normal handle (so the
-  file system filter sees it) accepted only with the same file ID. Because an *empty* held
-  folder can still be turned into a junction in place, and the flag only guards a path's last
-  component, every component and leaf opened by path must sit in the held parent
-  (`GetFinalPathNameByHandleW` of both); leaves are deleted through their own handle
-  (`FileDispositionInfoEx` with POSIX semantics, so the name is gone once our handle closes
-  even while a scanner or indexer keeps the file open, #168; it falls back to
-  `FileDispositionInfo` where the file system refuses, as std's `remove_dir_all` does), new
-  files are created with `create_new` and deleted again through their handle if misplaced. A
-  missing folder is created relative to the held parent's handle (`NtCreateFile` with
-  `RootDirectory`, #163), so on a local NTFS/ReFS volume a parent turned into a junction in
-  that instant is never followed (on an SMB share the redirector resolves the relative open by
-  path on the server, so there the race is only narrowed);
-  tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write,
-  a read and a folder creation (#164). Hand-declared `kernel32` and `ntdll` imports, no new
-  dependency. A `Step` seam in both walkers makes the races deterministic in tests.
+  to a UNC share included); a link's target is read from its own handle
+  (`FSCTL_GET_REPARSE_POINT`, as `read_link` would give it). Another reparse point
+  (OneDrive/Cloud Files placeholder) is walked through as a folder, or as a file read and
+  written through a second, normal handle (so the file system filter sees it) accepted only
+  with the same file ID. An *empty* held folder can still be turned into a junction in place;
+  on a local NTFS/ReFS volume a relative open below it then fails with
+  `ERROR_CANT_RESOLVE_FILENAME`, reported as "a folder of the working tree changed", so
+  nothing is opened, created or contacted in the junction's target. On an SMB share the
+  redirector resolves a relative name by path on the server, so every component and leaf must
+  also sit in the held parent (`GetFinalPathNameByHandleW` of both), and a new file is deleted
+  again through its handle if misplaced: there the race is only narrowed. Leaves are deleted
+  through their own handle (`FileDispositionInfoEx` with POSIX semantics, so the name is gone
+  once our handle closes even while a scanner or indexer keeps the file open, #168, and with
+  `IGNORE_READONLY_ATTRIBUTE`, so a read-only file is deleted as by std's `remove_file` and
+  git, #194). Windows 10 1607–1803 don't know that flag (`ERROR_INVALID_PARAMETER`): POSIX
+  semantics alone. Where the file system has no POSIX deletes (FAT/exFAT, some shares) it
+  falls back to `FileDispositionInfo`, as std's `remove_dir_all` does, which clears a
+  read-only attribute through the same handle first (`FileBasicInfo`; restored if the delete
+  still fails). Tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`)
+  during a write, a read and a folder creation (#164, #193). Hand-declared `kernel32` and
+  `ntdll` imports, no new dependency. A `Step` seam in both walkers makes the races
+  deterministic in tests.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
