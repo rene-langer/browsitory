@@ -1492,3 +1492,133 @@ fn stash_all_without_untracked_stashes_an_edit_to_a_file_removed_from_the_index(
     );
     assert_eq!(read(dir.path(), "d"), "edited\n");
 }
+
+/// HEAD has `d/f` and ignores `d`; the folder was replaced by the ignored file `d` (#208).
+fn ignored_file_over_folder() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d/f", "f\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), ".gitignore", "d\n");
+    commit_all(&repo, "ignore d");
+    std::fs::remove_dir_all(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d", "ignored\n");
+    (dir, repo)
+}
+
+/// HEAD has the file `build` and ignores the folder `build/`; the file was replaced by the
+/// ignored folder `build/` holding `build/out.o` (#208).
+fn ignored_folder_over_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "build", "script\n");
+    write_file(dir.path(), ".gitignore", "build/\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("build")).unwrap();
+    write_file(dir.path(), "build/out.o", "object\n");
+    (dir, repo)
+}
+
+/// HEAD has the file `d`; it was replaced by a repository with one commit of `d/inner.txt` (#211).
+fn nested_repo_over_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    let inner = git2::Repository::init(dir.path().join("d")).unwrap();
+    {
+        let mut config = inner.config().unwrap();
+        config.set_str("user.name", "Inner").unwrap();
+        config.set_str("user.email", "inner@example.com").unwrap();
+    }
+    write_file(dir.path(), "d/inner.txt", "inner\n");
+    commit_all(&inner, "inner");
+    (dir, repo)
+}
+
+/// Runs `git stash push [-u]` in `dir` and reports whether it succeeded.
+fn git_stash_push(dir: &std::path::Path, include_untracked: bool) -> bool {
+    let mut args = vec!["stash", "push"];
+    if include_untracked {
+        args.push("-u");
+    }
+    git(dir, &args).status.success()
+}
+
+#[test]
+fn stash_all_deletes_an_ignored_file_in_the_way_today() {
+    for include_untracked in [false, true] {
+        let (dir, mut repo) = ignored_file_over_folder();
+
+        git_core::stash::save_stash(
+            &mut repo,
+            &with(|o| o.include_untracked = include_untracked),
+        )
+        .unwrap();
+
+        assert_eq!(read(dir.path(), "d/f"), "f\n");
+
+        // git deletes it too.
+        let (twin, _twin_repo) = ignored_file_over_folder();
+        assert!(git_stash_push(twin.path(), include_untracked));
+        assert_eq!(read(twin.path(), "d/f"), "f\n");
+    }
+}
+
+#[test]
+fn stash_all_deletes_an_ignored_folder_where_head_has_a_file_today() {
+    for include_untracked in [false, true] {
+        let (dir, mut repo) = ignored_folder_over_file();
+
+        git_core::stash::save_stash(
+            &mut repo,
+            &with(|o| o.include_untracked = include_untracked),
+        )
+        .unwrap();
+
+        assert_eq!(read(dir.path(), "build"), "script\n");
+
+        let (twin, _twin_repo) = ignored_folder_over_file();
+        assert!(git_stash_push(twin.path(), include_untracked));
+        assert_eq!(read(twin.path(), "build"), "script\n");
+    }
+}
+
+#[test]
+fn stash_all_deletes_a_nested_repository_where_head_has_a_file_today() {
+    for include_untracked in [false, true] {
+        let (dir, mut repo) = nested_repo_over_file();
+
+        git_core::stash::save_stash(
+            &mut repo,
+            &with(|o| o.include_untracked = include_untracked),
+        )
+        .unwrap();
+
+        assert_eq!(read(dir.path(), "d"), "f\n");
+
+        let (twin, _twin_repo) = nested_repo_over_file();
+        let pushed = git_stash_push(twin.path(), include_untracked);
+        assert!(pushed, "{include_untracked}");
+        assert_eq!(read(twin.path(), "d"), "f\n");
+    }
+}
+
+#[test]
+fn popping_a_stash_whose_folder_replaced_a_file_leaves_a_side_file_today() {
+    let (dir, mut repo) = file_replaced_by_folder();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    assert_eq!(top_level(dir.path()), ["d"]);
+
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+
+    assert_eq!(top_level(dir.path()), ["d", "d~Updated upstream"]);
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+
+    // git can't pop it either.
+    let (twin, _twin_repo) = file_replaced_by_folder();
+    assert!(git_stash_push(twin.path(), true));
+    let popped = git(twin.path(), &["stash", "pop"]);
+    assert!(!popped.status.success());
+}
