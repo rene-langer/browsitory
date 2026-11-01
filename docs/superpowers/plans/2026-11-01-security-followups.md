@@ -110,8 +110,23 @@ Reconciled with the code at 25040598 on 2026-11-01:
 
 ## Pre-flight notes
 
-(fill in: baseline counts, whether `main` moved, decisions confirmed by the user, deviations,
-the red CI run of Part W)
+PR 1 (2026-11-01):
+
+- `main` had not moved (25040598).
+- The user accepted D1-A, D3-A, D4-A and D7-A (and the other recommended options).
+- Red before the fix, on Linux: A1's three swap tests (new content, FIFO, link); B1's
+  `a_document_quoting_a_launcher_near_its_start_opens_on_linux`,
+  `linux_launchers_are_not_sniffed_on_macos_or_windows` and
+  `a_links_name_and_targets_name_both_count`; C1's
+  `a_burst_of_locked_commands_waits_once_while_the_lock_stays_held`.
+- Deviations: `an_extensionless_desktop_entry_is_refused` (goes through `prepare_editor`, so
+  `Os::current()`) is now `#[cfg(target_os = "linux")]`; the B1 guards are one test,
+  `launchers_without_a_document_name_are_still_refused`; the burst tests share a
+  `contended_worker()` fixture; `mark_resolved_records_resolve_undo` also asserts that status
+  shows only `INDEX_MODIFIED` (zeroed stat data); the existing up-front `NotAFile` type check is
+  kept before the read.
+
+PR 2: (fill in: the red CI run of Part W)
 
 ---
 

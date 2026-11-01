@@ -8,7 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security follow-ups
 
-- Fixed: Mark resolved stages exactly the content it checked for conflict markers (#199).
+- Fixed: Mark resolved stages exactly the content it checked for conflict markers, read without
+  following a symbolic link or waiting on a named pipe; a file swapped at that moment can no
+  longer hang it or get other content staged (#199).
+- Fixed: Open in editor (no editor configured) no longer refuses a document such as notes.txt or
+  README.md that quotes a "[Desktop Entry]" launcher near its start. On Linux, files whose
+  extension marks them as a document are not checked for launcher contents, as the Linux
+  desktops do; macOS and Windows no longer check for Linux launchers at all (#201).
+- While the other window keeps the undo history busy, a quick run of actions (for example
+  staging files one by one) waits about a second once, not a second per action (#197).
 
 ### Test robustness
 
