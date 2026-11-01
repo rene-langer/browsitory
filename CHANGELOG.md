@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Stash: edits removed from the index
+
+- Fixed: Stash all lost edits to files removed from the index (#247).
+
 ### Stash: things in the way
 
 - Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it
