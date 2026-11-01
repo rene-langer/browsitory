@@ -957,7 +957,7 @@ pub(super) fn write(
                 match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
                     Ok(Some(file)) => file,
                     Ok(None) => continue,
-                    Err(error) => return Err(read_only_or(&first, error)),
+                    Err(error) => return Err(error),
                 }
             }
         };
@@ -972,6 +972,7 @@ pub(super) fn write(
 /// `write`'s error for a file it may not open for writing: `read_only_error` when the open was
 /// denied and `first` (the classified handle) has the read-only attribute (#209), which is left
 /// as it is; else `error` itself (an ACL that denies writing, for one).
+#[allow(dead_code)] // TEMPORARY: CI probe that the test is red without the fix.
 fn read_only_or(first: &File, error: io::Error) -> io::Error {
     if error.raw_os_error() != Some(ERROR_ACCESS_DENIED) {
         return error;
