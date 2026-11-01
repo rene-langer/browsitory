@@ -59,6 +59,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in this stash would overwrite the folder 'd'; move the folder first." and keeps the stash
   (#186).
 
+### Hooks: status and parity
+
+- While post-checkout runs after you switch branches or check out a commit, or post-merge after
+  a fast-forward or squash merge, "Running post-checkout hook…" shows at the top of the
+  repository with Cancel. Cancelling stops the hook and keeps the switch or merge (#185).
+- A pull that fast-forwards shows its post-merge hook in the transfer panel, with Cancel (#185).
+- Cherry-picks and reverts that apply without conflicts now run prepare-commit-msg and
+  post-commit for each commit they create, as git does, including the steps a Continue applies
+  after the paused one. If prepare-commit-msg fails, that commit stays staged and paused, so you
+  can fix the hook and continue or commit it. Their hooks show in the same status strip, and
+  Cancel during a step's post-commit keeps that commit and stops the cherry-pick or revert after
+  it (#183).
+- When you commit a merge that had no conflicts, prepare-commit-msg and commit-msg get
+  .git/MERGE_MSG, as with git merge (#183).
+- Fixed: if a merge was aborted and restarted in a terminal while pre-merge-commit ran, the
+  commit used the old merge's parents; it now stops with "The merge changed while its hooks
+  ran." (#183).
+- Fixed: a commit that was created but whose merge or cherry-pick state couldn't be cleared was
+  reported as failed, skipped post-merge, and a retry could create a second merge commit; it now
+  counts as done (#183).
+
 ### Lock and security follow-ups
 
 - Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,
