@@ -9,9 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Repository identity
 
 - Fixed: a repository opened through two different paths (a trailing slash, a subfolder, a
-  symbolic link, or different letter case on Windows), for example from a worktree's Open
-  button, got two background workers, so actions in the two tabs could run at the same time.
-  They now share one worker, and closing one tab keeps the other working (#223).
+  symbolic link, or different letter case on Windows or macOS), for example from a worktree's
+  Open button, got two background workers, so actions in the two tabs could run at the same
+  time. They now share one worker, and closing one tab keeps the other working. The two tabs
+  also share the undo history, and a new search in one stops a search still running in the
+  other (#223).
 
 ### Windows walker
 

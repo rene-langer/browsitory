@@ -26,13 +26,19 @@ use super::{Worker, WorkerHandle};
 ///
 /// Errors with the same text `Worker::spawn` gives for a path that isn't in a repository.
 pub fn repo_key(path: &Path) -> Result<String, String> {
+    discover(path).map(|(_, key)| key)
+}
+
+/// The repository's root as discovered from `path` (not canonicalized, so no `\\?\` prefix
+/// on Windows) and its key.
+fn discover(path: &Path) -> Result<(PathBuf, String), String> {
     let repo = git_core::repo::open(path).map_err(|e| e.to_string())?;
-    let root = repo.workdir().unwrap_or_else(|| repo.path());
-    let key = match std::fs::canonicalize(root) {
+    let root = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
+    let key = match std::fs::canonicalize(&root) {
         Ok(canonical) => canonical,
-        Err(_) => trim_trailing_separators(root),
+        Err(_) => trim_trailing_separators(&root),
     };
-    Ok(key.to_string_lossy().into_owned())
+    Ok((root, key.to_string_lossy().into_owned()))
 }
 
 fn trim_trailing_separators(path: &Path) -> PathBuf {
@@ -49,12 +55,14 @@ struct Inner {
 }
 
 impl Inner {
-    /// Drops `key`'s worker when no spelling refers to it any more. Returns whether it did.
+    /// Drops `key`'s worker (if any) when no spelling refers to it any more. Returns whether
+    /// `key` is now unreferenced.
     fn drop_if_unreferenced(&mut self, key: &str) -> bool {
         if self.aliases.values().any(|k| k == key) {
             return false;
         }
-        self.workers.remove(key).is_some()
+        self.workers.remove(key);
+        true
     }
 }
 
@@ -84,34 +92,59 @@ impl WorkerRegistry {
     /// (its thread exited, e.g. after a panic inside a `Command` match arm,
     /// AUD-2026-09-05-CONC-001) is evicted and respawned, so a repository can't stay wedged
     /// behind a dead handle.
+    ///
+    /// The worker is spawned from the repository's discovered root, not from `path`: it reopens
+    /// the repository from there after worktree commands, and `path` (say a subfolder) may be
+    /// gone by then while another spelling still uses the worker.
     pub fn open(&self, path: &str) -> Result<(String, WorkerHandle), String> {
-        let key = repo_key(Path::new(path))?;
+        self.open_with(path, |_| {})
+    }
+
+    /// Like `open`, but runs `on_drop` (with the registry still locked, see `get_with`) for each
+    /// key this call leaves without a worker: the repository `path` named before, when it now
+    /// names another one and nothing else names the old one; or `path`'s own repository, when
+    /// its dead worker was evicted and the respawn failed.
+    pub fn open_with(
+        &self,
+        path: &str,
+        mut on_drop: impl FnMut(&str),
+    ) -> Result<(String, WorkerHandle), String> {
+        let (root, key) = discover(Path::new(path))?;
         {
             let mut inner = self.lock();
             if let Some(worker) = inner.workers.get(&key) {
                 let handle = worker.handle();
                 if handle.is_alive() {
-                    Self::record_alias(&mut inner, path, &key);
+                    Self::record_alias(&mut inner, path, &key, &mut on_drop);
                     return Ok((key, handle));
                 }
                 inner.workers.remove(&key);
             }
         }
 
-        let worker = Worker::spawn(PathBuf::from(path))?;
+        let worker = match Worker::spawn(root) {
+            Ok(worker) => worker,
+            Err(error) => {
+                let inner = self.lock();
+                if !inner.workers.contains_key(&key) {
+                    on_drop(&key);
+                }
+                return Err(error);
+            }
+        };
         let mut inner = self.lock();
         // Another caller may have opened the same repository (through any spelling) while this
         // one was spawning, unlocked. Prefer the worker already in the map: this one is dropped
         // and its idle thread exits.
         let handle = inner.workers.entry(key.clone()).or_insert(worker).handle();
-        Self::record_alias(&mut inner, path, &key);
+        Self::record_alias(&mut inner, path, &key, &mut on_drop);
         Ok((key, handle))
     }
 
-    fn record_alias(inner: &mut Inner, path: &str, key: &str) {
+    fn record_alias(inner: &mut Inner, path: &str, key: &str, on_drop: &mut dyn FnMut(&str)) {
         if let Some(previous) = inner.aliases.insert(path.to_string(), key.to_string()) {
-            if previous != key {
-                inner.drop_if_unreferenced(&previous);
+            if previous != key && inner.drop_if_unreferenced(&previous) {
+                on_drop(&previous);
             }
         }
     }
@@ -135,13 +168,14 @@ impl WorkerRegistry {
     }
 
     /// Forgets the spelling `path`. When no other spelling refers to its repository, drops the
-    /// worker and returns the key. Calls already holding a handle finish as usual.
+    /// worker (if it still has one) and returns the key. Calls already holding a handle finish
+    /// as usual.
     pub fn close(&self, path: &str) -> Option<String> {
         self.close_with(path, |_| {})
     }
 
     /// Like `close`, but runs `on_drop` with the key while the registry is still locked, when
-    /// the worker is dropped (see `get_with`).
+    /// no spelling refers to the repository any more (see `get_with`).
     pub fn close_with(&self, path: &str, on_drop: impl FnOnce(&str)) -> Option<String> {
         let mut inner = self.lock();
         let key = inner.aliases.remove(path)?;
@@ -321,6 +355,50 @@ mod tests {
         registry.close_with(&sub, |key| dropped.push(key.to_string()));
 
         assert_eq!(dropped, [repo_key(dir.path()).unwrap()]);
+    }
+
+    /// The worker reopens its repository after worktree commands; it must do so from the
+    /// repository's root, not from the first opener's spelling, which may stop existing.
+    #[test]
+    fn the_worker_outlives_the_folder_its_first_spelling_named() {
+        let (dir, _repo) = repo_with_commit();
+        let registry = WorkerRegistry::new();
+        let plain = spelling(dir.path());
+        let sub = spelling(&dir.path().join("sub"));
+        registry.open(&sub).unwrap();
+        registry.open(&plain).unwrap();
+        registry.close(&sub);
+        std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
+
+        let (_, handle) = registry.get(&plain).unwrap();
+
+        assert_eq!(handle.prune_worktrees(), Ok(()));
+        assert!(handle.get_status().is_ok());
+    }
+
+    /// A spelling that now names another repository moves to it; the old repository's worker
+    /// is dropped when nothing else names it, and the drop hook hears about it.
+    #[cfg(unix)]
+    #[test]
+    fn reopening_a_spelling_that_names_another_repository_reports_the_dropped_key() {
+        let (first, _a) = repo_with_commit();
+        let (second, _b) = repo_with_commit();
+        let links = TempDir::new().unwrap();
+        let link = links.path().join("link");
+        std::os::unix::fs::symlink(first.path(), &link).unwrap();
+        let registry = WorkerRegistry::new();
+        let (first_key, _) = registry.open(&spelling(&link)).unwrap();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(second.path(), &link).unwrap();
+        let mut dropped = Vec::new();
+
+        let (second_key, _) = registry
+            .open_with(&spelling(&link), |key| dropped.push(key.to_string()))
+            .unwrap();
+
+        assert_ne!(first_key, second_key);
+        assert_eq!(dropped, [first_key]);
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]

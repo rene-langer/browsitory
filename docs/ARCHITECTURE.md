@@ -236,9 +236,15 @@ has its own root and so its own worker. `open` always recomputes the key and rec
 spelling as an alias; `get` only reads the aliases (no file system access per command), so a
 spelling that was never opened is "repo not open". `close` forgets one alias and drops the
 worker only when no alias still names its key; the Tauri app then drops the gate too, under
-the registry's lock (`close_with`/`get_with`; lock order registry → gates). `open` keeps the
-former `ensure_worker`'s rules: a dead worker is evicted and respawned, and the spawn runs
-unlocked.
+the registry's lock (`close_with`/`get_with`; lock order registry → gates). `open_with` reports
+the other keys it leaves without a worker the same way (a spelling that now names another
+repository, a failed respawn), so no gate outlives its worker. `open` keeps the former
+`ensure_worker`'s rules: a dead worker is evicted and respawned, and the spawn runs unlocked.
+The worker is spawned from the discovered root (not the spelling, not the canonical key with
+its `\\?\` prefix on Windows), because it reopens the repository from that path after worktree
+commands, and the first opener's spelling (a subfolder) may be gone by then.
+Two tabs of one repository share its worker, so they share one undo history, and a new search
+in one cancels a search still running in the other (one search generation per worker).
 Everything else keeps the caller's spelling: hook and transfer events, recent repositories, open
 tabs and per-repository settings, so two spellings still make two tabs. A repository renamed
 while open keeps its alias until it is closed. The registry is per process: two VSCode windows

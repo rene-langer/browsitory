@@ -1734,11 +1734,7 @@ type RepoGate = tauri::async_runtime::Mutex<()>;
 
 #[tauri::command]
 pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    // `open` evicts a dead worker (its thread having exited, e.g. from a panic inside a
-    // `Command` match arm) before deciding whether to reuse or respawn — a plain
-    // `contains_key` fast path would keep handing back a dead entry forever. See
-    // AUD-2026-09-05-CONC-001. A second spelling of an open repository shares its worker.
-    state.registry.open(&path)?;
+    remember_repo(&state, &path)?;
     // Best-effort: a repo that opened successfully should count as "recent" even if we can't
     // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
     // over it.
@@ -1757,13 +1753,30 @@ pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result
 fn forget_repo(state: &AppState, repo_path: &str) {
     // Same lock order as `repo_worker` (registry, then gates), so a lookup racing a close can't
     // leave a gate behind for a repository that is no longer open.
-    state.registry.close_with(repo_path, |key| {
-        state
-            .gates
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(key);
-    });
+    state
+        .registry
+        .close_with(repo_path, |key| drop_gate(state, key));
+}
+
+/// Opens `path`'s worker. `open_with` evicts a dead worker (its thread having exited, e.g. from
+/// a panic inside a `Command` match arm) before deciding whether to reuse or respawn — a plain
+/// `contains_key` fast path would keep handing back a dead entry forever. See
+/// AUD-2026-09-05-CONC-001. A second spelling of an open repository shares its worker. A gate
+/// whose repository this leaves without a worker (`path` now names another repository, or a
+/// respawn failed) is dropped, under the registry's lock like `forget_repo`'s.
+fn remember_repo(state: &AppState, path: &str) -> Result<(), String> {
+    state
+        .registry
+        .open_with(path, |key| drop_gate(state, key))
+        .map(|_| ())
+}
+
+fn drop_gate(state: &AppState, key: &str) {
+    state
+        .gates
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
 }
 
 #[tauri::command]
@@ -2194,7 +2207,7 @@ mod tests {
             .iter()
             .map(|dir| {
                 let key = dir.to_string_lossy().into_owned();
-                state.registry.open(&key).unwrap();
+                super::remember_repo(&state, &key).unwrap();
                 key
             })
             .collect();
@@ -2473,6 +2486,34 @@ mod tests {
         assert!(state.gates.lock().unwrap().is_empty());
         assert!(state.registry.is_empty());
         assert!(super::repo_worker(&state, &keys[0]).is_err());
+    }
+
+    /// #223: reopening a spelling that now names another repository drops the old one's gate.
+    #[cfg(unix)]
+    #[test]
+    fn reopening_a_spelling_that_names_another_repository_drops_the_old_gate() {
+        let first = tempfile::TempDir::new().unwrap();
+        git2::Repository::init(first.path()).unwrap();
+        let second = tempfile::TempDir::new().unwrap();
+        git2::Repository::init(second.path()).unwrap();
+        let links = tempfile::TempDir::new().unwrap();
+        let link = links.path().join("link");
+        std::os::unix::fs::symlink(first.path(), &link).unwrap();
+        let (state, keys) = state_with_repos(&[&link]);
+        super::repo_worker(&state, &keys[0]).unwrap();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(second.path(), &link).unwrap();
+
+        super::remember_repo(&state, &keys[0]).unwrap();
+
+        assert!(state.gates.lock().unwrap().is_empty());
+        assert_eq!(state.registry.len(), 1);
+        super::repo_worker(&state, &keys[0]).unwrap();
+        let (key, _) = state.registry.get(&keys[0]).unwrap();
+        assert_eq!(
+            state.gates.lock().unwrap().keys().collect::<Vec<_>>(),
+            [&key]
+        );
     }
 
     /// #223: closing one spelling's tab keeps the repository's worker and gate for the other.

@@ -48,7 +48,9 @@ Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 If two tabs show the same repository through different paths (for example a
 subfolder, a symbolic link, or a worktree's **Open** button), they share its
-actions: one runs after the other, never both at once.
+actions: one runs after the other, never both at once. They also share one
+undo history, and starting a search in one stops a search still running in
+the other.
 
 ## Workspaces
 
