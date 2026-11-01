@@ -26,6 +26,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refuses a tracked file that is now a folder ("Can't stash 't': it was a file and is now a
   directory. Commit or move its contents first.") (#247).
 
+### Terminal cherry-picks
+
+- Fixed: when a cherry-pick or revert of several commits started in a terminal paused on a
+  conflict, committing the resolution in Browsitory dropped the remaining commits. They are now
+  kept, as with git commit, so git cherry-pick --continue (or git revert --continue) carries on;
+  the list is removed after its last commit. A single cherry-pick, revert or squash merge in
+  Browsitory no longer drops such a list either (#241).
+- Fixed: committing a merge or cherry-pick no longer ends a git bisect started in a terminal
+  (#241).
+
 ### Stash: things in the way
 
 - Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it
