@@ -504,6 +504,29 @@ fn save_path_limited_stash(
             repo.checkout_index(Some(&mut index), Some(&mut checkout))?;
         } else {
             repo.checkout_tree(base_tree.as_object(), Some(&mut checkout))?;
+            // The checkout updates the index only for the files it writes: a path removed from
+            // the index whose worktree file already matches HEAD (`git rm --cached f`, or the
+            // unedited `d/g` of `git rm -r --cached d`) would stay removed, and Pop would then
+            // refuse with `StagedChanges` (#248). Put HEAD's entry back for every reverted
+            // path. (Not `reset_default`: it takes pathspecs, so a name like `[ab]` would also
+            // unstage `a` and `b`.)
+            index.read(true)?;
+            let mut changed = false;
+            for path in &checkout_paths {
+                let Ok(entry) = base_tree.get_path(std::path::Path::new(path)) else {
+                    continue;
+                };
+                let mode = entry.filemode() as u32;
+                let current = index.get_path(std::path::Path::new(path), 0);
+                if current.is_some_and(|current| current.id == entry.id() && current.mode == mode) {
+                    continue;
+                }
+                index.add(&crate::undo::index_entry(path, entry.id(), mode))?;
+                changed = true;
+            }
+            if changed {
+                index.write()?;
+            }
         }
     }
     Ok(())
@@ -606,8 +629,8 @@ fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError>
 }
 
 /// True when a file the index no longer has is still in the worktree and not ignored (`git rm
-/// --cached`, often followed by an edit): status `INDEX_DELETED | WT_NEW` once untracked folders
-/// are recursed into. libgit2 1.9.6's whole stash mishandles it (#247):
+/// --cached`, often followed by an edit; status `INDEX_DELETED | WT_NEW`). libgit2 1.9.6's whole
+/// stash mishandles it (#247):
 ///
 /// - Its worktree tree comes from an index-to-worktree diff with untracked files but without
 ///   `GIT_DIFF_RECURSE_UNTRACKED_DIRS` (stash.c `build_workdir_tree`, l.391). For `d/f` in a
@@ -620,28 +643,38 @@ fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError>
 ///   file against the restored `f`: conflict markers and "would overwrite".
 ///
 /// Such a stash takes the path-limited route instead, which records the file once, as a
-/// tracked change (its edit in the worktree tree, the index commit without it), and reverts it
-/// to HEAD in index and worktree (with keep-index it deletes it, as git does). Pop then brings
-/// the edit back, and "Restore staged changes" the removal from the index too. git records it
-/// in the worktree tree as well (and, with `-u`, also in the untracked commit, which its own
-/// pop can't apply). A folder at the path is left to the other checks.
+/// tracked change (its edit in the worktree tree, the index commit without it), then puts
+/// HEAD's version back in the worktree and HEAD's entry back in the index (with keep-index it
+/// deletes the file, as git does). Pop then brings the edit back, and "Restore staged changes"
+/// the removal from the index too. git records it in the worktree tree as well (and, with
+/// `-u`, also in the untracked commit, which its own pop can't apply).
+///
+/// Cost: a HEAD-to-index diff (no worktree scan), then one no-follow stat and one ignore check
+/// per staged deletion. A folder at the path, or a path beyond a symlinked folder, is left to
+/// the other checks.
 fn edit_removed_from_index(repo: &Repository) -> Result<bool, StashError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(false);
     };
-    let mut options = git2::StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false)
-        .exclude_submodules(true);
-    for entry in repo.statuses(Some(&mut options))?.iter() {
-        let status = entry.status();
-        if !status.contains(git2::Status::INDEX_DELETED | git2::Status::WT_NEW) {
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) else {
+        return Ok(false);
+    };
+    let index = repo.index()?;
+    let diff = repo.diff_tree_to_index(Some(&head), Some(&index), None)?;
+    for delta in diff.deltas() {
+        if delta.status() != git2::Delta::Deleted {
             continue;
         }
-        let Ok(path) = entry.path() else { continue };
-        if std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| !meta.is_dir()) {
+        let Some(path) = delta.old_file().path() else {
+            continue;
+        };
+        let Some(name) = path.to_str() else { continue };
+        if has_symlinked_ancestor(workdir, name) {
+            continue;
+        }
+        if std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| !meta.is_dir())
+            && !repo.is_path_ignored(path)?
+        {
             return Ok(true);
         }
     }
