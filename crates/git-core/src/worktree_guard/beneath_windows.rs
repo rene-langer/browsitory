@@ -20,7 +20,7 @@
 //! its own handle (`FSCTL_GET_REPARSE_POINT`), never by path. Leaves are deleted through their
 //! handle (`FileDispositionInfoEx` with POSIX semantics, read-only files included, see
 //! `delete_by_handle`), never by path, and an existing file is written through a handle whose
-//! file ID matches the one classified.
+//! file ID matches the one classified; a read-only one is refused and left as it is (#209).
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
@@ -954,9 +954,10 @@ pub(super) fn write(
                 ))
             }
             Some((first, Found::File { reopen })) => {
-                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE)? {
-                    Some(file) => file,
-                    None => continue,
+                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
+                    Ok(Some(file)) => file,
+                    Ok(None) => continue,
+                    Err(error) => return Err(read_only_or(&first, error)),
                 }
             }
         };
@@ -966,6 +967,37 @@ pub(super) fn write(
         return Ok(true);
     }
     Err(redirected())
+}
+
+/// `write`'s error for a file it may not open for writing: `read_only_error` when the open was
+/// denied and `first` (the classified handle) has the read-only attribute (#209), which is left
+/// as it is; else `error` itself (an ACL that denies writing, for one).
+fn read_only_or(first: &File, error: io::Error) -> io::Error {
+    if error.raw_os_error() != Some(ERROR_ACCESS_DENIED) {
+        return error;
+    }
+    match has_read_only_attribute(first) {
+        Ok(true) => super::read_only_error(),
+        _ => error,
+    }
+}
+
+fn has_read_only_attribute(file: &File) -> io::Result<bool> {
+    Ok(attribute_tag(file)?.file_attributes & FILE_ATTRIBUTE_READONLY != 0)
+}
+
+/// See `worktree_guard::is_read_only_beneath`. The leaf is classified through a handle with no
+/// access beyond its attributes, opened as itself, so an online-only OneDrive file is not
+/// downloaded and a link is not followed.
+pub(super) fn is_read_only(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => at,
+        Walk::Link | Walk::Missing | Walk::NotDir => return Ok(false),
+    };
+    match open_leaf(&at, Purpose::Read)? {
+        Some((leaf, Found::File { .. })) => has_read_only_attribute(&leaf),
+        _ => Ok(false),
+    }
 }
 
 /// See `worktree_guard::remove_beneath`.
@@ -1549,6 +1581,72 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
             "new"
+        );
+    }
+
+    /// Clears `0`'s read-only attribute when dropped, so a failed assertion doesn't leave a
+    /// temp folder that can't be deleted.
+    struct WritableAgain(PathBuf);
+
+    impl Drop for WritableAgain {
+        fn drop(&mut self) {
+            if let Ok(meta) = std::fs::symlink_metadata(&self.0) {
+                let mut permissions = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+                let _ = std::fs::set_permissions(&self.0, permissions);
+            }
+        }
+    }
+
+    #[test]
+    fn writing_a_read_only_file_is_reported_as_read_only() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        let _writable_again = WritableAgain(dir.path().join("d/f"));
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_read_only(&error), "{error:?}");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "old"
+        );
+        assert!(std::fs::metadata(dir.path().join("d/f"))
+            .unwrap()
+            .permissions()
+            .readonly());
+    }
+
+    #[test]
+    fn is_read_only_reads_the_attribute_without_opening_the_data() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        std::fs::write(dir.path().join("d/g"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        let _writable_again = WritableAgain(dir.path().join("d/f"));
+        assert!(is_read_only(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d/g"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d/missing"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d"), &mut no_step).unwrap());
+    }
+
+    #[test]
+    fn writing_a_writable_file_still_works() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "new"
+        );
+        assert!(write(dir.path(), Path::new("d/g"), b"created", &mut no_step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/g")).unwrap(),
+            "created"
         );
     }
 
