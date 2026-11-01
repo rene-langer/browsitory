@@ -542,8 +542,15 @@ move it."
 If you removed a file or folder from the index without ignoring it (`git rm -r --cached d`) and
 then edited it, **Stash all** stashes your edit and puts the committed version back. **Pop**
 brings the edit back; with **Restore staged changes** the removal from the index comes back too.
-With **Keep staged changes** the file is deleted, as with git; the edit is still in the stash.
-Pop works once you unstage that deletion and discard it.
+This is the same with **Stash file…**, and for a removal without an edit: the file is back in
+the index afterwards, so Pop isn't refused. With **Keep staged changes** the file is deleted, as
+with git; the edit is still in the stash. Pop works once you unstage that deletion and discard
+it. This applies to any stash made with **Keep staged changes**: the staged changes are still
+staged, so Pop says "Commit or unstage your staged changes before applying a stash." until you
+commit or unstage them. In this case **Stash all** works like **Stash file…** on every change,
+so it also refuses what that refuses. For example, if another tracked file `t` is now a folder,
+it says "Can't stash 't': it was a file and is now a directory. Commit or move its contents
+first."
 
 When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
 untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. Browsitory

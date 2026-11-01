@@ -14,6 +14,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Pop wrote conflict markers and said it would overwrite local changes (also for a single file
   removed this way). The edits are now stashed and Pop brings them back; with Restore staged
   changes the removal from the index comes back too (#247).
+- Fixed: after stashing a file removed from the index (Stash file…, or Stash all when the file
+  wasn't edited or was one of several files in a removed folder), its removal stayed staged, so
+  Pop said "Commit or unstage your staged changes before applying a stash." The stash now puts
+  the file back in the index, so Pop works (#248).
+- Known limitation: in these cases Stash all works like Stash file… on every change, so it also
+  refuses a tracked file that is now a folder ("Can't stash 't': it was a file and is now a
+  directory. Commit or move its contents first.") (#247).
 
 ### Stash: things in the way
 
