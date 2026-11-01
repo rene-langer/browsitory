@@ -1827,7 +1827,6 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::{HashMap, VecDeque};
     use std::path::Path;
-    use std::sync::atomic::Ordering;
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use std::time::Duration;
