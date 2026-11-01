@@ -55,6 +55,11 @@ pub enum StashError {
     /// Browsitory refuses (#208).
     #[error("Stashing would delete the ignored '{ignored}', which is in the way of the tracked '{tracked}'. Move '{ignored}' first.")]
     IgnoredInTheWay { ignored: String, tracked: String },
+    /// Stash all resets to the committed version of a path the index no longer has, which
+    /// overwrites the ignored file or folder there: the stash doesn't record it (`git rm
+    /// --cached`, then ignored, then edited). git records it; Browsitory refuses (#208).
+    #[error("Stashing would overwrite the ignored '{0}' with its committed version. Commit the removal of '{0}' first, or move it.")]
+    IgnoredOverwritten(String),
     /// Stash all resets `tracked`, which deletes the untracked repository in `path` (its
     /// history included), with or without untracked files (a nested repository is never
     /// stashed). git deletes it; Browsitory refuses (#211).
@@ -185,6 +190,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
                 tracked,
             },
             Kind::Repository => StashError::RepositoryInTheWay { path, tracked },
+            Kind::IgnoredOverwritten => StashError::IgnoredOverwritten(path),
         });
     }
     // libgit2's stash records and resets in one call, and its forced reset writes through a
@@ -611,6 +617,9 @@ enum Kind {
     Ignored,
     /// An untracked folder holding a `.git`: never stashed.
     Repository,
+    /// An ignored file (or one in the ignored folder `path`) the index no longer has, at a
+    /// restored file's path: the reset overwrites it.
+    IgnoredOverwritten,
 }
 
 /// Before a whole stash: the first worktree entry the reset would delete because it is in the
@@ -621,7 +630,10 @@ enum Kind {
 /// whole untracked folder is left to `kept_entry_in_untracked_folder`.) So in the way are:
 ///
 /// - an ignored file or folder, or an untracked nested repository, in either mode;
-/// - an untracked file only when `include_untracked` is off (otherwise it is in the stash).
+/// - an untracked file only when `include_untracked` is off (otherwise it is in the stash);
+/// - a non-folder at a restored file's path that the index no longer has and status doesn't
+///   report as `WT_NEW` (`git rm --cached`, then ignored, alone or as part of an ignored
+///   folder): the stash doesn't record it and the reset overwrites it (`IgnoredOverwritten`).
 ///
 /// The restored tree is HEAD's; with `keep_index` the index's too: libgit2 resets once to the
 /// index commit, but with HEAD as the checkout baseline, so it still removes what is in the way
@@ -678,15 +690,48 @@ fn entry_in_the_way(
         .include_ignored(true)
         .recurse_ignored_dirs(false)
         .exclude_submodules(true);
-    for entry in repo.statuses(Some(&mut options))?.iter() {
-        let status = entry.status();
-        // An ignored file can also be `INDEX_DELETED` (`git rm --cached`, then ignored): the
-        // stash doesn't record it either, and the reset writes HEAD's version over it.
+    let statuses = repo.statuses(Some(&mut options))?;
+    let entries: Vec<(git2::Status, String)> = statuses
+        .iter()
+        .filter_map(|entry| Some((entry.status(), entry.path().ok()?.to_string())))
+        .collect();
+    // Folders ignored as a whole: their files are reported one by one only when the index
+    // still had them (`INDEX_DELETED`), without the `IGNORED` flag.
+    let ignored_folders: Vec<&str> = entries
+        .iter()
+        .filter(|(status, raw)| status.contains(git2::Status::IGNORED) && raw.ends_with('/'))
+        .map(|(_, raw)| raw.trim_end_matches('/'))
+        .collect();
+    for (status, raw) in &entries {
+        let status = *status;
+        // A file the index no longer has but the worktree still does (`git rm --cached`, then
+        // ignored, so it isn't `WT_NEW`): the stash doesn't record it, and the reset writes the
+        // committed version over it (with keep-index it deletes it).
+        if status.contains(git2::Status::INDEX_DELETED)
+            && !status.contains(git2::Status::WT_NEW)
+            && files.contains_key(&fold(raw))
+            && workdir.as_ref().is_some_and(|workdir| {
+                std::fs::symlink_metadata(workdir.join(raw)).is_ok_and(|meta| !meta.is_dir())
+            })
+        {
+            let path = ignored_folders
+                .iter()
+                .find(|folder| {
+                    raw.strip_prefix(**folder)
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
+                .map_or(raw.as_str(), |folder| folder);
+            return Ok(Some(InTheWay {
+                path: path.to_string(),
+                tracked: raw.clone(),
+                kind: Kind::IgnoredOverwritten,
+            }));
+        }
         let ignored = status.contains(git2::Status::IGNORED);
         if status != git2::Status::WT_NEW && !ignored {
             continue;
         }
-        let Ok(raw) = entry.path() else { continue };
+        let raw = raw.as_str();
         // Untracked folders are only reported whole when they hold a repository (empty ones
         // aren't reported); ignored ones whenever the folder is ignored as a whole.
         let is_dir = raw.ends_with('/');
@@ -715,13 +760,7 @@ fn entry_in_the_way(
             files.get(&folded)
         } else {
             // A file where the restored tree has a folder: the reset checks out its files.
-            // An ignored file where it has a file: the reset overwrites it (an untracked one
-            // there is recorded in the stash's worktree tree, as git does).
-            folders.get(&folded).or_else(|| {
-                matches!(kind, Kind::Ignored)
-                    .then(|| files.get(&folded))
-                    .flatten()
-            })
+            folders.get(&folded)
         }
         .or_else(|| {
             // Anything below a path the restored tree has as a file: the reset replaces the

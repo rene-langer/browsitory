@@ -529,8 +529,11 @@ files and repositories elsewhere don't matter. A repository inside an untracked 
 in an untracked folder stay too. In that case Stash all works like **Stash file…** on every
 change, so it also refuses what that refuses. For example, a folder that replaced a tracked file
 gets "Can't stash 'd': it was a file and is now a directory. Commit or move its contents first."
-A file you removed from the index and then ignored (`.env` after `git rm --cached .env`) counts
-as in the way too: stashing would overwrite it with the committed version.
+A file or folder you removed from the index and then ignored (`.env` after
+`git rm --cached .env`, or `build/` after `git rm -r --cached build`) isn't stashed, and
+stashing would overwrite it with the committed version. So **Stash all** refuses: "Stashing would
+overwrite the ignored '.env' with its committed version. Commit the removal of '.env' first, or
+move it."
 
 When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
 untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. Browsitory

@@ -2019,20 +2019,7 @@ fn stash_all_refuses_to_overwrite_an_ignored_file_removed_from_the_index() {
 
         let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
 
-        assert!(
-            matches!(
-                error,
-                StashError::IgnoredInTheWay { ref ignored, ref tracked }
-                    if ignored == ".env" && tracked == ".env"
-            ),
-            "{opts:?}: {error:?}"
-        );
-        assert_nothing_stashed(
-            &mut repo,
-            &error,
-            "Stashing would delete the ignored '.env', which is in the way of the tracked '.env'. Move '.env' first.",
-            &status_before,
-        );
+        assert_ignored_overwritten(&mut repo, &opts, error, ".env", &status_before);
         assert_eq!(read(dir.path(), ".env"), "local secret\n");
     }
     // git records the edit in the stash and its pop brings it back.
@@ -2041,6 +2028,68 @@ fn stash_all_refuses_to_overwrite_an_ignored_file_removed_from_the_index() {
     assert_eq!(read(twin.path(), ".env"), "base\n");
     assert!(git(twin.path(), &["stash", "pop"]).status.success());
     assert_eq!(read(twin.path(), ".env"), "local secret\n");
+}
+
+/// The reset would write the committed version over the ignored `path`, which the index no
+/// longer has; Browsitory refuses and writes nothing.
+fn assert_ignored_overwritten(
+    repo: &mut git2::Repository,
+    opts: &StashOptions,
+    error: StashError,
+    path: &str,
+    status_before: &[git_core::status::StatusEntry],
+) {
+    assert!(
+        matches!(error, StashError::IgnoredOverwritten(ref p) if p == path),
+        "{opts:?}: {error:?}"
+    );
+    assert_nothing_stashed(
+        repo,
+        &error,
+        &format!(
+            "Stashing would overwrite the ignored '{path}' with its committed version. Commit the removal of '{path}' first, or move it."
+        ),
+        status_before,
+    );
+}
+
+/// HEAD has `build/a` and `build/b`; `build` was removed from the index (`git rm -r --cached`),
+/// is ignored as a folder, and `build/a` was edited to "local\n".
+fn ignored_folder_removed_from_the_index() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "build/a", "a\n");
+    write_file(dir.path(), "build/b", "b\n");
+    write_file(dir.path(), "keep.txt", "k\n");
+    commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    index.remove_dir(std::path::Path::new("build"), 0).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), ".git/info/exclude", "build/\n");
+    write_file(dir.path(), "build/a", "local\n");
+    (dir, repo)
+}
+
+#[test]
+fn stash_all_refuses_to_overwrite_an_ignored_folder_removed_from_the_index() {
+    // Only the folder entry `build/` is reported as ignored; its files show up as plain
+    // `INDEX_DELETED`. The reset wrote HEAD's `build/a` over the edit (or, with keep-index,
+    // deleted `build/`).
+    for opts in whole_stash_modes() {
+        let (dir, mut repo) = ignored_folder_removed_from_the_index();
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert_ignored_overwritten(&mut repo, &opts, error, "build", &status_before);
+        assert_eq!(read(dir.path(), "build/a"), "local\n");
+        assert_eq!(read(dir.path(), "build/b"), "b\n");
+    }
+    // git records the edit in the stash and its pop brings it back.
+    let (twin, _twin_repo) = ignored_folder_removed_from_the_index();
+    assert!(git_stash_push(twin.path(), false));
+    assert_eq!(read(twin.path(), "build/a"), "a\n");
+    assert!(git(twin.path(), &["stash", "pop"]).status.success());
+    assert_eq!(read(twin.path(), "build/a"), "local\n");
 }
 
 /// HEAD has the file `d`, replaced by a folder with the untracked `d/x`; the new folder
@@ -2094,4 +2143,20 @@ fn a_swap_next_to_ignored_files_in_an_untracked_folder_is_refused_as_on_the_path
         read(dir.path(), "newpkg/node_modules/pkg/i.js"),
         "dependency\n"
     );
+}
+
+#[test]
+fn a_staged_deletion_replaced_by_a_folder_is_not_an_ignored_file() {
+    // `d` deleted from the index and the worktree, then a folder `d/x` created: `d` is
+    // `INDEX_DELETED` with a folder at its path, nothing ignored is overwritten.
+    let (dir, mut repo) = file_replaced_by_folder();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    index.write().unwrap();
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false));
+
+    assert_untracked_in_the_way(&mut repo, result, "d/x", "d", &status_before);
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
 }

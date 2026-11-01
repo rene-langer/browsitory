@@ -165,8 +165,13 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   succeeded and deleted the nested repository or ignored files.
 - An ignored file that is also `INDEX_DELETED` (`git rm --cached .env`, then ignored, then
   edited) is not in libgit2's stash (its worktree commit skips ignored files; git records it),
-  and the reset writes HEAD's version over it; Pop then deletes it. `entry_in_the_way` treats an
-  ignored file at a restored file's path as in the way (`IgnoredInTheWay`), in both modes.
+  and the reset writes HEAD's version over it (with keep-index it deletes it); Pop then deletes
+  it. For a folder ignored as a whole (`git rm -r --cached build`, `build/` ignored) status
+  (`recurse_ignored_dirs(false)`) flags only the folder entry `IGNORED`; its files show up as
+  plain `INDEX_DELETED`. `entry_in_the_way` therefore refuses with
+  `StashError::IgnoredOverwritten` for any `INDEX_DELETED` entry without `WT_NEW` whose worktree
+  path is a non-folder (one no-follow stat per staged deletion) and a restored file, in both
+  modes. It names the ignored folder when the file is inside one.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
