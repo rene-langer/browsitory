@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Repository identity
+
+- Fixed: a repository opened through two different paths (a trailing slash, a subfolder, a
+  symbolic link, or different letter case on Windows), for example from a worktree's Open
+  button, got two background workers, so actions in the two tabs could run at the same time.
+  They now share one worker, and closing one tab keeps the other working (#223).
+
 ### Windows walker
 
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
