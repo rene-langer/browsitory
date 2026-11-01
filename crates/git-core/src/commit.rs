@@ -44,6 +44,9 @@ pub enum CommitError {
     /// The merge was already committed but its MERGE_HEAD can't be removed (#183).
     #[error("This merge was already committed, but git's merge state can't be cleared. Check the permissions of the .git folder, then commit again.")]
     LeftoverMergeState,
+    /// The cherry-pick was already committed but its CHERRY_PICK_HEAD can't be removed (#226).
+    #[error("This cherry-pick was already committed, but git's cherry-pick state can't be cleared. Check the permissions of the .git folder, then commit again.")]
+    LeftoverPickState,
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -558,6 +561,13 @@ pub fn commit_with(
         is_merging = false;
         merge_parent_ids.clear();
     }
+    // Likewise a cherry-pick whose commit already landed (D7-A): HEAD carries the pick (its
+    // author, time included, and its changes). Its CHERRY_PICK_HEAD must not make the picked
+    // author the author of this unrelated commit, so the leftover is cleared first (#226).
+    if pick_already_committed(repo)? {
+        repo.cleanup_state()
+            .map_err(|_| CommitError::LeftoverPickState)?;
+    }
 
     let pick_author = if matches!(
         repo.state(),
@@ -682,6 +692,35 @@ fn merge_already_committed(
         && merge_heads.iter().all(|merge_head| {
             *merge_head == head || repo.graph_descendant_of(head, *merge_head).unwrap_or(false)
         })
+}
+
+/// A cherry-pick is in progress and HEAD is already its commit: one parent, the picked
+/// commit's author (name, email and time) and its changes (`pick::commit_carries_pick`), at
+/// least one of them. The message isn't compared, since hooks may rewrite it. A paused pick's
+/// HEAD is the commit the pick applies to: it lacks the picked author or the pick's changes. A
+/// pick whose clean changes are all already there (nothing to carry) is not taken for one.
+fn pick_already_committed(repo: &git2::Repository) -> Result<bool, git2::Error> {
+    if !matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
+    ) {
+        return Ok(false);
+    }
+    let Some(picked) = repo
+        .find_reference("CHERRY_PICK_HEAD")
+        .ok()
+        .and_then(|r| r.peel_to_commit().ok())
+    else {
+        return Ok(false);
+    };
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) else {
+        return Ok(false);
+    };
+    if head.parent_count() != 1 {
+        return Ok(false);
+    }
+    let carried = crate::pick::commit_carries_pick(repo, &head, head.parent_id(0)?, &picked)?;
+    Ok(carried.is_some_and(|changes| changes > 0))
 }
 
 /// `MERGE_HEAD`'s commits, in order.

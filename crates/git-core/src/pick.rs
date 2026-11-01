@@ -910,22 +910,34 @@ pub(crate) fn commit_matches_pick(
     picked: &Commit<'_>,
     messages: &[&str],
 ) -> Result<bool, git2::Error> {
+    let message = clean_message(head.message_bytes());
+    let message_matches = messages
+        .iter()
+        .any(|expected| clean_message(expected.as_bytes()) == message);
+    Ok(message_matches && commit_carries_pick(repo, head, expected_parent, picked)?.is_some())
+}
+
+/// `commit_matches_pick` without the message: `head` has the single parent `expected_parent`,
+/// the picked commit's author (name, email and time) and every change that applying `picked`
+/// onto that parent makes cleanly. `Some(n)` when it does, `n` being the number of those
+/// clean changes (0 when the pick changes nothing cleanly, so only the author matched).
+/// Recognises a pick whose commit landed but whose CHERRY_PICK_HEAD was left behind (#226),
+/// even when a hook rewrote its message.
+pub(crate) fn commit_carries_pick(
+    repo: &Repository,
+    head: &Commit<'_>,
+    expected_parent: Oid,
+    picked: &Commit<'_>,
+) -> Result<Option<usize>, git2::Error> {
     if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
-        return Ok(false);
+        return Ok(None);
     }
     let (ours, theirs) = (head.author(), picked.author());
     let same_author = ours.name_bytes() == theirs.name_bytes()
         && ours.email_bytes() == theirs.email_bytes()
         && ours.when() == theirs.when();
     if !same_author {
-        return Ok(false);
-    }
-    let message = clean_message(head.message_bytes());
-    if !messages
-        .iter()
-        .any(|expected| clean_message(expected.as_bytes()) == message)
-    {
-        return Ok(false);
+        return Ok(None);
     }
     let parent = repo.find_commit(expected_parent)?;
     let applied = repo.cherrypick_commit(picked, &parent, 0, None)?;
@@ -941,6 +953,7 @@ pub(crate) fn commit_matches_pick(
     }
     let (parent_tree, head_tree) = (parent.tree()?, head.tree()?);
     let diff = repo.diff_tree_to_index(Some(&parent_tree), Some(&applied), None)?;
+    let mut carried = 0;
     for delta in diff.deltas() {
         if delta.status() == git2::Delta::Conflicted {
             continue;
@@ -957,11 +970,12 @@ pub(crate) fn commit_matches_pick(
                     .map(|entry| (entry.id(), entry.filemode()))
             };
             if entry(&parent_tree) == entry(&head_tree) {
-                return Ok(false);
+                return Ok(None);
             }
+            carried += 1;
         }
     }
-    Ok(true)
+    Ok(Some(carried))
 }
 
 /// A commit message as git's default cleanup leaves it: `#` comment lines dropped, trailing

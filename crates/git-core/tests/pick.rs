@@ -768,3 +768,219 @@ fn a_cleanup_failure_after_a_clean_pick_still_counts_it() {
         "the leftover state stays for Abort"
     );
 }
+
+// --- #226: a leftover pick state doesn't author the next commit ---
+
+/// `repo_with_feature_branch`, plus a commit "foreign change" (+foreign.txt) on base by "Other
+/// Author" at a fixed time, so a commit that takes the picked author is told apart from one by
+/// the user. HEAD stays at base.
+#[cfg(unix)]
+fn repo_with_foreign_commit() -> (tempfile::TempDir, git2::Repository, String) {
+    let (dir, repo, _) = repo_with_feature_branch();
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    common::write_file(dir.path(), "foreign.txt", "foreign\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("foreign.txt")).unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let other = git2::Signature::new(
+        "Other Author",
+        "other@example.com",
+        &git2::Time::new(1_000_000, 0),
+    )
+    .unwrap();
+    let foreign = repo
+        .commit(None, &other, &other, "foreign change\n", &tree, &[&base])
+        .unwrap()
+        .to_string();
+    drop(tree);
+    drop(base);
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    (dir, repo, foreign)
+}
+
+/// Cherry-picks `picked` cleanly while a `post-commit` hook makes `.git` read-only, so the pick
+/// lands but its state stays (D7-A). Then puts the mode back, removes the hooks and stages a new
+/// `after.txt`. Returns the pick commit, or `None` as root.
+#[cfg(unix)]
+fn leave_a_pick_state_behind(
+    dir: &Path,
+    repo: &git2::Repository,
+    picked: &str,
+    prepare_commit_msg: Option<&str>,
+) -> Option<git2::Oid> {
+    let hooks = repo.path().join("hooks");
+    if let Some(body) = prepare_commit_msg {
+        common::install_hook(&hooks, "prepare-commit-msg", body);
+    }
+    let restore = common::ReadOnlyGitDir::restore_later(repo)?;
+    common::install_hook(
+        &hooks,
+        "post-commit",
+        &format!("chmod 555 '{}'", repo.path().display()),
+    );
+    let outcome = cherry_pick(repo, picked, None, git_core::hooks::HookOptions::default());
+    drop(restore);
+    let Ok(PickOutcome::Committed { commit_id }) = outcome else {
+        panic!("expected Committed, got {outcome:?}")
+    };
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick, "leftover");
+    std::fs::remove_dir_all(&hooks).unwrap();
+    common::write_file(dir, "after.txt", "after\n");
+    stage(repo, "after.txt");
+    Some(git2::Oid::from_str(&commit_id).unwrap())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_commit_after_a_leftover_pick_state_is_authored_by_the_user() {
+    let (dir, repo, foreign) = repo_with_foreign_commit();
+    let Some(pick) = leave_a_pick_state_behind(dir.path(), &repo, &foreign, None) else {
+        return;
+    };
+    let mut repo = repo;
+
+    git_core::commit::commit(
+        &mut repo,
+        "after the pick",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.author().name().unwrap(), "Test User");
+    assert_eq!(head.author().email().unwrap(), "test@example.com");
+    assert_eq!(head.parent_id(0).unwrap(), pick);
+    assert_eq!(head.message().unwrap(), "after the pick");
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(!repo.path().join("MERGE_MSG").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leftover_pick_state_that_cannot_be_cleared_refuses_the_commit() {
+    let (dir, repo, foreign) = repo_with_foreign_commit();
+    let Some(pick) = leave_a_pick_state_behind(dir.path(), &repo, &foreign, None) else {
+        return;
+    };
+    let mut repo = repo;
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+
+    let error = git_core::commit::commit(
+        &mut repo,
+        "after the pick",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
+    drop(read_only);
+
+    assert!(
+        matches!(error, git_core::commit::CommitError::LeftoverPickState),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "This cherry-pick was already committed, but git's cherry-pick state can't be cleared. \
+         Check the permissions of the .git folder, then commit again."
+    );
+    assert_eq!(repo.head().unwrap().target().unwrap(), pick);
+    assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
+}
+
+/// The pick's message was rewritten by `prepare-commit-msg`; the leftover is still recognised by
+/// its author and changes (D3-A doesn't compare messages).
+#[cfg(unix)]
+#[test]
+fn a_leftover_after_a_prepare_commit_msg_rewrite_is_still_recognised() {
+    let (dir, repo, foreign) = repo_with_foreign_commit();
+    let Some(pick) = leave_a_pick_state_behind(
+        dir.path(),
+        &repo,
+        &foreign,
+        Some(r#"echo "Reviewed-by: Hook" >> "$1""#),
+    ) else {
+        return;
+    };
+    let message = repo
+        .find_commit(pick)
+        .unwrap()
+        .message()
+        .unwrap()
+        .to_string();
+    assert!(message.contains("Reviewed-by: Hook"), "{message:?}");
+    let mut repo = repo;
+
+    git_core::commit::commit(
+        &mut repo,
+        "after the pick",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.author().name().unwrap(), "Test User");
+    assert_eq!(head.parent_id(0).unwrap(), pick);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+/// The leftover check must not catch a pick that is really paused: here the conflict is resolved
+/// to HEAD's side, and the commit still takes the picked commit's author.
+#[test]
+fn a_paused_conflicted_pick_is_still_committed_with_the_picked_author() {
+    let (dir, repo, _) = repo_with_feature_branch();
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    common::write_file(dir.path(), "shared.txt", "theirs\n");
+    common::write_file(dir.path(), "extra.txt", "extra\n");
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let other = git2::Signature::now("Other Author", "other@example.com").unwrap();
+    let theirs = repo
+        .commit(None, &other, &other, "theirs edit", &tree, &[&base])
+        .unwrap()
+        .to_string();
+    drop(tree);
+    drop(base);
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    common::write_file(dir.path(), "shared.txt", "ours\n");
+    common::commit_all(&repo, "ours edit");
+
+    assert!(matches!(
+        cherry_pick(
+            &repo,
+            &theirs,
+            None,
+            git_core::hooks::HookOptions::default()
+        )
+        .unwrap(),
+        PickOutcome::Conflicted { .. }
+    ));
+    common::write_file(dir.path(), "shared.txt", "ours\n");
+    stage(&repo, "shared.txt");
+    let mut repo = repo;
+    git_core::commit::commit(
+        &mut repo,
+        "theirs edit",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.author().name().unwrap(), "Other Author");
+    assert_eq!(head.committer().name().unwrap(), "Test User");
+    assert!(head.tree().unwrap().get_name("extra.txt").is_some());
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}

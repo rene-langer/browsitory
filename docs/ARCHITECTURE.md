@@ -596,7 +596,14 @@ search also cancels a search still waiting there; and the stored work tree path
   clears it harmlessly (worktree and index equal the new HEAD). A later commit that finds such a
   leftover merge (every `MERGE_HEAD` already in HEAD's history) clears it first and commits as an
   ordinary single-parent commit, so no second merge commit is made; if it still can't be cleared,
-  `CommitError::LeftoverMergeState` refuses the commit.
+  `CommitError::LeftoverMergeState` refuses the commit. A leftover cherry-pick is handled the
+  same way (#226): when HEAD already carries the pick (`pick::commit_carries_pick`: one parent,
+  the picked commit's author with its time, and every change the pick makes cleanly, at least
+  one; the message isn't compared, since `prepare-commit-msg` may have rewritten it), the commit clears
+  `CHERRY_PICK_HEAD` first and is authored by the user, not by the picked commit's author. If
+  it can't be cleared, `CommitError::LeftoverPickState` refuses the commit. A paused pick's HEAD
+  is the commit the pick applies to, so it never matches. A leftover `REVERT_HEAD` is not
+  handled (the author is the user either way).
 - A pull drops its cancel flag (`TransferOp::clear`) before `post-merge`, so a Cancel pressed
   during the fetch that came too late to stop the pull doesn't kill the hook at once; only a
   Cancel pressed while `post-merge` runs stops it.
