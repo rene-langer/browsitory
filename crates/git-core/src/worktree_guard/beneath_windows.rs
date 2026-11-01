@@ -948,22 +948,30 @@ pub(super) fn write(
     bytes: &[u8],
     step: StepFn<'_>,
 ) -> io::Result<bool> {
-    write_with(workdir, rel, step, &mut |file| file.write_all(bytes))
+    write_with(
+        workdir,
+        rel,
+        step,
+        &mut |file| file.write_all(bytes),
+        &mut || {},
+    )
 }
 
-/// `write` with `fill` writing the content into the opened file (a test seam).
+/// `write` with `fill` writing the content into the opened file and `on_wait` called before
+/// each wait for a file in use (test seams).
 fn write_with(
     workdir: &Path,
     rel: &Path,
     step: StepFn<'_>,
     fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
+    on_wait: &mut dyn FnMut(),
 ) -> io::Result<bool> {
     let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
     let in_use = || file_in_use(rel);
-    let (attributes, target) = classify_for_writing(&at, &in_use)?;
+    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait)?;
     let mut temp = create_temp(&at, &mut next_temp_number)?;
     let written = (|| {
         if attributes != 0 {
@@ -980,6 +988,7 @@ fn write_with(
                 // A program that opened the file only for a moment (a backup or sync tool)
                 // gets a short while to close it.
                 Err(error) if super::is_in_use(&error) && tries < IN_USE_TRIES => {
+                    on_wait();
                     std::thread::sleep(IN_USE_WAIT);
                 }
                 other => break other,
@@ -997,8 +1006,9 @@ fn write_with(
 
 /// After a successful rename: an SMB server resolves the new name by path, so the file may have
 /// landed somewhere else. Only when its path positively lies outside the work tree (`root`) is
-/// it deleted again (through its handle) and the write reported as redirected; the name it
-/// replaced there stays replaced. When either path can't be read (some file system filters,
+/// it deleted again (through its handle) and the write reported as redirected. By then it has
+/// replaced whatever had that name outside, and the delete removes that name too: the outside
+/// file is lost, as with any write the server redirected. When either path can't be read (some file system filters,
 /// shares) or the file is inside the work tree (in the right folder, or already moved by a
 /// sync tool), it is kept and the write succeeds: deleting it could lose the user's content.
 fn settle_after_rename(
@@ -1027,7 +1037,7 @@ fn is_beneath(path: &Path, root: &Path) -> bool {
 
 /// How often `write` tries a file another program holds open before reporting it in use, and
 /// how long it waits in between.
-const IN_USE_TRIES: usize = 3;
+const IN_USE_TRIES: usize = 1;
 const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// The next number for a temporary file's name, unique in this process.
@@ -1057,6 +1067,7 @@ fn file_in_use(rel: &Path) -> io::Error {
 fn classify_for_writing(
     at: &Beneath,
     in_use: &dyn Fn() -> io::Error,
+    on_wait: &mut dyn FnMut(),
 ) -> io::Result<(u32, OsString)> {
     let mut busy = 0;
     for _ in 0..ATTEMPTS + IN_USE_TRIES {
@@ -1088,6 +1099,7 @@ fn classify_for_writing(
                         if busy >= IN_USE_TRIES {
                             return Err(in_use());
                         }
+                        on_wait();
                         std::thread::sleep(IN_USE_WAIT);
                     }
                     Err(error) => return Err(read_only_or(&first, error)),
@@ -2045,6 +2057,7 @@ mod tests {
             Path::new("d/f"),
             &mut no_step,
             &mut fail_halfway,
+            &mut || {},
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
@@ -2063,6 +2076,7 @@ mod tests {
             Path::new("d/new"),
             &mut no_step,
             &mut fail_halfway,
+            &mut || {},
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
@@ -2203,18 +2217,28 @@ mod tests {
         std::fs::create_dir(dir.path().join("d")).unwrap();
         let f = dir.path().join("d").join("f");
         std::fs::write(&f, "old").unwrap();
-        let holder = OpenOptions::new()
-            .read(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-            .open(&f)
-            .unwrap();
-        let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            drop(holder);
-        });
-        let written = write(dir.path(), Path::new("d/f"), b"new", &mut no_step);
-        release.join().unwrap();
+        // Shares reading and writing, not delete: the rename is refused while it is open.
+        let mut holder = Some(
+            OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(&f)
+                .unwrap(),
+        );
+        let mut waits = 0;
+        let written = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut |file| file.write_all(b"new"),
+            // The other program closes the file during the first wait.
+            &mut || {
+                waits += 1;
+                holder.take();
+            },
+        );
         assert!(written.unwrap());
+        assert_eq!(waits, 1);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
         assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
