@@ -60,8 +60,10 @@ pub(crate) fn link_target(buf: &[u8]) -> Option<Vec<u16>> {
     let length = usize::from(u16_at(10)?);
     let name: Vec<u16> = buf
         .get(start..start + length)?
-        .chunks_exact(2)
-        .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&unit| u16::from_le_bytes(unit))
         .collect();
     let wide = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
     let Some(rest) = name
