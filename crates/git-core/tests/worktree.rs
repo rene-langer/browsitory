@@ -492,3 +492,33 @@ fn a_checkout_failure_leaves_a_registered_worktree_today() {
     assert!(!twin_repo.path().join("worktrees").join("wt").exists());
     assert!(has_branch(&twin_repo, "newb"));
 }
+
+/// Adds a worktree on a new branch from `bad` (see [`branch_with_unwritable_name`]) and checks
+/// that nothing of it is left: no entry, no folder, no new branch, and the same name works again.
+#[cfg(windows)]
+fn assert_an_unwritable_name_is_rolled_back(name: &str) {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, name);
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert!(result.is_err());
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert!(!linked.exists());
+    assert!(!has_branch(&repo, "newb"));
+    create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
+    assert!(linked.join("file.txt").is_file());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_reserved_name_in_the_branch_is_rolled_back() {
+    assert_an_unwritable_name_is_rolled_back("aux");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_trailing_dot_in_the_branch_is_rolled_back() {
+    assert_an_unwritable_name_is_rolled_back("a.");
+}
