@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, Sender};
@@ -39,6 +39,7 @@ mod merge;
 mod rebase;
 mod rebase_store;
 mod reflog;
+mod registry;
 mod remote;
 mod search;
 mod sequence_store;
@@ -53,6 +54,7 @@ mod undo_store;
 mod worktree;
 
 pub use hooks::{HookEvent, HookSource};
+pub use registry::{repo_key, WorkerRegistry};
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1886,56 +1888,6 @@ impl WorkerHandle {
     }
 }
 
-/// Returns a live `WorkerHandle` for `path`, evicting and respawning first if `workers` already
-/// holds an entry whose worker thread has since exited — most notably after a panic inside a
-/// `Command` match arm (see AUD-2026-09-05-CONC-001). Without this check, a caller's naive
-/// "already open, reuse it" fast path (a plain `contains_key`/`Entry::Vacant` test) would keep
-/// handing back a dead handle forever, since the map itself never notices its `Worker` stopped
-/// responding.
-///
-/// Takes the map's `Mutex` rather than an already-locked `&mut HashMap` so it can enforce the
-/// same "drop the lock before doing any slow work" discipline `tauri-app`'s `AppState` and
-/// `vscode-sidecar`'s `Repos` both rely on elsewhere: the lock here is held only for the cheap
-/// lookup/evict and the final insert, never across `Worker::spawn` (which opens a `git2::
-/// Repository` and can be slow), so a repo that's slow to open can't block a concurrent request
-/// against a different, already-open repo.
-///
-/// Shared by `tauri-app`'s `AppState` and `vscode-sidecar`'s repo map so the eviction rule can't
-/// drift between the two frontends.
-pub fn ensure_worker(
-    workers: &Mutex<HashMap<String, Worker>>,
-    path: &str,
-) -> Result<WorkerHandle, String> {
-    {
-        let mut guard = workers.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(worker) = guard.get(path) {
-            let handle = worker.handle();
-            if handle.is_alive() {
-                return Ok(handle);
-            }
-            // The worker thread already exited (most likely a panic inside a `Command` match
-            // arm) — evict the stale entry so the fresh spawn below actually replaces it instead
-            // of leaving this path permanently wedged behind a `contains_key`-style fast path.
-            guard.remove(path);
-        }
-    }
-
-    let worker = Worker::spawn(PathBuf::from(path))?;
-    let handle = worker.handle();
-    let mut guard = workers.lock().unwrap_or_else(|e| e.into_inner());
-    // Another caller may have opened (or re-opened, after its own eviction) the same
-    // never-before-open path while we were spawning, unguarded, above. Prefer whichever worker
-    // is already sitting in the map: this loser's `Worker` (and its `Sender`) is simply dropped,
-    // letting its otherwise-idle thread exit immediately — wasted work, not a correctness issue.
-    match guard.entry(path.to_string()) {
-        std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.get().handle()),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            entry.insert(worker);
-            Ok(handle)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -1953,7 +1905,7 @@ mod tests {
 
     #[cfg(unix)]
     use super::HookEvent;
-    use super::{ensure_worker, Command, TransferEvent, UndoOutcome, UndoState, Worker};
+    use super::{Command, TransferEvent, UndoOutcome, UndoState, Worker, WorkerRegistry};
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
@@ -6016,47 +5968,6 @@ mod tests {
     }
 
     #[test]
-    fn ensure_worker_recovers_a_repo_after_its_worker_thread_panics() {
-        let (dir, _repo) = init_repo();
-        let path = dir.path().to_string_lossy().into_owned();
-
-        let workers: Mutex<HashMap<String, Worker>> = Mutex::new(HashMap::new());
-        let handle = ensure_worker(&workers, &path).expect("spawn the first worker");
-        assert!(handle.get_status().is_ok());
-
-        // Crash the worker thread from inside its dispatch loop — the same failure mode a
-        // panicking git-core call inside a `Command` match arm would trigger.
-        handle.crash_for_test();
-
-        // The channel-disconnect signal std::sync::mpsc gives us is immediate, so this call
-        // shouldn't hang — bound it with a timeout anyway so a regression here fails the test
-        // instead of wedging it.
-        let (done_tx, done_rx) = mpsc::channel();
-        let crashed_handle = handle.clone();
-        thread::spawn(move || {
-            let _ = done_tx.send(crashed_handle.get_status());
-        });
-        let result = done_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("worker did not report an error after crashing — call hung");
-        let error = result.expect_err("a crashed worker must return an error, not a status list");
-        assert!(
-            error.contains("worker thread stopped"),
-            "unexpected error message: {error}"
-        );
-
-        // The map still holds the stale (dead) entry at this point. `ensure_worker` — the same
-        // helper `open_repo` uses in both tauri-app and vscode-sidecar — must detect it's dead
-        // and respawn rather than handing back the same broken handle
-        // (AUD-2026-09-05-CONC-001), which is what `open_repo`'s old `contains_key` fast path
-        // did.
-        assert!(!handle.is_alive());
-        let fresh_handle =
-            ensure_worker(&workers, &path).expect("respawn a fresh worker for the same path");
-        assert!(fresh_handle.get_status().is_ok());
-    }
-
-    #[test]
     fn history_commands_round_trip_through_the_worker() {
         let (dir, repo) = init_repo();
         write_file(dir.path(), "base.txt", "base\n");
@@ -6592,15 +6503,15 @@ mod tests {
         let (dir, repo) = init_repo();
         let (onto, plan, _, _) = edit_then_pick(dir.path(), &repo);
         let path = dir.path().to_string_lossy().into_owned();
-        let workers: Mutex<HashMap<String, Worker>> = Mutex::new(HashMap::new());
-        let handle = ensure_worker(&workers, &path).unwrap();
+        let registry = WorkerRegistry::new();
+        let (_, handle) = registry.open(&path).unwrap();
         handle.start_rebase(onto, plan).unwrap();
 
         handle.crash_for_test();
         while handle.get_status().is_ok() {
             thread::sleep(Duration::from_millis(10));
         }
-        let fresh = ensure_worker(&workers, &path).unwrap();
+        let (_, fresh) = registry.open(&path).unwrap();
 
         assert_eq!(rebase_progress(&fresh), Some((1, 2)));
     }

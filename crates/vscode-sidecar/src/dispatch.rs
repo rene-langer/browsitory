@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -16,22 +15,22 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{HookEvent, HookSource, TransferEvent, Worker};
+use repo_service::worker::{HookEvent, HookSource, TransferEvent, WorkerRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Shared, thread-safe handle to the sidecar's open repositories, keyed by path.
+/// Shared, thread-safe handle to the sidecar's open repositories: one worker per repository,
+/// whatever path spelling a request uses (#223, see `WorkerRegistry`).
 ///
 /// `main.rs` spawns one thread per incoming request (see its module doc comment) so a slow
 /// operation against one repo can never block another request — including one against a
-/// *different* repo — from being read and dispatched. That only holds if access to this map
-/// itself is never held across a blocking call: every handler below either mutates the map
-/// directly (`open_repo`/`close_repo`, both just a lock-mutate-unlock) or, far more commonly,
-/// calls `worker_handle` to lock the map just long enough to clone out a `WorkerHandle` (a cheap
-/// channel `Sender` clone) and then drops the lock *before* sending a command and blocking on its
-/// reply — the same "clone the handle, drop the guard, then block" discipline
-/// `docs/ARCHITECTURE.md` describes for `tauri-app`'s `AppState`.
-pub type Repos = Arc<Mutex<HashMap<String, Worker>>>;
+/// *different* repo — from being read and dispatched. That only holds if the registry's lock is
+/// never held across a blocking call: `open_repo`/`close_repo` only update it (the registry
+/// spawns a worker unlocked), and every other handler calls `worker_handle` to clone out a
+/// `WorkerHandle` (a cheap channel `Sender` clone) and sends its command and blocks on the reply
+/// after the lock is released — the same "clone the handle, drop the guard, then block"
+/// discipline `docs/ARCHITECTURE.md` describes for `tauri-app`'s `AppState`.
+pub type Repos = Arc<WorkerRegistry>;
 
 /// Test-only hook: sleeping here before dispatch runs, gated behind two env vars production
 /// callers (the VSCode extension) never set, lets `tests/protocol_roundtrip.rs` deterministically
@@ -199,7 +198,8 @@ pub fn dispatch(
 }
 
 /// Locks `repos` only long enough to clone out a `WorkerHandle` (a cheap channel `Sender`
-/// clone), then drops the guard before returning. Callers always send their command and block
+/// clone), then drops the guard before returning. `repo_path` is a spelling `open_repo` was
+/// called with; any open spelling of a repository reaches its one worker. Callers always send their command and block
 /// on its reply *after* this function has returned, i.e. with the map lock already released —
 /// that's what lets one repo's slow operation run without blocking access to any other repo's
 /// entry in this map.
@@ -207,10 +207,9 @@ fn worker_handle(
     repos: &Repos,
     repo_path: &str,
 ) -> Result<repo_service::worker::WorkerHandle, String> {
-    let repos = repos.lock().unwrap_or_else(|error| error.into_inner());
     repos
         .get(repo_path)
-        .map(Worker::handle)
+        .map(|(_, handle)| handle)
         .ok_or_else(|| format!("repo not open: {repo_path}"))
 }
 
@@ -222,12 +221,12 @@ struct OpenRepoParams {
 fn open_repo(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: OpenRepoParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    // `ensure_worker` keeps the same "don't hold the map lock across `Worker::spawn`" discipline
-    // this function used to inline here itself, and additionally evicts a dead worker (its
-    // thread having exited, e.g. from a panic inside a `Command` match arm) before deciding
-    // whether to reuse or respawn — a plain `contains_key`/`Entry::Vacant` fast path would keep
-    // handing back a dead entry forever. See AUD-2026-09-05-CONC-001.
-    repo_service::worker::ensure_worker(repos, &params.path)?;
+    // `WorkerRegistry::open` doesn't hold its lock across `Worker::spawn`, and evicts a dead
+    // worker (its thread having exited, e.g. from a panic inside a `Command` match arm) before
+    // deciding whether to reuse or respawn — a plain `contains_key`/`Entry::Vacant` fast path
+    // would keep handing back a dead entry forever. See AUD-2026-09-05-CONC-001. A second
+    // spelling of an open repository shares its worker (#223).
+    repos.open(&params.path)?;
     let _ = config::add_recent_repo(Path::new(&params.path));
     Ok(Value::Null)
 }
@@ -241,10 +240,8 @@ struct RepoPathParams {
 fn close_repo(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    repos
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .remove(&params.repo_path);
+    // Drops the worker only when no other spelling of the repository is still open.
+    repos.close(&params.repo_path);
     Ok(Value::Null)
 }
 
@@ -3878,6 +3875,51 @@ mod tests {
     use super::*;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
 
+    /// A repository with a subfolder `sub`, opened as `opened(root)`; returns the temp dir.
+    fn repo_opened_as(repos: &Repos, opened: impl Fn(&Path) -> String) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        open_repo(serde_json::json!({ "path": opened(dir.path()) }), repos).unwrap();
+        dir
+    }
+
+    /// #223: a request through another spelling of an open repository reaches its worker.
+    #[test]
+    fn a_repository_opened_with_a_trailing_slash_answers_another_spelling() {
+        let repos: Repos = Arc::default();
+        let dir = repo_opened_as(&repos, |path| {
+            format!("{}{}", path.display(), std::path::MAIN_SEPARATOR)
+        });
+        let plain = dir.path().to_str().unwrap().to_string();
+        open_repo(serde_json::json!({ "path": plain }), &repos).unwrap();
+
+        let status = get_status(serde_json::json!({ "repoPath": plain }), &repos).unwrap();
+
+        assert_eq!(status, serde_json::json!([]));
+        assert_eq!(repos.len(), 1);
+    }
+
+    /// #223: closing one spelling keeps the repository open for the other.
+    #[test]
+    fn closing_one_spelling_keeps_the_other_open() {
+        let repos: Repos = Arc::default();
+        let dir = repo_opened_as(&repos, |path| path.to_str().unwrap().to_string());
+        let plain = dir.path().to_str().unwrap().to_string();
+        let sub = dir.path().join("sub").to_str().unwrap().to_string();
+        open_repo(serde_json::json!({ "path": sub }), &repos).unwrap();
+
+        close_repo(serde_json::json!({ "repoPath": sub }), &repos).unwrap();
+
+        assert!(get_status(serde_json::json!({ "repoPath": plain }), &repos).is_ok());
+        assert_eq!(
+            get_status(serde_json::json!({ "repoPath": sub }), &repos).unwrap_err(),
+            format!("repo not open: {sub}")
+        );
+        close_repo(serde_json::json!({ "repoPath": plain }), &repos).unwrap();
+        assert!(repos.is_empty());
+    }
+
     fn lines_of(buffer: &Arc<Mutex<Vec<u8>>>) -> Vec<Value> {
         let written = buffer.lock().expect("buffer lock").clone();
         String::from_utf8(written)
@@ -4224,11 +4266,8 @@ mod tests {
     #[cfg(unix)]
     fn relay_fixture(dir: &std::path::Path, hook: &str) -> (Repos, Arc<Mutex<Vec<u8>>>) {
         use std::os::unix::fs::PermissionsExt;
-        let repos: Repos = Arc::new(Mutex::new(HashMap::new()));
-        repos.lock().unwrap().insert(
-            dir.to_str().unwrap().to_string(),
-            Worker::spawn(dir.to_path_buf()).unwrap(),
-        );
+        let repos: Repos = Arc::default();
+        repos.open(dir.to_str().unwrap()).unwrap();
         let hooks = dir.join(".git").join("hooks");
         std::fs::create_dir_all(&hooks).unwrap();
         let path = hooks.join(hook);
@@ -4326,11 +4365,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, ids) = paused_pick_repo();
         let path = dir.path().to_str().unwrap().to_string();
-        let repos: Repos = Arc::new(Mutex::new(HashMap::new()));
-        repos.lock().unwrap().insert(
-            path.clone(),
-            Worker::spawn(dir.path().to_path_buf()).unwrap(),
-        );
+        let repos: Repos = Arc::default();
+        repos.open(&path).unwrap();
         let hooks = dir.path().join(".git").join("hooks");
         std::fs::create_dir_all(&hooks).unwrap();
         let hook = hooks.join("post-commit");
@@ -4367,11 +4403,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, ids) = paused_pick_repo();
         let path = dir.path().to_str().unwrap().to_string();
-        let repos: Repos = Arc::new(Mutex::new(HashMap::new()));
-        repos.lock().unwrap().insert(
-            path.clone(),
-            Worker::spawn(dir.path().to_path_buf()).unwrap(),
-        );
+        let repos: Repos = Arc::default();
+        repos.open(&path).unwrap();
         let handle = worker_handle(&repos, &path).unwrap();
         handle.cherry_pick_many(ids, mpsc::channel().0).unwrap();
         handle

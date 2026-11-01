@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,11 +17,10 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 /// thread per request means this loop is only ever busy for the time it takes to parse a line and
 /// spawn a thread, so it's always ready to read the next one.
 ///
-/// `repos` is therefore an `Arc<Mutex<...>>` (`dispatch::Repos`) rather than an owned `HashMap`,
-/// shared by every in-flight request thread. `dispatch.rs`'s handlers only ever hold that lock
-/// long enough to mutate the map or clone a `WorkerHandle` out of it (see `worker_handle`'s doc
-/// comment) — never across the blocking reply-wait — so the lock itself can't reintroduce the
-/// same serialization.
+/// `repos` is therefore an `Arc<WorkerRegistry>` (`dispatch::Repos`), shared by every in-flight
+/// request thread. The registry holds its lock only long enough to update its maps or clone a
+/// `WorkerHandle` out of them (see `worker_handle`'s doc comment) — never across the blocking
+/// reply-wait — so the lock itself can't reintroduce the same serialization.
 ///
 /// Responses (and the transfer-progress notifications `spawn_progress_relay` emits) are written
 /// through the shared `stdout` mutex, which is what keeps concurrent writers from interleaving a
@@ -30,7 +28,7 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 fn main() {
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));
-    let repos: dispatch::Repos = Arc::new(Mutex::new(HashMap::new()));
+    let repos: dispatch::Repos = Arc::default();
 
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
