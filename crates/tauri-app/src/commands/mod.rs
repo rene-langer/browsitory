@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use repo_service::worker::{HookEvent, HookSource, TransferEvent, Worker, WorkerHandle};
+use repo_service::worker::{HookEvent, HookSource, TransferEvent, WorkerHandle, WorkerRegistry};
 
 mod branch;
 mod clone;
@@ -1722,8 +1722,10 @@ impl From<CreatePullRequestDto> for repo_service::pull_requests::CreatePullReque
 
 #[derive(Default)]
 pub struct AppState {
-    pub workers: Mutex<HashMap<String, Worker>>,
-    /// One gate per open repository, keyed like `workers` (see `RepoWorker::call`, #181).
+    /// One worker per repository, whatever path spelling a command uses (#223).
+    pub registry: WorkerRegistry,
+    /// One gate per open repository, keyed by the registry's repository key (not the command's
+    /// spelling), so two spellings of one repository share it (see `RepoWorker::call`, #181).
     gates: Mutex<HashMap<String, Arc<RepoGate>>>,
 }
 
@@ -1732,11 +1734,11 @@ type RepoGate = tauri::async_runtime::Mutex<()>;
 
 #[tauri::command]
 pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    // `ensure_worker` evicts a dead worker (its thread having exited, e.g. from a panic inside
-    // a `Command` match arm) before deciding whether to reuse or respawn — a plain
+    // `open` evicts a dead worker (its thread having exited, e.g. from a panic inside a
+    // `Command` match arm) before deciding whether to reuse or respawn — a plain
     // `contains_key` fast path would keep handing back a dead entry forever. See
-    // AUD-2026-09-05-CONC-001.
-    repo_service::worker::ensure_worker(&state.workers, &path)?;
+    // AUD-2026-09-05-CONC-001. A second spelling of an open repository shares its worker.
+    state.registry.open(&path)?;
     // Best-effort: a repo that opened successfully should count as "recent" even if we can't
     // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
     // over it.
@@ -1750,17 +1752,18 @@ pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
-/// Drops `repo_path`'s worker and gate. Calls already holding a clone of either finish as usual.
+/// Forgets the spelling `repo_path`. When no other spelling of the repository is open, drops its
+/// worker and gate. Calls already holding a clone of either finish as usual.
 fn forget_repo(state: &AppState, repo_path: &str) {
-    // Same lock order as `repo_worker` (workers, then gates), so a lookup racing a close can't
+    // Same lock order as `repo_worker` (registry, then gates), so a lookup racing a close can't
     // leave a gate behind for a repository that is no longer open.
-    let mut workers = state.workers.lock().unwrap_or_else(|e| e.into_inner());
-    workers.remove(repo_path);
-    state
-        .gates
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(repo_path);
+    state.registry.close_with(repo_path, |key| {
+        state
+            .gates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key);
+    });
 }
 
 #[tauri::command]
@@ -2050,23 +2053,24 @@ impl RepoWorker {
     }
 }
 
-/// Looks up `repo_path`'s worker and gate (creating the gate on first use). Clones the worker's
-/// channel handle and drops the guards before any round trip: holding the mutex across one would
-/// serialize every command behind it and let a wedged worker hold the lock forever.
+/// Looks up `repo_path`'s worker and its repository's gate (creating the gate on first use).
+/// Clones the worker's channel handle and drops the guards before any round trip: holding the
+/// mutex across one would serialize every command behind it and let a wedged worker hold the
+/// lock forever.
 pub(crate) fn repo_worker(state: &AppState, repo_path: &str) -> Result<RepoWorker, String> {
-    let workers = state.workers.lock().unwrap_or_else(|e| e.into_inner());
-    let handle = workers
-        .get(repo_path)
-        .map(Worker::handle)
-        .ok_or_else(|| format!("repo not open: {repo_path}"))?;
-    let gate = state
-        .gates
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .entry(repo_path.to_string())
-        .or_default()
-        .clone();
-    Ok(RepoWorker { handle, gate })
+    state
+        .registry
+        .get_with(repo_path, |key, handle| {
+            let gate = state
+                .gates
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(key.to_string())
+                .or_default()
+                .clone();
+            RepoWorker { handle, gate }
+        })
+        .ok_or_else(|| format!("repo not open: {repo_path}"))
 }
 
 /// Runs blocking work on Tokio's blocking pool, off the async runtime's threads (#125).
@@ -2182,18 +2186,26 @@ mod tests {
         (dir, release)
     }
 
-    /// An `AppState` with a worker open for each of `dirs`, keyed by path as `open_repo` does.
+    /// An `AppState` with a worker open for each of `dirs`, as `open_repo` opens them. Returns
+    /// the paths they were opened with.
     fn state_with_repos(dirs: &[&std::path::Path]) -> (super::AppState, Vec<String>) {
         let state = super::AppState::default();
         let keys = dirs
             .iter()
             .map(|dir| {
                 let key = dir.to_string_lossy().into_owned();
-                repo_service::worker::ensure_worker(&state.workers, &key).unwrap();
+                state.registry.open(&key).unwrap();
                 key
             })
             .collect();
         (state, keys)
+    }
+
+    /// The gate of the repository opened as `path`.
+    #[cfg(unix)]
+    fn gate_of(state: &super::AppState, path: &str) -> std::sync::Arc<super::RepoGate> {
+        let (key, _) = state.registry.get(path).unwrap();
+        state.gates.lock().unwrap()[&key].clone()
     }
 
     #[cfg(unix)]
@@ -2268,7 +2280,7 @@ mod tests {
         ));
         // Each read gets a gate of its own, so every one of them reaches `off_runtime` and waits
         // on the worker there: this checks the #125 property, not the #181 gate.
-        let handle = state.workers.lock().unwrap()[&keys[0]].handle();
+        let (_, handle) = state.registry.get(&keys[0]).unwrap();
         let reads: Vec<_> = (0..saturating_count())
             .map(|_| {
                 tauri::async_runtime::spawn(
@@ -2310,8 +2322,42 @@ mod tests {
             started_rx.recv_timeout(std::time::Duration::from_secs(10)),
             Ok(HookEvent::Started { .. })
         ));
-        assert!(state.gates.lock().unwrap()[key].try_lock().is_err());
+        assert!(gate_of(state, key).try_lock().is_err());
         commit
+    }
+
+    /// #223: a second spelling of an open repository waits at the same gate.
+    #[cfg(unix)]
+    #[test]
+    fn two_spellings_share_one_gate() {
+        let (dir, release) = repo_with_waiting_pre_commit();
+        let (state, keys) = state_with_repos(&[dir.path()]);
+        let slashed = format!("{}/", keys[0]);
+        state.registry.open(&slashed).unwrap();
+        let commit = hold_gate_with_hook(&state, &keys[0]);
+
+        let via_other = super::repo_worker(&state, &slashed).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &via_other.gate,
+            &gate_of(&state, &keys[0])
+        ));
+        let (answered_tx, answered_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = tauri::async_runtime::block_on(via_other.call(|w| w.get_status()));
+            let _ = answered_tx.send(result.is_ok());
+        });
+        let while_held = answered_rx.recv_timeout(std::time::Duration::from_millis(500));
+
+        std::fs::write(&release, "").unwrap();
+        assert!(tauri::async_runtime::block_on(commit).unwrap().is_ok());
+        assert!(
+            while_held.is_err(),
+            "a call through another spelling ran while the gate was held"
+        );
+        assert_eq!(
+            answered_rx.recv_timeout(std::time::Duration::from_secs(10)),
+            Ok(true)
+        );
     }
 
     #[cfg(unix)]
@@ -2425,7 +2471,28 @@ mod tests {
         super::forget_repo(&state, &keys[0]);
 
         assert!(state.gates.lock().unwrap().is_empty());
+        assert!(state.registry.is_empty());
         assert!(super::repo_worker(&state, &keys[0]).is_err());
+    }
+
+    /// #223: closing one spelling's tab keeps the repository's worker and gate for the other.
+    #[test]
+    fn closing_one_spelling_keeps_the_gate() {
+        let dir = tempfile::TempDir::new().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let (state, keys) = state_with_repos(&[dir.path()]);
+        let sub = dir.path().join("sub").to_string_lossy().into_owned();
+        state.registry.open(&sub).unwrap();
+        let first = super::repo_worker(&state, &keys[0]).unwrap();
+
+        super::forget_repo(&state, &sub);
+
+        let again = super::repo_worker(&state, &keys[0]).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first.gate, &again.gate));
+        assert_eq!(state.gates.lock().unwrap().len(), 1);
+        assert!(super::repo_worker(&state, &sub).is_err());
+        assert!(tauri::async_runtime::block_on(again.call(|w| w.get_status())).is_ok());
     }
     use std::path::PathBuf;
 
