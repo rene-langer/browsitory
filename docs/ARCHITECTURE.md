@@ -700,6 +700,16 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder creation (#164, #193), and use a work tree through the admin share
   `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
   `Step` seam in both walkers makes the races deterministic in tests.
+- `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
+  written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
+  owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:
+  an access-denied reopen for writing of a file whose classifying handle has
+  `FILE_ATTRIBUTE_READONLY`. Either way the error is `worktree_guard::read_only_error()`
+  (`PermissionDenied` wrapping `ReadOnlyFile`, tested with `is_read_only`), which conflict
+  resolution and **Ignore** report as `MergeError::ReadOnlyFile` / `StageError::ReadOnlyFile`
+  ("'f.txt' is read-only. Make it writable, then try again."). Any other denied write (an ACL,
+  another owner) keeps the system's error. Deletes still clear the read-only attribute
+  (#194), and `replace_beneath` replaces a read-only file (undo/redo restores, like git).
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").

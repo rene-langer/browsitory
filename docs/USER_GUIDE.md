@@ -122,6 +122,10 @@ A merge, cherry-pick, revert, rebase or stash pop that conflicts lists the files
   tool. If it still contains `<<<<<<<` / `>>>>>>>` conflict markers, Browsitory asks before
   staging it. A deleted file is marked resolved as deleted.
 
+If the conflicted file is read-only, **Save resolution** and the whole-file choices change
+nothing and say so: "'f.txt' is read-only. Make it writable, then try again." Clear the file's
+read-only flag (Windows) or give yourself write permission (macOS, Linux), then try again.
+
 ### Staging individual lines
 
 In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add
@@ -162,7 +166,9 @@ For untracked files the menu also offers ignore items. Each appends a pattern to
 repository's `.gitignore` (creating it if needed; a `.gitignore` that is a symlink is left
 alone and reported). **Ignore file** is always offered.
 **Ignore all \*.ext** appears only when the file name has an extension. **Ignore folder
-⟨folder⟩/** appears only when the file is in a subfolder.
+⟨folder⟩/** appears only when the file is in a subfolder. If `.gitignore` is read-only, the
+ignore items change nothing and say "'.gitignore' is read-only. Make it writable, then try
+again."
 
 ### Signing commits
 

@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Read-only files
 
-- Work in progress (#209).
+- Fixed: resolving a conflict or adding a pattern to .gitignore failed with "Access is denied"
+  (Windows) or "Permission denied" (macOS, Linux) when the file was read-only. It now says
+  "'f.txt' is read-only. Make it writable, then try again." and changes nothing (#209).
 
 ### Windows walker
 
