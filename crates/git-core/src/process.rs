@@ -1158,17 +1158,113 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn timeout_kills_a_process_whose_grandchild_holds_the_pipe() {
+        let timeout = Duration::from_millis(500);
+        let started = Instant::now();
         let captured = run_captured(
             sh("sleep 30 & echo started; sleep 30"),
             None,
             &|| false,
-            Duration::from_millis(500),
+            timeout,
             1024,
         )
         .unwrap();
         assert!(captured.timed_out);
         assert!(!captured.success);
         assert_eq!(captured.output, "started\n");
+        // The output is the same if `killpg` missed the grandchild; only the time tells: a
+        // surviving `sleep 30` holds the pipe open for the whole `DRAIN_GRACE` (#179).
+        assert!(
+            started.elapsed() < timeout + DRAIN_GRACE / 2,
+            "waited for the pipe: the grandchild survived ({:?})",
+            started.elapsed()
+        );
+    }
+
+    /// A hook's background job that redirects its output (so it doesn't hold the pipe) and does
+    /// its work a second later: a timeout or cancel must kill it too (#179). A non-interactive
+    /// `sh` has no job control, so the job stays in the hook's process group, which `kill_tree`
+    /// kills with `killpg`.
+    #[cfg(unix)]
+    const GRANDCHILD: &str = r#"(sleep 1; echo alive > "$MARKER") >/dev/null 2>&1 & sleep 30"#;
+
+    /// How long to wait for a background job that survived to write its marker.
+    #[cfg(unix)]
+    const MARKER_WAIT: Duration = Duration::from_millis(2500);
+
+    #[cfg(unix)]
+    fn unix_marker() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("alive");
+        (dir, marker)
+    }
+
+    /// `sh -c script` with `MARKER` pointing at `marker`.
+    #[cfg(unix)]
+    fn sh_with_marker(script: &str, marker: &std::path::Path) -> Command {
+        let mut command = sh(script);
+        command.env("MARKER", marker);
+        command
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_a_hooks_background_grandchild_on_unix() {
+        let (_dir, marker) = unix_marker();
+        let captured = run_captured(
+            sh_with_marker(GRANDCHILD, &marker),
+            None,
+            &|| false,
+            Duration::from_millis(300),
+            1024,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        std::thread::sleep(MARKER_WAIT);
+        assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_kills_a_hooks_background_grandchild_on_unix() {
+        let (_dir, marker) = unix_marker();
+        let cancel_at = Instant::now() + Duration::from_millis(300);
+        let result = run_captured(
+            sh_with_marker(GRANDCHILD, &marker),
+            None,
+            &|| Instant::now() >= cancel_at,
+            Duration::from_secs(60),
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        std::thread::sleep(MARKER_WAIT);
+        assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    /// The control for the marker tests above (#179, D2-A): the same hook started without its
+    /// own process group (no `detach`), so `killpg` finds no group and only `sh` is killed. Its
+    /// background job then survives and writes the marker, which shows the marker tests can
+    /// fail. The survivor exits by itself right after writing the marker.
+    #[cfg(unix)]
+    #[test]
+    fn without_its_own_group_a_background_grandchild_survives() {
+        let (_dir, marker) = unix_marker();
+        let mut command = sh_with_marker(GRANDCHILD, &marker);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = spawn_retrying(&mut command).unwrap();
+        let (_, timed_out) =
+            wait_bounded(&mut child, &|| false, Duration::from_millis(300), None).unwrap();
+        assert!(timed_out);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            marker.exists(),
+            "the background process died without a process group kill: the marker tests prove nothing"
+        );
     }
 
     #[cfg(unix)]
@@ -1251,7 +1347,56 @@ mod tests {
         assert!(captured.timed_out);
         assert!(!captured.success);
         assert_eq!(captured.stdout, b"started\n");
-        assert!(started.elapsed() < Duration::from_secs(10));
+        // As in `timeout_kills_a_process_whose_grandchild_holds_the_pipe`: a surviving
+        // grandchild would hold the pipes for the whole `DRAIN_GRACE` (#179).
+        assert!(
+            started.elapsed() < Duration::from_millis(300) + DRAIN_GRACE / 2,
+            "waited for the pipes: the grandchild survived ({:?})",
+            started.elapsed()
+        );
+        assert!(captured.drained);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_timeout_kills_a_background_grandchild() {
+        let (_dir, marker) = unix_marker();
+        let captured = run_captured_split(
+            sh_with_marker(GRANDCHILD, &marker),
+            None,
+            &|| false,
+            Duration::from_millis(300),
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        std::thread::sleep(MARKER_WAIT);
+        assert!(
+            !marker.exists(),
+            "the program's background process survived"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_cancel_kills_a_background_grandchild() {
+        let (_dir, marker) = unix_marker();
+        let cancel_at = Instant::now() + Duration::from_millis(300);
+        let result = run_captured_split(
+            sh_with_marker(GRANDCHILD, &marker),
+            None,
+            &|| Instant::now() >= cancel_at,
+            Duration::from_secs(60),
+            1024,
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        std::thread::sleep(MARKER_WAIT);
+        assert!(
+            !marker.exists(),
+            "the program's background process survived"
+        );
     }
 
     #[cfg(unix)]
@@ -1423,6 +1568,39 @@ mod tests {
         assert!(matches!(result, Err(RunError::Cancelled)));
         std::thread::sleep(Duration::from_secs(6));
         assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    /// The control for the job tests above (#179, D2-A): the same hook started without a job
+    /// (`detach` only, as before #122), so a timeout kills only `sh.exe`. Its background job then
+    /// survives and writes the marker, which shows those tests can fail.
+    #[cfg(windows)]
+    #[test]
+    fn without_a_job_a_background_grandchild_survives_on_windows() {
+        let (_dir, marker) = marker_path();
+        let Some(mut command) = windows_sh(
+            r#"(sleep 3; echo alive > "$MARKER") >/dev/null 2>&1 & sleep 30"#,
+            &marker,
+        ) else {
+            eprintln!("no sh.exe found; skipping");
+            return;
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach(&mut command);
+        let mut child = spawn_retrying(&mut command).unwrap();
+        let (_, timed_out) =
+            wait_bounded(&mut child, &|| false, Duration::from_millis(500), None).unwrap();
+        assert!(timed_out);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            marker.exists(),
+            "the background process died without a job: the job tests prove nothing"
+        );
     }
 
     #[cfg(windows)]

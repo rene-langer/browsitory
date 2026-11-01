@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Test robustness
+
+- Fixed (tests): the Unix tests for stopping a hook now check that a background process the hook
+  started can't finish its work after a timeout or Cancel; control tests (also for the Windows
+  job object) show the checks fail without the process group or job (#179).
+
 ### Folder/file swaps
 
 - Fixed: unstaging a file whose folder a merge left conflicts in failed with "invalid entry
