@@ -15,6 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: Stash all could delete a repository nested where the branch has a file of that name,
   including its history. It now refuses with "Stashing would delete the repository in 'd',
   which is in the way of the tracked 'd'. Move 'd' first." (#211).
+- Fixed: Stash all with Include untracked files deleted a repository inside an untracked folder
+  (for example `vendor/lib` in a new `vendor/` folder), including its history. It now keeps the
+  repository and stashes the folder's other untracked files, as `git stash -u` does (#211).
 - Fixed: applying or popping a stash whose untracked files sit in a folder that replaced a
   tracked file reported success, left a "d~Updated upstream" file, and Pop dropped the stash.
   It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where

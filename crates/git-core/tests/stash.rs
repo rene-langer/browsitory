@@ -1832,3 +1832,109 @@ fn the_refused_stash_applies_after_the_deletion_is_committed() {
     assert_eq!(read(dir.path(), "d/x"), "x\n");
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 }
+
+/// HEAD has `a.txt` (edited in the worktree); the untracked folder `vendor/` holds a repository
+/// `vendor/lib` with one commit and, with `other`, the untracked file `vendor/other.txt`.
+fn nested_repo_in_untracked_folder(other: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let inner = git2::Repository::init(dir.path().join("vendor/lib")).unwrap();
+    {
+        let mut config = inner.config().unwrap();
+        config.set_str("user.name", "Inner").unwrap();
+        config.set_str("user.email", "inner@example.com").unwrap();
+    }
+    write_file(dir.path(), "vendor/lib/inner.txt", "inner\n");
+    commit_all(&inner, "inner");
+    if other {
+        write_file(dir.path(), "vendor/other.txt", "other\n");
+    }
+    write_file(dir.path(), "a.txt", "edited\n");
+    (dir, repo)
+}
+
+/// The files of a stash's untracked-files commit, sorted; empty without one.
+fn untracked_files_of(repo: &git2::Repository, stash: git2::Oid) -> Vec<String> {
+    let Ok(untracked) = repo.find_commit(stash).unwrap().parent(2) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    untracked
+        .tree()
+        .unwrap()
+        .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                files.push(format!("{root}{}", entry.name().unwrap()));
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .unwrap();
+    files.sort();
+    files
+}
+
+#[test]
+fn stash_all_with_untracked_files_keeps_a_repository_nested_in_an_untracked_folder() {
+    // libgit2's REMOVE_UNTRACKED removes the untracked `vendor/` whole: it only protects a
+    // folder that itself holds a `.git`. git's `stash -u` keeps the repository.
+    for other in [false, true] {
+        for keep_index in [false, true] {
+            let (dir, mut repo) = nested_repo_in_untracked_folder(other);
+            let inner_head = git2::Repository::open(dir.path().join("vendor/lib"))
+                .unwrap()
+                .head()
+                .unwrap()
+                .target()
+                .unwrap();
+
+            git_core::stash::save_stash(&mut repo, &with(|o| o.keep_index = keep_index)).unwrap();
+
+            let context = format!("other {other}, keep_index {keep_index}");
+            assert!(dir.path().join("vendor/lib/.git").is_dir(), "{context}");
+            let inner = git2::Repository::open(dir.path().join("vendor/lib")).unwrap();
+            assert_eq!(inner.head().unwrap().target().unwrap(), inner_head);
+            assert_eq!(read(dir.path(), "vendor/lib/inner.txt"), "inner\n");
+            assert!(!dir.path().join("vendor/other.txt").exists(), "{context}");
+            assert_eq!(read(dir.path(), "a.txt"), "a\n");
+
+            // The stash holds what git's does.
+            let stash = stash_commit(&mut repo, 0);
+            let expected: Vec<String> = if other {
+                vec!["vendor/other.txt".into()]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(untracked_files_of(&repo, stash), expected, "{context}");
+            let a = repo
+                .find_commit(stash)
+                .unwrap()
+                .tree()
+                .unwrap()
+                .get_path(std::path::Path::new("a.txt"))
+                .unwrap()
+                .id();
+            assert_eq!(repo.find_blob(a).unwrap().content(), b"edited\n");
+            let (twin, twin_repo) = nested_repo_in_untracked_folder(other);
+            let mut args = vec!["stash", "push", "-u"];
+            if keep_index {
+                args.push("--keep-index");
+            }
+            assert!(git(twin.path(), &args).status.success());
+            assert!(twin.path().join("vendor/lib/.git").is_dir());
+            let twin_stash = twin_repo.refname_to_id("refs/stash").unwrap();
+            assert_eq!(untracked_files_of(&twin_repo, twin_stash), expected);
+
+            drop(inner);
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+                StashApplyOutcome::Applied
+            );
+            assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+            if other {
+                assert_eq!(read(dir.path(), "vendor/other.txt"), "other\n");
+            }
+            assert!(dir.path().join("vendor/lib/.git").is_dir());
+        }
+    }
+}

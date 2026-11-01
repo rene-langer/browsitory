@@ -191,7 +191,11 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // symlink that replaced a tracked file or folder (#114). With such a link, stash every
     // changed path through Browsitory's path-limited stash instead: a file link is stashed and
     // then replaced by the file, a folder link is refused (`BeyondSymlink`).
-    if crate::worktree_guard::has_hazard(repo)? {
+    // The same route keeps a repository nested in an untracked folder, which libgit2's reset
+    // with untracked files would delete (see `nested_repository_in_untracked_folder`).
+    if crate::worktree_guard::has_hazard(repo)?
+        || (opts.include_untracked && nested_repository_in_untracked_folder(repo)?)
+    {
         let paths = changed_paths(repo, opts.include_untracked)?;
         if paths.is_empty() {
             return Err(StashError::NothingToStash);
@@ -501,6 +505,75 @@ fn save_path_limited_stash(
 fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
     let path = std::path::Path::new(path);
     Ok(repo.index()?.get_path(path, 0).is_none() && !repo.is_path_ignored(path)?)
+}
+
+/// True when an untracked repository (a folder with a `.git`) sits below an untracked folder:
+/// a proper ancestor folder with no path in the index or in HEAD. libgit2's reset after a stash
+/// with untracked files (`GIT_CHECKOUT_REMOVE_UNTRACKED`) removes such an ancestor whole,
+/// nested repository and history included: `wd_item_is_removable` (checkout.c) only protects a
+/// folder that itself holds a `.git`. git's `stash -u` keeps it (`git clean -d` skips nested
+/// repositories). Such a stash takes the path-limited route, which deletes only the untracked
+/// files it stashed.
+fn nested_repository_in_untracked_folder(repo: &Repository) -> Result<bool, StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+    let mut repositories = Vec::new();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        if entry.status() != git2::Status::WT_NEW {
+            continue;
+        }
+        let Ok(path) = entry.path() else { continue };
+        if let Some(path) = path.strip_suffix('/') {
+            if path.contains('/') && workdir.join(path).join(".git").exists() {
+                repositories.push(path.to_string());
+            }
+        }
+    }
+    if repositories.is_empty() {
+        return Ok(false);
+    }
+    // The folders holding a path of the index, and of HEAD. A folder missing from either counts
+    // as untracked: taking the path-limited route when it wasn't needed costs nothing.
+    let folders_of = |paths: &mut dyn Iterator<Item = String>| {
+        let mut folders = std::collections::HashSet::new();
+        for path in paths {
+            for (slash, _) in path.match_indices('/') {
+                folders.insert(path[..slash].to_string());
+            }
+        }
+        folders
+    };
+    let index = repo.index()?;
+    let in_index = folders_of(
+        &mut index
+            .iter()
+            .map(|entry| String::from_utf8_lossy(&entry.path).into_owned()),
+    );
+    let mut head_paths = Vec::new();
+    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
+        head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                if let Ok(name) = entry.name() {
+                    head_paths.push(format!("{root}{name}"));
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+    }
+    let in_head = folders_of(&mut head_paths.into_iter());
+    Ok(repositories.iter().any(|path| {
+        path.match_indices('/').any(|(slash, _)| {
+            let folder = &path[..slash];
+            !in_index.contains(folder) || !in_head.contains(folder)
+        })
+    }))
 }
 
 /// What `entry_in_the_way` found: the worktree entry `path` the reset would delete, the
