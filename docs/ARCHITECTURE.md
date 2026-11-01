@@ -454,6 +454,19 @@ across processes).
 - `git-core::pick` is a pure state machine: `cherry_pick_many`/`revert_many`/`continue_sequence`
   take and return a `SequenceState` (`SequenceRun { outcome, state }`, `state: Some` = "keep
   this", `None` = "no sequence any more"); `git-core` has no persistence and no serde.
+- git's own terminal sequences (`git cherry-pick A B C`, `git revert A B`) keep their remaining
+  list in `.git/sequencer/todo`. Wherever Browsitory finishes or clears a pick after a commit
+  (the Commit button's `commit_with` and its leftover handling, a single `cherry_pick`/`revert`
+  and its empty or failed step, Continue's step and its skips, a squash `start_merge`), it uses
+  `commit::clear_commit_state`, git's post-commit cleanup, not libgit2's `cleanup_state` (which
+  deletes every `state_files` entry: the merge and pick files, `BISECT_LOG`, `rebase-*` and
+  `sequencer/`). It removes `MERGE_HEAD`, `MERGE_MODE`, `MERGE_MSG`, `CHERRY_PICK_HEAD` and
+  `REVERT_HEAD`, and removes `sequencer/` only when a pick was finished and its todo has at most
+  one line left (git's `have_finished_the_last_pick`), so `git cherry-pick --continue` carries on
+  after a step committed in Browsitory (#241, D2-A). A missing or unreadable todo keeps the
+  folder. It never touches `BISECT_LOG`, `rebase-*`, `AUTO_MERGE` or `SQUASH_MSG`, so, as with
+  `git commit`, a commit no longer ends a `git bisect` started in a terminal. Abort
+  (`merge::abort_merge`, `pick::abort_sequence`) and rebase still use `cleanup_state`.
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
@@ -667,8 +680,8 @@ across processes).
   if the state is no longer `Merge`, or HEAD or `MERGE_HEAD` changed (a merge aborted and
   restarted in a terminal during `pre-merge-commit`), it returns `CommitError::MergeChanged` and
   commits nothing; the first check comes before the message file is written, so a restarted
-  merge's own `MERGE_MSG` is kept. Once the commit landed, `cleanup_state` and
-  `clear_squash_message` failures are logged (`commit::cleanup_after_commit`) and the result is
+  merge's own `MERGE_MSG` is kept. Once the commit landed, `commit::clear_commit_state` (see
+  "Cherry-pick sequences") and `clear_squash_message` failures are logged (`commit::cleanup_after_commit`) and the result is
   still `Ok` (D7-A): post hooks run, the worker forgets the clean merge, the frontend clears the
   message, and the leftover merge/pick state stays visible in the operation strip, where Abort
   clears it harmlessly (worktree and index equal the new HEAD). A later commit that finds such a
@@ -679,10 +692,9 @@ across processes).
   `Coverage::Exact`: one parent, the picked commit's author with its time, and exactly the
   pick's result on every path it changes cleanly onto HEAD's parent, at least one; the message
   isn't compared, since `prepare-commit-msg` may have rewritten it), the commit clears the
-  leftover first and is authored by the user, not by the picked commit's author. A single
-  pick's state is cleared with `cleanup_state`; a terminal sequence (`CherryPickSequence`) only
-  loses `CHERRY_PICK_HEAD` and `MERGE_MSG`, so `.git/sequencer` and the rest of its todo stay,
-  as after `git commit`. If it can't be cleared, `CommitError::LeftoverPickState` refuses the
+  leftover first and is authored by the user, not by the picked commit's author. Both
+  leftovers are cleared with `clear_commit_state`, so a terminal sequence's `.git/sequencer`
+  and the rest of its todo stay, as after `git commit` (#241). If it can't be cleared, `CommitError::LeftoverPickState` refuses the
   commit. A paused pick's HEAD is the commit the pick applies to; it matches only if it has the
   picked author to the second and the pick's exact content on every cleanly changed path (a
   look-alike commit; accepted as a risk). Not recognised, so the commit takes the picked author
