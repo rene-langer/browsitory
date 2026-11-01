@@ -705,8 +705,8 @@ fn open_leaf(at: &Beneath, purpose: Purpose) -> io::Result<Option<(File, Found)>
 /// a OneDrive file) or as itself, by its file ID (see [`open_by_id`]), so a link swapped in under
 /// its name meanwhile is never followed. Where the file system has no opens by ID (FAT/exFAT,
 /// which have no links either, and SMB shares) it is opened by its name in the held parent
-/// instead. Either way the second handle must have `first`'s file ID; `None` when it hasn't or
-/// the file is gone.
+/// instead. Either way the second handle must have `first`'s file ID and still be directly in
+/// the held parent; `None` when it isn't or the file is gone.
 fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Result<Option<File>> {
     let mut options = FILE_NON_DIRECTORY_FILE;
     if !reopen {
@@ -717,7 +717,12 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
         Err(error)
             if matches!(
                 error.raw_os_error(),
-                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+                Some(
+                    ERROR_INVALID_FUNCTION
+                        | ERROR_NOT_SUPPORTED
+                        | ERROR_INVALID_PARAMETER
+                        | ERROR_INVALID_NAME
+                )
             ) =>
         {
             nt_open(
@@ -737,7 +742,12 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
         Err(error) if missing(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    Ok((file_id(&second)? == id).then_some(second))
+    // Opened by identity, it may have been renamed out of the held parent meanwhile (delete is
+    // shared): then not this leaf any more, and the caller tries again.
+    if file_id(&second)? != id || !in_parent(&second, at.parent_file())? {
+        return Ok(None);
+    }
+    Ok(Some(second))
 }
 
 /// How often a walk retries one component that keeps changing under it before giving up.
@@ -924,14 +934,17 @@ pub(super) fn write(
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
     for _ in 0..ATTEMPTS {
-        let mut file = match open_leaf(&at, Purpose::Delete)? {
+        // Classified for reading: a file the user may write but not delete stays writable.
+        let mut file = match open_leaf(&at, Purpose::Read)? {
             None => match create_leaf(&at)? {
                 Some(file) => file,
                 None => continue,
             },
-            Some((link, Found::Link)) => {
-                delete_by_handle(&link)?;
-                drop(link);
+            Some((_, Found::Link)) => {
+                // Reopened to delete it, checked to still be the link in the held parent.
+                if let Some((link, Found::Link)) = open_leaf(&at, Purpose::Delete)? {
+                    delete_by_handle(&link)?;
+                }
                 continue;
             }
             Some((_, Found::Dir)) => {
@@ -1677,8 +1690,11 @@ mod tests {
             .open(&path)
             .unwrap();
         let calls = std::cell::Cell::new(0);
-        let error = delete_classic_with(&file, |_| {
+        let error = delete_classic_with(&file, |file| {
             calls.set(calls.get() + 1);
+            // The retry comes after the attribute was cleared.
+            let read_only = attribute_tag(file).unwrap().file_attributes & FILE_ATTRIBUTE_READONLY;
+            assert_eq!(read_only != 0, calls.get() == 1, "call {}", calls.get());
             Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED))
         })
         .unwrap_err();
@@ -1694,18 +1710,26 @@ mod tests {
     #[test]
     fn set_attributes_writes_only_settable_attributes() {
         let dir = TempDir::new().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, "x").unwrap();
         let file = OpenOptions::new()
             .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-            .open(dir.path())
+            .open(&path)
             .unwrap();
         let attributes = attribute_tag(&file).unwrap().file_attributes;
-        assert_ne!(attributes & FILE_ATTRIBUTE_DIRECTORY, 0);
-        // The directory bit is passed in but not written; the folder stays a folder.
-        set_attributes(&file, attributes | FILE_ATTRIBUTE_READONLY).unwrap();
+        assert_eq!(attributes & FILE_ATTRIBUTE_DIRECTORY, 0);
+        let wanted = attributes | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_DIRECTORY;
+        // Unmasked, the directory bit on a file is refused...
+        let mut unmasked = BasicInfo {
+            file_attributes: wanted,
+            ..BasicInfo::default()
+        };
+        assert!(set_information(&file, FILE_BASIC_INFO_CLASS, &mut unmasked).is_err());
+        // ...masked, it is dropped and the rest is written.
+        set_attributes(&file, wanted).unwrap();
         let set = attribute_tag(&file).unwrap().file_attributes;
         assert_ne!(set & FILE_ATTRIBUTE_READONLY, 0);
-        assert_ne!(set & FILE_ATTRIBUTE_DIRECTORY, 0);
+        assert_eq!(set & FILE_ATTRIBUTE_DIRECTORY, 0);
         set_attributes(&file, attributes).unwrap();
     }
 
@@ -1740,6 +1764,42 @@ mod tests {
         // Deleting needs only `DELETE`: the open falls back to it without `FILE_WRITE_ATTRIBUTES`.
         assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
         assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+
+    /// The work tree through the admin share `\\localhost\C$\…` (SMB): the reopen of an
+    /// existing file, by its ID or, where the share refuses that, by name, still works.
+    #[test]
+    fn a_work_tree_on_an_smb_share_is_written_and_read() {
+        let dir = TempDir::new().unwrap();
+        let local = std::fs::canonicalize(dir.path()).unwrap();
+        // `\\?\C:\x` -> `\\localhost\C$\x`.
+        let local = local.to_string_lossy();
+        let Some(rest) = local.strip_prefix(r"\\?\") else {
+            panic!("not a drive path: {local}")
+        };
+        let (drive, rest) = rest.split_at(1);
+        let share = PathBuf::from(format!(r"\\localhost\{drive}${}", &rest[1..]));
+        if std::fs::metadata(&share).is_err() {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "the admin share isn't reachable on CI: {}",
+                share.display()
+            );
+            eprintln!("SKIP: no admin share at {}", share.display());
+            return;
+        }
+        assert!(write(&share, Path::new("d/f"), b"one", &mut no_step).unwrap());
+        // Existing now: written through the reopened handle.
+        assert!(write(&share, Path::new("d/f"), b"two", &mut no_step).unwrap());
+        let read = read(&share, Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"two"),
+            "{read:?}"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("d").join("f")).unwrap(),
+            b"two"
+        );
     }
 
     /// A OneDrive-like file is reopened by its file ID: the result is the same file.

@@ -599,8 +599,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   only where the file system has no opens by ID: FAT/exFAT, which have no links, and SMB
   shares) and accepted only with the same file ID. Leaves are opened for reading with no more
   access than attributes, so a file whose ACL denies writing still reads; acts that may delete
-  ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES`. An *empty* held folder can still be turned into a junction in place;
-  on a local NTFS/ReFS volume a relative open below it then fails with
+  ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES` (a write classifies
+  the leaf for reading and reopens only a link to delete it, so a file the user may write but
+  not delete stays writable). A reopen by ID must also still sit in the held parent (it may
+  have been renamed out meanwhile). An *empty* held folder can still be turned into a junction
+  in place; on a local NTFS/ReFS volume a relative open below it then fails with
   `ERROR_CANT_RESOLVE_FILENAME`, reported as "a folder of the working tree changed", so
   nothing is opened, created or contacted in the junction's target. On an SMB share the
   redirector resolves a relative name by path on the server, so every component and leaf must
@@ -615,10 +618,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   it falls back to `FileDispositionInfo`, as std's `remove_dir_all` does; when that is denied
   on a read-only file, the attribute is cleared through the same handle (`FileBasicInfo`,
   settable attributes only) and the delete tried again, and the attribute is restored if it
-  still fails (not possible when the ACL denies `FILE_WRITE_ATTRIBUTES`). Tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`)
-  during a write, a read and a folder creation (#164, #193). Hand-declared `kernel32` and
-  `ntdll` imports, no new dependency. A `Step` seam in both walkers makes the races
-  deterministic in tests.
+  still fails (not possible when the ACL denies `FILE_WRITE_ATTRIBUTES`). Tests turn a held
+  folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write, a read and a
+  folder creation (#164, #193), and use a work tree through the admin share
+  `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
+  `Step` seam in both walkers makes the races deterministic in tests.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
