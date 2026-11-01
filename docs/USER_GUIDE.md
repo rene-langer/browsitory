@@ -464,8 +464,22 @@ together, since git's index can't hold half of the swap. The other way round wor
 a folder replaced a committed file or link, **Stage all** stages that file's deletion and the
 folder's files in any order, and unstaging any of them, the folder's name included, puts the file
 or link back. Unstaging a staged rename whose old path is part of such a swap leaves the swap
-staged, as `git restore --staged` does. Discarding a file below the link still refuses ("'d/f'
-is beyond a symbolic link."), like git.
+staged, as `git restore --staged` does. While a merge has left conflicts in such a swap,
+unstaging it refuses and changes nothing ("Can't unstage 'd': the merge left conflicts in it.
+Resolve them first."). Discarding a file below the link still refuses ("'d/f' is beyond a
+symbolic link."), like git.
+
+When a file replaced a tracked folder (`d` where `d/f` was), **Stash file…** on `d` stashes the
+file together with the folder's deletion and puts the folder back, as `git stash push -u -- d`
+does. Browsitory can't apply such a stash while the folder is back: Apply and Pop say "This stash
+can't be applied here because a file replaced a folder; use git stash apply from a terminal."
+and keep the stash. If a folder was created where a stash holds an untracked file, Apply and Pop
+refuse too ("The untracked file 'd' in this stash would overwrite the folder 'd'; move the folder
+first."). With **Include untracked files** off, stashing would delete an untracked file that is
+in the way of a stashed folder or file (with **Keep staged changes** also one in the way of a
+staged one), so it refuses instead ("Stashing would delete the untracked file 'd', which is in
+the way of 'd/f'. Turn on Include untracked files, or move 'd' first."). Where names ignore case
+(`core.ignorecase`), `docs` counts as in the way of `Docs/f`.
 
 On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
 and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:
