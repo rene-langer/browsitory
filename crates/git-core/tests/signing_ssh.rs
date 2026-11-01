@@ -329,7 +329,14 @@ fn cherry_pick_and_revert_are_signed() {
         git_core::commit::commit(&mut repo, "add a", git_core::hooks::HookOptions::default())
             .unwrap();
 
-    let reverted = match git_core::pick::revert(&repo, &picked, None).unwrap() {
+    let reverted = match git_core::pick::revert(
+        &repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap()
+    {
         git_core::pick::PickOutcome::Committed { commit_id } => commit_id,
         other => panic!("unexpected {other:?}"),
     };
@@ -342,7 +349,14 @@ fn cherry_pick_and_revert_are_signed() {
     repo.set_head_detached(base).unwrap();
     repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
         .unwrap();
-    let cherry = match git_core::pick::cherry_pick(&repo, &picked, None).unwrap() {
+    let cherry = match git_core::pick::cherry_pick(
+        &repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap()
+    {
         git_core::pick::PickOutcome::Committed { commit_id } => commit_id,
         other => panic!("unexpected {other:?}"),
     };
@@ -694,7 +708,13 @@ fn cherry_pick_with_unsupported_signing_config_touches_nothing() {
         .set_str("gpg.format", "x509")
         .unwrap();
 
-    let err = git_core::pick::cherry_pick(&repo, &picked, None).unwrap_err();
+    let err = git_core::pick::cherry_pick(
+        &repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
 
     assert!(err.to_string().contains("gpg.format=x509"), "{err}");
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
@@ -729,7 +749,13 @@ fn cherry_pick_signer_failure_leaves_a_pick_in_progress_that_can_be_committed() 
         )
         .unwrap();
 
-    let err = git_core::pick::cherry_pick(&repo, &picked, None).unwrap_err();
+    let err = git_core::pick::cherry_pick(
+        &repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
 
     assert!(err.to_string().starts_with("Signing failed: "), "{err}");
     assert_eq!(head_oid(&repo), base);

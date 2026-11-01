@@ -97,14 +97,16 @@ fn paused(
     conflict_adds_a_file: bool,
 ) -> (tempfile::TempDir, Repository, Vec<String>, SequenceState) {
     let (dir, repo, ids) = side_branch(true, conflict_adds_a_file);
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     (dir, repo, ids, state)
 }
 
 #[test]
 fn a_clean_sequence_applies_every_commit_oldest_first() {
     let (dir, repo, ids) = side_branch(false, true);
-    let run = cherry_pick_many(&repo, &ids);
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -125,7 +127,7 @@ fn a_clean_sequence_applies_every_commit_oldest_first() {
 fn a_conflict_in_the_middle_stops_with_state_and_progress() {
     let (_dir, repo, ids) = side_branch(true, true);
     let original = head(&repo);
-    let run = cherry_pick_many(&repo, &ids);
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     let SequenceOutcome::Conflicted { files, progress } = run.outcome.unwrap() else {
         panic!("expected a conflict")
     };
@@ -145,8 +147,14 @@ fn a_conflict_in_the_middle_stops_with_state_and_progress() {
 #[test]
 fn an_already_applied_commit_is_skipped() {
     let (_dir, repo, ids) = side_branch(false, true);
-    cherry_pick(&repo, &ids[0], None).unwrap();
-    let run = cherry_pick_many(&repo, &ids);
+    cherry_pick(
+        &repo,
+        &ids[0],
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -168,7 +176,7 @@ fn revert_many_applies_newest_first() {
         common::commit_all(&repo, name);
         ids.push(head(&repo));
     }
-    let run = revert_many(&repo, &ids);
+    let run = revert_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert_eq!(
         run.outcome.unwrap(),
         SequenceOutcome::Completed {
@@ -199,7 +207,11 @@ fn a_merge_commit_in_a_sequence_is_refused_before_anything_changes() {
             .unwrap()
             .to_string()
     };
-    let run = cherry_pick_many(&repo, &[ids[0].clone(), merge]);
+    let run = cherry_pick_many(
+        &repo,
+        &[ids[0].clone(), merge],
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(matches!(run.outcome, Err(PickError::MainlineRequired)));
     assert!(run.state.is_none());
     assert_eq!(head(&repo), before);
@@ -209,7 +221,7 @@ fn a_merge_commit_in_a_sequence_is_refused_before_anything_changes() {
 #[test]
 fn nothing_selected_is_refused() {
     let (_dir, repo, _) = side_branch(false, true);
-    let run = cherry_pick_many(&repo, &[]);
+    let run = cherry_pick_many(&repo, &[], git_core::hooks::HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::NothingSelected)));
     assert!(run.state.is_none());
     assert_eq!(
@@ -223,12 +235,12 @@ fn a_paused_operation_or_staged_change_refuses_a_new_sequence() {
     let (dir, repo, ids) = side_branch(false, true);
     common::write_file(dir.path(), "notes.txt", "staged\n");
     stage(&repo, "notes.txt");
-    let run = cherry_pick_many(&repo, &ids);
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::DirtyIndex)));
     assert!(run.state.is_none());
 
     let (_dir, repo, ids, _state) = paused(true);
-    let run = revert_many(&repo, &ids[..1]);
+    let run = revert_many(&repo, &ids[..1], git_core::hooks::HookOptions::default());
     assert!(matches!(run.outcome, Err(PickError::OperationInProgress)));
     assert!(run.state.is_none());
 }
@@ -239,7 +251,7 @@ fn an_error_on_the_first_step_returns_no_state() {
     let before = head(&repo);
     // An untracked file in the way of the first pick's new file: libgit2's SAFE checkout refuses.
     common::write_file(dir.path(), "one.txt", "mine\n");
-    let run = cherry_pick_many(&repo, &ids);
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert!(run.outcome.is_err());
     assert!(run.state.is_none());
     assert_eq!(head(&repo), before);
@@ -254,7 +266,7 @@ fn an_error_on_the_first_step_returns_no_state() {
 fn an_error_on_a_later_step_returns_the_state_at_that_step() {
     let (dir, repo, ids) = side_branch(false, true);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let run = cherry_pick_many(&repo, &ids);
+    let run = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default());
     assert!(run.outcome.is_err());
     let state = run.state.expect("later failure keeps the sequence");
     assert_eq!(state.next, 2);
@@ -346,7 +358,11 @@ fn a_revert_sequence_paused_on_a_conflict_continues_with_gits_message() {
     common::write_file(dir.path(), "a.txt", "three\n");
     common::commit_all(&repo, "three");
     // Newest-first: "add b" reverts cleanly, then "two" conflicts with "three".
-    let run = revert_many(&repo, &[two.clone(), add_b.clone()]);
+    let run = revert_many(
+        &repo,
+        &[two.clone(), add_b.clone()],
+        git_core::hooks::HookOptions::default(),
+    );
     let Ok(SequenceOutcome::Conflicted { progress, .. }) = run.outcome else {
         panic!("expected a conflict, got {:?}", run.outcome)
     };
@@ -376,7 +392,9 @@ fn a_revert_sequence_paused_on_a_conflict_continues_with_gits_message() {
 fn continue_retries_a_step_that_failed_without_a_conflict() {
     let (dir, repo, ids) = side_branch(false, true);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
     let run = continue_sequence(&repo, state, HookOptions::default());
     assert_eq!(
@@ -406,7 +424,9 @@ fn continue_after_the_step_was_aborted_outside_retries_it() {
 fn continue_refuses_staged_changes_before_retrying_a_step() {
     let (dir, repo, ids) = side_branch(false, true);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
     common::write_file(dir.path(), "notes.txt", "staged\n");
     stage(&repo, "notes.txt");
@@ -458,7 +478,7 @@ fn continue_refuses_a_different_paused_pick() {
             .to_string()
     };
     assert!(matches!(
-        cherry_pick(&repo, &other, None).unwrap(),
+        cherry_pick(&repo, &other, None, git_core::hooks::HookOptions::default()).unwrap(),
         git_core::pick::PickOutcome::Conflicted { .. }
     ));
     let run = continue_sequence(&repo, state.clone(), HookOptions::default());
@@ -480,7 +500,9 @@ fn abort_restores_the_original_head_and_keeps_unrelated_edits() {
     let original = head(&repo);
     let branch = repo.head().unwrap().shorthand().unwrap().to_string();
     common::write_file(dir.path(), "notes.txt", "local edit\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
 
     let abort = abort_sequence(&repo, &state).unwrap();
     assert!(abort.rewound);
@@ -511,7 +533,9 @@ fn abort_on_a_detached_head_moves_the_detached_head_back() {
     let original = head(&repo);
     repo.set_head_detached(Oid::from_str(&original).unwrap())
         .unwrap();
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     let abort = abort_sequence(&repo, &state).unwrap();
     assert!(abort.rewound);
     assert!(repo.head_detached().unwrap());
@@ -547,7 +571,9 @@ fn abort_after_an_error_stop_rewinds_the_landed_steps() {
     let (dir, repo, ids) = side_branch(false, true);
     let original = head(&repo);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     let abort = abort_sequence(&repo, &state).unwrap();
     assert!(abort.rewound);
     assert_eq!(head(&repo), original);
@@ -563,7 +589,9 @@ fn abort_refuses_to_overwrite_a_local_edit_and_can_be_retried() {
     let (dir, repo, ids) = side_branch(false, true);
     let original = head(&repo);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     // A local edit to a file a landed step changed: rewinding would overwrite it.
     common::write_file(dir.path(), "one.txt", "edited\n");
     assert!(abort_sequence(&repo, &state).is_err());
@@ -623,7 +651,9 @@ fn an_unrelated_commit_after_a_terminal_abort_is_not_taken_for_the_step() {
 fn after_an_error_stop_any_new_commit_is_head_moved() {
     let (dir, repo, ids) = side_branch(false, true);
     common::write_file(dir.path(), "three.txt", "mine\n");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     assert!(!state.stopped_on_conflict);
     std::fs::remove_file(dir.path().join("three.txt")).unwrap();
     common::write_file(dir.path(), "notes.txt", "user work\n");
@@ -645,7 +675,11 @@ fn a_revert_step_committed_by_hand_is_recognised_by_its_message() {
     let add_b = head(&repo);
     common::write_file(dir.path(), "a.txt", "three\n");
     common::commit_all(&repo, "three");
-    let run = revert_many(&repo, &[two, add_b]);
+    let run = revert_many(
+        &repo,
+        &[two, add_b],
+        git_core::hooks::HookOptions::default(),
+    );
     let state = run.state.unwrap();
     assert!(state.stopped_on_conflict);
     common::write_file(dir.path(), "a.txt", "resolved\n");
@@ -713,7 +747,9 @@ fn abort_does_not_rewind_a_branch_switched_to_after_the_stop() {
     let (_dir, repo, ids) = side_branch(true, true);
     let original = head(&repo);
     let base_ref = base_branch_ref(&repo);
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     git_core::merge::abort_merge(&repo).unwrap();
     // `git switch -c other`: same commit, different branch.
     {
@@ -764,9 +800,15 @@ fn reverting_a_revert_reapplies_like_git() {
     common::write_file(dir.path(), "a.txt", "a\n");
     common::commit_all(&repo, "add a");
     let add_a = head(&repo);
-    git_core::pick::revert(&repo, &add_a, None).unwrap();
+    git_core::pick::revert(&repo, &add_a, None, git_core::hooks::HookOptions::default()).unwrap();
     let revert = head(&repo);
-    git_core::pick::revert(&repo, &revert, None).unwrap();
+    git_core::pick::revert(
+        &repo,
+        &revert,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     let tip = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(
         tip.message().unwrap(),
@@ -774,7 +816,7 @@ fn reverting_a_revert_reapplies_like_git() {
     );
     // In a sequence too; and a revert of a "Reapply" is a plain Revert again.
     let reapply = head(&repo);
-    let run = revert_many(&repo, &[reapply]);
+    let run = revert_many(&repo, &[reapply], git_core::hooks::HookOptions::default());
     assert!(run.outcome.is_ok());
     let tip = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(
@@ -789,7 +831,7 @@ fn reverting_a_revert_of_a_revert_stays_a_revert() {
     common::write_file(dir.path(), "a.txt", "a\n");
     common::commit_all(&repo, "Revert \"Revert \"x\"\"");
     let id = head(&repo);
-    git_core::pick::revert(&repo, &id, None).unwrap();
+    git_core::pick::revert(&repo, &id, None, git_core::hooks::HookOptions::default()).unwrap();
     let tip = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(
         tip.summary().unwrap().unwrap(),
@@ -842,7 +884,9 @@ fn continue_does_not_count_another_commit_with_the_same_author() {
     .unwrap();
     common::write_file(dir.path(), "shared.txt", "ours\n");
     common::commit_all(&repo, "ours edit");
-    let state = cherry_pick_many(&repo, &ids).state.unwrap();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
     git_core::merge::abort_merge(&repo).unwrap();
     let other = repo
         .find_commit(git2::Oid::from_str(&ids[1]).unwrap())
@@ -904,9 +948,11 @@ fn continue_runs_the_commit_hooks_once_on_the_resolved_step() {
             skipped: vec![]
         }
     );
+    // The resolved step gets `git commit`'s hooks; the clean step after it only
+    // `prepare-commit-msg … message` and `post-commit` (#183).
     assert_eq!(
         common::read_log(&repo),
-        "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \n"
+        "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \nprepare-commit-msg <msg> message\npost-commit \n"
     );
 }
 
@@ -990,7 +1036,7 @@ fn continue_with_no_verify_skips_pre_commit_and_commit_msg() {
     assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
     assert_eq!(
         common::read_log(&repo),
-        "prepare-commit-msg <msg> merge\npost-commit \n"
+        "prepare-commit-msg <msg> merge\npost-commit \nprepare-commit-msg <msg> message\npost-commit \n"
     );
 }
 
@@ -1071,7 +1117,11 @@ fn an_empty_resolution_is_skipped_without_running_hooks() {
             skipped: vec![ids[1].clone()]
         }
     );
-    assert_eq!(common::read_log(&repo), "");
+    // Only the clean step after the skipped one runs hooks (#183).
+    assert_eq!(
+        common::read_log(&repo),
+        "prepare-commit-msg <msg> message\npost-commit \n"
+    );
 }
 
 #[cfg(unix)]
@@ -1088,7 +1138,11 @@ fn a_revert_sequence_continue_runs_the_commit_hooks() {
     let add_b = head(&repo);
     common::write_file(dir.path(), "a.txt", "three\n");
     common::commit_all(&repo, "three");
-    let run = revert_many(&repo, &[two, add_b]);
+    let run = revert_many(
+        &repo,
+        &[two, add_b],
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(matches!(
         run.outcome,
         Ok(SequenceOutcome::Conflicted { .. })
@@ -1133,5 +1187,269 @@ fn a_pre_commit_that_empties_the_step_skips_it() {
         }
     );
     assert_eq!(summaries(&repo, 3), ["side three", "side one", "ours edit"]);
-    assert_eq!(common::read_log(&repo), "");
+    // The emptied step runs no post-commit; the clean step after it does (#183).
+    assert_eq!(common::read_log(&repo), "post-commit \n");
+}
+
+// ---- hooks on clean steps (#183) -------------------------------------------------------------
+
+/// Installs `names` as hooks logging `<name> <basename of $1> <$2>` to `<git dir>/hook-log`, so
+/// the log reads the same whether git passes the message file as an absolute or relative path.
+#[cfg(unix)]
+fn log_hooks_by_file_name(repo: &Repository, names: &[&str]) {
+    let log = repo.path().join("hook-log");
+    for name in names {
+        common::install_hook(
+            &repo.path().join("hooks"),
+            name,
+            &format!(
+                r#"echo "{name} ${{1:+$(basename "$1")}} $2" >> '{}'"#,
+                log.display()
+            ),
+        );
+    }
+}
+
+#[cfg(unix)]
+fn hook_log(repo: &Repository) -> String {
+    std::fs::read_to_string(repo.path().join("hook-log")).unwrap_or_default()
+}
+
+#[cfg(unix)]
+const CLEAN_STEP_LOG: &str = "prepare-commit-msg COMMIT_EDITMSG message\npost-commit  \n";
+
+#[cfg(unix)]
+#[test]
+fn clean_sequence_steps_run_prepare_commit_msg_and_post_commit() {
+    let (_dir, repo, ids) = side_branch(false, true);
+    log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
+
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+
+    assert!(matches!(
+        run.outcome,
+        Ok(SequenceOutcome::Completed { applied: 3, .. })
+    ));
+    assert_eq!(hook_log(&repo), CLEAN_STEP_LOG.repeat(3));
+}
+
+#[cfg(unix)]
+#[test]
+fn git_cherry_pick_runs_the_same_hooks_on_clean_steps() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (dir, repo, ids) = side_branch(false, true);
+    log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
+
+    let status = std::process::Command::new("git")
+        .arg("cherry-pick")
+        .args(&ids)
+        .current_dir(dir.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(hook_log(&repo), CLEAN_STEP_LOG.repeat(3));
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_revert_steps_run_prepare_commit_msg_and_post_commit() {
+    let (_dir, repo, ids) = side_branch(false, true);
+    cherry_pick_many(&repo, &ids, HookOptions::default());
+    let picked: Vec<String> = {
+        let mut commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            out.push(commit.id().to_string());
+            commit = commit.parent(0).unwrap();
+        }
+        out.reverse();
+        out
+    };
+    log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
+
+    let run = revert_many(&repo, &picked, HookOptions::default());
+
+    assert!(matches!(
+        run.outcome,
+        Ok(SequenceOutcome::Completed { applied: 2, .. })
+    ));
+    assert_eq!(hook_log(&repo), CLEAN_STEP_LOG.repeat(2));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_commit_msg_can_rewrite_a_picked_message() {
+    let (_dir, repo, ids) = side_branch(false, true);
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "prepare-commit-msg",
+        r#"printf '\nTicket: 42\n' >> "$1""#,
+    );
+
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    for steps_back in 0..3 {
+        assert!(
+            message_of(&repo, steps_back)
+                .trim_end()
+                .ends_with("Ticket: 42"),
+            "{}",
+            message_of(&repo, steps_back)
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failing_prepare_commit_msg_pauses_the_step_staged() {
+    let (_dir, repo, ids) = side_branch(false, true);
+    let hook = common::install_hook(
+        &repo.path().join("hooks"),
+        "prepare-commit-msg",
+        r#"if grep -q "side two" "$1"; then echo "no ticket"; exit 1; fi"#,
+    );
+
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+
+    let SequenceOutcome::HookFailed {
+        hook: failed,
+        output,
+        progress,
+    } = run.outcome.unwrap()
+    else {
+        panic!("expected HookFailed")
+    };
+    assert_eq!(failed, "prepare-commit-msg");
+    assert_eq!(output, "no ticket\n");
+    assert_eq!(progress.current_step, 2);
+    let state = run.state.unwrap();
+    assert!(state.stopped_on_conflict);
+    assert_eq!(state.next, 1);
+    assert_eq!(repo.state(), RepositoryState::CherryPick);
+    assert_eq!(
+        repo.find_reference("CHERRY_PICK_HEAD")
+            .unwrap()
+            .target()
+            .unwrap()
+            .to_string(),
+        ids[1]
+    );
+    assert_eq!(summaries(&repo, 1), ["side one"]);
+    let staged = repo
+        .diff_tree_to_index(
+            Some(&repo.head().unwrap().peel_to_tree().unwrap()),
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(staged.deltas().len() > 0, "the step stays staged");
+
+    std::fs::remove_file(hook).unwrap();
+    let run = continue_sequence(&repo, state, HookOptions::default());
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(summaries(&repo, 3), ["side three", "side two", "side one"]);
+    assert_eq!(repo.state(), RepositoryState::Clean);
+}
+
+#[cfg(unix)]
+#[test]
+fn continue_runs_the_hooks_for_later_clean_steps() {
+    let (_dir, repo, _ids, state) = resolved();
+    log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(
+        hook_log(&repo),
+        format!(
+            "pre-commit  \nprepare-commit-msg COMMIT_EDITMSG merge\ncommit-msg COMMIT_EDITMSG \npost-commit  \n{CLEAN_STEP_LOG}"
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cancel_during_a_steps_post_commit_keeps_it_and_stops_after_it() {
+    let (dir, repo, ids) = side_branch(false, true);
+    let marker = dir.path().join("..").join(format!(
+        "{}-post-commit-started",
+        dir.path().file_name().unwrap().to_string_lossy()
+    ));
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!("touch '{}'; sleep 30", marker.display()),
+    );
+    let cancel = || marker.exists();
+    let started = std::time::Instant::now();
+
+    let run = cherry_pick_many(
+        &repo,
+        &ids,
+        HookOptions {
+            cancel: Some(&cancel),
+            ..Default::default()
+        },
+    );
+    let _ = std::fs::remove_file(&marker);
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    assert!(
+        matches!(
+            run.outcome,
+            Err(PickError::Hook(
+                git_core::hooks::HookError::Cancelled { .. }
+            ))
+        ),
+        "{:?}",
+        run.outcome
+    );
+    let state = run.state.unwrap();
+    assert_eq!(state.next, 1);
+    assert_eq!(state.expected_head, head(&repo));
+    assert_eq!(summaries(&repo, 2), ["side one", "main only"]);
+    assert_eq!(repo.state(), RepositoryState::Clean);
+
+    std::fs::remove_file(repo.path().join("hooks").join("post-commit")).unwrap();
+    let run = continue_sequence(&repo, state, HookOptions::default());
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+    assert_eq!(
+        summaries(&repo, 4),
+        ["side three", "side two", "side one", "main only"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cleanup_failure_after_continue_still_counts_the_step() {
+    // Pause on the last step, so nothing runs after the step Continue commits.
+    let (dir, repo, ids) = side_branch(true, false);
+    let state = cherry_pick_many(&repo, &ids[1..2], HookOptions::default())
+        .state
+        .unwrap();
+    common::write_file(dir.path(), "shared.txt", "resolved\n");
+    stage(&repo, "shared.txt");
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+
+    let run = continue_sequence(&repo, state, HookOptions::default());
+    drop(read_only);
+
+    assert!(
+        matches!(
+            run.outcome,
+            Ok(SequenceOutcome::Completed { applied: 1, .. })
+        ),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(summaries(&repo, 1), ["side two"]);
 }

@@ -456,7 +456,12 @@ fn cherry_pick_leaf_is_refused() {
     let f = fx();
     let other = f.side_branch(&[("tc", "other\n")]);
     f.link_leaf();
-    let result = git_core::pick::cherry_pick(&f.repo, &other, None);
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &other,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(result.is_err(), "{result:?}");
     f.untouched();
 }
@@ -596,7 +601,11 @@ fn abort_sequence_leaf_never_writes_through() {
         .to_string();
     git_core::branch::create_branch(&f.repo, "seq", &base).unwrap();
     f.commit(&[("a.txt", "conflicting\n")], "seq");
-    let run = git_core::pick::cherry_pick_many(&f.repo, &[first, second]);
+    let run = git_core::pick::cherry_pick_many(
+        &f.repo,
+        &[first, second],
+        git_core::hooks::HookOptions::default(),
+    );
     let state = run.state.expect("the sequence stops on the conflict");
     f.link_leaf();
     let _ = git_core::pick::abort_sequence(&f.repo, &state);
@@ -722,7 +731,12 @@ fn squash_merge_adding_below_the_ancestor_is_refused() {
 #[test]
 fn cherry_pick_adding_below_the_ancestor_is_refused() {
     let (f, other) = adds_below_linked_folder();
-    let result = git_core::pick::cherry_pick(&f.repo, &other, None);
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &other,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(result.is_err(), "{result:?}");
     precious_kept(&f);
 }
@@ -749,7 +763,12 @@ fn revert_adding_below_the_ancestor_is_refused() {
     let _ = removes;
     std::fs::write(f.out.path().join("new.txt"), "PRECIOUS\n").unwrap();
     f.link_ancestor();
-    let result = git_core::pick::revert(&f.repo, &removal, None);
+    let result = git_core::pick::revert(
+        &f.repo,
+        &removal,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(result.is_err(), "{result:?}");
     precious_kept(&f);
 }
@@ -958,7 +977,12 @@ fn cherry_pick_adding_below_a_committed_folder_link_is_refused() {
     git_core::branch::switch_branch(&f.repo, "old").unwrap();
     let picked = f.commit(&[("d/new.txt", "NEW\n")], "old2");
     git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
-    let result = git_core::pick::cherry_pick(&f.repo, &picked, None);
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(
         matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
         "{result:?}"
@@ -1109,7 +1133,12 @@ fn squash_merge_adding_below_an_untracked_link_is_refused() {
 #[test]
 fn cherry_pick_adding_below_an_untracked_link_is_refused() {
     let (f, other) = untracked_link_fixture();
-    let result = git_core::pick::cherry_pick(&f.repo, &other, None);
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &other,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(
         matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
         "{result:?}"
@@ -1121,7 +1150,11 @@ fn cherry_pick_adding_below_an_untracked_link_is_refused() {
 #[test]
 fn cherry_pick_many_adding_below_an_untracked_link_is_refused() {
     let (f, other) = untracked_link_fixture();
-    let run = git_core::pick::cherry_pick_many(&f.repo, &[other]);
+    let run = git_core::pick::cherry_pick_many(
+        &f.repo,
+        &[other],
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(
         matches!(run.outcome, Err(git_core::pick::PickError::LinkedFolder(_))),
         "{:?}",
@@ -1141,7 +1174,12 @@ fn revert_adding_below_an_untracked_link_is_refused() {
     common::commit_all(&f.repo, "removes e");
     let removal = f.head();
     f.link_e();
-    let result = git_core::pick::revert(&f.repo, &removal, None);
+    let result = git_core::pick::revert(
+        &f.repo,
+        &removal,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(
         matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
         "{result:?}"
@@ -1206,7 +1244,11 @@ fn sequence_rewind_adding_below_an_untracked_link_is_refused() {
     let conflicting = f.commit(&[("a.txt", "picked\n")], "a");
     git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
     f.commit(&[("a.txt", "local\n")], "local a");
-    let run = git_core::pick::cherry_pick_many(&f.repo, &[removal, conflicting]);
+    let run = git_core::pick::cherry_pick_many(
+        &f.repo,
+        &[removal, conflicting],
+        git_core::hooks::HookOptions::default(),
+    );
     let state = run.state.expect("the sequence stops on the conflict");
     assert!(!f.path().join("e").exists());
     f.link_e();

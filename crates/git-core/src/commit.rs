@@ -37,6 +37,10 @@ pub enum CommitError {
     InvalidTrailer(String),
     #[error("Invalid author. Use a name and an email address.")]
     InvalidAuthor,
+    /// The merge a clean-merge commit concludes was aborted, restarted or moved while its pre
+    /// hooks ran (#183); nothing was committed.
+    #[error("The merge changed while its hooks ran. Nothing was committed; check the merge and commit again.")]
+    MergeChanged,
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -265,15 +269,34 @@ fn installed(repo: &git2::Repository, name: &str) -> Result<bool, CommitError> {
     ))
 }
 
+/// The file the message hooks get the message in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessageFile {
+    /// `<git dir>/COMMIT_EDITMSG`, as `git commit` and `git cherry-pick` use.
+    CommitEditmsg,
+    /// `<git dir>/MERGE_MSG`, as `git merge` uses for the commit concluding a clean merge (#183).
+    MergeMsg,
+}
+
+impl MessageFile {
+    fn path(self, repo: &git2::Repository) -> std::path::PathBuf {
+        repo.path().join(match self {
+            MessageFile::CommitEditmsg => "COMMIT_EDITMSG",
+            MessageFile::MergeMsg => "MERGE_MSG",
+        })
+    }
+}
+
 /// `pre_hook` (`pre-commit`, or `pre-merge-commit` for a clean merge's commit) ->
 /// `prepare-commit-msg` -> `commit-msg`, as `git commit -m` (or `git merge`) runs them. The
-/// message goes through `<git dir>/COMMIT_EDITMSG` only when a message hook will run, and is
-/// re-read afterwards so hook edits apply.
+/// message goes through `message_file` only when a message hook will run, and is re-read
+/// afterwards so hook edits apply.
 pub(crate) fn run_commit_hooks(
     repo: &git2::Repository,
     message: &str,
     pre_hook: &str,
     source: &str,
+    message_file: MessageFile,
     options: &mut HookOptions<'_>,
 ) -> Result<HookedMessage, CommitError> {
     let index_path = repo.path().join("index");
@@ -299,7 +322,7 @@ pub(crate) fn run_commit_hooks(
             reload_index,
         });
     }
-    let path = repo.path().join("COMMIT_EDITMSG");
+    let path = message_file.path(repo);
     std::fs::write(&path, message)?;
     let path_arg = path.to_string_lossy().into_owned();
     let prepare_args = [path_arg.as_str(), source];
@@ -334,6 +357,55 @@ pub(crate) fn run_commit_hooks(
         message: edited,
         reload_index,
     })
+}
+
+/// Only `prepare-commit-msg <COMMIT_EDITMSG> <source>`, as git's sequencer runs it for each
+/// commit a cherry-pick or revert creates by itself (no `pre-commit`, no `commit-msg`, #183).
+/// The message goes through the file only when the hook is installed; a failing hook is
+/// `HookFailed` and a message the hook emptied `EmptyMessage`.
+pub(crate) fn run_message_hook(
+    repo: &git2::Repository,
+    message: &str,
+    source: &str,
+    options: &mut HookOptions<'_>,
+) -> Result<String, CommitError> {
+    if !installed(repo, "prepare-commit-msg")? {
+        return Ok(message.to_string());
+    }
+    let index_path = repo.path().join("index");
+    let env: [(&str, &OsStr); 2] = [
+        ("GIT_INDEX_FILE", index_path.as_os_str()),
+        ("GIT_EDITOR", OsStr::new(":")),
+    ];
+    let path = MessageFile::CommitEditmsg.path(repo);
+    std::fs::write(&path, message)?;
+    let path_arg = path.to_string_lossy().into_owned();
+    gate(
+        repo,
+        &HookInvocation {
+            name: "prepare-commit-msg",
+            args: &[path_arg.as_str(), source],
+            stdin: None,
+            env: &env,
+        },
+        options,
+    )?;
+    let edited = String::from_utf8_lossy(&std::fs::read(&path)?).into_owned();
+    if edited.trim().is_empty() {
+        return Err(CommitError::EmptyMessage);
+    }
+    Ok(edited)
+}
+
+/// Clears git's operation state after a commit that already landed. A failure is logged, not
+/// returned: the commit counts, the caller still runs the post hooks, and the leftover state
+/// stays visible (Abort clears it harmlessly) instead of inviting a second commit (#183).
+pub(crate) fn cleanup_after_commit(repo: &git2::Repository) {
+    if let Err(error) = repo.cleanup_state() {
+        eprintln!(
+            "browsitory: the commit was created, but git's merge/cherry-pick state could not be cleared: {error}"
+        );
+    }
 }
 
 /// Failure is ignored: the commit already exists. The reporter (the worker) logs it.
@@ -395,17 +467,25 @@ pub fn commit(
 }
 
 /// Which hooks a commit runs: `git commit`'s, or `git merge`'s when it concludes a clean merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CommitHookSet {
     /// `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`.
     #[default]
     Commit,
     /// For the commit concluding a merge that Browsitory started and that stopped without
     /// conflicts (#124): what `git merge` runs when it creates the commit, `pre-merge-commit`
-    /// (in place of `pre-commit`, also skipped by `no_verify`), `prepare-commit-msg … merge` and
-    /// `commit-msg`, and **no** `post-commit`. The caller (the worker) runs `post-merge 0` after
-    /// it when `Committed::merge_hooks` says these hooks ran. Outside a merge (`repo.state() != Merge`) this is `Commit`.
-    CleanMerge,
+    /// (in place of `pre-commit`, also skipped by `no_verify`), `prepare-commit-msg <MERGE_MSG>
+    /// merge` and `commit-msg <MERGE_MSG>` (#183), and **no** `post-commit`. The caller (the
+    /// worker) runs `post-merge 0` after it when `Committed::merge_hooks` says these hooks ran.
+    ///
+    /// `head` and `merge_heads` name the merge the caller saw staged. Only while the repository
+    /// shows exactly that merge does the commit run these hooks (otherwise `Commit`'s); if the
+    /// merge changes while they run (aborted and restarted in a terminal during
+    /// `pre-merge-commit`), the commit is refused with `CommitError::MergeChanged`.
+    CleanMerge {
+        head: git2::Oid,
+        merge_heads: Vec<git2::Oid>,
+    },
 }
 
 /// What `commit_with` committed.
@@ -434,13 +514,12 @@ pub fn commit_with(
     // alongside it) is confined to the block below, ending before `cleanup_state` needs `&mut`
     // again.
     let is_merging = repo.state() == git2::RepositoryState::Merge;
-    let mut merge_parent_ids = Vec::new();
-    if is_merging {
-        repo.mergehead_foreach(|oid| {
-            merge_parent_ids.push(*oid);
-            true
-        })?;
-    }
+    let merge_parent_ids = if is_merging {
+        merge_heads(repo)?
+    } else {
+        Vec::new()
+    };
+    let head_before = head_commit_id(repo);
 
     let pick_author = if matches!(
         repo.state(),
@@ -454,15 +533,29 @@ pub fn commit_with(
         None
     };
 
-    // `git merge`'s hooks only for a clean merge's commit; otherwise `git commit`'s.
-    let merge_hooks = set == CommitHookSet::CleanMerge && is_merging;
-    let pre_hook = if merge_hooks {
-        "pre-merge-commit"
+    // `git merge`'s hooks only for the very clean merge the caller saw; otherwise `git commit`'s.
+    let merge_hooks = match &set {
+        CommitHookSet::CleanMerge { head, merge_heads } => {
+            is_merging && head_before == Some(*head) && merge_parent_ids == *merge_heads
+        }
+        CommitHookSet::Commit => false,
+    };
+    let (pre_hook, message_file) = if merge_hooks {
+        ("pre-merge-commit", MessageFile::MergeMsg)
     } else {
-        "pre-commit"
+        ("pre-commit", MessageFile::CommitEditmsg)
     };
     let source = message_source(repo, is_merging);
-    let hooked = run_commit_hooks(repo, message, pre_hook, source, &mut hooks)?;
+    let hooked = run_commit_hooks(repo, message, pre_hook, source, message_file, &mut hooks)?;
+    // The parents were read before the hooks, which may run for minutes: a merge aborted and
+    // restarted meanwhile must not be committed with the old merge's parents (#183).
+    if is_merging
+        && (repo.state() != git2::RepositoryState::Merge
+            || head_commit_id(repo) != head_before
+            || merge_heads(repo)? != merge_parent_ids)
+    {
+        return Err(CommitError::MergeChanged);
+    }
 
     let oid = {
         let mut index = repo.index()?;
@@ -507,11 +600,16 @@ pub fn commit_with(
             | git2::RepositoryState::Revert
             | git2::RepositoryState::RevertSequence
     );
+    // The commit landed: nothing after this point fails it (#183).
     if is_merging || finishes_pick {
-        repo.cleanup_state()?;
+        cleanup_after_commit(repo);
     }
     // A squash merge's message has been used (or replaced) by this commit.
-    crate::merge::clear_squash_message(repo)?;
+    if let Err(error) = crate::merge::clear_squash_message(repo) {
+        eprintln!(
+            "browsitory: the commit was created, but SQUASH_MSG could not be removed: {error}"
+        );
+    }
 
     if !merge_hooks {
         run_post_commit(repo, &mut hooks);
@@ -520,6 +618,23 @@ pub fn commit_with(
         commit_id: oid.to_string(),
         merge_hooks,
     })
+}
+
+/// `MERGE_HEAD`'s commits, in order.
+fn merge_heads(repo: &mut git2::Repository) -> Result<Vec<git2::Oid>, git2::Error> {
+    let mut heads = Vec::new();
+    repo.mergehead_foreach(|oid| {
+        heads.push(*oid);
+        true
+    })?;
+    Ok(heads)
+}
+
+fn head_commit_id(repo: &git2::Repository) -> Option<git2::Oid> {
+    repo.head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .map(|commit| commit.id())
 }
 
 /// `signing::create_commit_with`, bounded by the commit's cancel check. While a signing program
@@ -593,7 +708,14 @@ pub fn amend_head(
         }
         Err(error) => return Err(error.into()),
     };
-    let hooked = run_commit_hooks(repo, message, "pre-commit", "message", &mut hooks)?;
+    let hooked = run_commit_hooks(
+        repo,
+        message,
+        "pre-commit",
+        "message",
+        MessageFile::CommitEditmsg,
+        &mut hooks,
+    )?;
     let mut index = repo.index()?;
     if hooked.reload_index {
         index.read(true)?;

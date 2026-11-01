@@ -333,8 +333,36 @@ pub(super) fn pull<S: CredentialStore>(
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
         git_core::remote::pull_after_fetch(repo, &upstream.remote_name, &upstream.remote_branch)
     })();
+    // git runs post-merge after a pull that fast-forwarded. It runs on the pull's own operation:
+    // the transfer panel shows it (`RunningHook`), and its Cancel stops only the hook; the pull's
+    // outcome stands (#185).
     if matches!(result, Ok(PullOutcome::FastForwarded { .. })) {
-        super::hooks::run_post_hook(repo, "post-merge", &["0"]);
+        let installed = matches!(
+            git_core::hooks::find_hook(repo, "post-merge"),
+            Ok(git_core::hooks::HookLookup::Found(_))
+        );
+        if installed {
+            let _ = events.send(TransferEvent::Progress(
+                git_core::remote::TransferProgress {
+                    operation_id: op.id.clone(),
+                    operation: TransferOperation::Pull,
+                    phase: git_core::remote::TransferPhase::RunningHook,
+                    current: 0,
+                    total: 0,
+                    received_bytes: 0,
+                    message: None,
+                },
+            ));
+        }
+        super::hooks::run_post_hook_reported(
+            repo,
+            "post-merge",
+            &["0"],
+            &mut git_core::hooks::HookOptions {
+                cancel: Some(&cancel),
+                ..Default::default()
+            },
+        );
     }
     let error = result
         .as_ref()

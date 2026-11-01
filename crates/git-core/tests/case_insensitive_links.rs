@@ -566,7 +566,12 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
     }
     {
         let (dir, repo) = fresh(&fx, ignore_case);
-        let result = pick::cherry_pick(&repo, &fx.evil.to_string(), None);
+        let result = pick::cherry_pick(
+            &repo,
+            &fx.evil.to_string(),
+            None,
+            git_core::hooks::HookOptions::default(),
+        );
         record("cherry_pick", show(result), dir.path());
     }
     {
@@ -660,7 +665,12 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
     {
         let (dir, repo) = head_on_pair(&fx, ignore_case);
         let side = on_evil_with(&repo, &fx, "b.txt", "b\n");
-        let result = pick::cherry_pick(&repo, &side.to_string(), None);
+        let result = pick::cherry_pick(
+            &repo,
+            &side.to_string(),
+            None,
+            git_core::hooks::HookOptions::default(),
+        );
         record("HEAD=pair: cherry_pick unrelated", show(result), dir.path());
     }
     {

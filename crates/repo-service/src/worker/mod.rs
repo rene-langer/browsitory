@@ -52,7 +52,7 @@ mod undo;
 mod undo_store;
 mod worktree;
 
-pub use hooks::HookEvent;
+pub use hooks::{HookEvent, HookSource};
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,8 +264,12 @@ pub(crate) enum Command {
         start_point: String,
         reply: Sender<Result<(), String>>,
     },
+    /// `operation_id` (`switch-<n>`) is what `cancel_transfer` stops; `events` reports
+    /// `post-checkout` (#185).
     SwitchBranch {
         name: String,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<(), String>>,
     },
     DeleteBranch {
@@ -422,9 +426,13 @@ pub(crate) enum Command {
         commit_id: String,
         reply: Sender<Result<(), String>>,
     },
+    /// `operation_id` (`merge-<n>`) and `events`: a fast-forward's or squash's `post-merge`
+    /// (#185).
     StartMerge {
         branch_name: String,
         options: git_core::merge::MergeOptions,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<MergeOutcome, String>>,
     },
     GetMergeDefaults {
@@ -538,22 +546,32 @@ pub(crate) enum Command {
         events: Sender<HookEvent>,
         reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
     },
+    /// The pick commands' `operation_id` (`pick-<n>`) and `events`: each clean step's
+    /// `prepare-commit-msg`, signing and `post-commit` (#183).
     CherryPick {
         commit_id: String,
         mainline: Option<u32>,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<git_core::pick::PickOutcome, String>>,
     },
     RevertCommit {
         commit_id: String,
         mainline: Option<u32>,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<git_core::pick::PickOutcome, String>>,
     },
     CherryPickMany {
         commit_ids: Vec<String>,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
     },
     RevertMany {
         commit_ids: Vec<String>,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
     },
     /// Commits the resolved step through the commit hooks (#133): `no_verify` skips the
@@ -573,8 +591,11 @@ pub(crate) enum Command {
         mode: git_core::reset::ResetMode,
         reply: Sender<Result<(), String>>,
     },
+    /// `operation_id` (`checkout-<n>`) and `events`: `post-checkout` (#185).
     CheckoutCommit {
         commit_id: String,
+        operation_id: String,
+        events: Sender<HookEvent>,
         reply: Sender<Result<(), String>>,
     },
     ForcePushCurrentBranch {
@@ -1092,10 +1113,9 @@ impl Worker {
                         events,
                         reply,
                     } => {
-                        let set = if clean_merge.as_ref().is_some_and(|m| m.matches(&mut repo)) {
-                            git_core::commit::CommitHookSet::CleanMerge
-                        } else {
-                            git_core::commit::CommitHookSet::Commit
+                        let set = match &clean_merge {
+                            Some(merge) if merge.matches(&mut repo) => merge.hook_set(),
+                            _ => git_core::commit::CommitHookSet::Commit,
                         };
                         let committed = status::commit(
                             &mut repo,
@@ -1122,7 +1142,21 @@ impl Worker {
                         start_point,
                         reply,
                     } => branch::create(&repo, name, start_point, reply),
-                    Command::SwitchBranch { name, reply } => branch::switch(&repo, name, reply),
+                    Command::SwitchBranch {
+                        name,
+                        operation_id,
+                        events,
+                        reply,
+                    } => branch::switch(
+                        &repo,
+                        name,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::DeleteBranch { name, force, reply } => {
                         branch::delete(&repo, name, force, reply)
                     }
@@ -1261,9 +1295,21 @@ impl Worker {
                     Command::StartMerge {
                         branch_name,
                         options,
+                        operation_id,
+                        events,
                         reply,
                     } => {
-                        let result = merge::start(&repo, branch_name, options, reply);
+                        let result = merge::start(
+                            &repo,
+                            branch_name,
+                            options,
+                            remote::TransferOp {
+                                id: operation_id,
+                                cancelled: &cancelled,
+                            },
+                            events,
+                            reply,
+                        );
                         match result {
                             Ok(MergeOutcome::Merged) => {
                                 clean_merge = merge::CleanMerge::capture(&mut repo)
@@ -1320,22 +1366,78 @@ impl Worker {
                     Command::CherryPick {
                         commit_id,
                         mainline,
+                        operation_id,
+                        events,
                         reply,
-                    } => history::cherry_pick(&repo, commit_id, mainline, reply),
+                    } => history::pick_one(
+                        &repo,
+                        git_core::pick::SequenceKind::CherryPick,
+                        commit_id,
+                        mainline,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::RevertCommit {
                         commit_id,
                         mainline,
+                        operation_id,
+                        events,
                         reply,
-                    } => history::revert(&repo, commit_id, mainline, reply),
-                    Command::CherryPickMany { commit_ids, reply } => {
+                    } => history::pick_one(
+                        &repo,
+                        git_core::pick::SequenceKind::Revert,
+                        commit_id,
+                        mainline,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
+                    Command::CherryPickMany {
+                        commit_ids,
+                        operation_id,
+                        events,
+                        reply,
+                    } => {
                         let kind = git_core::pick::SequenceKind::CherryPick;
-                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        let result = history::pick_many(
+                            &repo,
+                            &sequence_store,
+                            kind,
+                            commit_ids,
+                            remote::TransferOp {
+                                id: operation_id,
+                                cancelled: &cancelled,
+                            },
+                            events,
+                        );
                         undo::relabel_sequence(&mut undo_recorder, kind, &result);
                         let _ = reply.send(result);
                     }
-                    Command::RevertMany { commit_ids, reply } => {
+                    Command::RevertMany {
+                        commit_ids,
+                        operation_id,
+                        events,
+                        reply,
+                    } => {
                         let kind = git_core::pick::SequenceKind::Revert;
-                        let result = history::pick_many(&repo, &sequence_store, kind, commit_ids);
+                        let result = history::pick_many(
+                            &repo,
+                            &sequence_store,
+                            kind,
+                            commit_ids,
+                            remote::TransferOp {
+                                id: operation_id,
+                                cancelled: &cancelled,
+                            },
+                            events,
+                        );
                         undo::relabel_sequence(&mut undo_recorder, kind, &result);
                         let _ = reply.send(result);
                     }
@@ -1368,9 +1470,21 @@ impl Worker {
                         mode,
                         reply,
                     } => history::reset(&repo, commit_id, mode, reply),
-                    Command::CheckoutCommit { commit_id, reply } => {
-                        history::checkout(&repo, commit_id, reply)
-                    }
+                    Command::CheckoutCommit {
+                        commit_id,
+                        operation_id,
+                        events,
+                        reply,
+                    } => history::checkout(
+                        &repo,
+                        commit_id,
+                        remote::TransferOp {
+                            id: operation_id,
+                            cancelled: &cancelled,
+                        },
+                        events,
+                        reply,
+                    ),
                     Command::ForcePushCurrentBranch {
                         remote_name,
                         no_verify,
@@ -1844,6 +1958,11 @@ mod tests {
     use crate::credentials::{CredentialKey, CredentialStore, CredentialStoreError};
     use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
+    /// A hook event sender for commands whose hook progress a test doesn't look at.
+    fn no_events() -> mpsc::Sender<super::HookEvent> {
+        mpsc::channel().0
+    }
+
     /// In-memory `CredentialStore` fake for worker tests — the design doc's "in-memory trait
     /// implementations only at external seams such as the keychain" rule applies here just as
     /// it does to `credentials.rs`'s own tests; the real OS keychain is never touched.
@@ -1983,8 +2102,8 @@ mod tests {
         let events: Vec<HookEvent> = events_rx.iter().collect();
         assert!(
             matches!(&events[..], [
-                HookEvent::Started { operation_id: a, hook: h1 },
-                HookEvent::Finished { operation_id: b, hook: h2 },
+                HookEvent::Started { operation_id: a, hook: h1, .. },
+                HookEvent::Finished { operation_id: b, hook: h2, .. },
             ] if a == b && a.starts_with("commit-") && h1 == "pre-commit" && h2 == "pre-commit"),
             "{events:?}"
         );
@@ -2116,9 +2235,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
 
-        handle.switch_branch("other".into()).unwrap();
-        handle.checkout_commit(second.to_string()).unwrap();
-        handle.switch_branch(main).unwrap();
+        handle.switch_branch("other".into(), no_events()).unwrap();
+        handle
+            .checkout_commit(second.to_string(), no_events())
+            .unwrap();
+        handle.switch_branch(main, no_events()).unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&record).unwrap(),
@@ -2157,7 +2278,11 @@ mod tests {
         let handle = worker.handle();
 
         let merged = handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         assert_eq!(merged, MergeOutcome::FastForwarded);
         let squashed = handle
@@ -2167,11 +2292,429 @@ mod tests {
                     squash: true,
                     ..git_core::merge::MergeOptions::default()
                 },
+                no_events(),
             )
             .unwrap();
         assert_eq!(squashed, MergeOutcome::Squashed);
 
         assert_eq!(std::fs::read_to_string(&record).unwrap(), "0\n1\n");
+    }
+
+    /// Collects a command's hook events on a thread; with `cancel_hook`, presses Cancel as soon
+    /// as that hook starts.
+    #[cfg(unix)]
+    fn watch_hooks(
+        handle: &super::WorkerHandle,
+        cancel_hook: Option<&'static str>,
+    ) -> (
+        mpsc::Sender<HookEvent>,
+        std::thread::JoinHandle<Vec<HookEvent>>,
+    ) {
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let thread = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for event in events_rx {
+                if let HookEvent::Started {
+                    operation_id, hook, ..
+                } = &event
+                {
+                    if Some(hook.as_str()) == cancel_hook {
+                        canceller.cancel_transfer(operation_id);
+                    }
+                }
+                seen.push(event);
+            }
+            seen
+        });
+        (events_tx, thread)
+    }
+
+    /// `[Started, Finished]` of `hook` from `source` on one operation id starting `prefix`.
+    #[cfg(unix)]
+    fn assert_one_reported_hook(
+        events: &[HookEvent],
+        hook: &str,
+        source: super::HookSource,
+        prefix: &str,
+    ) {
+        assert!(
+            matches!(events, [
+                HookEvent::Started { operation_id: a, hook: h1, source: s1 },
+                HookEvent::Finished { operation_id: b, hook: h2, source: s2 },
+            ] if a == b && a.starts_with(prefix) && h1 == hook && h2 == hook
+                && *s1 == source && *s2 == source),
+            "{events:?}"
+        );
+    }
+
+    /// HEAD on the initial branch with a second commit; `other` points at the first. Returns
+    /// the initial branch's name.
+    #[cfg(unix)]
+    fn two_branches() -> (TempDir, Repository, String) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        let first = repo.head().unwrap().target().unwrap();
+        repo.branch("other", &repo.find_commit(first).unwrap(), false)
+            .unwrap();
+        write_file(dir.path(), "a.txt", "b");
+        commit_all(&repo, "second");
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        (dir, repo, main)
+    }
+
+    /// #185: the "Hook status" strip shows post-checkout with Cancel.
+    #[cfg(unix)]
+    #[test]
+    fn switch_and_checkout_report_post_checkout_on_their_operation() {
+        let (dir, repo, _main) = two_branches();
+        let second = repo.head().unwrap().target().unwrap();
+        install_hook(&repo, "post-checkout", "exit 0");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let (events, watcher) = watch_hooks(&handle, None);
+        handle.switch_branch("other".into(), events).unwrap();
+        let events = watcher.join().unwrap();
+        assert_one_reported_hook(
+            &events,
+            "post-checkout",
+            super::HookSource::Checkout,
+            "switch-",
+        );
+
+        let (events, watcher) = watch_hooks(&handle, None);
+        handle.checkout_commit(second.to_string(), events).unwrap();
+        let events = watcher.join().unwrap();
+        assert_one_reported_hook(
+            &events,
+            "post-checkout",
+            super::HookSource::Checkout,
+            "checkout-",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_stops_post_checkout_and_keeps_the_switch_or_checkout() {
+        let (dir, repo, _main) = two_branches();
+        let first = repo
+            .find_branch("other", git2::BranchType::Local)
+            .unwrap()
+            .get()
+            .target()
+            .unwrap();
+        install_hook(&repo, "post-checkout", "sleep 30");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let started = std::time::Instant::now();
+
+        let (events, watcher) = watch_hooks(&handle, Some("post-checkout"));
+        handle.switch_branch("other".into(), events).unwrap();
+        watcher.join().unwrap();
+        assert_eq!(
+            Repository::open(dir.path())
+                .unwrap()
+                .head()
+                .unwrap()
+                .shorthand()
+                .unwrap(),
+            "other"
+        );
+
+        let (events, watcher) = watch_hooks(&handle, Some("post-checkout"));
+        handle.checkout_commit(first.to_string(), events).unwrap();
+        watcher.join().unwrap();
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert!(reopened.head_detached().unwrap());
+        assert_eq!(reopened.head().unwrap().target().unwrap(), first);
+
+        // Generous bound: only proves neither hook's `sleep 30` was waited out.
+        assert!(started.elapsed() < Duration::from_secs(25));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fast_forward_and_squash_report_post_merge_and_cancel_keeps_the_merge() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a");
+        commit_all(&repo, "first");
+        let first = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &first, false).unwrap();
+        repo.branch("other", &first, false).unwrap();
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        repo.set_head("refs/heads/feature").unwrap();
+        write_file(dir.path(), "b.txt", "b");
+        commit_all(&repo, "feature work");
+        let feature = repo.head().unwrap().target().unwrap();
+        repo.set_head("refs/heads/other").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        write_file(dir.path(), "c.txt", "c");
+        commit_all(&repo, "other work");
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        install_hook(&repo, "post-merge", r#"[ "$1" = 1 ] && exit 0; sleep 30"#);
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let started = std::time::Instant::now();
+
+        let (events, watcher) = watch_hooks(&handle, Some("post-merge"));
+        let merged = handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                events,
+            )
+            .unwrap();
+        assert_eq!(merged, MergeOutcome::FastForwarded);
+        assert_one_reported_hook(
+            &watcher.join().unwrap(),
+            "post-merge",
+            super::HookSource::Merge,
+            "merge-",
+        );
+        assert!(started.elapsed() < Duration::from_secs(25));
+        assert_eq!(
+            Repository::open(dir.path())
+                .unwrap()
+                .head()
+                .unwrap()
+                .target()
+                .unwrap(),
+            feature
+        );
+
+        let (events, watcher) = watch_hooks(&handle, None);
+        let squashed = handle
+            .start_merge(
+                "other".into(),
+                git_core::merge::MergeOptions {
+                    squash: true,
+                    ..git_core::merge::MergeOptions::default()
+                },
+                events,
+            )
+            .unwrap();
+        assert_eq!(squashed, MergeOutcome::Squashed);
+        assert_one_reported_hook(
+            &watcher.join().unwrap(),
+            "post-merge",
+            super::HookSource::Merge,
+            "merge-",
+        );
+    }
+
+    /// `upstream` with one commit, `local` cloned from it, then a second upstream commit, so a
+    /// pull fast-forwards.
+    #[cfg(unix)]
+    fn pull_fixture() -> (TempDir, TempDir, Repository) {
+        let (upstream_dir, upstream) = init_repo();
+        write_file(upstream_dir.path(), "a.txt", "a\n");
+        commit_all(&upstream, "first");
+        let local_dir = TempDir::new().unwrap();
+        let local = Repository::clone(upstream_dir.path().to_str().unwrap(), local_dir.path())
+            .expect("clone");
+        {
+            let mut config = local.config().unwrap();
+            config.set_str("user.name", "Test User").unwrap();
+            config.set_str("user.email", "test@example.com").unwrap();
+            config.set_bool("commit.gpgSign", false).unwrap();
+            let hooks = local.path().join("hooks");
+            config
+                .set_str("core.hooksPath", hooks.to_str().unwrap())
+                .unwrap();
+        }
+        write_file(upstream_dir.path(), "b.txt", "b\n");
+        commit_all(&upstream, "second");
+        (upstream_dir, local_dir, local)
+    }
+
+    /// #185: a pull's post-merge shows in the transfer panel ("Running post-merge hook…") and
+    /// its Cancel stops only the hook.
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_reports_post_merge_as_running_hook_and_cancel_keeps_the_pull() {
+        let (_upstream_dir, local_dir, local) = pull_fixture();
+        install_hook(&local, "post-merge", "sleep 30");
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let (events_tx, events_rx) = mpsc::channel();
+        let canceller = handle.clone();
+        let watcher = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for event in events_rx {
+                if let TransferEvent::Progress(progress) = &event {
+                    if progress.phase == git_core::remote::TransferPhase::RunningHook {
+                        // Give the hook a moment to start, then cancel it.
+                        std::thread::sleep(Duration::from_millis(300));
+                        canceller.cancel_transfer(&progress.operation_id);
+                    }
+                }
+                seen.push(event);
+            }
+            seen
+        });
+        let started = std::time::Instant::now();
+
+        let outcome = handle.pull_current_upstream(events_tx);
+
+        let events = watcher.join().unwrap();
+        assert!(
+            matches!(
+                outcome,
+                Ok(git_core::remote::PullOutcome::FastForwarded { .. })
+            ),
+            "{outcome:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(25));
+        assert!(local_dir.path().join("b.txt").exists());
+        let running = events.iter().position(|event| {
+            matches!(event, TransferEvent::Progress(progress)
+                if progress.phase == git_core::remote::TransferPhase::RunningHook
+                    && progress.operation == TransferOperation::Pull)
+        });
+        let completed = events
+            .iter()
+            .position(|event| matches!(event, TransferEvent::Completed { error: None, .. }));
+        assert!(
+            matches!((running, completed), (Some(r), Some(c)) if r < c),
+            "{events:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_without_post_merge_reports_no_running_hook() {
+        let (_upstream_dir, local_dir, _local) = pull_fixture();
+        let worker = Worker::spawn(local_dir.path().to_path_buf()).unwrap();
+        let (events_tx, events_rx) = mpsc::channel();
+
+        worker.handle().pull_current_upstream(events_tx).unwrap();
+
+        assert!(!events_rx.iter().any(|event| matches!(event,
+            TransferEvent::Progress(progress)
+                if progress.phase == git_core::remote::TransferPhase::RunningHook)));
+    }
+
+    /// #183: a clean pick's hooks show in the "Hook status" strip (`HookSource::Pick`).
+    #[cfg(unix)]
+    #[test]
+    fn cherry_pick_many_reports_its_hooks_with_source_pick() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        install_hook(&repo, "prepare-commit-msg", "exit 0");
+        install_hook(&repo, "post-commit", "exit 0");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let (events, watcher) = watch_hooks(&handle, None);
+        let outcome = handle
+            .cherry_pick_many(vec![ids[0].clone(), ids[2].clone()], events)
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            git_core::pick::SequenceOutcome::Completed { applied: 2, .. }
+        ));
+        let events = watcher.join().unwrap();
+        let hooks: Vec<(String, super::HookSource)> = events
+            .iter()
+            .filter_map(|event| match event {
+                HookEvent::Started {
+                    operation_id,
+                    hook,
+                    source,
+                } if operation_id.starts_with("pick-") => Some((hook.clone(), *source)),
+                _ => None,
+            })
+            .collect();
+        let pick = super::HookSource::Pick;
+        assert_eq!(
+            hooks,
+            [
+                ("prepare-commit-msg".to_string(), pick),
+                ("post-commit".to_string(), pick),
+                ("prepare-commit-msg".to_string(), pick),
+                ("post-commit".to_string(), pick),
+            ]
+        );
+    }
+
+    /// D9-A: Cancel during a clean step's post-commit keeps that commit and stops the sequence
+    /// after it; Continue goes on with the next step.
+    #[cfg(unix)]
+    #[test]
+    fn cancel_during_a_picks_post_commit_stops_the_sequence_after_that_step() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        install_hook(&repo, "post-commit", "sleep 30");
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let before = repo.head().unwrap().target().unwrap();
+
+        let (events, watcher) = watch_hooks(&handle, Some("post-commit"));
+        let result = handle.cherry_pick_many(vec![ids[0].clone(), ids[2].clone()], events);
+        watcher.join().unwrap();
+
+        assert_eq!(result.unwrap_err(), "The post-commit hook was cancelled.");
+        let reopened = Repository::open(dir.path()).unwrap();
+        let head = reopened.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.summary().unwrap(), Some("f one"));
+        assert_eq!(head.parent_id(0).unwrap(), before);
+        assert!(sequence_file(&repo).exists(), "the sequence is kept");
+
+        std::fs::remove_file(repo.path().join("hooks").join("post-commit")).unwrap();
+        let outcome = handle.continue_sequence(false, no_events()).unwrap();
+        assert!(matches!(
+            outcome,
+            git_core::pick::SequenceOutcome::Completed { .. }
+        ));
+        let reopened = Repository::open(dir.path()).unwrap();
+        let head = reopened.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.summary().unwrap(), Some("f three"));
+        assert!(!sequence_file(&repo).exists());
+    }
+
+    /// #183 (D7-A): the merge commit landed, so it counts and post-merge runs even though git's
+    /// merge state could not be cleared.
+    #[cfg(unix)]
+    #[test]
+    fn a_merge_commit_whose_state_cannot_be_cleared_still_counts_and_runs_post_merge() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, repo) = diverged_repo(false);
+        let marker = dir.path().join("post-merge-ran");
+        install_hook(
+            &repo,
+            "post-merge",
+            &format!("touch '{}'", marker.display()),
+        );
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
+        let git_dir = repo.path().to_path_buf();
+        std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(git_dir.join("probe"), "").is_ok() {
+            eprintln!("the git dir stays writable (root?); skipping");
+            let _ = std::fs::remove_file(git_dir.join("probe"));
+            std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let outcome = handle.commit("Merge feature".into(), false, Vec::new(), no_events());
+
+        std::fs::set_permissions(&git_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            matches!(
+                outcome,
+                Ok(git_core::commit::CommitOutcome::Committed { .. })
+            ),
+            "{outcome:?}"
+        );
+        assert!(marker.exists(), "post-merge must run");
+        let reopened = Repository::open(dir.path()).unwrap();
+        let head = reopened.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
     }
 
     /// HEAD on the initial branch, with `feature` diverged from it: both sides added a different
@@ -2215,6 +2758,7 @@ mod tests {
                     fast_forward: git_core::merge::FastForward::Never,
                     ..git_core::merge::MergeOptions::default()
                 },
+                no_events(),
             )
             .unwrap()
     }
@@ -2289,8 +2833,8 @@ mod tests {
         let events: Vec<HookEvent> = events_rx.iter().collect();
         assert!(
             matches!(&events[..], [
-                HookEvent::Started { operation_id: a, hook: h1 },
-                HookEvent::Finished { operation_id: b, hook: h2 },
+                HookEvent::Started { operation_id: a, hook: h1, .. },
+                HookEvent::Finished { operation_id: b, hook: h2, .. },
             ] if a == b && a.starts_with("commit-") && h1 == "post-merge" && h2 == "post-merge"),
             "{events:?}"
         );
@@ -2309,7 +2853,10 @@ mod tests {
         let canceller = handle.clone();
         let cancel_thread = std::thread::spawn(move || {
             for event in events_rx {
-                if let HookEvent::Started { operation_id, hook } = event {
+                if let HookEvent::Started {
+                    operation_id, hook, ..
+                } = event
+                {
                     if hook == "post-merge" {
                         canceller.cancel_transfer(&operation_id);
                     }
@@ -2453,12 +3000,16 @@ mod tests {
             Arc::new(Mutex::new(std::collections::HashSet::new()));
         let (reply_tx, reply_rx) = mpsc::channel();
 
+        let head = repo.head().unwrap().peel_to_commit().unwrap().id();
         let committed = super::status::commit(
             &mut repo,
             "after the abort".into(),
             false,
             Vec::new(),
-            git_core::commit::CommitHookSet::CleanMerge,
+            git_core::commit::CommitHookSet::CleanMerge {
+                head,
+                merge_heads: Vec::new(),
+            },
             super::remote::TransferOp {
                 id: "commit-1".into(),
                 cancelled: &cancelled,
@@ -2491,7 +3042,11 @@ mod tests {
         let handle = worker.handle();
         assert_eq!(merge_no_ff(&handle), MergeOutcome::Merged);
         assert!(handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events()
+            )
             .is_err());
 
         assert!(matches!(
@@ -3086,7 +3641,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
 
-        let outcome = handle.cherry_pick_many(ids.clone()).unwrap();
+        let outcome = handle.cherry_pick_many(ids.clone(), no_events()).unwrap();
         assert!(matches!(
             outcome,
             git_core::pick::SequenceOutcome::Conflicted { .. }
@@ -3096,11 +3651,23 @@ mod tests {
         assert_eq!((progress.current_step, progress.total_steps), (2, 3));
         assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
         let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
-        assert_eq!(handle.cherry_pick(ids[0].clone(), None).unwrap_err(), busy);
-        assert_eq!(handle.revert_many(ids.clone()).unwrap_err(), busy);
         assert_eq!(
             handle
-                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .cherry_pick(ids[0].clone(), None, no_events())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle.revert_many(ids.clone(), no_events()).unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .start_merge(
+                    "feature".into(),
+                    git_core::merge::MergeOptions::default(),
+                    no_events()
+                )
                 .unwrap_err(),
             busy
         );
@@ -3132,7 +3699,7 @@ mod tests {
         let (dir, repo, ids) = side_commits_with_a_conflict();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, no_events()).unwrap();
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
@@ -3158,8 +3725,8 @@ mod tests {
         let events: Vec<HookEvent> = events_rx.iter().collect();
         assert!(
             matches!(&events[..], [
-                HookEvent::Started { operation_id: a, hook: h1 },
-                HookEvent::Finished { operation_id: b, hook: h2 },
+                HookEvent::Started { operation_id: a, hook: h1, .. },
+                HookEvent::Finished { operation_id: b, hook: h2, .. },
             ] if a == b && a.starts_with("continue-") && h1 == "commit-msg" && h2 == "commit-msg"),
             "{events:?}"
         );
@@ -3175,7 +3742,7 @@ mod tests {
         let (dir, repo, ids) = side_commits_with_a_conflict();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, no_events()).unwrap();
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
@@ -3215,7 +3782,7 @@ mod tests {
         {
             let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
             let handle = first.handle();
-            handle.cherry_pick_many(ids).unwrap();
+            handle.cherry_pick_many(ids, no_events()).unwrap();
             handle
                 .resolve_conflict("a.txt".into(), "resolved\n".into())
                 .unwrap();
@@ -3243,7 +3810,7 @@ mod tests {
         let (dir, repo, ids) = side_commits_with_a_conflict();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.cherry_pick_many(ids.clone()).unwrap();
+        handle.cherry_pick_many(ids.clone(), no_events()).unwrap();
         let base = repo.head().unwrap().target().unwrap().to_string();
         let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
 
@@ -3259,8 +3826,18 @@ mod tests {
                 .unwrap_err(),
             busy
         );
-        assert_eq!(handle.checkout_commit(base.clone()).unwrap_err(), busy);
-        assert_eq!(handle.switch_branch("feature".into()).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .checkout_commit(base.clone(), no_events())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .switch_branch("feature".into(), no_events())
+                .unwrap_err(),
+            busy
+        );
         assert_eq!(
             handle.pull_current_upstream(mpsc::channel().0).unwrap_err(),
             busy
@@ -3285,10 +3862,10 @@ mod tests {
     fn the_undo_label_counts_the_commits_that_were_applied() {
         let (dir, repo, ids) = side_commits_with_a_conflict();
         // "f one" is already on the branch: it is skipped, so two commits are applied.
-        git_core::pick::cherry_pick(&repo, &ids[0], None).unwrap();
+        git_core::pick::cherry_pick(&repo, &ids[0], None, Default::default()).unwrap();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.cherry_pick_many(ids.clone()).unwrap();
+        handle.cherry_pick_many(ids.clone(), no_events()).unwrap();
         handle
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
@@ -3312,11 +3889,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         assert_eq!(
-            handle.revert_many(vec![]).unwrap_err(),
+            handle.revert_many(vec![], no_events()).unwrap_err(),
             "Select at least one commit."
         );
         assert!(!sequence_file(&repo).exists());
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, no_events()).unwrap();
         assert_eq!(
             handle.abort_sequence().unwrap(),
             git_core::pick::SequenceAbort { rewound: true }
@@ -3347,7 +3924,7 @@ mod tests {
         let original = repo.head().unwrap().target().unwrap();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, no_events()).unwrap();
         handle.abort_merge().unwrap();
         assert_eq!(handle.get_head_info().unwrap().sequence, None);
         assert!(!sequence_file(&repo).exists());
@@ -3363,7 +3940,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         assert!(matches!(
-            handle.cherry_pick_many(ids).unwrap(),
+            handle.cherry_pick_many(ids, no_events()).unwrap(),
             git_core::pick::SequenceOutcome::Conflicted { .. }
         ));
         (dir, repo, worker, handle, branch)
@@ -3443,7 +4020,7 @@ mod tests {
         let (dir, repo, ids) = side_commits_with_a_conflict();
         {
             let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-            worker.handle().cherry_pick_many(ids).unwrap();
+            worker.handle().cherry_pick_many(ids, no_events()).unwrap();
         }
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
@@ -3474,7 +4051,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         // Step two conflicts first; take theirs and continue into step three's error.
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, no_events()).unwrap();
         handle
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
             .unwrap();
@@ -3503,7 +4080,9 @@ mod tests {
         let handle = worker.handle();
         assert_eq!(handle.get_head_info().unwrap().sequence, None);
         assert!(matches!(
-            handle.cherry_pick(ids[0].clone(), None).unwrap(),
+            handle
+                .cherry_pick(ids[0].clone(), None, no_events())
+                .unwrap(),
             git_core::pick::PickOutcome::Committed { .. }
         ));
         assert!(matches!(handle.undo().unwrap(), UndoOutcome::Done { .. }));
@@ -3526,7 +4105,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         handle
             .resolve_whole_file("a.txt".into(), git_core::merge::ConflictSide::Theirs)
@@ -4075,7 +4658,9 @@ mod tests {
             .unwrap()
             .name
             .clone();
-        handle.switch_branch(initial_branch_name.clone()).unwrap();
+        handle
+            .switch_branch(initial_branch_name.clone(), no_events())
+            .unwrap();
 
         let branches_after = handle.list_branches().unwrap();
         assert!(
@@ -4123,7 +4708,9 @@ mod tests {
             .find(|b| b.name != "feature")
             .unwrap()
             .name;
-        handle.switch_branch(initial_branch_name).unwrap();
+        handle
+            .switch_branch(initial_branch_name, no_events())
+            .unwrap();
 
         handle.delete_branch("feature".into(), true).unwrap();
 
@@ -4838,6 +5425,7 @@ mod tests {
                     fast_forward: git_core::merge::FastForward::Allow,
                     squash: true,
                 },
+                no_events(),
             )
             .unwrap();
 
@@ -4875,6 +5463,7 @@ mod tests {
                     fast_forward: git_core::merge::FastForward::Never,
                     squash: false,
                 },
+                no_events(),
             )
             .unwrap();
 
@@ -5083,7 +5672,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let outcome = handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
 
         assert!(matches!(
@@ -5116,7 +5709,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
 
         let segments = handle.get_conflict_hunks("shared.txt".into()).unwrap();
@@ -5155,7 +5752,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
 
         handle.abort_merge().unwrap();
@@ -5189,7 +5790,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
 
         handle
@@ -5473,7 +6078,7 @@ mod tests {
 
         assert_eq!(handle.get_head_info().unwrap().head_id, Some(base.clone()));
 
-        let outcome = handle.cherry_pick(side.clone(), None).unwrap();
+        let outcome = handle.cherry_pick(side.clone(), None, no_events()).unwrap();
         assert!(matches!(
             outcome,
             git_core::pick::PickOutcome::Committed { .. }
@@ -5490,7 +6095,7 @@ mod tests {
             .unwrap();
         let picked = handle.get_head_info().unwrap().head_id.unwrap();
 
-        let reverted = handle.revert_commit(picked, None).unwrap();
+        let reverted = handle.revert_commit(picked, None, no_events()).unwrap();
         assert!(matches!(
             reverted,
             git_core::pick::PickOutcome::Committed { .. }
@@ -5501,10 +6106,12 @@ mod tests {
             .unwrap();
         assert_eq!(handle.get_head_info().unwrap().head_id, Some(base.clone()));
 
-        handle.checkout_commit(side).unwrap();
+        handle.checkout_commit(side, no_events()).unwrap();
         assert!(handle.get_head_info().unwrap().detached_at.is_some());
 
-        assert!(handle.cherry_pick("not-a-sha".into(), None).is_err());
+        assert!(handle
+            .cherry_pick("not-a-sha".into(), None, no_events())
+            .is_err());
         assert!(
             handle.get_head_info().is_ok(),
             "worker survives a failed command"
@@ -5690,7 +6297,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let outcome = handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         assert!(matches!(outcome, MergeOutcome::Conflicted { .. }));
         // A recordable command while the merge is paused must not become its own entry.
@@ -5735,7 +6346,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
@@ -6116,9 +6731,24 @@ mod tests {
             .unwrap()
             .unwrap()
             .to_string();
-        assert_eq!(handle.switch_branch(branch.clone()).unwrap_err(), busy);
-        assert_eq!(handle.cherry_pick(id.clone(), None).unwrap_err(), busy);
-        assert_eq!(handle.cherry_pick_many(vec![id.clone()]).unwrap_err(), busy);
+        assert_eq!(
+            handle
+                .switch_branch(branch.clone(), no_events())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .cherry_pick(id.clone(), None, no_events())
+                .unwrap_err(),
+            busy
+        );
+        assert_eq!(
+            handle
+                .cherry_pick_many(vec![id.clone()], no_events())
+                .unwrap_err(),
+            busy
+        );
         assert_eq!(
             handle
                 .commit("x".into(), false, Vec::new(), mpsc::channel().0)
@@ -6133,7 +6763,11 @@ mod tests {
         );
         assert_eq!(
             handle
-                .start_merge(branch, git_core::merge::MergeOptions::default())
+                .start_merge(
+                    branch,
+                    git_core::merge::MergeOptions::default(),
+                    no_events()
+                )
                 .unwrap_err(),
             busy
         );
@@ -6144,7 +6778,10 @@ mod tests {
                 .unwrap_err(),
             busy
         );
-        assert_eq!(handle.checkout_commit(id.clone()).unwrap_err(), busy);
+        assert_eq!(
+            handle.checkout_commit(id.clone(), no_events()).unwrap_err(),
+            busy
+        );
         assert_eq!(handle.pop_stash(0, id, false).unwrap_err(), busy);
         assert_eq!(repo.head().unwrap().target().unwrap(), head);
     }
@@ -6252,7 +6889,9 @@ mod tests {
             git_core::rebase::RebaseHealth::Diverged(git_core::rebase::RebaseDivergence::HeadMoved)
         );
         assert_eq!(
-            handle.checkout_commit(info.head_id.unwrap()).unwrap_err(),
+            handle
+                .checkout_commit(info.head_id.unwrap(), no_events())
+                .unwrap_err(),
             "Finish or abort the current merge/cherry-pick/revert/rebase first."
         );
         assert_eq!(
@@ -6291,7 +6930,7 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         assert!(matches!(
-            handle.cherry_pick_many(ids).unwrap(),
+            handle.cherry_pick_many(ids, no_events()).unwrap(),
             git_core::pick::SequenceOutcome::Conflicted { .. }
         ));
         let (_worker, handle) = restart(worker, handle, dir.path());
@@ -6338,7 +6977,11 @@ mod tests {
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         let (_worker, handle) = restart(worker, handle, dir.path());
 
@@ -6383,7 +7026,11 @@ mod tests {
             let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
             worker
                 .handle()
-                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .start_merge(
+                    "feature".into(),
+                    git_core::merge::MergeOptions::default(),
+                    no_events(),
+                )
                 .unwrap();
         }
         assert_eq!(undo_file(&repo)["pending"]["label"], "Merge feature");
@@ -6427,7 +7074,11 @@ mod tests {
             let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
             worker
                 .handle()
-                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .start_merge(
+                    "feature".into(),
+                    git_core::merge::MergeOptions::default(),
+                    no_events(),
+                )
                 .unwrap();
         }
         abort_outside(&repo);
@@ -6460,7 +7111,11 @@ mod tests {
             .create_branch("before".into(), "HEAD".into())
             .unwrap();
         handle
-            .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
             .unwrap();
         let (_worker, handle) = restart(worker, handle, dir.path());
         assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
@@ -6536,7 +7191,8 @@ mod tests {
 
         let aborted = handle.abort_rebase();
         let rebase = handle.get_head_info().map(|info| info.rebase);
-        let switched = handle.switch_branch(branch.trim_start_matches("refs/heads/").into());
+        let switched =
+            handle.switch_branch(branch.trim_start_matches("refs/heads/").into(), no_events());
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert_eq!(
@@ -6554,8 +7210,12 @@ mod tests {
         let first = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let second = Worker::spawn(dir.path().to_path_buf()).unwrap();
         let (a, b) = (first.handle(), second.handle());
-        a.start_merge("feature".into(), git_core::merge::MergeOptions::default())
-            .unwrap();
+        a.start_merge(
+            "feature".into(),
+            git_core::merge::MergeOptions::default(),
+            no_events(),
+        )
+        .unwrap();
         assert_eq!(b.get_undo_state().unwrap(), no_undo()); // b now knows the pending entry
         a.resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
@@ -6770,9 +7430,21 @@ mod state_lock_tests {
     fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {
         let branch = repo.head().unwrap().shorthand().unwrap().to_string();
         let store = super::sequence_store::SequenceStore::open(repo);
+        let cancelled: super::CancelRegistry =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
         assert!(matches!(
-            super::history::pick_many(repo, &store, git_core::pick::SequenceKind::CherryPick, ids)
-                .unwrap(),
+            super::history::pick_many(
+                repo,
+                &store,
+                git_core::pick::SequenceKind::CherryPick,
+                ids,
+                super::remote::TransferOp {
+                    id: "pick-1".into(),
+                    cancelled: &cancelled,
+                },
+                mpsc::channel().0,
+            )
+            .unwrap(),
             git_core::pick::SequenceOutcome::Conflicted { .. }
         ));
         branch
@@ -6881,7 +7553,11 @@ mod state_lock_tests {
             let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
             let outcome = worker
                 .handle()
-                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .start_merge(
+                    "feature".into(),
+                    git_core::merge::MergeOptions::default(),
+                    std::sync::mpsc::channel().0,
+                )
                 .unwrap();
             assert!(matches!(
                 outcome,
@@ -6924,7 +7600,11 @@ mod state_lock_tests {
         let handle = worker.handle();
         assert!(matches!(
             handle
-                .start_merge("feature".into(), git_core::merge::MergeOptions::default())
+                .start_merge(
+                    "feature".into(),
+                    git_core::merge::MergeOptions::default(),
+                    std::sync::mpsc::channel().0
+                )
                 .unwrap(),
             git_core::merge::MergeOutcome::Conflicted { .. }
         ));

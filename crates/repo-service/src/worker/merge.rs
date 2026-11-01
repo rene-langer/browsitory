@@ -39,13 +39,26 @@ impl CleanMerge {
     pub(super) fn matches(&self, repo: &mut git2::Repository) -> bool {
         Self::capture(repo).as_ref() == Some(self)
     }
+
+    /// The hook set for the commit concluding this merge. `commit_with` checks the repository
+    /// against it before and after the hooks (#183).
+    pub(super) fn hook_set(&self) -> git_core::commit::CommitHookSet {
+        git_core::commit::CommitHookSet::CleanMerge {
+            head: self.head,
+            merge_heads: self.merge_heads.clone(),
+        }
+    }
 }
 
 /// Starts a merge and replies; returns the result too, so the loop can remember a clean merge.
+/// A fast-forward's or squash's `post-merge` runs reported and cancellable on `op` (as
+/// `HookSource::Merge`) before the reply; a cancel stops only the hook (#185).
 pub(super) fn start(
     repo: &git2::Repository,
     branch_name: String,
     options: MergeOptions,
+    op: super::remote::TransferOp<'_>,
+    events: Sender<super::HookEvent>,
     reply: Sender<Result<MergeOutcome, String>>,
 ) -> Result<MergeOutcome, String> {
     let result = git_core::merge::start_merge(repo, &branch_name, options)
@@ -53,11 +66,22 @@ pub(super) fn start(
     // git runs post-merge after a merge that completed (or a squash, with "1"); not after a
     // conflicted or no-op one. A clean non-fast-forward merge (`Merged`) is only staged here:
     // its post-merge runs after the commit that concludes it (`status::commit`).
-    match result {
-        Ok(MergeOutcome::FastForwarded) => super::hooks::run_post_hook(repo, "post-merge", &["0"]),
-        Ok(MergeOutcome::Squashed) => super::hooks::run_post_hook(repo, "post-merge", &["1"]),
-        _ => {}
+    let squash = match result {
+        Ok(MergeOutcome::FastForwarded) => Some("0"),
+        Ok(MergeOutcome::Squashed) => Some("1"),
+        _ => None,
+    };
+    if let Some(squash) = squash {
+        super::hooks::run_post_hook_on(
+            repo,
+            "post-merge",
+            &[squash],
+            &op,
+            events,
+            super::hooks::HookSource::Merge,
+        );
     }
+    op.clear();
     let _ = reply.send(result.clone());
     result
 }
@@ -150,17 +174,22 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    /// Merges `branch_name` (a local branch name or a full ref) with `options`.
+    /// Merges `branch_name` (a local branch name or a full ref) with `options`. The
+    /// `post-merge` of a fast-forward or squash is reported on `events` (`HookSource::Merge`)
+    /// under a `merge-<n>` id that `cancel_transfer` stops (#185).
     pub fn start_merge(
         &self,
         branch_name: String,
         options: MergeOptions,
+        events: Sender<super::HookEvent>,
     ) -> Result<MergeOutcome, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::StartMerge {
                 branch_name,
                 options,
+                operation_id: super::remote::next_operation_id("merge"),
+                events,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

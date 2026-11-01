@@ -16,7 +16,7 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{HookEvent, TransferEvent, Worker};
+use repo_service::worker::{HookEvent, HookSource, TransferEvent, Worker};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -119,7 +119,7 @@ pub fn dispatch(
         "commit" => commit(params, repos, stdout),
         "list_branches" => list_branches(params, repos),
         "create_branch" => create_branch(params, repos),
-        "switch_branch" => switch_branch(params, repos),
+        "switch_branch" => switch_branch(params, repos, stdout),
         "delete_branch" => delete_branch(params, repos),
         "rename_branch" => rename_branch(params, repos),
         "list_worktrees" => list_worktrees(params, repos),
@@ -157,14 +157,14 @@ pub fn dispatch(
         "get_undo_state" => get_undo_state(params, repos),
         "undo_last" => undo_last(params, repos),
         "redo_last" => redo_last(params, repos),
-        "cherry_pick" => cherry_pick(params, repos),
-        "revert_commit" => revert_commit(params, repos),
-        "cherry_pick_many" => cherry_pick_many(params, repos),
-        "revert_many" => revert_many(params, repos),
+        "cherry_pick" => cherry_pick(params, repos, stdout),
+        "revert_commit" => revert_commit(params, repos, stdout),
+        "cherry_pick_many" => cherry_pick_many(params, repos, stdout),
+        "revert_many" => revert_many(params, repos, stdout),
         "continue_sequence" => continue_sequence(params, repos, stdout),
         "abort_sequence" => abort_sequence(params, repos),
         "reset_to_commit" => reset_to_commit(params, repos),
-        "checkout_commit" => checkout_commit(params, repos),
+        "checkout_commit" => checkout_commit(params, repos, stdout),
         "push_tags" => push_tags(params, repos, stdout),
         "fetch_all_remotes" => fetch_all_remotes(params, repos, stdout),
         "push_branch" => push_branch(params, repos, stdout),
@@ -177,7 +177,7 @@ pub fn dispatch(
         "get_stash_files" => get_stash_files(params, repos),
         "drop_stash" => drop_stash(params, repos),
         "get_blame" => get_blame(params, repos),
-        "start_merge" => start_merge(params, repos),
+        "start_merge" => start_merge(params, repos, stdout),
         "get_merge_options" => get_merge_options(params, repos),
         "set_merge_options" => set_merge_options(params),
         "get_conflict_hunks" => get_conflict_hunks(params, repos),
@@ -1536,7 +1536,9 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
     }
 }
 
-/// Payload of the `hookProgress` notification (commit/amend/Continue hooks).
+/// Payload of the `hookProgress` notification (commit/amend/Continue, checkout, merge and pick
+/// hooks). `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it
+/// (#185).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HookProgressDto {
@@ -1544,19 +1546,44 @@ struct HookProgressDto {
     operation_id: String,
     hook: String,
     phase: &'static str,
+    source: &'static str,
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
-    let (operation_id, hook, phase) = match event {
-        HookEvent::Started { operation_id, hook } => (operation_id, hook, "Started"),
-        HookEvent::Finished { operation_id, hook } => (operation_id, hook, "Finished"),
+    let (operation_id, hook, phase, source) = match event {
+        HookEvent::Started {
+            operation_id,
+            hook,
+            source,
+        } => (operation_id, hook, "Started", source),
+        HookEvent::Finished {
+            operation_id,
+            hook,
+            source,
+        } => (operation_id, hook, "Finished", source),
     };
     HookProgressDto {
         repo_path: repo_path.to_string(),
         operation_id,
         hook,
         phase,
+        source: match source {
+            HookSource::Commit => "Commit",
+            HookSource::Checkout => "Checkout",
+            HookSource::Merge => "Merge",
+            HookSource::Pick => "Pick",
+        },
     }
+}
+
+/// A hook event channel relayed as `hookProgress` notifications for `repo_path`.
+fn hook_relay<W: std::io::Write + Send + 'static>(
+    repo_path: &str,
+    out: &Arc<Mutex<W>>,
+) -> mpsc::Sender<HookEvent> {
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_hook_relay(repo_path.to_string(), event_rx, Arc::clone(out));
+    event_tx
 }
 
 /// Writes each hook event as a `hookProgress` notification; same framing and shutdown as
@@ -1658,10 +1685,16 @@ struct SwitchBranchParams {
     name: String,
 }
 
-fn switch_branch(params: Value, repos: &Repos) -> Result<Value, String> {
+/// `post-checkout` is relayed as `hookProgress` with `source: "Checkout"` (#185).
+fn switch_branch<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: SwitchBranchParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.switch_branch(params.name)?;
+    let events = hook_relay(&params.repo_path, out);
+    worker_handle(repos, &params.repo_path)?.switch_branch(params.name, events)?;
     Ok(Value::Null)
 }
 
@@ -2688,6 +2721,11 @@ enum PickOutcomeDto {
     Conflicted {
         files: Vec<String>,
     },
+    /// `prepare-commit-msg` failed; the pick stays staged and in progress (#183).
+    HookFailed {
+        hook: String,
+        output: String,
+    },
 }
 
 impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
@@ -2695,6 +2733,9 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
         match outcome {
             git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
             git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
+            git_core::pick::PickOutcome::HookFailed { hook, output } => {
+                Self::HookFailed { hook, output }
+            }
         }
     }
 }
@@ -2884,17 +2925,35 @@ struct PickParams {
     mainline: Option<u32>,
 }
 
-fn cherry_pick(params: Value, repos: &Repos) -> Result<Value, String> {
+/// A clean pick's `prepare-commit-msg`/`post-commit` are relayed as `hookProgress` with
+/// `source: "Pick"` (#183).
+fn cherry_pick<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome =
-        worker_handle(repos, &params.repo_path)?.cherry_pick(params.commit_id, params.mainline)?;
+    let events = hook_relay(&params.repo_path, out);
+    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(
+        params.commit_id,
+        params.mainline,
+        events,
+    )?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn revert_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+fn revert_commit<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?
-        .revert_commit(params.commit_id, params.mainline)?;
+    let events = hook_relay(&params.repo_path, out);
+    let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(
+        params.commit_id,
+        params.mainline,
+        events,
+    )?;
     serde_json::to_value(PickOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
@@ -2906,17 +2965,29 @@ struct CommitIdsParams {
     commit_ids: Vec<String>,
 }
 
-fn cherry_pick_many(params: Value, repos: &Repos) -> Result<Value, String> {
+fn cherry_pick_many<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: CommitIdsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick_many(params.commit_ids)?;
+    let events = hook_relay(&params.repo_path, out);
+    let outcome =
+        worker_handle(repos, &params.repo_path)?.cherry_pick_many(params.commit_ids, events)?;
     serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn revert_many(params: Value, repos: &Repos) -> Result<Value, String> {
+fn revert_many<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: CommitIdsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?.revert_many(params.commit_ids)?;
+    let events = hook_relay(&params.repo_path, out);
+    let outcome =
+        worker_handle(repos, &params.repo_path)?.revert_many(params.commit_ids, events)?;
     serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
@@ -2961,10 +3032,16 @@ fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn checkout_commit(params: Value, repos: &Repos) -> Result<Value, String> {
+/// `post-checkout` is relayed as `hookProgress` with `source: "Checkout"` (#185).
+fn checkout_commit<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: CommitIdParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    worker_handle(repos, &params.repo_path)?.checkout_commit(params.commit_id)?;
+    let events = hook_relay(&params.repo_path, out);
+    worker_handle(repos, &params.repo_path)?.checkout_commit(params.commit_id, events)?;
     Ok(Value::Null)
 }
 
@@ -3300,11 +3377,21 @@ struct StartMergeParams {
     options: MergeOptionsDto,
 }
 
-fn start_merge(params: Value, repos: &Repos) -> Result<Value, String> {
+/// A fast-forward's or squash's `post-merge` is relayed as `hookProgress` with
+/// `source: "Merge"` (#185).
+fn start_merge<W: std::io::Write + Send + 'static>(
+    params: Value,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, String> {
     let params: StartMergeParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let outcome = worker_handle(repos, &params.repo_path)?
-        .start_merge(params.branch_name, params.options.into())?;
+    let events = hook_relay(&params.repo_path, out);
+    let outcome = worker_handle(repos, &params.repo_path)?.start_merge(
+        params.branch_name,
+        params.options.into(),
+        events,
+    )?;
     serde_json::to_value(MergeOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
@@ -4065,6 +4152,49 @@ mod tests {
         (dir, ids)
     }
 
+    /// #183/#185: a clean pick's hooks reach the webview as `hookProgress` with
+    /// `source: "Pick"`.
+    #[cfg(unix)]
+    #[test]
+    fn cherry_pick_many_relays_its_hooks_with_source_pick() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, ids) = paused_pick_repo();
+        let path = dir.path().to_str().unwrap().to_string();
+        let repos: Repos = Arc::new(Mutex::new(HashMap::new()));
+        repos.lock().unwrap().insert(
+            path.clone(),
+            Worker::spawn(dir.path().to_path_buf()).unwrap(),
+        );
+        let hooks = dir.path().join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("post-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let outcome = cherry_pick_many(
+            serde_json::json!({ "repoPath": path, "commitIds": [ids[0]] }),
+            &repos,
+            &buffer,
+        )
+        .unwrap();
+
+        assert_eq!(outcome["kind"], "Completed");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while lines_of(&buffer).len() < 2 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let lines = lines_of(&buffer);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines.iter().all(|line| line["method"] == "hookProgress"
+            && line["params"]["hook"] == "post-commit"
+            && line["params"]["source"] == "Pick"));
+        assert!(lines[0]["params"]["operationId"]
+            .as_str()
+            .unwrap()
+            .starts_with("pick-"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn continue_sequence_accepts_no_verify_and_relays_hook_progress() {
@@ -4077,7 +4207,7 @@ mod tests {
             Worker::spawn(dir.path().to_path_buf()).unwrap(),
         );
         let handle = worker_handle(&repos, &path).unwrap();
-        handle.cherry_pick_many(ids).unwrap();
+        handle.cherry_pick_many(ids, mpsc::channel().0).unwrap();
         handle
             .resolve_conflict("a.txt".into(), "resolved\n".into())
             .unwrap();
@@ -4104,6 +4234,7 @@ mod tests {
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines.iter().all(|line| line["method"] == "hookProgress"));
         assert_eq!(lines[0]["params"]["hook"], "commit-msg");
+        assert_eq!(lines[0]["params"]["source"], "Commit");
         assert!(lines[0]["params"]["operationId"]
             .as_str()
             .unwrap()

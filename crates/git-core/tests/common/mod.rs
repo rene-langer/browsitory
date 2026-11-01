@@ -243,13 +243,44 @@ pub fn log_hooks(repo: &Repository, names: &[&str]) {
     }
 }
 
-/// The hook log of `log_hooks`, with the commit message file's path replaced by `<msg>`; empty
-/// when no hook ran.
+/// The hook log of `log_hooks`, with the commit message file's path replaced by `<msg>` (and
+/// `MERGE_MSG`'s by `<MERGE_MSG>`); empty when no hook ran.
 #[cfg(unix)]
 #[allow(dead_code)]
 pub fn read_log(repo: &Repository) -> String {
     let message_file = repo.path().join("COMMIT_EDITMSG");
+    let merge_message = repo.path().join("MERGE_MSG");
     std::fs::read_to_string(repo.path().join("hook-log"))
         .unwrap_or_default()
         .replace(&message_file.display().to_string(), "<msg>")
+        .replace(&merge_message.display().to_string(), "<MERGE_MSG>")
+}
+
+/// Makes `.git` read-only so `cleanup_state` can't delete `MERGE_HEAD` and friends, and puts the
+/// mode back on drop. `new` is `None` as root, who ignores the mode.
+#[cfg(unix)]
+#[allow(dead_code)]
+pub struct ReadOnlyGitDir(std::path::PathBuf);
+
+#[cfg(unix)]
+#[allow(dead_code)]
+impl ReadOnlyGitDir {
+    pub fn new(repo: &Repository) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("running as root; skipping");
+            return None;
+        }
+        let path = repo.path().to_path_buf();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o555)).unwrap();
+        Some(Self(path))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnlyGitDir {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
 }

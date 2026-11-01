@@ -911,18 +911,32 @@ fn head_id(repo: &git2::Repository) -> git2::Oid {
     repo.head().unwrap().peel_to_commit().unwrap().id()
 }
 
+fn merge_heads(repo: &mut git2::Repository) -> Vec<git2::Oid> {
+    let mut heads = Vec::new();
+    repo.mergehead_foreach(|oid| {
+        heads.push(*oid);
+        true
+    })
+    .unwrap();
+    heads
+}
+
+/// The clean-merge hook set for the merge `repo` shows now.
+fn clean_set(repo: &mut git2::Repository) -> CommitHookSet {
+    CommitHookSet::CleanMerge {
+        head: head_id(repo),
+        merge_heads: merge_heads(repo),
+    }
+}
+
 #[test]
 fn a_clean_merge_commit_runs_git_merges_hooks() {
     let (_dir, mut repo) = clean_merge_fixture();
     common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
 
-    let committed = commit_with(
-        &mut repo,
-        "Merge feature",
-        CommitHookSet::CleanMerge,
-        HookOptions::default(),
-    )
-    .unwrap();
+    let set = clean_set(&mut repo);
+
+    let committed = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap();
 
     assert!(
         committed.merge_hooks,
@@ -930,7 +944,7 @@ fn a_clean_merge_commit_runs_git_merges_hooks() {
     );
     assert_eq!(
         common::read_log(&repo),
-        "pre-merge-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\n"
+        "pre-merge-commit \nprepare-commit-msg <MERGE_MSG> merge\ncommit-msg <MERGE_MSG>\n"
     );
     assert_eq!(
         repo.head()
@@ -953,13 +967,9 @@ fn a_failing_pre_merge_commit_keeps_the_merge_staged() {
         "echo blocked; exit 1",
     );
 
-    let error = commit_with(
-        &mut repo,
-        "Merge feature",
-        CommitHookSet::CleanMerge,
-        HookOptions::default(),
-    )
-    .unwrap_err();
+    let set = clean_set(&mut repo);
+
+    let error = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap_err();
 
     match error {
         CommitError::HookFailed { hook, output } => {
@@ -981,10 +991,12 @@ fn no_verify_skips_pre_merge_commit_and_commit_msg() {
     common::install_hook(&hooks, "commit-msg", "exit 1");
     common::log_hooks(&repo, &["prepare-commit-msg"]);
 
+    let set = clean_set(&mut repo);
+
     commit_with(
         &mut repo,
         "Merge feature",
-        CommitHookSet::CleanMerge,
+        set,
         HookOptions {
             no_verify: true,
             ..Default::default()
@@ -992,7 +1004,10 @@ fn no_verify_skips_pre_merge_commit_and_commit_msg() {
     )
     .unwrap();
 
-    assert_eq!(common::read_log(&repo), "prepare-commit-msg <msg> merge\n");
+    assert_eq!(
+        common::read_log(&repo),
+        "prepare-commit-msg <MERGE_MSG> merge\n"
+    );
     assert_eq!(
         repo.head()
             .unwrap()
@@ -1017,13 +1032,9 @@ fn a_pre_merge_commit_that_stages_a_file_gets_it_committed() {
         "git add generated.txt",
     );
 
-    commit_with(
-        &mut repo,
-        "Merge feature",
-        CommitHookSet::CleanMerge,
-        HookOptions::default(),
-    )
-    .unwrap();
+    let set = clean_set(&mut repo);
+
+    commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap();
 
     let tree = repo.head().unwrap().peel_to_tree().unwrap();
     assert!(tree.get_name("generated.txt").is_some());
@@ -1065,7 +1076,10 @@ fn the_clean_merge_hook_set_outside_a_merge_runs_the_commit_hooks() {
     let committed = commit_with(
         &mut repo,
         "add a",
-        CommitHookSet::CleanMerge,
+        CommitHookSet::CleanMerge {
+            head: git2::Oid::ZERO_SHA1,
+            merge_heads: Vec::new(),
+        },
         HookOptions::default(),
     )
     .unwrap();
@@ -1093,4 +1107,150 @@ fn head_info_lists_pre_merge_commit_only_while_merging() {
         git_core::repo::head_info(&repo).unwrap().commit_hooks,
         vec!["pre-merge-commit".to_string()]
     );
+}
+
+// ---- clean merge residuals (#183) --------------------------------------------------------------
+
+/// `clean_merge_fixture` plus a branch `side2` (adds `side2.txt` on the base commit).
+fn clean_merge_with_side2() -> (tempfile::TempDir, git2::Repository, git2::Oid) {
+    let (dir, repo) = clean_merge_fixture();
+    let base = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .parent_id(0)
+        .unwrap();
+    let side2 = common::commit_tree(
+        &repo,
+        &[
+            ("base.txt", "base\n", 0o100644),
+            ("side2.txt", "side2\n", 0o100644),
+        ],
+        &[base],
+        "side2",
+    );
+    repo.reference("refs/heads/side2", side2, true, "test")
+        .unwrap();
+    (dir, repo, side2)
+}
+
+#[test]
+fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, mut repo, side2) = clean_merge_with_side2();
+    let before = head_id(&repo);
+    let set = clean_set(&mut repo);
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "pre-merge-commit",
+        "git merge --abort && git merge --no-ff --no-commit side2 >/dev/null",
+    );
+
+    let error = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap_err();
+
+    assert!(
+        matches!(error, CommitError::MergeChanged),
+        "expected MergeChanged, got {error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "The merge changed while its hooks ran. Nothing was committed; check the merge and commit again."
+    );
+    assert_eq!(head_id(&repo), before);
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    assert_eq!(merge_heads(&mut repo), vec![side2]);
+}
+
+#[test]
+fn commit_with_runs_pre_commit_when_the_expected_merge_is_not_the_current_one() {
+    let (_dir, mut repo, side2) = clean_merge_with_side2();
+    common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
+    let set = CommitHookSet::CleanMerge {
+        head: head_id(&repo),
+        merge_heads: vec![side2],
+    };
+
+    let committed = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap();
+
+    assert!(!committed.merge_hooks);
+    assert_eq!(
+        common::read_log(&repo),
+        "pre-commit \nprepare-commit-msg <msg> merge\ncommit-msg <msg>\npost-commit \n"
+    );
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent_count(),
+        2
+    );
+}
+
+#[test]
+fn a_clean_merges_message_hooks_get_merge_msg_like_git_merge() {
+    let (_dir, mut repo) = clean_merge_fixture();
+    let log = repo.path().join("hook-log");
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "prepare-commit-msg",
+        &format!(
+            "echo \"$(basename \"$1\") $2\" >> '{}'; echo added >> \"$1\"",
+            log.display()
+        ),
+    );
+
+    let set = clean_set(&mut repo);
+    commit_with(&mut repo, "Merge feature\n", set, HookOptions::default()).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "MERGE_MSG merge\n");
+    assert_eq!(head_message(&repo), "Merge feature\nadded\n");
+    assert!(!repo.path().join("MERGE_MSG").exists());
+}
+
+#[test]
+fn git_merge_also_gives_prepare_commit_msg_merge_msg() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (dir, repo) = merge_fixture(false);
+    let log = repo.path().join("hook-log");
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "prepare-commit-msg",
+        &format!("echo \"$(basename \"$1\") $2\" >> '{}'", log.display()),
+    );
+
+    let status = std::process::Command::new("git")
+        .args(["merge", "--no-ff", "-m", "Merge feature", "feature"])
+        .current_dir(dir.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "MERGE_MSG merge\n");
+}
+
+#[test]
+fn a_cleanup_failure_after_a_merge_commit_still_reports_it() {
+    let (_dir, mut repo) = clean_merge_fixture();
+    let set = clean_set(&mut repo);
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+
+    let committed = commit_with(&mut repo, "Merge feature", set, HookOptions::default());
+    drop(read_only);
+
+    let committed = committed.expect("the commit landed, so it counts");
+    assert!(committed.merge_hooks, "the caller still owes post-merge");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.id().to_string(), committed.commit_id);
+    assert_eq!(head.parent_count(), 2);
 }
