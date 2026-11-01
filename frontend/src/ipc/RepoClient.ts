@@ -184,8 +184,16 @@ export interface SequenceProgress {
 export type SequenceOutcome =
   | { kind: "Completed"; applied: number; skipped: string[] }
   | { kind: "Conflicted"; files: string[]; progress: SequenceProgress }
-  /** Continue's commit hook `hook` failed: nothing was committed and the step is still paused. */
-  | { kind: "HookFailed"; hook: string; output: string; progress: SequenceProgress };
+  /**
+   * A commit hook failed (Continue's, or a clean step's `prepare-commit-msg`): nothing was
+   * committed for that step, which is paused.
+   */
+  | { kind: "HookFailed"; hook: string; output: string; progress: SequenceProgress }
+  /**
+   * Cancel was pressed while a step's hooks ran after its commit: that commit (`kept`, its
+   * summary) stands and the sequence stopped before `progress.currentCommit`; Continue resumes.
+   */
+  | { kind: "Stopped"; kept: string; progress: SequenceProgress };
 /** `rewound: false`: HEAD had moved since the sequence stopped, so it was left where it is. */
 export interface SequenceAbort {
   rewound: boolean;

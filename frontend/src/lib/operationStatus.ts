@@ -41,6 +41,8 @@ export function pickToast(kind: SequenceKind, outcome: PickOutcome): string | nu
  * was resolved to nothing, so they are "with no changes", not "already applied".
  */
 export function sequenceToast(kind: SequenceKind, outcome: SequenceOutcome): string | null {
+  // Cancel after a step's commit: not a failure, the commit stands (#183, D9-A).
+  if (outcome.kind === "Stopped") return `Stopped after "${outcome.kept}"; its commit was kept. Continue to resume.`;
   if (outcome.kind !== "Completed") return null;
   const count = (n: number) => `${n} ${n === 1 ? "commit" : "commits"}`;
   const skipped = outcome.skipped.length;

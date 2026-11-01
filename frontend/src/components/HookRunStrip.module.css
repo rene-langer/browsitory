@@ -15,3 +15,10 @@
 .spacer {
   flex: 1 1 auto;
 }
+
+/* No hook running: the live region stays mounted (and focusable) but takes no space. */
+.idle {
+  height: 0;
+  overflow: hidden;
+  outline: none;
+}

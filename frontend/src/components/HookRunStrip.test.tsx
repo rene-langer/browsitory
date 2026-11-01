@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { HookRunStrip } from "./HookRunStrip";
 
 describe("HookRunStrip", () => {
-  it("shows a checkout's running post-checkout hook with Cancel", () => {
+  it("shows a checkout's running post-checkout hook with a named Cancel", () => {
     const onCancel = vi.fn();
     render(
       <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={onCancel} />,
@@ -11,7 +11,9 @@ describe("HookRunStrip", () => {
 
     const strip = screen.getByRole("status", { name: "Hook status" });
     expect(strip).toHaveTextContent("Running post-checkout hook…");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const cancel = screen.getByRole("button", { name: "Cancel post-checkout hook" });
+    expect(cancel).toHaveTextContent("Cancel");
+    fireEvent.click(cancel);
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -23,16 +25,26 @@ describe("HookRunStrip", () => {
 
     rerender(<HookRunStrip running={{ operationId: "pick-2", hook: "signing", source: "Pick" }} onCancel={() => {}} />);
     expect(screen.getByRole("status", { name: "Hook status" })).toHaveTextContent("Waiting for the signing program…");
+    expect(screen.getByRole("button", { name: "Cancel signing" })).toBeEnabled();
   });
 
-  it("renders nothing for a commit's hooks or when no hook runs", () => {
-    const { container, rerender } = render(
+  it("keeps an empty live region mounted for a commit's hooks or when no hook runs", () => {
+    const { rerender } = render(
       <HookRunStrip running={{ operationId: "commit-1", hook: "pre-commit", source: "Commit" }} onCancel={() => {}} />,
     );
-    expect(container).toBeEmptyDOMElement();
+    const strip = screen.getByRole("status", { name: "Hook status" });
+    expect(strip).toBeEmptyDOMElement();
 
     rerender(<HookRunStrip running={null} onCancel={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByRole("status", { name: "Hook status" })).toBe(strip);
+    expect(strip).toBeEmptyDOMElement();
+
+    rerender(
+      <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={() => {}} />,
+    );
+    // The same region announces the new text.
+    expect(screen.getByRole("status", { name: "Hook status" })).toBe(strip);
+    expect(strip).toHaveTextContent("Running post-checkout hook…");
   });
 
   it("latches Cancel for the operation and re-arms for the next one", () => {
@@ -41,8 +53,9 @@ describe("HookRunStrip", () => {
       <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={onCancel} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    const latched = screen.getByRole("button", { name: "Cancelling…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel post-checkout hook" }));
+    const latched = screen.getByRole("button", { name: "Cancel post-checkout hook" });
+    expect(latched).toHaveTextContent("Cancelling…");
     expect(latched).toBeDisabled();
     fireEvent.click(latched);
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -50,6 +63,19 @@ describe("HookRunStrip", () => {
     rerender(
       <HookRunStrip running={{ operationId: "switch-2", hook: "post-checkout", source: "Checkout" }} onCancel={onCancel} />,
     );
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel post-checkout hook" })).toBeEnabled();
+  });
+
+  it("moves focus to the strip when the cancelled hook ends", () => {
+    const { rerender } = render(
+      <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={() => {}} />,
+    );
+    const cancel = screen.getByRole("button", { name: "Cancel post-checkout hook" });
+    cancel.focus();
+    fireEvent.click(cancel);
+
+    rerender(<HookRunStrip running={null} onCancel={() => {}} />);
+
+    expect(document.activeElement).toBe(screen.getByRole("status", { name: "Hook status" }));
   });
 });

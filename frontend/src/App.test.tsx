@@ -269,18 +269,18 @@ describe("App", () => {
     const strip = screen.getByRole("status", { name: "Hook status" });
     expect(strip).toHaveTextContent("Running post-checkout hook…");
     expect(screen.getAllByText("Running post-checkout hook…")).toHaveLength(1);
-    fireEvent.click(within(strip).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(strip).getByRole("button", { name: "Cancel post-checkout hook" }));
     await waitFor(() => expect(cancelTransfer).toHaveBeenCalledWith("/repos/a", "switch-1"));
 
     act(() =>
       emit?.({ repoPath: "/repos/a", operationId: "switch-1", hook: "post-checkout", phase: "Finished", source: "Checkout" }),
     );
-    expect(screen.queryByRole("status", { name: "Hook status" })).toBeNull();
+    expect(screen.getByRole("status", { name: "Hook status" })).toBeEmptyDOMElement();
 
     act(() =>
       emit?.({ repoPath: "/repos/a", operationId: "commit-2", hook: "pre-commit", phase: "Started", source: "Commit" }),
     );
-    expect(screen.queryByRole("status", { name: "Hook status" })).toBeNull();
+    expect(screen.getByRole("status", { name: "Hook status" })).toBeEmptyDOMElement();
   });
 
   it("closes the active tab on Ctrl/Cmd+W", async () => {

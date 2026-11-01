@@ -98,7 +98,7 @@ describe("Browsitory post-checkout status", () => {
   let hookPath = "";
   let originalBranch = "";
 
-  /** The visible text of the "Hook status" strip, or `null` while there is none. Read inside
+  /** The text of the "Hook status" strip (empty while no hook runs), `null` without one. Read inside
    * the page, so a strip that unmounts between lookup and read can't go stale. */
   async function hookStatusText(): Promise<string | null> {
     return browser.execute(() => {
@@ -148,7 +148,8 @@ describe("Browsitory post-checkout status", () => {
     if (!clicked) throw new Error("no Cancel button in the Hook status strip");
 
     // Well before the hook's `sleep 30` ends: Cancel stopped it.
-    await browser.waitUntil(async () => (await hookStatusText()) === null, {
+    // The strip's live region stays mounted; it empties when the hook ends.
+    await browser.waitUntil(async () => !((await hookStatusText()) ?? "").includes("Running"), {
       timeout: 15000,
       timeoutMsg: "the Hook status strip stayed after Cancel",
     });
