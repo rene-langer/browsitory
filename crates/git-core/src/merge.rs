@@ -180,8 +180,9 @@ pub fn start_merge(
 }
 
 /// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no
-/// merge state (`cleanup_state`), so the next commit has HEAD as its only parent. HEAD never
-/// moves, even when a fast-forward was possible.
+/// merge state (`commit::clear_commit_state`, which keeps a terminal cherry-pick's todo, #241),
+/// so the next commit has HEAD as its only parent. HEAD never moves, even when a fast-forward
+/// was possible.
 fn squash_merge(
     repo: &Repository,
     their_annotated: &git2::AnnotatedCommit<'_>,
@@ -192,7 +193,7 @@ fn squash_merge(
     repo.merge(&[their_annotated], None, None)?;
     let files = conflicted_files(&repo.index()?)?;
     std::fs::write(repo.path().join("SQUASH_MSG"), message)?;
-    repo.cleanup_state()?;
+    crate::commit::clear_commit_state(repo)?;
     if files.is_empty() {
         Ok(MergeOutcome::Squashed)
     } else {
